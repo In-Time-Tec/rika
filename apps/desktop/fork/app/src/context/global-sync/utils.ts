@@ -164,8 +164,6 @@ export function sanitizeProject(project: Project) {
 }
 
 export function normalizeProjectInfo(project: Project | CurrentProject): Project {
-  return {
-    ...project,
-    vcs: project.vcs === "git" ? "git" : undefined,
-  }
+  const { vcs: _, ...value } = project
+  return value
 }

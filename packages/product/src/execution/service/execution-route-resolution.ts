@@ -44,7 +44,7 @@ const bedrockUrl = (connection: ModelRoute.AmazonBedrockProviderConnection): str
 
 const registrationIdentity = (route: ModelRouteResolution.ResolvedModelRoute, candidateIndex?: number) =>
   modelRegistrationIdentity(
-    `rika:model:v1:${createHash("sha256")
+    `rika:model:${createHash("sha256")
       .update(
         canonical({
           alias: route.alias,

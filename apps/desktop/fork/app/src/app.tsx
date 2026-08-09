@@ -40,7 +40,6 @@ import { Dynamic } from "solid-js/web"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { CommandProvider, useCommand, type CommandOption } from "@/context/command"
 import { CommentsProvider } from "@/context/comments"
-import { FileProvider } from "@/context/file"
 import { ServerSDKProvider } from "@/context/server-sdk"
 import { ServerSyncProvider, useServerSync } from "@/context/server-sync"
 import { GlobalProvider, useGlobal } from "@/context/global"
@@ -56,12 +55,10 @@ import { ServerConnection, ServerProvider, serverName, useServer } from "@/conte
 import { SettingsProvider, useSettings } from "@/context/settings"
 import { TabsProvider, useTabs, type DraftTab } from "@/context/tabs"
 import { SDKProvider, useSDK } from "@/context/sdk"
-import { WslServersProvider } from "@/wsl/context"
 import DirectoryLayout, { DirectoryDataProvider } from "@/pages/directory-layout"
 import LegacyLayout from "@/pages/layout"
 import NewLayout from "@/pages/layout-new"
 import { ErrorPage } from "./pages/error"
-import { useCheckServerHealth } from "./utils/server-health"
 import { legacySessionHref, legacySessionServer, requireServerKey, sessionHref } from "./utils/session-route"
 import { createSessionLineage } from "@/pages/session/session-lineage"
 
@@ -243,37 +240,13 @@ function UiI18nBridge(props: ParentProps) {
 }
 
 function LayoutCompatibility(props: ParentProps) {
-  const global = useGlobal()
-  const navigate = useNavigate()
-  const server = useServer()
-  const settings = useSettings()
-
-  createEffect(() => {
-    if (settings.general.newLayoutDesigns()) return
-    const current = server.current
-    if (!current) return
-    const protocol = global.ensureServerCtx(current).sdk.protocolKind()
-    if (protocol !== "v2") return
-    const next = global.servers.list().find((s) => {
-      if (ServerConnection.key(s) === ServerConnection.key(current)) return false
-      return global.ensureServerCtx(s).sdk.protocolKind() !== "v2"
-    })
-    if (!next) return
-    navigate("/")
-    queueMicrotask(() => server.setActive(ServerConnection.key(next)))
-  })
-
   return <>{props.children}</>
 }
 
 declare global {
   interface Window {
-    __OPENCODE__?: {
+    __RIKA__?: {
       deepLinks?: string[]
-    }
-    api?: {
-      setTitlebar?: (theme: { mode: "light" | "dark"; scheme?: "system" | "light" | "dark" }) => Promise<void>
-      exportDebugLogs?: () => Promise<string>
     }
   }
 }
@@ -378,15 +351,11 @@ function NewAppLayout(props: ParentProps<{ serverScoped?: JSX.Element }>) {
   )
 }
 
-// The draft page only renders the prompt composer, so it drops TerminalProvider.
-// FileProvider and CommentsProvider stay because PromptInput uses file search and comment context.
 function DraftProviders(props: ParentProps) {
   return (
-    <FileProvider>
-      <PromptProvider>
-        <CommentsProvider>{props.children}</CommentsProvider>
-      </PromptProvider>
-    </FileProvider>
+    <PromptProvider>
+      <CommentsProvider>{props.children}</CommentsProvider>
+    </PromptProvider>
   )
 }
 
@@ -401,7 +370,14 @@ export function AppBaseProviders(
       <Font />
       <ThemeProvider
         onThemeApplied={(_, mode, scheme) => {
-          void window.api?.setTitlebar?.({ mode, scheme })
+          const api = (
+            window as unknown as {
+              api?: {
+                setTitlebar?: (theme: { mode: "light" | "dark"; scheme?: "system" | "light" | "dark" }) => Promise<void>
+              }
+            }
+          ).api
+          void api?.setTitlebar?.({ mode, scheme })
         }}
       >
         <LanguageProvider locale={props.locale} onNativeTranslations={props.onNativeTranslations}>
@@ -413,11 +389,9 @@ export function AppBaseProviders(
               }}
             >
               <QueryProvider>
-                <WslServersProvider>
-                  <DialogProvider>
-                    <FileComponentProvider component={File}>{props.children}</FileComponentProvider>
-                  </DialogProvider>
-                </WslServersProvider>
+                <DialogProvider>
+                  <FileComponentProvider component={File}>{props.children}</FileComponentProvider>
+                </DialogProvider>
               </QueryProvider>
             </ErrorBoundary>
           </UiI18nBridge>
@@ -429,24 +403,20 @@ export function AppBaseProviders(
 
 function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean; startup?: Promise<void> }>) {
   const server = useServer()
-  const checkServerHealth = useCheckServerHealth()
-
+  const global = useGlobal()
   const [checkMode, setCheckMode] = createSignal<"blocking" | "background">("blocking")
 
-  // performs repeated health check with a grace period for
-  // non-http connections, otherwise fails instantly
   const [startupHealthCheck, healthCheckActions] = createResource(() =>
     props.disableHealthCheck
       ? true
-      : Effect.gen(function* () {
-          if (!server.current) return true
-          const { http, type } = server.current
-
-          while (true) {
-            const res = yield* Effect.promise(() => checkServerHealth(http))
-            if (res.healthy) return true
-            if (checkMode() === "background" || type === "http") return false
-          }
+      : Effect.tryPromise({
+          try: async () => {
+            if (!server.current) return true
+            const connection = await global.ensureServerCtx(server.current).rika.ready
+            await Effect.runPromise(connection.connection.ping)
+            return true
+          },
+          catch: () => false,
         }).pipe(
           Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => Effect.succeed(false) }),
           Effect.ensuring(Effect.sync(() => setCheckMode("background"))),

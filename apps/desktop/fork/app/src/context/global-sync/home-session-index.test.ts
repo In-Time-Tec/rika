@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import type { SessionV2Info } from "@opencode-ai/sdk/v2/client"
 import {
   applyHomeSessionEvent,
   appendHomeSessionEvent,
-  HOME_V2_SESSION_PAGE_LIMIT,
+  HOME_SESSION_PAGE_LIMIT,
   loadHomeSessionIndex,
   homeSessionIndexSessions,
   homeSessionIndexRefresh,
@@ -19,17 +18,23 @@ const session = (input: {
   updated?: number
 }) => ({
   id: input.id,
+  slug: input.id,
+  version: "rika",
   parentID: input.parentID,
   projectID: "project",
+  workspaceID: "workspace",
+  directory: input.directory ?? "/project",
+  path: input.directory ?? "/project",
   cost: 0,
   tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-  time: { created: 1, updated: input.updated ?? 1, archived: input.archived },
+  agent: "rika",
+  model: undefined,
   title: input.id,
-  location: { directory: input.directory ?? "/project" },
+  time: { created: 1, updated: input.updated ?? 1, archived: input.archived },
 })
 
-describe("Home V2 session index", () => {
-  test("loads the Home index with one global V2 request", async () => {
+describe("Home session index", () => {
+  test("loads the Home index with one global request", async () => {
     const calls: unknown[] = []
     const result = await loadHomeSessionIndex(async (input) => {
       calls.push(input)
@@ -37,7 +42,7 @@ describe("Home V2 session index", () => {
     })
 
     expect(result.sessions).toHaveLength(1)
-    expect(calls).toEqual([{ limit: HOME_V2_SESSION_PAGE_LIMIT, order: "desc" }])
+    expect(calls).toEqual([{ limit: HOME_SESSION_PAGE_LIMIT, order: "desc" }])
   })
 
   test("loads subsequent pages until the session index is complete", async () => {
@@ -49,7 +54,7 @@ describe("Home V2 session index", () => {
         if (!("cursor" in input)) {
           return {
             data: {
-              data: Array.from({ length: HOME_V2_SESSION_PAGE_LIMIT }, (_, index) =>
+              data: Array.from({ length: HOME_SESSION_PAGE_LIMIT }, (_, index) =>
                 session({ id: `page-1-${index}` }),
               ),
               cursor: { next: "next-page" },
@@ -62,11 +67,11 @@ describe("Home V2 session index", () => {
       controller.signal,
     )
 
-    expect(result.sessions).toHaveLength(HOME_V2_SESSION_PAGE_LIMIT + 1)
+    expect(result.sessions).toHaveLength(HOME_SESSION_PAGE_LIMIT + 1)
     expect(calls).toEqual([
-      { input: { limit: HOME_V2_SESSION_PAGE_LIMIT, order: "desc" }, signal: controller.signal },
+      { input: { limit: HOME_SESSION_PAGE_LIMIT, order: "desc" }, signal: controller.signal },
       {
-        input: { limit: HOME_V2_SESSION_PAGE_LIMIT, order: "desc", cursor: "next-page" },
+        input: { limit: HOME_SESSION_PAGE_LIMIT, order: "desc", cursor: "next-page" },
         signal: controller.signal,
       },
     ])
@@ -76,7 +81,7 @@ describe("Home V2 session index", () => {
     const activeNull = {
       ...session({ id: "active-null", updated: 20 }),
       time: { created: 1, updated: 20, archived: null },
-    } as unknown as SessionV2Info
+    } as unknown as ReturnType<typeof session>
     const result = parseHomeSessionIndex([
       session({ id: "root", updated: 30 }),
       activeNull,
@@ -88,7 +93,7 @@ describe("Home V2 session index", () => {
       expect.objectContaining({
         id: "root",
         slug: "root",
-        version: "",
+        version: "rika",
         directory: "/project",
         projectID: "project",
         title: "root",

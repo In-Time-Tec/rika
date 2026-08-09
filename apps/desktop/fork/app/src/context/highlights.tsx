@@ -7,7 +7,7 @@ import { useSettings } from "@/context/settings"
 import { persisted } from "@/utils/persist"
 import { DialogReleaseNotes, type Highlight } from "@/components/dialog-release-notes"
 
-const CHANGELOG_URL = "https://opencode.ai/changelog.json"
+const CHANGELOG_URL = "https://rika.dev/changelog.json"
 
 type Store = {
   version?: string
@@ -144,7 +144,7 @@ export const { use: useHighlights, provider: HighlightsProvider } = createSimple
     const platform = usePlatform()
     const dialog = useDialog()
     const settings = useSettings()
-    const [store, setStore, _, ready] = persisted("highlights.v1", createStore<Store>({ version: undefined }))
+    const [store, setStore, _, ready] = persisted("highlights", createStore<Store>({ version: undefined }))
 
     const [range, setRange] = createStore({
       from: undefined as string | undefined,

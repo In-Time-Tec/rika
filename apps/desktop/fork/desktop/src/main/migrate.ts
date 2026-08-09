@@ -5,6 +5,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { CHANNEL } from "./constants"
 import { getStore } from "./store"
+import { SETTINGS_STORE } from "./store-keys"
 
 const TAURI_MIGRATED_KEY = "tauriMigrated"
 
@@ -48,7 +49,7 @@ function migrateFile(datPath: string, filename: string) {
   // opencode.settings.dat → the electron settings store ("opencode.settings").
   // All other .dat files keep their full filename as the store name so they match
   // what the renderer passes via IPC (e.g. "default.dat", "opencode.global.dat").
-  const storeName = filename === "opencode.settings.dat" ? "opencode.settings" : filename
+  const storeName = migratedStoreName(filename)
   const target = getStore(storeName)
   const migrated: string[] = []
   const skipped: string[] = []
@@ -64,6 +65,13 @@ function migrateFile(datPath: string, filename: string) {
   }
 
   log.log("tauri migration: migrated", filename, "→", storeName, { migrated, skipped })
+}
+
+function migratedStoreName(filename: string) {
+  if (filename === "opencode.settings.dat") return SETTINGS_STORE
+  if (filename === "opencode.global.dat") return "rika.global.dat"
+  if (filename.startsWith("opencode.")) return `rika.${filename.slice("opencode.".length)}`
+  return filename
 }
 
 export function migrate() {

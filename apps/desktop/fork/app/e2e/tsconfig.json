@@ -3,9 +3,14 @@
   "compilerOptions": {
     "noEmit": true,
     "rootDir": "..",
-    "types": ["node", "bun"]
+    "types": [
+      "node",
+      "bun"
+    ]
   },
   "include": [
+    "./native/**/*.ts",
+    "./native-web-server.ts",
     "./performance/timeline-stability/**/*.spec.ts",
     "./performance/timeline-stability/fixture.test.ts",
     "./performance/timeline-stability/fixture.ts",

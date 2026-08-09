@@ -356,7 +356,7 @@ test.describe("smoke: session timeline", () => {
 async function configureSmokePage(page: Page, directory: string) {
   await page.addInitScript(() => {
     localStorage.setItem(
-      "settings.v3",
+      "settings",
       JSON.stringify({
         general: {
           editToolPartsExpanded: true,

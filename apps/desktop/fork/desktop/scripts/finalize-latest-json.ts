@@ -160,8 +160,8 @@ const out: Record<string, { url: string; signature: string }> = {}
 const winxexe = pick(winx?.files ?? [], [".exe"])
 const winaexe = pick(wina?.files ?? [], [".exe"])
 
-const macxTarGz = "opencode-desktop-mac-x64.app.tar.gz"
-const macaTarGz = "opencode-desktop-mac-arm64.app.tar.gz"
+const macxTarGz = pick(macx?.files ?? [], [".app.tar.gz"])
+const macaTarGz = pick(maca?.files ?? [], [".app.tar.gz"])
 
 const linxDeb = pick(linx?.files ?? [], [".deb"])
 const linxRpm = pick(linx?.files ?? [], [".rpm"])

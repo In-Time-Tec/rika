@@ -23,21 +23,20 @@ export function createPromptInputController(input: {
   queryOptions: Pick<QueryOptionsApi, "agents" | "providers">
   model?: ModelSelection
 }) {
-  const layout = useLayout()
   const local = useLocal()
   const sdk = useSDK()
   const sync = useSync()
   const providers = useProviders(() => sdk().directory)
-  const view = layout.view(input.sessionKey)
   const agentsQuery = createQuery(() => input.queryOptions.agents(pathKey(sdk().directory)))
   const globalProvidersQuery = createQuery(() => input.queryOptions.providers(null))
   const providersQuery = createQuery(() => input.queryOptions.providers(pathKey(sdk().directory)))
 
   return createMemo<PromptInputControls>(() => {
+    const agents = local.agent.list() ?? []
     return {
       agents: {
-        available: sync().data.agent,
-        options: local.agent.list().map((agent) => agent.name),
+        available: sync().data.agent ?? [],
+        options: agents.map((agent) => agent.name),
         current: local.agent.current()?.name ?? "",
         loading: agentsQuery.isLoading,
         visible: local.agent.visible(),
@@ -53,8 +52,6 @@ export function createPromptInputController(input: {
       },
       session: {
         id: input.sessionID(),
-        tabs: layout.tabs(input.sessionKey),
-        reviewPanel: view.reviewPanel,
       },
     }
   })

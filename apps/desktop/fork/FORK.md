@@ -1,6 +1,8 @@
-# opencode desktop fork (staging)
+# Rika desktop fork (staging)
 
-One-time fork of the opencode desktop application, taken on 2026-08-08 and owned by Rika from this point on. No upstream tracking, no sync script.
+One-time fork of the upstream desktop application, taken on 2026-08-08 and owned by Rika from this point on. No upstream tracking, no sync script.
+
+Rika is the product name used by desktop packaging and user-facing copy. OpenCode spellings that remain below are intentional technical contracts: `@opencode-ai/*` package names, `OPENCODE_*` environment variables, SDK/API/schema identifiers, upstream paths, and compatibility protocol or storage names must not be renamed as branding work.
 
 - **Upstream repo:** github.com/anomalyco/opencode (fork of sst/opencode)
 - **Upstream commit:** 284214c78d32a09fd9c729bdefc07be50f74eb40
@@ -11,10 +13,10 @@ One-time fork of the opencode desktop application, taken on 2026-08-08 and owned
 - `app/` — the SolidJS renderer (the UI we keep)
 - `ui/` — shared UI components
 - `session-ui/` — session components (diffs, review)
-- `schema/` — opencode data-model types (used as view-model types during the port)
+- `schema/` — retained data-model types (used as view-model types during the port)
 - `core/src/util/` — ONLY the util subpaths the renderer imports (encode/path/binary/retry/array); no engine code
-- `app/vendor/opencode-ai-client-1.17.13-v2.tgz` — vendored client tarball (type contract only; runtime replaced by @rika/client)
-- `sdk/` — the opencode v2 SDK client (app's server-client layer; replaced by @rika/client during the port)
+- `app/vendor/opencode-ai-client-1.17.13-v2.tgz` — vendored OpenCode client tarball (type contract only; runtime replaced by @rika/client)
+- `sdk/` — the OpenCode v2 SDK client (app's server-client layer; replaced by @rika/client during the port)
 - `script/` — build-tooling package (imported only by desktop/ui build scripts)
 
 ## Staging rules
@@ -29,34 +31,41 @@ One-time fork of the opencode desktop application, taken on 2026-08-08 and owned
   manifest (the app only imports `@opencode-ai/core/util/*` — zero-dep pure utils).
 - Fork root `package.json`: private workspace (`rika-desktop-fork`) with the
   upstream catalog (nested in `workspaces.catalog`), bun@1.3.14, and
-  `trustedDependencies` (electron + node-pty + esbuild).
+  `trustedDependencies` (electron + esbuild).
 - The fork has its OWN `bun install` (own node_modules + bun.lock) and does NOT
   join Rika's workspace — Rika gates untouched (23/23, 1548 tests).
-- `opencode/dist/node/node.js` is a STUB for `virtual:opencode-server` (the
-  desktop main's sidecar imports `Server.listen`); opencode's server bundle is
-  not vendored by design. The M3 port replaces this with Rika's server.
+- The former `opencode/dist/node/node.js` stub and `virtual:opencode-server` path
+  have been removed; the native Rika server now owns desktop lifecycle and
+  transport. The upstream server bundle is not vendored.
 - Baseline build: `cd desktop && bunx electron-vite build` — green in ~18s
   (main + preload + renderer bundles).
-- Baseline launch: `bunx electron .` — window opens; main + renderer + sidecar
-  processes run; logs show "server ready" + the expected stub-era
-  `global-sdk event stream failed` (that layer is exactly what the Rika port
-  replaces). Electron 42.3.3 binary installed via the cached package's install.js
+- Baseline launch: `bunx electron .` — window opens; Electron main starts the
+  native Rika server through the publication/token contract, and the renderer
+  connects through one authenticated Rika connection. Electron 42.3.3 binary installed via the cached package's install.js
   (bun does not run electron's postinstall by default).
 
-## Phase A status (Rika transport in the fork) — DONE
+## Phase A status (Rika transport proof) — DONE
 
-- `app/src/rika/` — `endpoint.ts` (server.json/token resolution + identity),
-  `connection.ts` (`connectRika`: @rika/client connect, clientKind "desktop",
-  WebCrypto-backed effect Crypto, WebSocket factory), `events.ts`
-  (`runThreadFeed`: interactive session attach).
-- `app/tsconfig.json` paths + `desktop/electron.vite.config.ts` renderer
-  aliases map `@rika/client/*` and `@rika/product/*` into Rika's packages and
-  unify `effect` on the Rika instance (4.0.0-beta.98; fork catalog bumped from
-  beta.83). `effect/<sub>` subpaths resolve via a small resolveId plugin
-  (vite cannot apply effect's `./*` exports wildcard; string aliases match
-  prefixes, so the bare `effect` alias is a regex).
-- Verification: `bun test app/src/rika/connection.test.ts` — 2/2 green
-  (spawns the REAL Rika Server, connects with clientKind "desktop", pings).
-  Renderer build green; desktop app launches.
-- Test spawns `apps/server/dist/server-main.js` with an isolated HOME
-  (settings-file decode requires a clean profile) and waits for server.json.
+The initial proof established browser-safe `@rika/client` connection and
+interactive-feed support against a real Server. Its renderer-owned
+`server.json`/token discovery was transitional and has now been deleted.
+
+## Phase B status (native lifecycle and renderer adapter) — IN PROGRESS
+
+- Electron main owns the Rika profile/data root, starts the built Rika Server
+  through its fd-3 spawn contract, validates the canonical publication/token,
+  and exposes only `{url, token, identity}` to the trusted renderer main frame.
+- `GlobalProvider` owns one scoped physical Rika Connection. Cached directory
+  runtimes own one `InteractiveSession` and one feed consumer per workspace.
+- `app/src/rika/{projection,projection-events,adapter}.ts` translate revisioned
+  Rika Thread Views into the retained view-store Message/Part/Permission
+  shapes. Full Unit upserts replace complete Parts; gaps resync.
+- `context/server-sdk.tsx` no longer constructs OpenCode clients or subscribes
+  to OpenCode HTTP/SSE events. Its temporary local facade executes native Rika
+  operations and rejects unsupported calls without a transport fallback.
+- Question, Todo, revert/share/compact, auto-accept, terminal/PTY, old MCP,
+  LSP, and provider-OAuth controls are cut from active session paths. Rika
+  OpenRouter API-key login is exposed through native `Auth` operations.
+- Projection/adapter and endpoint/IPC tests are focused under `app/src/rika`
+  and `desktop/src/main`; the canonical Electron build is
+  `cd desktop && bunx electron-vite build`.

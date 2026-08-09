@@ -1,31 +1,29 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
-import { type Accessor, batch, createMemo } from "solid-js"
+import { type Accessor, createMemo } from "solid-js"
 import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
 import { Persist, persisted } from "@/utils/persist"
 import { pathKey } from "@/utils/path-key"
 import { ServerScope } from "@/utils/server-scope"
+import type { RikaConnectionInput } from "@/rika/connection"
 
 type StoredProject = { worktree: string; expanded: boolean }
-type StoredServer = string | ServerConnection.HttpBase | ServerConnection.Http
+type StoredServer =
+  | string
+  | ServerConnection.HttpBase
+  | ServerConnection.Http
+  | ServerConnection.Ssh
+  | ServerConnection.Rika
 type ServerProjectState = {
   projects: Record<string, StoredProject[]>
   lastProject: Record<string, string>
   recentlyClosed: Record<string, string[]>
 }
-const HEALTH_POLL_INTERVAL_MS = 10_000
 // The store retains more history than is displayed. Consumers filter recently closed entries
 // against the live project list (dropping deleted projects) and then cap the visible count via
 // RECENTLY_CLOSED_DISPLAY_LIMIT. Retaining extra history ensures entries that are temporarily
 // filtered out do not evict still-visible ones from the persisted store.
 const RECENTLY_CLOSED_HISTORY_LIMIT = 16
 export const RECENTLY_CLOSED_DISPLAY_LIMIT = 5
-
-export function normalizeServerUrl(input: string) {
-  const trimmed = input.trim()
-  if (!trimmed) return
-  const withProtocol = /^https?:\/\//.test(trimmed) ? trimmed : `http://${trimmed}`
-  return withProtocol.replace(/\/+$/, "")
-}
 
 export function serverName(conn?: ServerConnection.Any, ignoreDisplayName = false) {
   if (!conn) return ""
@@ -43,37 +41,97 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function migrateCanonicalLocalServerState(value: unknown, canonicalLocalServer?: ServerConnection.Key) {
-  if (!canonicalLocalServer || canonicalLocalServer === "local") return value
   if (!isRecord(value)) return value
+
+  // The built-in server used `sidecar` before the native Rika transport. Keep that
+  // bucket migration-only so existing local projects remain available after the
+  // connection key changes to `rika`.
+  const aliases = new Set<string>(["sidecar"])
+  if (canonicalLocalServer && canonicalLocalServer !== "local") aliases.add(canonicalLocalServer)
+
   const projects = isRecord(value.projects) ? value.projects : undefined
   const lastProject = isRecord(value.lastProject) ? value.lastProject : undefined
-  const previousProjects = projects?.[canonicalLocalServer]
-  const previousLastProject = lastProject?.[canonicalLocalServer]
-  if (!Array.isArray(previousProjects) && typeof previousLastProject !== "string") return value
+  const projectAliases = projects
+    ? [...aliases].filter((key) => Object.prototype.hasOwnProperty.call(projects, key))
+    : []
+  const lastProjectAliases = lastProject
+    ? [...aliases].filter((key) => Object.prototype.hasOwnProperty.call(lastProject, key))
+    : []
+  if (projectAliases.length === 0 && lastProjectAliases.length === 0) return value
 
   const next = { ...value }
-  if (projects && Array.isArray(previousProjects)) {
+  if (projects && projectAliases.length > 0) {
     const local = Array.isArray(projects.local) ? projects.local : []
     const worktrees = new Set(
       local.flatMap((project) => (isRecord(project) && typeof project.worktree === "string" ? [project.worktree] : [])),
     )
-    const migrated = previousProjects.filter((project) => {
-      if (!isRecord(project) || typeof project.worktree !== "string") return true
-      if (worktrees.has(project.worktree)) return false
-      worktrees.add(project.worktree)
-      return true
+    const migrated = projectAliases.flatMap((alias) => {
+      const previous = projects[alias]
+      if (!Array.isArray(previous)) return []
+      return previous.filter((project) => {
+        if (!isRecord(project) || typeof project.worktree !== "string") return true
+        if (worktrees.has(project.worktree)) return false
+        worktrees.add(project.worktree)
+        return true
+      })
     })
     const nextProjects: Record<string, unknown> = { ...projects, local: [...local, ...migrated] }
-    delete nextProjects[canonicalLocalServer]
+    for (const alias of projectAliases) delete nextProjects[alias]
     next.projects = nextProjects
   }
-  if (lastProject && typeof previousLastProject === "string") {
+  if (lastProject && lastProjectAliases.length > 0) {
     const nextLastProject = { ...lastProject }
-    if (typeof nextLastProject.local !== "string") nextLastProject.local = previousLastProject
-    delete nextLastProject[canonicalLocalServer]
+    if (typeof nextLastProject.local !== "string") {
+      for (const alias of lastProjectAliases) {
+        const previous = nextLastProject[alias]
+        if (typeof previous === "string") {
+          nextLastProject.local = previous
+          break
+        }
+      }
+    }
+    for (const alias of lastProjectAliases) delete nextLastProject[alias]
     next.lastProject = nextLastProject
   }
   return next
+}
+
+/**
+ * Migrate the persisted server bucket without carrying legacy connection records forward.
+ *
+ * HTTP/SSH entries are still accepted by the storage shape above so old data can be parsed,
+ * but they must not remain in the active store (or retain their credentials at rest). Native
+ * Rika descriptors are kept byte-for-byte so their transport URL, token, and identity survive
+ * startup/persistence migration.
+ */
+export function migrateServerState(value: unknown, canonicalLocalServer?: ServerConnection.Key) {
+  const migrated = migrateCanonicalLocalServerState(value, canonicalLocalServer)
+  if (!isRecord(migrated)) return migrated
+
+  const list = Array.isArray(migrated.list) ? migrated.list.filter(isRikaConnection) : []
+  // Rika currently uses the canonical `rika` key. Keep that bucket even when the descriptor
+  // came from startup props rather than persistence; it is the only native server scope.
+  const serverKeys = new Set<ServerConnection.Key>([
+    ServerConnection.Key.make("local"),
+    ServerConnection.Key.make("rika"),
+    ...list.map(ServerConnection.key),
+  ])
+
+  const filterScopes = (input: unknown) => {
+    if (!isRecord(input)) return input
+    return Object.fromEntries(Object.entries(input).filter(([key]) => serverKeys.has(ServerConnection.Key.make(key))))
+  }
+
+  const projects = filterScopes(migrated.projects)
+  const lastProject = filterScopes(migrated.lastProject)
+  const recentlyClosed = filterScopes(migrated.recentlyClosed)
+  return {
+    ...migrated,
+    list,
+    projects,
+    lastProject,
+    recentlyClosed,
+  }
 }
 
 export function createServerProjects<T extends ServerProjectState>(input: {
@@ -148,34 +206,32 @@ export function createServerProjects<T extends ServerProjectState>(input: {
 export function resolveServerList(input: {
   props?: Array<ServerConnection.Any>
   stored: StoredServer[]
-}): Array<ServerConnection.Any> {
-  const deduped = new Map<ServerConnection.Key, ServerConnection.Any>(
-    input.props?.map((v) => [ServerConnection.key(v), v]) ?? [],
-  )
+}): Array<ServerConnection.Rika> {
+  const deduped = new Map<ServerConnection.Key, ServerConnection.Rika>()
+
+  for (const conn of input.props ?? []) {
+    if (conn.type !== "rika") continue
+    deduped.set(ServerConnection.key(conn), conn)
+  }
 
   for (const value of input.stored) {
-    const conn: ServerConnection.Http =
-      typeof value === "string"
-        ? {
-            type: "http" as const,
-            http: { url: value },
-          }
-        : "http" in value
-          ? value
-          : { type: "http", http: value }
-    const key = ServerConnection.key(conn)
-
-    const existing = deduped.get(key)
-    if (existing)
-      deduped.set(key, {
-        ...existing,
-        ...conn,
-        http: { ...existing.http, ...conn.http },
-      })
-    else deduped.set(key, conn)
+    if (!isRikaConnection(value)) continue
+    const key = ServerConnection.key(value)
+    if (!deduped.has(key)) deduped.set(key, value)
   }
 
   return [...deduped.values()]
+}
+
+function isRikaConnection(value: unknown): value is ServerConnection.Rika {
+  if (!isRecord(value) || value.type !== "rika") return false
+  if (!isRecord(value.http) || typeof value.http.url !== "string") return false
+  if (!isRecord(value.rika)) return false
+  return (
+    typeof value.rika.url === "string" &&
+    typeof value.rika.token === "string" &&
+    typeof value.rika.identity === "string"
+  )
 }
 
 export namespace ServerConnection {
@@ -194,19 +250,12 @@ export namespace ServerConnection {
     authToken?: boolean
   } & Base
 
-  export type Sidecar = {
-    type: "sidecar"
-    http: HttpBase
-  } & (
-    | // Regular desktop server
-    { variant: "base" }
-    // WSL server (windows only)
-    | {
-        variant: "wsl"
-        distro: string
-      }
-  ) &
-    Base
+  export type Rika = {
+    type: "rika"
+    // Native connections authenticate with their Rika token, never HTTP Basic auth.
+    http: Pick<HttpBase, "url">
+    rika: RikaConnectionInput
+  } & Base
 
   // Remote server desktop can SSH into
   export type Ssh = {
@@ -219,16 +268,14 @@ export namespace ServerConnection {
   export type Any =
     | Http
     // All these are desktop-only
-    | (Sidecar | Ssh)
+    | (Rika | Ssh)
 
   export const key = (conn: Any): Key => {
     switch (conn.type) {
       case "http":
         return Key.make(conn.http.url)
-      case "sidecar": {
-        if (conn.variant === "wsl") return Key.make(`wsl:${conn.distro}`)
-        return Key.make("sidecar")
-      }
+      case "rika":
+        return Key.make("rika")
       case "ssh":
         return Key.make(`ssh:${conn.host}`)
     }
@@ -237,7 +284,7 @@ export namespace ServerConnection {
   export type Key = string & { _brand: "Key" }
   export const Key = { make: (v: string) => v as Key }
 
-  export const builtin = (conn: Any) => conn.type === "sidecar" && conn.variant === "base"
+  export const builtin = (conn: Any) => conn.type === "rika"
   export const local = (conn?: Any) =>
     !!conn && (builtin(conn) || (conn.type === "http" && isLocalHost(conn.http.url) === "local"))
 }
@@ -263,7 +310,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     const [store, setStore, _, ready] = persisted(
       {
         ...Persist.global("server", ["server.v3"]),
-        migrate: (value) => migrateCanonicalLocalServerState(value, props.canonicalLocalServer),
+        migrate: (value) => migrateServerState(value, props.canonicalLocalServer),
       },
       createStore({
         list: [] as StoredServer[],
@@ -273,9 +320,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       }),
     )
 
-    const url = (x: StoredServer) => (typeof x === "string" ? x : "type" in x ? x.http.url : x.url)
-
-    const allServers = createMemo((): Array<ServerConnection.Any> => {
+    const allServers = createMemo((): Array<ServerConnection.Rika> => {
       return resolveServerList({ stored: store.list, props: props.servers })
     })
 
@@ -285,31 +330,6 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
 
     function setActive(input: ServerConnection.Key) {
       if (state.active !== input) setState("active", input)
-    }
-
-    function add(input: ServerConnection.Http) {
-      const url_ = normalizeServerUrl(input.http.url)
-      if (!url_) return
-      const conn: ServerConnection.Http = { ...input, authToken: undefined, http: { ...input.http, url: url_ } }
-      return batch(() => {
-        const existing = store.list.findIndex((x) => url(x) === url_)
-        if (existing !== -1) {
-          setStore("list", existing, conn)
-        } else {
-          setStore("list", store.list.length, conn)
-        }
-        setState("active", ServerConnection.key(conn))
-        return conn
-      })
-    }
-
-    function remove(key: ServerConnection.Key) {
-      const next = nextServerAfterRemoval(allServers(), key, props.defaultServer)
-      const list = store.list.filter((x) => url(x) !== key)
-      batch(() => {
-        setStore("list", list)
-        if (state.active === key) setState("active", next)
-      })
     }
 
     const isReady = Object.assign(
@@ -327,7 +347,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       projectStores.set(key, next)
       return next
     }
-    const current: Accessor<ServerConnection.Any | undefined> = createMemo(
+    const current: Accessor<ServerConnection.Rika | undefined> = createMemo(
       () => allServers().find((s) => ServerConnection.key(s) === state.active) ?? allServers()[0],
     )
     const isLocal = createMemo(() => ServerConnection.local(current()))
@@ -348,8 +368,6 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
         return current()
       },
       setActive,
-      add,
-      remove,
       scope,
       projects: {
         ...projects,

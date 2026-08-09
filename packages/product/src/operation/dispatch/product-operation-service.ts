@@ -1,4 +1,4 @@
-import { Console, Context, Effect, Ref, Semaphore } from "effect"
+import { Context, Effect, Ref, Semaphore } from "effect"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as TurnRepository from "@rika/product/turn-repository"
 import { OperationUnavailable } from "../contract/product-operation"
@@ -15,7 +15,6 @@ export interface ProductOperationServiceInput {
   readonly options: ProductLayerOptions<Error, Error, Error, Error, Error>
   readonly state: ProductOperationRuntimeState
   readonly schedule: ProductOperationSchedule
-  readonly console: Console.Console
   readonly fileSystem: import("effect").FileSystem.FileSystem | undefined
   readonly path: import("effect").Path.Path | undefined
   readonly executionDependencies: ProductOperationRuntimeState["executionDependencies"]

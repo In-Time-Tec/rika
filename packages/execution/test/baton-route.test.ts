@@ -25,7 +25,7 @@ it.effect("resolves complete ordered model candidates deterministically", () =>
     expect(first).toEqual(second)
     expect(first.version).toBe(1)
     expect(first.tokenBudget).toBe(12_000)
-    expect(first.main.registrationIdentity).toMatch(/^rika:model:v1:[a-f0-9]{64}$/)
+    expect(first.main.registrationIdentity).toMatch(/^rika:model:[a-f0-9]{64}$/)
     expect(first.main.candidates).toHaveLength(Settings.Defaults.settingsDefaults.models.luna!.candidates.length)
     expect(first.main.candidates[0]?.providerOptions?.max_output_tokens).toBe(128_000)
     const mainAlias = Settings.Defaults.settingsDefaults.modes.medium.main.alias

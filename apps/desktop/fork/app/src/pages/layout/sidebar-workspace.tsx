@@ -73,7 +73,7 @@ export const WorkspaceDragOverlay = (props: {
     const [workspaceStore] = serverSync().child(directory, { bootstrap: false })
     const kind =
       directory === project.worktree ? language.t("workspace.type.local") : language.t("workspace.type.sandbox")
-    const name = props.workspaceLabel(directory, workspaceStore.vcs?.branch, project.id)
+    const name = props.workspaceLabel(directory, undefined, project.id)
     return `${kind} : ${name}`
   })
 
@@ -316,7 +316,7 @@ export const SortableWorkspace = (props: {
   const local = createMemo(() => props.directory === props.project.worktree)
   const active = createMemo(() => pathKey(props.ctx.currentDir()) === pathKey(props.directory))
   const workspaceValue = createMemo(() => {
-    const branch = workspaceStore.vcs?.branch
+    const branch = undefined
     const name = branch ?? getFilename(props.directory)
     return props.ctx.workspaceName(props.directory, props.project.id, branch) ?? name
   })
@@ -342,7 +342,7 @@ export const SortableWorkspace = (props: {
       open={open}
       directory={props.directory}
       language={language}
-      branch={() => workspaceStore.vcs?.branch}
+      branch={() => undefined}
       workspaceValue={workspaceValue}
       workspaceEditActive={workspaceEditActive}
       InlineEditor={props.ctx.InlineEditor}

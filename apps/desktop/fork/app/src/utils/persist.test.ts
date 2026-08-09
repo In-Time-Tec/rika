@@ -25,22 +25,22 @@ class MemoryStorage implements Storage {
   getItem(key: string) {
     this.calls.get += 1
     this.events.push(`get:${key}`)
-    if (key.startsWith("opencode.throw")) throw new Error("storage get failed")
+    if (key.startsWith("rika.throw")) throw new Error("storage get failed")
     return this.values.get(key) ?? null
   }
 
   setItem(key: string, value: string) {
     this.calls.set += 1
     this.events.push(`set:${key}`)
-    if (key.startsWith("opencode.quota")) throw new DOMException("quota", "QuotaExceededError")
-    if (key.startsWith("opencode.throw")) throw new Error("storage set failed")
+    if (key.startsWith("rika.quota")) throw new DOMException("quota", "QuotaExceededError")
+    if (key.startsWith("rika.throw")) throw new Error("storage set failed")
     this.values.set(key, value)
   }
 
   removeItem(key: string) {
     this.calls.remove += 1
     this.events.push(`remove:${key}`)
-    if (key.startsWith("opencode.throw")) throw new Error("storage remove failed")
+    if (key.startsWith("rika.throw")) throw new Error("storage remove failed")
     this.values.delete(key)
   }
 }
@@ -76,15 +76,15 @@ beforeEach(() => {
 
 describe("persist localStorage resilience", () => {
   test("does not cache values as persisted when quota write and eviction fail", () => {
-    const storageApi = persistTesting.localStorageWithPrefix("opencode.quota.scope")
+    const storageApi = persistTesting.localStorageWithPrefix("rika.quota.scope")
     storageApi.setItem("value", '{"value":1}')
 
-    expect(storage.getItem("opencode.quota.scope:value")).toBeNull()
+    expect(storage.getItem("rika.quota.scope:value")).toBeNull()
     expect(storageApi.getItem("value")).toBeNull()
   })
 
   test("disables only the failing scope when storage throws", () => {
-    const bad = persistTesting.localStorageWithPrefix("opencode.throw.scope")
+    const bad = persistTesting.localStorageWithPrefix("rika.throw.scope")
     bad.setItem("value", '{"value":1}')
 
     const before = storage.calls.set
@@ -92,13 +92,13 @@ describe("persist localStorage resilience", () => {
     expect(storage.calls.set).toBe(before)
     expect(bad.getItem("value")).toBeNull()
 
-    const healthy = persistTesting.localStorageWithPrefix("opencode.safe.scope")
+    const healthy = persistTesting.localStorageWithPrefix("rika.safe.scope")
     healthy.setItem("value", '{"value":3}')
-    expect(storage.getItem("opencode.safe.scope:value")).toBe('{"value":3}')
+    expect(storage.getItem("rika.safe.scope:value")).toBe('{"value":3}')
   })
 
   test("failing fallback scope does not poison direct storage scope", () => {
-    const broken = persistTesting.localStorageWithPrefix("opencode.throw.scope2")
+    const broken = persistTesting.localStorageWithPrefix("rika.throw.scope2")
     broken.setItem("value", '{"value":1}')
 
     const direct = persistTesting.localStorageDirect()
@@ -115,23 +115,87 @@ describe("persist localStorage resilience", () => {
   test("workspace storage sanitizes Windows filename characters", () => {
     const result = persistTesting.workspaceStorage("C:\\Users\\foo")
 
-    expect(result).toStartWith("opencode.workspace.")
+    expect(result).toStartWith("rika.workspace.")
     expect(result.endsWith(".dat")).toBeTrue()
     expect(/[:\\/]/.test(result)).toBeFalse()
   })
 
-  test("workspace target keeps raw path storage as legacy fallback", () => {
+  test("workspace target keeps Rika path variants and their OpenCode names as legacy fallbacks", () => {
     const target = Persist.workspace("C:\\Users\\foo", "vcs")
+    const current = persistTesting.workspaceStorage("C:/Users/foo")
+    const raw = persistTesting.workspaceStorage("C:\\Users\\foo")
 
-    expect(target.storage).toBe(persistTesting.workspaceStorage("C:/Users/foo"))
-    expect(target.legacyStorageNames).toEqual([persistTesting.workspaceStorage("C:\\Users\\foo")])
+    expect(target.storage).toBe(current)
+    expect(target.legacyStorageNames).toEqual([
+      current.replace("rika.", "opencode."),
+      raw,
+      raw.replace("rika.", "opencode."),
+    ])
   })
 
   test("workspace target keeps backslash storage as fallback for normalized Windows paths", () => {
     const target = Persist.workspace("C:/Users/foo", "vcs")
+    const current = persistTesting.workspaceStorage("C:/Users/foo")
+    const backslash = persistTesting.workspaceStorage("C:\\Users\\foo")
 
-    expect(target.storage).toBe(persistTesting.workspaceStorage("C:/Users/foo"))
-    expect(target.legacyStorageNames).toEqual([persistTesting.workspaceStorage("C:\\Users\\foo")])
+    expect(target.storage).toBe(current)
+    expect(target.legacyStorageNames).toEqual([
+      current.replace("rika.", "opencode."),
+      backslash,
+      backslash.replace("rika.", "opencode."),
+    ])
+  })
+
+  test("discovers matching OpenCode storage for every Rika persistence scope", () => {
+    const targets = [
+      Persist.global("global"),
+      persistTesting.resolveTarget(Persist.window("window")),
+      Persist.workspace("/home/luke/repo", "workspace"),
+      Persist.draft("draft-migration", "prompt"),
+    ]
+
+    for (const target of targets) {
+      const expected = target.storage!.replace("rika.", "opencode.")
+      expect(target.legacyStorageNames).toContain(expected)
+    }
+  })
+
+  test("migrates OpenCode scoped storage into the active Rika store", () => {
+    const target = Persist.global("legacy-global", ["legacy-global.v1"])
+    const current = persistTesting.localStorageWithPrefix(target.storage!)
+    const oldName = target.legacyStorageNames!.find((name) => name.startsWith("opencode."))!
+    const oldStore = persistTesting.localStorageWithPrefix(oldName)
+    oldStore.setItem(target.key, '{"value":2}')
+
+    const result = persistTesting.migrateLegacy({
+      current,
+      legacyStore: persistTesting.localStorageDirect(),
+      stores: [oldStore],
+      keys: target.legacy!,
+      key: target.key,
+      defaults: { value: 1 },
+    })
+
+    expect(result).toBe('{"value":2}')
+    expect(current.getItem(target.key)).toBe('{"value":2}')
+    expect(oldStore.getItem(target.key)).toBeNull()
+    expect(target.legacy).toEqual(["legacy-global.v1"])
+  })
+
+  test("clears Rika and OpenCode window storage together", () => {
+    const target = Persist.window("legacy-window")
+    const resolved = persistTesting.resolveTarget(target)
+    storage.setItem(`${resolved.storage}:${resolved.key}`, '{"value":1}')
+    for (const name of resolved.legacyStorageNames!) {
+      storage.setItem(`${name}:${resolved.key}`, '{"value":2}')
+    }
+
+    removePersisted(target)
+
+    expect(storage.getItem(`${resolved.storage}:${resolved.key}`)).toBeNull()
+    for (const name of resolved.legacyStorageNames!) {
+      expect(storage.getItem(`${name}:${resolved.key}`)).toBeNull()
+    }
   })
 
   test("migrates direct legacy keys into scoped storage", () => {
@@ -193,14 +257,15 @@ describe("persist localStorage resilience", () => {
     expect(windows.storage).not.toBe(local.storage)
     expect(debian.storage).not.toBe(local.storage)
     expect(debian.storage).not.toBe(windows.storage)
-    expect(windows.legacyStorageNames).toBeUndefined()
-    expect(debian.legacyStorageNames).toBeUndefined()
+    expect(windows.legacyStorageNames).toEqual([windows.storage!.replace("rika.", "opencode.")])
+    expect(debian.legacyStorageNames).toEqual([debian.storage!.replace("rika.", "opencode.")])
   })
 
   test("server global target preserves local key and isolates remote keys", () => {
     expect(Persist.serverGlobal(ServerScope.local, "notification")).toEqual(Persist.global("notification"))
     expect(Persist.serverGlobal("https://debian.example" as ServerScope, "notification")).toEqual({
-      storage: "opencode.global.dat",
+      storage: "rika.global.dat",
+      legacyStorageNames: ["opencode.global.dat"],
       key: "https://debian.example\0notification",
     })
   })

@@ -113,8 +113,8 @@ export function applyOptimisticRemove(draft: OptimisticStore, input: OptimisticR
 export const useSync = () => {
   const serverSync = useServerSync()
   const sdk = useSDK()
-
-  return createMemo(() => serverSync().ensureDirSyncContext(sdk().directory))
+  const value = serverSync().ensureDirSyncContext(sdk().directory)
+  return () => value
 }
 
 export type DirectorySync = ReturnType<ReturnType<typeof useSync>>

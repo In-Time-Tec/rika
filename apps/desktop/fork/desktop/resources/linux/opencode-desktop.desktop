@@ -1,5 +1,6 @@
 [Desktop Entry]
-Name=OpenCode
+# Keep the historical filename and identifiers so existing launcher pins continue to resolve.
+Name=Rika
 Exec=/opt/OpenCode/ai.opencode.desktop %U
 Terminal=false
 Type=Application

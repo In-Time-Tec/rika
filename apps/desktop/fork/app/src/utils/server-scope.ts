@@ -21,7 +21,7 @@ export const ServerScope = {
   fromServerKey(key: ServerConnection.Key, canonicalLocalServer?: ServerConnection.Key) {
     return fragment(
       "Server scope",
-      key === "sidecar" || key === canonicalLocalServer ? ServerScope.local : key,
+      key === "rika" || key === canonicalLocalServer ? ServerScope.local : key,
     ) as ServerScope
   },
 }

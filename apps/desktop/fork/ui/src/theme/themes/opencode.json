@@ -1,6 +1,6 @@
 {
-  "$schema": "https://opencode.ai/desktop-theme.json",
-  "name": "OpenCode",
+  "$schema": "https://rika.dev/desktop-theme.json",
+  "name": "Rika",
   "id": "opencode",
   "light": {
     "palette": {

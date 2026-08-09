@@ -28,11 +28,7 @@ function localeDirection(locale: Locale): Direction {
 
 type RawDictionary = typeof en & typeof uiEn
 type Dictionary = i18n.Flatten<RawDictionary>
-type PluralKey =
-  | UiI18nPluralKey
-  | "session.question.pending"
-  | "session.followupDock.summary"
-  | "session.revertDock.summary"
+type PluralKey = UiI18nPluralKey | "session.followupDock.summary"
 type Source = { dict: Record<string, string> }
 
 function cookie(locale: Locale) {
@@ -140,7 +136,7 @@ export function normalizeLocale(value: string): Locale {
 function readStoredLocale() {
   if (typeof localStorage !== "object") return
   try {
-    const raw = localStorage.getItem("opencode.global.dat:language")
+    const raw = localStorage.getItem("rika.global.dat:language")
     if (!raw) return
     const next = JSON.parse(raw) as { locale?: string }
     if (typeof next?.locale !== "string") return
@@ -169,7 +165,7 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
   init: (props: { locale?: Locale; onNativeTranslations?: (bundle: DesktopNativeBundle) => void }) => {
     const initial = props.locale ?? readStoredLocale() ?? detectLocale()
     const [store, setStore, _, ready] = persisted(
-      Persist.global("language", ["language.v1"]),
+      Persist.global("language"),
       createStore({
         locale: initial,
       }),

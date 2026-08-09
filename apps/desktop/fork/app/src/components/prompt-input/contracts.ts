@@ -26,16 +26,6 @@ export type PromptInputControls = {
   }
   session: {
     id?: string
-    tabs: {
-      active: () => string | undefined
-      all: () => string[]
-      open: (tab: string) => void | Promise<void>
-      setActive: (tab: string) => void
-    }
-    reviewPanel: {
-      opened: () => boolean
-      open: () => void
-    }
   }
 }
 
@@ -46,8 +36,6 @@ export interface PromptInputProps {
   submission?: PromptInputSubmission
   controls: PromptInputControls
   ref?: (el: HTMLDivElement) => void
-  newSessionWorktree?: string
-  onNewSessionWorktreeReset?: () => void
   edit?: { id: string; prompt: Prompt; context: FollowupDraft["context"] }
   onEditLoaded?: () => void
   shouldQueue?: () => boolean

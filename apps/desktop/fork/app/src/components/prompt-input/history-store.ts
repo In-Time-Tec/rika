@@ -42,11 +42,11 @@ export function createPromptInputHistory(): PromptInputHistory {
 
 export function createPersistedPromptInputHistory() {
   const [normal, setNormal, normalInit] = persisted(
-    Persist.prompt(Persist.global("prompt-history", ["prompt-history.v1"])),
+    Persist.prompt(Persist.global("prompt-history")),
     createStore<PromptHistoryState>({ entries: [] }),
   )
   const [shell, setShell, shellInit] = persisted(
-    Persist.prompt(Persist.global("prompt-history-shell", ["prompt-history-shell.v1"])),
+    Persist.prompt(Persist.global("prompt-history-shell")),
     createStore<PromptHistoryState>({ entries: [] }),
   )
   const history = createPromptInputHistoryStore(normal, setNormal, shell, setShell)

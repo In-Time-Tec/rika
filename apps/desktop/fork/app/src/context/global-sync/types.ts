@@ -1,21 +1,16 @@
 import type {
   Agent,
   Config,
-  LspStatus,
   Message,
   Part,
   Path,
   PermissionRequest,
-  QuestionRequest,
   ReferenceInfo,
   Session,
   SessionStatus,
-  Todo,
-  VcsInfo,
 } from "@opencode-ai/sdk/v2/client"
-import type { FileDiffInfo } from "@opencode-ai/client/promise"
 import { NormalizedProviderListResponse } from "@opencode-ai/session-ui/context"
-import type { CommandInfo, McpResource, McpServer, SessionMessageInfo } from "@opencode-ai/client/promise"
+import type { CommandInfo, SessionMessageInfo } from "@opencode-ai/client/promise"
 import type { Accessor } from "solid-js"
 import type { SetStoreFunction, Store } from "solid-js/store"
 
@@ -48,28 +43,9 @@ export type State = {
     [sessionID: string]: SessionStatus
   }
   session_working(id: string): boolean
-  session_diff: {
-    [sessionID: string]: FileDiffInfo[]
-  }
-  todo: {
-    [sessionID: string]: Todo[]
-  }
   permission: {
     [sessionID: string]: PermissionRequest[]
   }
-  question: {
-    [sessionID: string]: QuestionRequest[]
-  }
-  mcp_ready: boolean
-  mcp: {
-    [name: string]: McpServer["status"]
-  }
-  mcp_resource: {
-    [key: string]: McpResource
-  }
-  lsp_ready: boolean
-  lsp: LspStatus[]
-  vcs: VcsInfo | undefined
   limit: number
   message: {
     [sessionID: string]: Message[]
@@ -83,12 +59,6 @@ export type State = {
   part_text_accum_delta: {
     [partID: string]: string
   }
-}
-
-export type VcsCache = {
-  store: Store<{ value: VcsInfo | undefined }>
-  setStore: SetStoreFunction<{ value: VcsInfo | undefined }>
-  ready: Accessor<boolean>
 }
 
 export type MetaCache = {
@@ -105,7 +75,6 @@ export type IconCache = {
 
 export type ChildOptions = {
   bootstrap?: boolean
-  mcp?: boolean
 }
 
 export type DirState = {

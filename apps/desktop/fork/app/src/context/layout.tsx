@@ -30,7 +30,6 @@ const AVATAR_COLOR_KEYS = ["pink", "mint", "orange", "purple", "cyan", "lime"] a
 const DEFAULT_SIDEBAR_WIDTH = 344
 const DEFAULT_FILE_TREE_WIDTH = 200
 const DEFAULT_SESSION_WIDTH = 600
-const DEFAULT_TERMINAL_HEIGHT = 280
 const DEFAULT_REVIEW_PANEL_OPENED = false
 export type AvatarColorKey = (typeof AVATAR_COLOR_KEYS)[number]
 
@@ -72,7 +71,6 @@ type SessionView = {
   reviewFile?: string
   pendingMessage?: string
   pendingMessageAt?: number
-  todoCollapsed?: boolean
 }
 
 type TabHandoff = {
@@ -267,7 +265,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       }
     }
 
-    const target = Persist.serverGlobal(serverSdk().scope, "layout", ["layout.v6"])
+    const target = Persist.serverGlobal(serverSdk().scope, "layout")
     const [store, setStore, _, ready] = persisted(
       { ...target, migrate },
       createStore({
@@ -276,10 +274,6 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           width: DEFAULT_SIDEBAR_WIDTH,
           workspaces: {} as Record<string, boolean>,
           workspacesDefault: false,
-        },
-        terminal: {
-          height: DEFAULT_TERMINAL_HEIGHT,
-          opened: false,
         },
         review: {
           diffStyle: "split" as ReviewDiffStyle,
@@ -319,11 +313,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       used: new Map<string, number>(),
     }
 
-    const SESSION_STATE_KEYS = [
-      { key: "prompt", legacy: "prompt", version: "v2" },
-      { key: "terminal", legacy: "terminal", version: "v1" },
-      { key: "file-view", legacy: "file", version: "v1" },
-    ] as const
+    const SESSION_STATE_KEYS = ["prompt", "file-view"] as const
 
     const dropSessionState = (keys: string[]) => {
       for (const key of keys) {
@@ -333,15 +323,11 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         const session = parts[1]
         if (!dir) continue
 
-        for (const entry of SESSION_STATE_KEYS) {
+        for (const key of SESSION_STATE_KEYS) {
           const target = session
-            ? Persist.serverSession(scope, dir, session, entry.key)
-            : Persist.serverWorkspace(scope, dir, entry.key)
+            ? Persist.serverSession(scope, dir, session, key)
+            : Persist.serverWorkspace(scope, dir, key)
           void removePersisted(target, platform)
-
-          if (scope !== ServerScope.local) continue
-          const legacyKey = `${dir}/${entry.legacy}${session ? "/" + session : ""}.${entry.version}`
-          void removePersisted({ key: legacyKey }, platform)
         }
       }
     }
@@ -573,7 +559,6 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         const projectID = project.id
         void (async () => {
           const sdk = serverSdk()
-          if ((await sdk.protocol) !== "v1") return
           return sdk.client.project
             .update({ projectID, directory: worktree, icon: { color } })
             .then((response) => response.data)
@@ -683,12 +668,6 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         toggleWorkspaces(directory: string) {
           const current = store.sidebar.workspaces[directory] ?? store.sidebar.workspacesDefault ?? false
           setStore("sidebar", "workspaces", directory, !current)
-        },
-      },
-      terminal: {
-        height: createMemo(() => store.terminal.height),
-        resize(height: number) {
-          setStore("terminal", "height", height)
         },
       },
       review: {
@@ -817,21 +796,8 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           const file = s().reviewFile
           if (typeof file === "string") return file
         })
-        const terminalOpened = createMemo(() => store.terminal?.opened ?? false)
         const reviewPanelOpened = createMemo(() => store.review?.panelOpened ?? DEFAULT_REVIEW_PANEL_OPENED)
         const reviewPanelSource = createMemo(() => (reviewPanelOpened() ? ephemeral.reviewPanelSource : "other"))
-
-        function setTerminalOpened(next: boolean) {
-          const current = store.terminal
-          if (!current) {
-            setStore("terminal", { height: DEFAULT_TERMINAL_HEIGHT, opened: next })
-            return
-          }
-
-          const value = current.opened ?? false
-          if (value === next) return
-          setStore("terminal", "opened", next)
-        }
 
         function setReviewPanelOpened(next: boolean, source: ReviewPanelSource) {
           const nextSource = next ? source : "other"
@@ -861,30 +827,6 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           },
           setScroll(tab: string, pos: SessionScroll) {
             scroll.setScroll(key(), tab, pos)
-          },
-          todoCollapsed: {
-            get: () => s().todoCollapsed ?? false,
-            set(collapsed: boolean) {
-              const session = key()
-              const current = store.sessionView[session]
-              if (!current) {
-                setStore("sessionView", session, { scroll: {}, todoCollapsed: collapsed })
-              } else {
-                setStore("sessionView", session, "todoCollapsed", collapsed)
-              }
-            },
-          },
-          terminal: {
-            opened: terminalOpened,
-            open() {
-              setTerminalOpened(true)
-            },
-            close() {
-              setTerminalOpened(false)
-            },
-            toggle() {
-              setTerminalOpened(!terminalOpened())
-            },
           },
           reviewPanel: {
             opened: reviewPanelOpened,

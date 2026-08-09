@@ -16,14 +16,12 @@ import { ServerConnection } from "@/context/server"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { displayName, getProjectAvatarSource } from "@/pages/layout/helpers"
-import { ServerRowMenuView, serverMenuLabels } from "@/components/server/server-row-menu"
 import { ServerHealthIndicator } from "@/components/server/server-row"
 import { type ServerHealth } from "@/utils/server-health"
 import { fileManagerApp } from "@/utils/file-manager"
 
 const HOME_PROJECT_NAV_LABEL = "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
 
-const serverContextMenuID = (server: ServerConnection.Any) => `server:${ServerConnection.key(server)}`
 const projectContextMenuID = (server: ServerConnection.Any, directory: string) =>
   `project:${ServerConnection.key(server)}:${directory}`
 
@@ -37,17 +35,12 @@ export type HomeProjectsViewProps = {
   serverHealth: (server: ServerConnection.Any) => ServerHealth | undefined
   projectsForServer: (server: ServerConnection.Any) => LocalProject[]
   collapsed: (server: ServerConnection.Any) => boolean
-  canDefaultServer: Accessor<boolean>
-  defaultServerKey: Accessor<ServerConnection.Key | null | undefined>
   canRevealProject: (server: ServerConnection.Any) => boolean
   unseenCount: (server: ServerConnection.Any, project: LocalProject) => number
   onWheel: (event: WheelEvent) => void
   onChooseProject: (server: ServerConnection.Any) => void
   onFocusServer: (server: ServerConnection.Any) => void
   onToggleCollapsed: (server: ServerConnection.Any) => void
-  onEditServer: (server: ServerConnection.Http) => void
-  onSetDefaultServer: (server: ServerConnection.Any | undefined) => void
-  onRemoveServer: (server: ServerConnection.Any) => void
   onMoveProject: (server: ServerConnection.Any, worktree: string, index: number) => void
   onSelectProject: (server: ServerConnection.Any, directory: string) => void
   onAddProjects: (server: ServerConnection.Any, directories: string[]) => void
@@ -185,15 +178,8 @@ export function HomeUtilityNav(props: {
 function HomeServerRow(props: {
   language: HomeProjectsViewProps["language"]
   projectsForServer: HomeProjectsViewProps["projectsForServer"]
-  contextMenuOpen: HomeProjectsContextMenuProps["contextMenuOpen"]
-  canDefaultServer: HomeProjectsViewProps["canDefaultServer"]
-  defaultServerKey: HomeProjectsViewProps["defaultServerKey"]
   onFocusServer: HomeProjectsViewProps["onFocusServer"]
   onToggleCollapsed: HomeProjectsViewProps["onToggleCollapsed"]
-  onEditServer: HomeProjectsViewProps["onEditServer"]
-  onSetDefaultServer: HomeProjectsViewProps["onSetDefaultServer"]
-  onRemoveServer: HomeProjectsViewProps["onRemoveServer"]
-  onSetContextMenuOpen: HomeProjectsContextMenuProps["onSetContextMenuOpen"]
   onChooseProject: HomeProjectsViewProps["onChooseProject"]
   server: ServerConnection.Any
   selected: boolean
@@ -202,11 +188,6 @@ function HomeServerRow(props: {
 }) {
   const healthy = () => !!props.health?.healthy
   const canToggle = () => healthy() && props.projectsForServer(props.server).length > 0
-  const contextMenuID = () => serverContextMenuID(props.server)
-  onCleanup(() => {
-    const id = contextMenuID()
-    if (props.contextMenuOpen(id)) props.onSetContextMenuOpen(id, false)
-  })
   return (
     <div class="group/server relative flex h-7 min-w-0 items-center rounded-[6px]">
       <HomeProjectNavButton
@@ -265,25 +246,7 @@ function HomeServerRow(props: {
           </Show>
         </span>
       </HomeProjectNavButton>
-      <div
-        class={`
-          hover-reveal absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1
-          group-hover/server:opacity-100 focus-within:opacity-100 data-[menu=true]:opacity-100
-        `}
-        data-menu={props.contextMenuOpen(contextMenuID())}
-      >
-        <ServerRowMenuView
-          server={props.server}
-          labels={serverMenuLabels(props.language)}
-          canDefault={props.canDefaultServer()}
-          isDefault={props.defaultServerKey() === ServerConnection.key(props.server)}
-          onEdit={props.onEditServer}
-          onSetDefault={() => props.onSetDefaultServer(props.server)}
-          onRemoveDefault={() => props.onSetDefaultServer(undefined)}
-          onRemove={() => props.onRemoveServer(props.server)}
-          open={props.contextMenuOpen(contextMenuID())}
-          onOpenChange={(open) => props.onSetContextMenuOpen(contextMenuID(), open)}
-        />
+      <div class="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1">
         <TooltipV2 class="flex shrink-0 items-center" placement="bottom" value={props.language.t("home.project.add")}>
           <IconButtonV2
             data-action="home-add-project"

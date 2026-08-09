@@ -29,6 +29,7 @@ import { createHash } from "node:crypto"
 import * as Logging from "../../diagnostics/diagnostic-file-logging"
 import { serve as serveServer } from "../../transport/host/server-host-transport"
 import { version } from "../../platform/application-version"
+import * as ServerEndpoint from "./server-endpoint"
 
 export { spawn } from "./server-process-spawn"
 
@@ -66,22 +67,25 @@ const writeServerJson = (endpoint: {
   readonly port: number
   readonly canonicalDataRoot: string
   readonly tokenPath: string
-}) => {
-  const encoded = `${JSON.stringify({
-    port: endpoint.port,
-    pid: process.pid,
-    tokenPath: endpoint.tokenPath,
-    version,
-    protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
-  })}\n`
-  return Effect.gen(function* () {
+}) =>
+  Effect.gen(function* () {
+    const publication = {
+      port: endpoint.port,
+      pid: process.pid,
+      tokenPath: endpoint.tokenPath,
+      version,
+      protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
+    } satisfies ServerEndpoint.ServerPublication
+    const value = yield* Schema.encodeEffect(ServerEndpoint.ServerPublication)(publication).pipe(
+      Effect.mapError((cause) => startupError("startup-failed", `Could not encode server.json: ${String(cause)}`)),
+    )
+    const encoded = `${encode(value)}\n`
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     yield* fileSystem
       .writeFileString(path.join(endpoint.canonicalDataRoot, "server.json"), encoded, { mode: 0o600 })
       .pipe(Effect.mapError((cause) => startupError("startup-failed", `Could not write server.json: ${String(cause)}`)))
   })
-}
 
 type Owner = (
   interactive: (

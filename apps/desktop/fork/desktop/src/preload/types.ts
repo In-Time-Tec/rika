@@ -1,28 +1,13 @@
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
-import type { WslServersPlatform } from "@opencode-ai/app/wsl/types"
 import type { UpdaterState } from "@opencode-ai/app/updater"
 import type { DesktopNativeBundle } from "@opencode-ai/app/i18n/desktop-native"
-export type {
-  WslDistroProbe,
-  WslInstalledDistro,
-  WslJob,
-  WslOnlineDistro,
-  WslOpencodeCheck,
-  WslRuntimeCheck,
-  WslServerConfig,
-  WslServerItem,
-  WslServerRuntime,
-  WslServersEvent,
-  WslServersState,
-} from "@opencode-ai/app/wsl/types"
 
-export type ServerReadyData = {
-  url: string
-  username: string | null
-  password: string | null
+export type RikaReadyData = {
+  readonly url: string
+  readonly token: string
+  readonly identity: string
 }
 
-export type WslServersAPI = WslServersPlatform
 export type UpdaterAPI = {
   subscribe: (cb: (state: UpdaterState) => void) => Promise<() => void>
   check: () => Promise<UpdaterState>
@@ -43,14 +28,11 @@ export type FatalRendererError = {
 }
 
 export type ElectronAPI = {
-  killSidecar: () => Promise<void>
+  stopRikaServer: () => Promise<void>
   installCli: () => Promise<string>
-  awaitInitialization: () => Promise<ServerReadyData>
-  wslServers: WslServersAPI
+  awaitInitialization: () => Promise<RikaReadyData>
   updater: UpdaterAPI
   consumeInitialDeepLinks: () => Promise<string[]>
-  getDefaultServerUrl: () => Promise<string | null>
-  setDefaultServerUrl: (url: string | null) => Promise<void>
   isFirstLaunchOnboardingPending: () => Promise<boolean>
   finishFirstLaunchOnboarding: (createDefaultProject: boolean) => Promise<string | null>
   isOldLayoutEligible: () => Promise<boolean>

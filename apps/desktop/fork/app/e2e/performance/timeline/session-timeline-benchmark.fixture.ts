@@ -127,7 +127,7 @@ export async function setupTimelineBenchmark(
   await page.addInitScript(
     (input) => {
       localStorage.setItem(
-        "settings.v3",
+        "settings",
         JSON.stringify({
           general: {
             newLayoutDesigns: input.newLayoutDesigns,

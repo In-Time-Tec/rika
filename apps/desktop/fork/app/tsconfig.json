@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
-    "composite": true,
+    "composite": false,
     "target": "ESNext",
     "module": "ESNext",
     "skipLibCheck": true,
@@ -13,9 +13,8 @@
     "allowJs": true,
     "resolveJsonModule": true,
     "strict": true,
-    "noEmit": false,
-    "emitDeclarationOnly": true,
-    "outDir": "node_modules/.ts-dist",
+    "noEmit": true,
+    "emitDeclarationOnly": false,
     "isolatedModules": true,
     "paths": {
       "@/*": [
@@ -97,10 +96,10 @@
         "../../../../packages/client/src/protocol/server-protocol-handshake.ts"
       ],
       "effect": [
-        "../../../../node_modules/effect"
+        "../../../../node_modules/effect/dist/index"
       ],
       "effect/*": [
-        "../../../../node_modules/effect/*"
+        "../../../../node_modules/effect/dist/*"
       ]
     }
   },

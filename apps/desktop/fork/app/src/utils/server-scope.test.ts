@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test"
 import { ScopedKey, ServerScope, SessionRouteKey, SessionStateKey, migrateLegacySessionStateKeys } from "./server-scope"
 
 describe("ServerScope", () => {
-  test("uses a stable local scope for the canonical sidecar", () => {
-    expect(String(ServerScope.fromServerKey("sidecar" as Parameters<typeof ServerScope.fromServerKey>[0]))).toBe(
+  test("uses a stable local scope for the canonical Rika", () => {
+    expect(String(ServerScope.fromServerKey("rika" as Parameters<typeof ServerScope.fromServerKey>[0]))).toBe(
       "local",
     )
   })
 
-  test("keeps configured loopback servers distinct from the canonical sidecar", () => {
+  test("keeps configured loopback servers distinct from the canonical Rika", () => {
     expect(
       String(ServerScope.fromServerKey("http://localhost:4096" as Parameters<typeof ServerScope.fromServerKey>[0])),
     ).toBe("http://localhost:4096")

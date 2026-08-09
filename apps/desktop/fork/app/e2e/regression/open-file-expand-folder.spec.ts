@@ -82,7 +82,7 @@ test("expands a folder whose path has a trailing Windows separator", async ({ pa
   await page.addInitScript(
     ({ directory, server, sessionID }) => {
       localStorage.setItem(
-        "settings.v3",
+        "settings",
         JSON.stringify({ general: { newLayoutDesigns: true, shouldDisplayTabsToast: false } }),
       )
       localStorage.setItem(

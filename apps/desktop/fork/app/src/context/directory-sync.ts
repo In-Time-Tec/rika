@@ -11,10 +11,7 @@ const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const sessionFields = new Set([
   "session_status",
   "session_working",
-  "session_diff",
-  "todo",
   "permission",
-  "question",
   "message",
   "session_message",
   "part",
@@ -27,7 +24,8 @@ export const createDirSyncContext = (
   serverSDK: ReturnType<typeof createServerSdkContext>,
 ) => {
   const client = serverSDK.createClient({ directory, throwOnError: true })
-  const current = createMemo(() => serverSync.child(directory, { mcp: true }))
+  const child = serverSync.child(directory)
+  const current = () => child
   const absolute = (path: string) => (current()[0].path.directory + "/" + path).replace("//", "/")
   const data = new Proxy({} as State, {
     get(_, property: keyof State) {
@@ -116,7 +114,6 @@ export const createDirSyncContext = (
         await serverSync.session.sync(sessionID, options)
         index(sessionID)
       },
-      todo: serverSync.session.todo,
       history: serverSync.session.history,
       evict(sessionID: string) {
         serverSync.session.evict(sessionID)
@@ -134,7 +131,6 @@ export const createDirSyncContext = (
       },
       more: createMemo(() => current()[0].session.length >= current()[0].limit),
       archive: async (sessionID: string) => {
-        if ((await serverSDK.protocol) !== "v1") return
         await serverSDK.client.session.update({ sessionID, directory, time: { archived: Date.now() } })
         current()[1](
           "session",
@@ -144,9 +140,6 @@ export const createDirSyncContext = (
           }),
         )
       },
-    },
-    mcp: {
-      toggle: (name: string) => serverSync.mcp.toggle(directory, name),
     },
     absolute,
     get directory() {

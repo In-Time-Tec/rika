@@ -1,4 +1,4 @@
-import { Console, Context, Effect, FileSystem, Function, Layer, Option, Path } from "effect"
+import { Context, Effect, FileSystem, Function, Layer, Option, Path } from "effect"
 import * as ConfigOperations from "../contract/configuration-operation"
 import * as ConfigurationService from "@rika/config/configuration-service"
 import type { Input, OperationUnavailable } from "../contract/product-operation"
@@ -30,7 +30,6 @@ const runConfigurationOperationImpl = (
       ),
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
-      Effect.provideService(Console.Console, factory.console),
       Effect.mapError((error) => unavailable(factory, input, String(error))),
     )
   }).pipe(Effect.scoped)

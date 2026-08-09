@@ -19,11 +19,6 @@ export function normalizeSessionInfo(input: SessionInfo | Session): Session {
     model: input.model,
     version: "",
     time: input.time,
-    revert: input.revert && {
-      messageID: input.revert.messageID,
-      partID: input.revert.partID,
-      snapshot: input.revert.snapshot,
-    },
   }
 }
 

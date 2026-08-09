@@ -1,7 +1,5 @@
 import { useDirectoryPicker } from "@/components/directory-picker"
-import { useServerManagementController } from "@/components/dialog-select-server"
 import { useSettingsCommand } from "@/components/settings-dialog"
-import { DialogServerV2 } from "@/components/settings-v2/dialog-server-v2"
 import { type LocalProject } from "@/context/layout"
 import { useLanguage } from "@/context/language"
 import { useNotification } from "@/context/notification"
@@ -22,9 +20,8 @@ export function createHomeProjectsController(home: HomeController) {
   const language = useLanguage()
   const notification = useNotification()
   const openSettings = useSettingsCommand()
-  const serverManagement = useServerManagementController({ navigateOnAdd: false })
   const [_state, setState, _, ready] = persisted(
-    Persist.global("home.servers", ["home.servers.v1"]),
+    Persist.global("home.servers"),
     createStore({ collapsed: {} as Record<string, boolean> }),
   )
   const [state] = createResource(
@@ -56,12 +53,6 @@ export function createHomeProjectsController(home: HomeController) {
         const key = ServerConnection.key(conn)
         setState("collapsed", key, !state().collapsed[key])
       },
-      canDefault: serverManagement.canDefault,
-      defaultKey: serverManagement.defaultKey,
-      setDefault: (conn: ServerConnection.Any | undefined) =>
-        serverManagement.setDefault(conn ? ServerConnection.key(conn) : null),
-      remove: (conn: ServerConnection.Any) => serverManagement.handleRemove(ServerConnection.key(conn)),
-      edit: (conn: ServerConnection.Http) => dialog.show(() => <DialogServerV2 mode="edit" server={conn} />),
       focus: home.selection.focusServer,
     },
     project: {
@@ -120,7 +111,7 @@ export function createHomeProjectsController(home: HomeController) {
     },
     utility: {
       settings: openSettings,
-      help: () => platform.openExternal("https://opencode.ai/desktop-feedback"),
+      help: () => platform.openExternal("https://rika.dev/desktop-feedback"),
     },
   }
 }

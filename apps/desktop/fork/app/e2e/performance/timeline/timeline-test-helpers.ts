@@ -6,7 +6,7 @@ import { fixture, pageMessages } from "./session-timeline-stress.fixture"
 export async function installTimelineSettings(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem(
-      "settings.v3",
+      "settings",
       JSON.stringify({
         general: {
           newLayoutDesigns: true,

@@ -11,6 +11,7 @@ import { useTabs, type Tab } from "./tabs"
 import {
   createPromptReady,
   createPromptSession,
+  createPromptState,
   type ContextItem,
   type FileContextItem,
   type Prompt,
@@ -106,7 +107,9 @@ export const { use: usePrompt, provider: PromptProvider } = createSimpleContext(
       search.draftId ? { draftID: search.draftId } : { dir: base64Encode(sdk().directory), id: params.id }
     const load = (scope: PromptScope) => {
       const current = settings.general.newLayoutDesigns() ? selectPromptTab(tabs.store, scope, serverKey()) : undefined
-      if (current) return createTabPromptState(tabs, current, serverSDK().scope, scope)
+      if (current) {
+        return createTabPromptState(tabs, current, serverSDK().scope, scope) ?? createPromptSession(serverSDK().scope, scope)
+      }
 
       const key = scopeKey(scope)
       const existing = cache.get(key)
@@ -129,8 +132,9 @@ export const { use: usePrompt, provider: PromptProvider } = createSimpleContext(
       return entry.value
     }
 
-    const session = createMemo(() => load(scope()))
-    const pick = (scope?: PromptScope) => (scope ? load(scope) : session())
+    const fallback = createPromptState()
+    const session = createMemo(() => load(scope()) ?? fallback)
+    const pick = (scope?: PromptScope) => (scope ? load(scope) ?? fallback : session())
     const ready = createPromptReady(session)
 
     const withSuspense = <T,>(cb: () => T): (() => T) =>
@@ -146,7 +150,7 @@ export const { use: usePrompt, provider: PromptProvider } = createSimpleContext(
 
     return {
       ready,
-      capture: (scope?: PromptScope) => pick(scope).capture(),
+      capture: (scope?: PromptScope) => (pick(scope) ?? fallback).capture(),
       current: withSuspense(() => session().current()),
       cursor: withSuspense(() => session().cursor()),
       dirty: withSuspense(() => session().dirty()),

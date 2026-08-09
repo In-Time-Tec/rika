@@ -21,9 +21,7 @@ export interface MockServerConfig {
   onMessage?: (input: { sessionID: string; messageID: string }) => void
   events?: () => unknown[]
   eventRetry?: number
-  todos?: (sessionID: string) => unknown[]
   permissions?: unknown[] | (() => unknown[])
-  questions?: unknown[] | (() => unknown[])
   fileList?: (path: string) => unknown | Promise<unknown>
   fileContent?: (path: string) => unknown | Promise<unknown>
   findFiles?: (input: { query: string; dirs?: string; limit?: number }) => unknown
@@ -91,8 +89,6 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
     }
     if (path === "/permission")
       return json(route, typeof config.permissions === "function" ? config.permissions() : (config.permissions ?? []))
-    if (path === "/question")
-      return json(route, typeof config.questions === "function" ? config.questions() : (config.questions ?? []))
     if (path === "/session/status")
       return json(
         route,
@@ -168,11 +164,6 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
           currentPermission,
         ),
       })
-    if (path === "/api/question/request")
-      return json(route, {
-        location: location(config),
-        data: typeof config.questions === "function" ? config.questions() : (config.questions ?? []),
-      })
     if (path === "/api/vcs")
       return json(route, { location: location(config), data: { branch: "main", defaultBranch: "main" } })
     if (path === "/api/vcs/status") return json(route, { location: location(config), data: [] })
@@ -220,20 +211,14 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
     if (/^\/api\/session\/[^/]+\/shell$/.test(path) && route.request().method() === "POST") {
       return route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } })
     }
-    if (/^\/api\/session\/[^/]+\/question\/[^/]+\/(reply|reject)$/.test(path) && route.request().method() === "POST") {
-      return route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } })
-    }
     if (/^\/api\/session\/[^/]+\/permission\/[^/]+\/reply$/.test(path) && route.request().method() === "POST") {
       return route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } })
-    }
-    if (/^\/question\/[^/]+\/(reply|reject)$/.test(path) && route.request().method() === "POST") {
-      return json(route, true)
     }
     if (/^\/session\/[^/]+\/permissions\/[^/]+$/.test(path) && route.request().method() === "POST") {
       return json(route, true)
     }
     if (
-      /^\/api\/session\/[^/]+\/(archive|rename|interrupt|revert\/clear|revert\/commit)$/.test(path) &&
+      /^\/api\/session\/[^/]+\/(archive|rename|interrupt)$/.test(path) &&
       route.request().method() === "POST"
     ) {
       return route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } })
@@ -270,8 +255,6 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
       return json(route, message)
     }
 
-    const todoMatch = path.match(/^\/session\/([^/]+)\/todo$/)
-    if (todoMatch) return json(route, config.todos?.(todoMatch[1]!) ?? [])
     if (/^\/session\/[^/]+\/(children|diff)$/.test(path)) return json(route, [])
 
     const currentMessagesMatch = path.match(/^\/api\/session\/([^/]+)\/message$/)
@@ -360,7 +343,6 @@ export function currentSession(session: { id: string } & Record<string, unknown>
       ...(typeof session.workspaceID === "string" ? { workspaceID: session.workspaceID } : {}),
     },
     subpath: session.path,
-    revert: session.revert,
   }
 }
 

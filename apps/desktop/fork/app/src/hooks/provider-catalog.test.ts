@@ -2,22 +2,34 @@ import { expect, test } from "bun:test"
 import type { NormalizedProviderListResponse } from "@opencode-ai/session-ui/context"
 import { selectProviderCatalog } from "./provider-catalog"
 
-const catalog = (id: string): NormalizedProviderListResponse => ({
-  all: new Map([[id, { id, name: id, source: "api", env: [], options: {}, models: {} }]]),
-  connected: [id],
-  default: { [id]: `${id}-model` },
+const provider = (id: string) => ({ id, name: id, source: "api" as const, env: [], options: {}, models: {} })
+
+const catalog = (...ids: string[]): NormalizedProviderListResponse => ({
+  all: new Map(ids.map((id) => [id, provider(id)])),
+  connected: ids,
+  default: Object.fromEntries(ids.map((id) => [id, `${id}-model`])),
 })
 
-test("selects the ready catalog for an explicit directory", () => {
-  const directory = catalog("directory")
+test("exposes only OpenRouter from a ready directory catalog", () => {
+  const selected = selectProviderCatalog({
+    explicit: true,
+    directory: "/repo",
+    catalog: { ready: true, providers: catalog("openai", "openrouter", "custom") },
+  })
 
+  expect([...selected.all.keys()]).toEqual(["openrouter"])
+  expect(selected.connected).toEqual(["openrouter"])
+  expect(selected.default).toEqual({ openrouter: "openrouter-model" })
+})
+
+test("does not expose an unsupported provider when OpenRouter is absent", () => {
   expect(
     selectProviderCatalog({
       explicit: true,
       directory: "/repo",
-      catalog: { ready: true, providers: directory },
+      catalog: { ready: true, providers: catalog("openai", "custom") },
     }),
-  ).toBe(directory)
+  ).toEqual({ all: new Map(), connected: [], default: {} })
 })
 
 test("returns an empty catalog while an explicit directory is unresolved", () => {
@@ -26,34 +38,12 @@ test("returns an empty catalog while an explicit directory is unresolved", () =>
     selectProviderCatalog({
       explicit: true,
       directory: "/repo",
-      catalog: { ready: false, providers: catalog("directory") },
+      catalog: { ready: false, providers: catalog("openrouter") },
     }),
   ).toEqual({ all: new Map(), connected: [], default: {} })
 })
 
-test("uses the route catalog when it is ready", () => {
-  const directory = catalog("directory")
-
-  expect(
-    selectProviderCatalog({
-      explicit: false,
-      directory: "/repo",
-      catalog: { ready: true, providers: directory },
-      global: catalog("global"),
-    }),
-  ).toBe(directory)
-})
-
-test("falls back to the global catalog for route consumers", () => {
-  const global = catalog("global")
-
-  expect(selectProviderCatalog({ explicit: false, global })).toBe(global)
-  expect(
-    selectProviderCatalog({
-      explicit: false,
-      directory: "/repo",
-      catalog: { ready: false, providers: catalog("directory") },
-      global,
-    }),
-  ).toBe(global)
+test("sanitizes the global fallback to OpenRouter", () => {
+  const selected = selectProviderCatalog({ explicit: false, global: catalog("openai", "openrouter") })
+  expect([...selected.all.keys()]).toEqual(["openrouter"])
 })

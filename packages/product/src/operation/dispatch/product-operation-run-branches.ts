@@ -19,7 +19,6 @@ import type { FileSystem, Path } from "effect"
 
 export interface ProductOperationRunFactory extends ProductOperationRuntimeState {
   readonly options: ProductLayerOptions<Error, Error, Error, Error, Error>
-  readonly console: Console.Console
   readonly fileSystem: FileSystem.FileSystem | undefined
   readonly path: Path.Path | undefined
   readonly backend: import("@rika/product/execution-gateway").Interface
@@ -159,7 +158,6 @@ const runExtensionOperationImpl = (
     )
     yield* ExtensionOperations.run(input).pipe(
       Effect.provide(context),
-      Effect.provideService(Console.Console, factory.console),
       Effect.mapError((error) => unavailable(factory, input, error instanceof Error ? error.message : String(error))),
     )
   }).pipe(Effect.scoped)
@@ -188,7 +186,7 @@ const runSystemOperationImpl = (
     const definition = ToolCatalog.get(input.name)
     return definition === undefined
       ? unavailable(factory, input, `Tool ${input.name} does not exist`)
-      : Console.log(factory.encodeJson(definition)).pipe(Effect.provideService(Console.Console, factory.console))
+      : Console.log(factory.encodeJson(definition))
   }
   if (input._tag === "Auth" && factory.options.authOperations !== undefined)
     return Effect.scoped(typedRunAuth(input, factory.options.authOperations, factory.options.defaultWorkspace))

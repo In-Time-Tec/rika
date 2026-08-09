@@ -184,13 +184,6 @@ export const DESKTOP_MENU: DesktopMenu[] = [
     labelKey: "desktop.menu.view",
     items: [
       { type: "item", labelKey: "desktop.menu.toggleSidebar", command: "sidebar.toggle" },
-      {
-        type: "item",
-        labelKey: "desktop.menu.toggleTerminal",
-        command: "terminal.toggle",
-        accelerator: { macos: "Ctrl+`" },
-      },
-      { type: "item", labelKey: "desktop.menu.toggleFileTree", command: "fileTree.toggle" },
       { type: "separator" },
       { type: "item", labelKey: "desktop.menu.reload", action: "view.reload", role: "reload" },
       {
@@ -279,19 +272,19 @@ export const DESKTOP_MENU: DesktopMenu[] = [
     id: "help",
     labelKey: "desktop.menu.help",
     items: [
-      { type: "item", labelKey: "desktop.menu.documentation", href: "https://opencode.ai/docs" },
-      { type: "item", labelKey: "desktop.menu.supportForum", href: "https://discord.com/invite/opencode" },
+      { type: "item", labelKey: "desktop.menu.documentation", href: "https://rika.dev/docs" },
+      { type: "item", labelKey: "desktop.menu.supportForum", href: "https://github.com/In-Time-Tec/rika/discussions" },
       { type: "item", labelKey: "desktop.menu.exportLogs", command: "logs.export" },
       { type: "separator" },
       {
         type: "item",
         labelKey: "desktop.menu.shareFeedback",
-        href: "https://github.com/anomalyco/opencode/issues/new?template=feature_request.yml",
+        href: "https://github.com/In-Time-Tec/rika/issues/new",
       },
       {
         type: "item",
         labelKey: "desktop.menu.reportBug",
-        href: "https://github.com/anomalyco/opencode/issues/new?template=bug_report.yml",
+        href: "https://github.com/In-Time-Tec/rika/issues/new",
       },
     ],
   },

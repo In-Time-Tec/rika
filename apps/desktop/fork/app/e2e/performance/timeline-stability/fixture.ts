@@ -127,7 +127,7 @@ export async function setupTimeline(
   })
   await page.addInitScript((settings) => {
     localStorage.setItem(
-      "settings.v3",
+      "settings",
       JSON.stringify({
         general: {
           editToolPartsExpanded: false,
@@ -139,7 +139,7 @@ export async function setupTimeline(
       }),
     )
     if (settings.newLayoutDesigns === false) {
-      localStorage.setItem("app-version.v1", JSON.stringify({ version: "1.17.20" }))
+      localStorage.setItem("app-version", JSON.stringify({ version: "1.17.20" }))
     }
   }, input.settings ?? {})
   if (input.locale) {

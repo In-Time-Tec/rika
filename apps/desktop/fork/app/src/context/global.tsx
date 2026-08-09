@@ -1,23 +1,24 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
-import { createEffect, createMemo, createRoot } from "solid-js"
+import { createEffect, createMemo, createRoot, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createServerProjects, RECENTLY_CLOSED_DISPLAY_LIMIT, ServerConnection, useServer } from "./server"
 import { pathKey } from "@/utils/path-key"
-import { useServerHealth } from "@/utils/server-health"
 import { createServerSdkContext } from "./server-sdk"
 import { createServerSyncContext } from "./server-sync"
 import { getOwner } from "solid-js/web"
 import { QueryClient } from "@tanstack/solid-query"
 import type { ServerScope } from "@/utils/server-scope"
+import { Effect, Exit, Scope } from "effect"
+import { connectRika } from "@/rika/connection"
+import type { RikaConnectionOwner } from "./server-sdk"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
   name: "Global",
   init: () => {
     const server = useServer()
-    const serverHealth = useServerHealth(
-      () => server.list,
-      () => true,
-    )
+    const [serverHealth, setServerHealth] = createStore<
+      Record<ServerConnection.Key, { healthy: boolean; version?: string } | undefined>
+    >({})
     const [store, setStore] = createStore({
       settings: {
         serverKey: undefined as ServerConnection.Key | undefined,
@@ -53,6 +54,32 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
       serverCtxs.set(key, root)
       return root.serverCtx
     }
+
+    createEffect(() => {
+      const list = server.list
+      let disposed = false
+      const refresh = () => {
+        for (const conn of list) {
+          const key = ServerConnection.key(conn)
+          void ensureServerCtx(conn)
+            .rika.ready.then((value) => Effect.runPromise(value.connection.ping))
+            .then(
+              () => {
+                if (!disposed) setServerHealth(key, { healthy: true, version: "rika" })
+              },
+              () => {
+                if (!disposed) setServerHealth(key, { healthy: false })
+              },
+            )
+        }
+      }
+      refresh()
+      const timer = setInterval(refresh, 10_000)
+      onCleanup(() => {
+        disposed = true
+        clearInterval(timer)
+      })
+    })
 
     createMemo(() => {
       for (const conn of server.list) {
@@ -107,7 +134,8 @@ function createServerCtx(
       },
     },
   })
-  const sdk = createServerSdkContext(conn, scope)
+  const rika = createRikaConnectionOwner(conn)
+  const sdk = createServerSdkContext(conn, scope, rika)
   const sync = createServerSyncContext(sdk)
 
   function enrich(project: { worktree: string; expanded: boolean }) {
@@ -138,10 +166,11 @@ function createServerCtx(
   })
 
   const isLocal =
-    (conn?.type === "sidecar" && conn.variant === "base") || (conn?.type === "http" && isLocalHost(conn.http.url))
+    (conn?.type === "rika") || (conn?.type === "http" && isLocalHost(conn.http.url))
 
   return {
     queryClient,
+    rika,
     sdk,
     sync,
     isLocal,
@@ -158,4 +187,20 @@ export type ServerCtx = ReturnType<typeof createServerCtx>
 function isLocalHost(url: string) {
   const host = url.replace(/^https?:\/\//, "").split(":")[0]
   if (host === "localhost" || host === "127.0.0.1") return "local"
+}
+
+function createRikaConnectionOwner(conn: ServerConnection.Any): RikaConnectionOwner {
+  const input = "rika" in conn ? conn.rika : undefined
+  const scope = Effect.runPromise(Scope.make())
+  const ready = scope.then((value) => {
+    if (!input) throw new Error("This desktop build supports only the native Rika server connection")
+    return Effect.runPromise(connectRika(input).pipe(Scope.provide(value)))
+  })
+  onCleanup(() => {
+    void Promise.allSettled([
+      ready.then((connection) => Effect.runPromise(connection.close)),
+      scope.then((value) => Effect.runPromise(Scope.close(value, Exit.void))),
+    ])
+  })
+  return { ready }
 }

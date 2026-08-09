@@ -1,7 +1,6 @@
 import { createRoot, createSignal, getOwner, onCleanup, runWithOwner, type Owner } from "solid-js"
 import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
 import { Persist, persisted } from "@/utils/persist"
-import type { VcsInfo } from "@opencode-ai/sdk/v2/client"
 import {
   DIR_IDLE_TTL_MS,
   MAX_DIR_STORES,
@@ -11,7 +10,6 @@ import {
   type MetaCache,
   type ProjectMeta,
   type State,
-  type VcsCache,
 } from "./types"
 import { canDisposeDirectory, pickDirectoriesToEvict } from "./eviction"
 import { useQuery } from "@tanstack/solid-query"
@@ -27,7 +25,6 @@ export function createChildStoreManager(input: {
   isBooting: (directory: string) => boolean
   isLoadingSessions: (directory: string) => boolean
   onBootstrap: (directory: string) => void
-  onMcp: (directory: string, setStore: SetStoreFunction<State>) => void
   onDispose: (directory: string) => void
   translate: (key: string, vars?: Record<string, string | number>) => string
   queryOptions: QueryOptionsApi
@@ -36,15 +33,12 @@ export function createChildStoreManager(input: {
   }
 }) {
   const children: Record<string, [Store<State>, SetStoreFunction<State>]> = {}
-  const vcsCache = new Map<string, VcsCache>()
   const metaCache = new Map<string, MetaCache>()
   const iconCache = new Map<string, IconCache>()
   const lifecycle = new Map<string, DirState>()
   const pins = new Map<string, number>()
   const ownerPins = new WeakMap<object, Set<string>>()
   const disposers = new Map<string, () => void>()
-  const mcpDirectories = new Set<string>()
-  const mcpToggles = new Map<string, (enabled: boolean) => void>()
   const activeDirectories = new Set<string>()
   const activationToggles = new Map<string, (enabled: boolean) => void>()
 
@@ -114,12 +108,9 @@ export function createChildStoreManager(input: {
       return false
     }
 
-    vcsCache.delete(key)
     metaCache.delete(key)
     iconCache.delete(key)
     lifecycle.delete(key)
-    mcpDirectories.delete(key)
-    mcpToggles.delete(key)
     activeDirectories.delete(key)
     activationToggles.delete(key)
     const dispose = disposers.get(key)
@@ -153,19 +144,9 @@ export function createChildStoreManager(input: {
     const key = directoryKey(directory)
     if (!key) console.error("No directory provided")
     if (!children[key]) {
-      const vcs = runWithOwner(input.owner, () =>
-        input.persist(
-          Persist.serverWorkspace(input.scope, directory, "vcs", ["vcs.v1"]),
-          createStore({ value: undefined as VcsInfo | undefined }),
-        ),
-      )
-      if (!vcs) throw new Error(input.translate("error.childStore.persistedCacheCreateFailed"))
-      const vcsStore = vcs[0]
-      vcsCache.set(key, { store: vcsStore, setStore: vcs[1], ready: vcs[3] })
-
       const meta = runWithOwner(input.owner, () =>
         input.persist(
-          Persist.serverWorkspace(input.scope, directory, "project", ["project.v1"]),
+          Persist.serverWorkspace(input.scope, directory, "project"),
           createStore({ value: undefined as ProjectMeta | undefined }),
         ),
       )
@@ -174,7 +155,7 @@ export function createChildStoreManager(input: {
 
       const icon = runWithOwner(input.owner, () =>
         input.persist(
-          Persist.serverWorkspace(input.scope, directory, "icon", ["icon.v1"]),
+          Persist.serverWorkspace(input.scope, directory, "icon"),
           createStore({ value: undefined as string | undefined }),
         ),
       )
@@ -185,13 +166,9 @@ export function createChildStoreManager(input: {
         createRoot((dispose) => {
           const initialMeta = meta[0].value
           const initialIcon = icon[0].value
-          const [mcpEnabled, setMcpEnabled] = createSignal(false)
           const [instanceQueriesEnabled, setInstanceQueriesEnabled] = createSignal(false)
 
           const pathQuery = useQuery(() => ({ ...input.queryOptions.path(key), enabled: instanceQueriesEnabled() }))
-          const mcpQuery = useQuery(() => ({ ...input.queryOptions.mcp(key), enabled: mcpEnabled() }))
-          const mcpResourceQuery = useQuery(() => ({ ...input.queryOptions.mcpResources(key), enabled: mcpEnabled() }))
-          const lspQuery = useQuery(() => ({ ...input.queryOptions.lsp(key), enabled: instanceQueriesEnabled() }))
           const providerQuery = useQuery(() => ({
             ...input.queryOptions.providers(key),
             enabled: instanceQueriesEnabled(),
@@ -233,26 +210,7 @@ export function createChildStoreManager(input: {
               const type = this.session_status[id]?.type
               return (type ?? "idle") !== "idle"
             },
-            session_diff: {},
-            todo: {},
             permission: {},
-            question: {},
-            get mcp_ready() {
-              return !mcpQuery.isLoading
-            },
-            get mcp() {
-              return mcpQuery.isLoading ? {} : (mcpQuery.data ?? {})
-            },
-            get mcp_resource() {
-              return mcpResourceQuery.isLoading ? {} : (mcpResourceQuery.data ?? {})
-            },
-            get lsp_ready() {
-              return instanceQueriesEnabled() && !lspQuery.isLoading
-            },
-            get lsp() {
-              return lspQuery.isLoading ? [] : (lspQuery.data ?? [])
-            },
-            vcs: vcsStore.value,
             limit: 5,
             message: {},
             session_message: {},
@@ -261,7 +219,6 @@ export function createChildStoreManager(input: {
           })
           children[key] = child
           disposers.set(key, dispose)
-          mcpToggles.set(key, setMcpEnabled)
           activationToggles.set(key, setInstanceQueriesEnabled)
 
           const onPersistedInit = (init: Promise<string> | string | null, run: () => void) => {
@@ -271,12 +228,6 @@ export function createChildStoreManager(input: {
               run()
             })
           }
-
-          onPersistedInit(vcs[2], () => {
-            const cached = vcsStore.value
-            if (!cached?.branch) return
-            child[1]("vcs", (value) => value ?? cached)
-          })
 
           onPersistedInit(meta[2], () => {
             if (child[0].projectMeta !== initialMeta) return
@@ -301,7 +252,6 @@ export function createChildStoreManager(input: {
     const key = directoryKey(directory)
     const childStore = ensureChild(directory)
     pinForOwner(key)
-    if (options.mcp) enableMcp(directory, key, childStore)
     const shouldBootstrap = options.bootstrap ?? true
     if (shouldBootstrap) activate(key)
     if (shouldBootstrap && childStore[0].status === "loading") {
@@ -313,20 +263,12 @@ export function createChildStoreManager(input: {
   function peek(directory: string, options: ChildOptions = {}) {
     const key = directoryKey(directory)
     const childStore = ensureChild(directory)
-    if (options.mcp) enableMcp(directory, key, childStore)
     const shouldBootstrap = options.bootstrap ?? true
     if (shouldBootstrap) activate(key)
     if (shouldBootstrap && childStore[0].status === "loading") {
       input.onBootstrap(directory)
     }
     return childStore
-  }
-
-  function enableMcp(directory: string, key: DirectoryKey, childStore: [Store<State>, SetStoreFunction<State>]) {
-    if (mcpDirectories.has(key)) return
-    mcpDirectories.add(key)
-    mcpToggles.get(key)?.(true)
-    if (childStore[0].status !== "loading") input.onMcp(directory, childStore[1])
   }
 
   // Passive Home/project metadata reads must not initialize the directory.
@@ -337,12 +279,6 @@ export function createChildStoreManager(input: {
     if (activeDirectories.has(key)) return
     activeDirectories.add(key)
     activationToggles.get(key)?.(true)
-  }
-
-  function disableMcp(directory: string) {
-    const key = directoryKey(directory)
-    if (!mcpDirectories.delete(key)) return
-    mcpToggles.get(key)?.(false)
   }
 
   function projectMeta(directory: string, patch: ProjectMeta) {
@@ -384,12 +320,9 @@ export function createChildStoreManager(input: {
     pin,
     unpin,
     pinned,
-    mcp: (directory: string) => mcpDirectories.has(directoryKey(directory)),
     active: (directory: string) => activeDirectories.has(directoryKey(directory)),
-    disableMcp,
     disposeDirectory,
     runEviction,
-    vcsCache,
     metaCache,
     iconCache,
   }

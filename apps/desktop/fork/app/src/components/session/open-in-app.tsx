@@ -13,13 +13,8 @@ export const OPEN_APPS = [
   "textmate",
   "antigravity",
   "finder",
-  "terminal",
-  "iterm2",
-  "ghostty",
-  "warp",
   "xcode",
   "android-studio",
-  "powershell",
   "sublime-text",
 ] as const
 
@@ -42,10 +37,6 @@ export const MAC_OPEN_APPS = [
     icon: "antigravity",
     openWith: "Antigravity",
   },
-  { id: "terminal", label: "session.header.open.app.terminal", icon: "terminal", openWith: "Terminal" },
-  { id: "iterm2", label: "session.header.open.app.iterm2", icon: "iterm2", openWith: "iTerm" },
-  { id: "ghostty", label: "session.header.open.app.ghostty", icon: "ghostty", openWith: "Ghostty" },
-  { id: "warp", label: "session.header.open.app.warp", icon: "warp", openWith: "Warp" },
   { id: "xcode", label: "session.header.open.app.xcode", icon: "xcode", openWith: "Xcode" },
   {
     id: "android-studio",
@@ -65,12 +56,6 @@ export const WINDOWS_OPEN_APPS = [
   { id: "vscode", label: "session.header.open.app.vscode", icon: "vscode", openWith: "code" },
   { id: "cursor", label: "session.header.open.app.cursor", icon: "cursor", openWith: "cursor" },
   { id: "zed", label: "session.header.open.app.zed", icon: "zed", openWith: "zed" },
-  {
-    id: "powershell",
-    label: "session.header.open.app.powershell",
-    icon: "powershell",
-    openWith: "powershell",
-  },
   {
     id: "sublime-text",
     label: "session.header.open.app.sublimeText",
@@ -208,7 +193,7 @@ export function useOpenInApp(input: { directory: () => string }) {
         showToast({
           variant: "success",
           icon: "circle-check",
-          title: language.t("session.share.copy.copied"),
+          title: language.t("session.header.open.copyPath"),
           description: directory,
         })
       })

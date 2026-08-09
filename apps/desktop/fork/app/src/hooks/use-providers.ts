@@ -2,19 +2,10 @@ import { useServerSync } from "@/context/server-sync"
 import { decode64 } from "@/utils/base64"
 import { useParams } from "@solidjs/router"
 import { Iterable, pipe } from "effect"
-import { createEffect, createMemo, type Accessor } from "solid-js"
+import type { Accessor } from "solid-js"
 import { selectProviderCatalog } from "./provider-catalog"
 
-export const popularProviders = [
-  "opencode",
-  "opencode-go",
-  "anthropic",
-  "github-copilot",
-  "openai",
-  "google",
-  "openrouter",
-  "vercel",
-]
+export const popularProviders = ["openrouter"]
 const popularProviderSet = new Set(popularProviders)
 
 export function useProviders(directory: Accessor<string | undefined>) {
@@ -23,7 +14,9 @@ export function useProviders(directory: Accessor<string | undefined>) {
   const dir = () => (directory ? directory() : decode64(params.dir))
   const providers = () => {
     const value = dir()
-    const projectStore = value ? serverSync().child(value)[0] : undefined
+    const sync = serverSync()
+    if (!sync) return selectProviderCatalog({ explicit: true, directory: value })
+    const projectStore = value ? sync.child(value)[0] : undefined
     if (value)
       return selectProviderCatalog({
         explicit: true,
@@ -34,7 +27,7 @@ export function useProviders(directory: Accessor<string | undefined>) {
       explicit: false,
       directory: value,
       catalog: projectStore && { ready: projectStore.provider_ready, providers: projectStore.provider },
-      global: serverSync().data.provider,
+      global: sync.data.provider,
     })
   }
 
@@ -62,9 +55,7 @@ export function useProviders(directory: Accessor<string | undefined>) {
       const paid = [
         ...Iterable.filter(
           providers().all,
-          ([id]) =>
-            connected.has(id) &&
-            (id !== "opencode" || Object.values(providers().all.get(id)?.models ?? {}).some((m) => m.cost?.input)),
+          ([id]) => connected.has(id),
         ),
       ]
       return paid

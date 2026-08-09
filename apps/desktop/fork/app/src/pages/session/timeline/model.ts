@@ -7,10 +7,7 @@ import { same } from "@/utils/same"
 const emptyUserMessages: UserMessage[] = []
 const sessionFreshness = 15_000
 
-export function createTimelineModel(input: {
-  sessionID: Accessor<string | undefined>
-  revertMessageID: Accessor<string | undefined>
-}) {
+export function createTimelineModel(input: { sessionID: Accessor<string | undefined> }) {
   const serverSync = useServerSync()
   const sync = useSync()
   let refreshFrame: number | undefined
@@ -48,13 +45,6 @@ export function createTimelineModel(input: {
     return !id || isTimelineReady(sync().data.message[id], serverSync().session.history.loading(id))
   })
   const userMessages = createMemo(() => selectUserMessages(messages()), emptyUserMessages, { equals: same })
-  const visibleUserMessages = createMemo(
-    () => {
-      return selectVisibleUserMessages(userMessages(), input.revertMessageID())
-    },
-    emptyUserMessages,
-    { equals: same },
-  )
   const more = createMemo(() => {
     const id = input.sessionID()
     return id ? sync().session.history.more(id) : false
@@ -78,12 +68,12 @@ export function createTimelineModel(input: {
 
   return {
     history: { loadOlder, loading, more },
-    lastUserMessage: createMemo(() => visibleUserMessages().at(-1)),
+    lastUserMessage: createMemo(() => userMessages().at(-1)),
     messages,
     ready,
     resource,
     userMessages,
-    visibleUserMessages,
+    visibleUserMessages: userMessages,
   }
 
   function clearRefresh() {
@@ -100,12 +90,6 @@ export function selectUserMessages(messages: Message[]) {
 
 export function isTimelineReady(messages: Message[] | undefined, loading: boolean) {
   return messages !== undefined && (messages.some((message) => message.role === "user") || !loading)
-}
-
-export function selectVisibleUserMessages(messages: UserMessage[], revertMessageID?: string) {
-  if (!revertMessageID) return messages
-  const boundary = messages.findIndex((message) => message.id === revertMessageID)
-  return boundary < 0 ? messages : messages.slice(0, boundary)
 }
 
 export async function loadOlderTimeline(input: {

@@ -14,17 +14,15 @@ import { normalizePromptHistoryEntry, promptLength, type PromptHistoryComment } 
 import { createPersistedPromptInputHistory } from "@/components/prompt-input/history-store"
 import { promptDesignPlaceholder, promptPlaceholder } from "@/components/prompt-input/placeholder"
 import { createPromptSubmit } from "@/components/prompt-input/submit"
-import { selectionFromLines, type SelectedLineRange, useFile } from "@/context/file"
+import { selectionFromLines, type SelectedLineRange } from "@/context/file/types"
 import { useComments } from "@/context/comments"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
-import { useLayout } from "@/context/layout"
 import { usePermission } from "@/context/permission"
 import { type ImageAttachmentPart, usePrompt } from "@/context/prompt"
 import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
-import { createSessionTabs } from "@/pages/session/helpers"
 import { showToast } from "@/utils/toast"
 import { PromptInputV2, type PromptInputV2Suggestion } from "@opencode-ai/session-ui/v2/prompt-input"
 import {
@@ -81,8 +79,6 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
 export function usePromptInputV2Controller(props: PromptInputV2ControllerProps): PromptInputV2ComposerController {
   const sdk = useSDK()
   const sync = useSync()
-  const files = useFile()
-  const layout = useLayout()
   const comments = useComments()
   const dialog = useDialog()
   const command = useCommand()
@@ -95,22 +91,6 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
   const interaction = createPromptInputV2State()
   const mode = () => interaction[0].mode
   const history = props.history ?? createPersistedPromptInputHistory()
-  const tabs = () => props.controls.session.tabs
-  const activeFileTab = createSessionTabs({
-    tabs,
-    pathFromTab: files.pathFromTab,
-    normalizeTab: (tab) => (tab.startsWith("file://") ? files.tab(tab) : tab),
-  }).activeFileTab
-  const recent = createMemo(() => {
-    const all = tabs().all()
-    const active = activeFileTab()
-    const order = active ? [active, ...all.filter((tab) => tab !== active)] : all
-    return order.reduce<string[]>((result, tab) => {
-      const path = files.pathFromTab(tab)
-      if (!path || result.includes(path)) return result
-      return [...result, path]
-    }, [])
-  })
   const info = createMemo(() => (props.controls.session.id ? sync().session.get(props.controls.session.id) : undefined))
   const working = createMemo(() => sync().data.session_working(props.controls.session.id ?? ""))
   const attachments = createMemo(() =>
@@ -190,17 +170,11 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     )
   }
 
-  const accepting = createMemo(() => {
-    const id = props.controls.session.id
-    if (!id) return permission.isAutoAcceptingDirectory(sdk().directory)
-    return permission.isAutoAccepting(id, sdk().directory)
-  })
   const submission = createPromptSubmit({
     prompt,
     info,
     imageAttachments: attachments,
     commentCount,
-    autoAccept: accepting,
     mode,
     working,
     editor: () => editor,
@@ -212,8 +186,6 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     setPopover: (popover) => {
       if (!popover) controller.dispatch({ type: "popover.close" })
     },
-    newSessionWorktree: () => props.newSessionWorktree,
-    onNewSessionWorktreeReset: props.onNewSessionWorktreeReset,
     shouldQueue: props.shouldQueue,
     onQueue: props.onQueue,
     onAbort: props.onAbort,
@@ -224,8 +196,8 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
   const referenceDescription = (reference: ReferenceInfo) =>
     reference.source.type === "git" ? reference.source.repository : reference.source.path
   const references = createMemo(() =>
-    sync()
-      .data.reference.filter((reference) => !reference.hidden)
+    (sync().data.reference ?? [])
+      .filter((reference) => !reference.hidden)
       .map((reference) => ({
         id: `reference:${reference.name}`,
         kind: "reference" as const,
@@ -243,54 +215,33 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
         },
       })),
   )
-  const resources = createMemo(() =>
-    Object.values(sync().data.mcp_resource).map((resource) => ({
-      id: `resource:${resource.server}:${resource.uri}`,
-      kind: "resource" as const,
-      label: `@${resource.name}`,
-      path: resource.uri,
-      description: resource.description,
-      mention: {
-        type: "file" as const,
-        path: resource.uri,
-        content: `@${resource.name}`,
-        start: 0,
-        end: 0,
-        mime: resource.mimeType ?? "text/plain",
-        filename: resource.name,
-        url: resource.uri,
-        source: {
-          type: "resource" as const,
-          text: { value: `@${resource.name}`, start: 0, end: resource.name.length + 1 },
-          clientName: resource.server,
-          uri: resource.uri,
-        },
-      },
-      resource,
-    })),
-  )
-  const context = createMemo<PromptInputV2Suggestion[]>(() => [
-    ...references(),
-    ...props.controls.agents.available
+  const context = createMemo<PromptInputV2Suggestion[]>(() => {
+    const referenceItems = typeof references === "function" ? references() ?? [] : []
+    const recentItems: string[] = []
+    const agents = (props.controls.agents.available ?? [])
       .filter((agent) => !agent.hidden && agent.mode !== "primary")
       .map((agent) => ({
         id: `agent:${agent.name}`,
         kind: "agent" as const,
         label: `@${agent.name}`,
         mention: { type: "agent" as const, name: agent.name, content: `@${agent.name}`, start: 0, end: 0 },
+      }))
+
+    return [
+      ...referenceItems,
+      ...agents,
+      ...recentItems.map((path) => ({
+        id: `file:${path}`,
+        kind: "file" as const,
+        label: path,
+        path,
+        recent: true,
+        mention: { type: "file" as const, path, content: `@${path}`, start: 0, end: 0 },
       })),
-    ...resources(),
-    ...recent().map((path) => ({
-      id: `file:${path}`,
-      kind: "file" as const,
-      label: path,
-      path,
-      recent: true,
-      mention: { type: "file" as const, path, content: `@${path}`, start: 0, end: 0 },
-    })),
-  ])
+    ]
+  })
   const slashCommands = createMemo(() => [
-    ...sync().data.command.map((item) => ({
+    ...(sync().data.command ?? []).map((item) => ({
       id: `custom.${item.name}`,
       trigger: item.name,
       title: item.name,
@@ -308,7 +259,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       })),
   ])
   const commands = createMemo<PromptInputV2Suggestion[]>(() =>
-    slashCommands().map((item) => ({
+    (typeof slashCommands === "function" ? slashCommands() : []).map((item) => ({
       id: item.id,
       kind: "command",
       label: `/${item.trigger}`,
@@ -335,23 +286,13 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     },
     commands,
     context,
-    searchContextFiles: async (query) =>
-      (await files.searchFilesAndDirectories(query)).map((path) => ({
-        id: `file:${path}`,
-        kind: "file",
-        label: path,
-        path,
-        mention: { type: "file", path, content: `@${path}`, start: 0, end: 0 },
-      })),
+    searchContextFiles: async (_query) => [],
     onContextRemove(item) {
       if (item?.commentID) comments.remove(item.path, item.commentID)
     },
     openAttachment: (attachment) =>
       dialog.show(() => <ImagePreview src={attachment.blob.url} alt={attachment.filename} />),
-    openContext(key) {
-      const item = controller.contextItem(key)
-      if (item) openComment(item, props, sync, layout, files, comments)
-    },
+    openContext(_key) {},
     onEditor(element) {
       editor = element as HTMLDivElement
       props.ref?.(editor)
@@ -548,42 +489,4 @@ function PromptInputV2ModelControl(props: {
       </TooltipV2>
     </Show>
   )
-}
-
-function openComment(
-  item: { path: string; commentID?: string; commentOrigin?: "review" | "file" },
-  props: PromptInputV2ControllerProps,
-  sync: ReturnType<typeof useSync>,
-  layout: ReturnType<typeof useLayout>,
-  files: ReturnType<typeof useFile>,
-  comments: ReturnType<typeof useComments>,
-) {
-  if (!item.commentID) return
-  const focus = { file: item.path, id: item.commentID }
-  comments.setActive(focus)
-  const queueFocus = (attempts = 6) => {
-    requestAnimationFrame(() => {
-      comments.setFocus({ ...focus })
-      if (attempts <= 0) return
-      requestAnimationFrame(() => {
-        const current = comments.focus()
-        if (current?.file === focus.file && current.id === focus.id) queueFocus(attempts - 1)
-      })
-    })
-  }
-  const diffs = props.controls.session.id ? sync().data.session_diff[props.controls.session.id] : undefined
-  const review =
-    item.commentOrigin === "review" || (item.commentOrigin !== "file" && diffs?.some((diff) => diff.file === item.path))
-  if (!props.controls.session.reviewPanel.opened()) props.controls.session.reviewPanel.open()
-  if (review) {
-    layout.fileTree.setTab("changes")
-    props.controls.session.tabs.setActive("review")
-    queueFocus()
-    return
-  }
-  layout.fileTree.setTab("all")
-  const tab = files.tab(item.path)
-  void props.controls.session.tabs.open(tab)
-  props.controls.session.tabs.setActive(tab)
-  void Promise.resolve(files.load(item.path)).finally(() => queueFocus())
 }

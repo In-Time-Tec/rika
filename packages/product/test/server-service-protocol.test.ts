@@ -9,6 +9,9 @@ import { Sha256Bun } from "../src/server/server-service-sha256-bun"
 const withDigest = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideService(effect, Sha256, Sha256Bun)
 
 describe("Rika Server protocol", () => {
+  it("uses the unversioned active-execution replacement guard", () => {
+    expect(ServerHandshake.HandshakeProtocol.replacementGuard).toBe("active-execution")
+  })
   it("supersedes only an idle server for a launching client", () => {
     expect(
       ServerHandshake.HandshakeProtocol.replacementDisposition({

@@ -25,9 +25,10 @@ type PersistTarget = {
 }
 
 const LEGACY_STORAGE = "default.dat"
-const GLOBAL_STORAGE = "opencode.global.dat"
-const WINDOW_STORAGE = "opencode.window"
-const LOCAL_PREFIX = "opencode."
+const GLOBAL_STORAGE = "rika.global.dat"
+const WINDOW_STORAGE = "rika.window"
+const LOCAL_PREFIX = "rika."
+const OPENCODE_PREFIX = "opencode."
 const fallback = new Map<string, boolean>()
 
 const CACHE_MAX_ENTRIES = 500
@@ -349,18 +350,41 @@ async function migrateLegacyAsync(input: {
 function workspaceStorage(dir: string) {
   const head = (dir.slice(0, 12) || "workspace").replace(/[^a-zA-Z0-9._-]/g, "-")
   const sum = checksum(dir) ?? "0"
-  return `opencode.workspace.${head}.${sum}.dat`
+  return `rika.workspace.${head}.${sum}.dat`
 }
 
 function draftStorage(draftID: string) {
   const head = (draftID.slice(0, 12) || "draft").replace(/[^a-zA-Z0-9._-]/g, "-")
   const sum = checksum(draftID) ?? "0"
-  return `opencode.draft.${head}.${sum}.dat`
+  return `rika.draft.${head}.${sum}.dat`
 }
 
 function windowStorage(windowID: string) {
   const safe = (windowID || "browser").replace(/[^a-zA-Z0-9._-]/g, "-")
   return `${WINDOW_STORAGE}.${safe}.dat`
+}
+
+function legacyStorageName(storage: string) {
+  if (!storage.startsWith(LOCAL_PREFIX)) return
+  return `${OPENCODE_PREFIX}${storage.slice(LOCAL_PREFIX.length)}`
+}
+
+function withStorage(
+  target: PersistTarget,
+  storage: string,
+  additionalLegacyStorageNames: string[] = [],
+): PersistTarget {
+  const legacyStorageNames = new Set<string>()
+  const opencode = legacyStorageName(storage)
+  if (opencode) legacyStorageNames.add(opencode)
+
+  for (const name of [...(target.legacyStorageNames ?? []), ...additionalLegacyStorageNames]) {
+    if (name !== storage) legacyStorageNames.add(name)
+    const legacy = legacyStorageName(name)
+    if (legacy && legacy !== storage) legacyStorageNames.add(legacy)
+  }
+
+  return { ...target, storage, legacyStorageNames: [...legacyStorageNames] }
 }
 
 function legacyWorkspaceStorage(dir: string) {
@@ -376,13 +400,13 @@ function legacyWorkspaceStorage(dir: string) {
     if (backslash !== storage) result.add(backslash)
   }
 
-  if (result.size === 0) return
   return [...result]
 }
 
 function serverWorkspaceTarget(scope: ServerScopeValue, dir: string, key: string, legacy?: string[]): PersistTarget {
-  if (scope !== ServerScope.local) return { storage: workspaceStorage(ScopedKey.from(scope, pathKey(dir))), key }
-  return { storage: workspaceStorage(pathKey(dir)), legacyStorageNames: legacyWorkspaceStorage(dir), key, legacy }
+  const storage = workspaceStorage(scope === ServerScope.local ? pathKey(dir) : ScopedKey.from(scope, pathKey(dir)))
+  if (scope !== ServerScope.local) return withStorage({ key }, storage)
+  return withStorage({ key, legacy }, storage, legacyWorkspaceStorage(dir))
 }
 
 function localStorageWithPrefix(prefix: string): SyncStorage {
@@ -490,17 +514,17 @@ export const PersistTesting = {
 
 export const Persist = {
   global(key: string, legacy?: string[]): PersistTarget {
-    return { storage: GLOBAL_STORAGE, key, legacy }
+    return withStorage({ key, legacy }, GLOBAL_STORAGE)
   },
   window(key: string, legacy?: string[]): PersistTarget {
     return { scope: "window", key, legacy }
   },
   draft(draftID: string, key: string, legacy?: string[]): PersistTarget {
-    return { storage: draftStorage(draftID), key: `draft:${key}`, legacy }
+    return withStorage({ key: `draft:${key}`, legacy }, draftStorage(draftID))
   },
   serverGlobal(scope: ServerScopeValue, key: string, legacy?: string[]): PersistTarget {
     if (scope === ServerScope.local) return Persist.global(key, legacy)
-    return { storage: GLOBAL_STORAGE, key: ScopedKey.from(scope, key) }
+    return withStorage({ key: ScopedKey.from(scope, key) }, GLOBAL_STORAGE)
   },
   workspace(dir: string, key: string, legacy?: string[]): PersistTarget {
     return serverWorkspaceTarget(ServerScope.local, dir, `workspace:${key}`, legacy)
@@ -527,41 +551,37 @@ export const Persist = {
   },
 }
 
-function resolveTarget(target: PersistTarget, platform: Platform): PersistTarget {
+function resolveTarget(target: PersistTarget, platform?: Platform): PersistTarget {
   if (target.scope !== "window") return target
-  if (platform.platform === "desktop" && !platform.windowID) return { ...target, storage: GLOBAL_STORAGE }
-  const windowID = platform.platform === "desktop" ? (platform.windowID ?? "browser") : "browser"
-  return {
-    ...target,
-    storage: windowStorage(windowID),
-  }
+  if (platform?.platform === "desktop" && !platform.windowID) return withStorage(target, GLOBAL_STORAGE)
+  const windowID = platform?.platform === "desktop" ? (platform.windowID ?? "browser") : "browser"
+  return withStorage(target, windowStorage(windowID))
 }
 
-export function removePersisted(
-  target: { draft?: boolean; storage?: string; legacyStorageNames?: string[]; key: string },
-  platform?: Platform,
-) {
-  if (target.draft && platform?.draftStore) {
-    void platform.draftStore.removeItem(`${target.storage ?? "default"}:${target.key}`)
+export function removePersisted(target: PersistTarget, platform?: Platform) {
+  const config = target.scope === "window" ? resolveTarget(target, platform) : target
+
+  if (config.draft && platform?.draftStore) {
+    void platform.draftStore.removeItem(`${config.storage ?? "default"}:${config.key}`)
   }
   const isDesktop = platform?.platform === "desktop" && !!platform.storage
 
   if (isDesktop) {
-    void platform.storage?.(target.storage)?.removeItem(target.key)
-    for (const storage of target.legacyStorageNames ?? []) {
-      void platform.storage?.(storage)?.removeItem(target.key)
+    void platform.storage?.(config.storage)?.removeItem(config.key)
+    for (const storage of config.legacyStorageNames ?? []) {
+      void platform.storage?.(storage)?.removeItem(config.key)
     }
     return
   }
 
-  if (!target.storage) {
-    localStorageDirect().removeItem(target.key)
+  if (!config.storage) {
+    localStorageDirect().removeItem(config.key)
     return
   }
 
-  localStorageWithPrefix(target.storage).removeItem(target.key)
-  for (const storage of target.legacyStorageNames ?? []) {
-    localStorageWithPrefix(storage).removeItem(target.key)
+  localStorageWithPrefix(config.storage).removeItem(config.key)
+  for (const storage of config.legacyStorageNames ?? []) {
+    localStorageWithPrefix(storage).removeItem(config.key)
   }
 }
 

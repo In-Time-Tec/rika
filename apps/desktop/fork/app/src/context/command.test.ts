@@ -56,14 +56,14 @@ describe("command registrations", () => {
 describe("resolveKeybindOption", () => {
   test("prefers a matching contextual command over the global fallback", () => {
     const fallback = { id: "tab.close", title: "Close tab" }
-    const contextual = { id: "terminal.close", title: "Close terminal", when: () => true }
+    const contextual = { id: "review.toggle", title: "Toggle review", when: () => true }
 
     expect(resolveKeybindOption([fallback, contextual], new KeyboardEvent("keydown"))).toBe(contextual)
   })
 
   test("uses the global fallback outside the command context", () => {
     const fallback = { id: "tab.close", title: "Close tab" }
-    const contextual = { id: "terminal.close", title: "Close terminal", when: () => false }
+    const contextual = { id: "review.toggle", title: "Toggle review", when: () => false }
 
     expect(resolveKeybindOption([fallback, contextual], new KeyboardEvent("keydown"))).toBe(fallback)
   })

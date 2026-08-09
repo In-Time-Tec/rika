@@ -5,7 +5,7 @@ declare const RIKA_BUILD_IDENTITY: string | undefined
 
 const protocolVersion = 8
 const buildIdentity = typeof RIKA_BUILD_IDENTITY === "string" ? RIKA_BUILD_IDENTITY : "rika-development-build"
-const replacementGuard = "active-execution-v1" as const
+const replacementGuard = "active-execution" as const
 const ClientKind = Schema.Literals(["interactive", "run", "thread-continue", "product", "desktop", "web"])
 const ConnectRole = Schema.Literals(["launch", "reattach"])
 type ConnectRole = typeof ConnectRole.Type

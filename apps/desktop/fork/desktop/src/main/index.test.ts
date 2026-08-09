@@ -3,7 +3,7 @@ import { Cause, Deferred, Effect, Exit, Fiber } from "effect"
 import { forwardInitializationFailure } from "./initialization"
 
 describe("desktop initialization", () => {
-  const failure = new Error("sidecar startup failed")
+  const failure = new Error("Rika server startup failed")
   const expectFailure = (exit: Exit.Exit<unknown, unknown>) => {
     expect(Exit.isFailure(exit)).toBe(true)
     if (Exit.isSuccess(exit)) return

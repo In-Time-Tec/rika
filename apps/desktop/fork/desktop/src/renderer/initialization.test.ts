@@ -3,7 +3,7 @@ import { initializationData, initializationReady } from "./initialization"
 
 describe("desktop renderer initialization", () => {
   test("throws the original initialization error before rendering server providers", () => {
-    const error = new Error("sidecar startup failed")
+    const error = new Error("Rika server startup failed")
 
     try {
       initializationData(Object.assign(() => undefined, { error }))
@@ -28,10 +28,14 @@ describe("desktop renderer initialization", () => {
     }
   })
 
-  test("returns initialized sidecar data", () => {
-    const sidecar = { url: "http://127.0.0.1:1234", username: "opencode", password: "secret" }
+  test("returns initialized Rika data", () => {
+    const rika = {
+      url: "ws://127.0.0.1:23456/server",
+      token: "a".repeat(64),
+      identity: "desktop-identity",
+    }
 
-    expect(initializationData(Object.assign(() => sidecar, { error: undefined }))).toBe(sidecar)
+    expect(initializationData(Object.assign(() => rika, { error: undefined }))).toBe(rika)
   })
 
   test("does not discard falsy initialization errors", () => {
@@ -49,7 +53,7 @@ describe("desktop renderer initialization", () => {
   })
 
   test("checks initialization errors before rendering server providers", () => {
-    const error = new Error("sidecar startup failed")
+    const error = new Error("Rika server startup failed")
 
     expect(() => initializationReady(Object.assign(() => undefined, { error, loading: false }))).toThrow(error)
   })

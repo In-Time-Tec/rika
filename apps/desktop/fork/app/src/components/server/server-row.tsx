@@ -10,7 +10,6 @@ import {
   type ParentProps,
   Show,
 } from "solid-js"
-import { useLanguage } from "@/context/language"
 import { type ServerConnection, serverName } from "@/context/server"
 import type { ServerHealth } from "@/utils/server-health"
 
@@ -22,11 +21,9 @@ interface ServerRowProps extends ParentProps {
   versionClass?: string
   dimmed?: boolean
   badge?: JSXElement
-  showCredentials?: boolean
 }
 
 export function ServerRow(props: ServerRowProps) {
-  const language = useLanguage()
   const [truncated, setTruncated] = createSignal(false)
   let nameRef: HTMLSpanElement | undefined
   let versionRef: HTMLSpanElement | undefined
@@ -92,20 +89,6 @@ export function ServerRow(props: ServerRowProps) {
               {(badge) => badge()}
             </Show>
           </div>
-          <Show when={props.showCredentials && props.conn.type === "http" && props.conn}>
-            {(conn) => (
-              <div class="flex flex-row gap-3">
-                <span>
-                  {conn().http.username ? (
-                    <span class="text-text-weak">{conn().http.username}</span>
-                  ) : (
-                    <span class="text-text-weaker">{language.t("server.row.noUsername")}</span>
-                  )}
-                </span>
-                {conn().http.password && <span class="text-text-weak">••••••••</span>}
-              </div>
-            )}
-          </Show>
         </div>
         {props.children}
       </div>

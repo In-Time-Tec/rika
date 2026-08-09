@@ -1,83 +1,102 @@
-# M3 Phase B contract — opencode SDK client surface → Rika operations
+# M3 Phase B contract — retained renderer → native Rika
 
-Grounded in the staged fork: `sdk/js/src/v2/gen/sdk.gen.ts` (endpoint classes),
-`app/src/**` usage, and Rika's `product-operation.ts` / `interactive-command.ts`
-/ `thread-view.ts` contracts. The adapter (`app/src/rika/adapter.ts`) exposes an
-opencode-shaped client to the UI while executing Rika operations.
+The desktop retains opencode's SolidJS views and store shapes temporarily, but
+all production transport and mutations cross Rika protocol v8 through
+`@rika/client`. The compatibility facade is local renderer code; it is not an
+opencode server adapter and never performs opencode HTTP or SSE requests.
 
-## Rika primitives (verified)
+## Rika primitives
 
-- Inputs: `Interactive` (prompt, mode?, threadId?, last?, ephemeral, workspace?,
-  clientWorkspace?), `Run`, `Review`, `Thread` (action: new|last|top|continue
-  |list|search|rename|label|fork|export), `Config` (edit), `Auth`, `Mcp` (add),
-  `Skill` (list/add), `ToolCatalog` (list/show), `Extension` (list), `Doctor`
-- InteractiveCommands: `Submit` (prompt + promptParts), `Shell`, `Steer`,
-  `Cancel`, `InterruptAndSend`, `ApproveAuthorization`, `DenyAuthorization`,
-  `NewThread`, `SelectThread`, `ReadQueue`, `PreviewThread`, `ReopenThread`,
-  `Quit`
-- InteractiveEvents: `ThreadViewSnapshot`, `ThreadViewPatch` (revision-based),
-  turn/status/todo/permission/question events, `ExecutionFailed`
+- `Thread`: `new`, `last`, `top`, `continue`, `list`, `search`, `rename`,
+  `label`, `pin`, `archive`, `unarchive`, `delete`, `usage`, `fork`, `export`.
+- `Interactive`: `Submit`, `Shell`, `Steer`, `Cancel`, `ApproveAuthorization`,
+  `DenyAuthorization`, `NewThread`, `SelectThread`, queue reads and previews.
+- Events: `ThreadViewSnapshot`, revisioned `ThreadViewPatch`,
+  `ResyncRequired`, thread summaries, lifecycle/control failures, retry
+  scheduling, and shell completion.
+- `Auth`: Rika-native OpenRouter login, status, and logout. The desktop
+  exposes API-key login for the active Rika provider. Provider OAuth UI is not
+  retained.
 
-## Adapter method contract (UI calls → Rika)
+Rika has no Question or Todo contract. The desktop must not synthesize these
+from authorization or lifecycle events. Rika-native MCP remains a separate
+future surface; opencode MCP/LSP/VCS/file/PTY contracts are not emulated.
 
-| opencode v2 client method                  | Rika operation                               | Notes                                                                 |
-| ------------------------------------------ | -------------------------------------------- | --------------------------------------------------------------------- |
-| `session.list({directory, search, limit})` | `Thread list` (+ `Thread search`)            | workspace = directory                                                 |
-| `session.get(sessionID)`                   | interactive attach → `ThreadViewSnapshot`    | via `runThreadFeed`                                                   |
-| `session.create({title, directory})`       | `Thread new`                                 | then attach                                                           |
-| `session.prompt(sessionID, {prompt})`      | interactive `Submit` on attached session     | incl. promptParts (text/image)                                        |
-| `session.promptAsync(...)`                 | `Run` input (non-interactive)                |                                                                       |
-| `session.abort(sessionID)`                 | interactive `Cancel`                         |                                                                       |
-| `session.interrupt(sessionID)`             | `InterruptAndSend` / `Cancel`                |                                                                       |
-| `session.update` (rename)                  | `Thread rename`                              | archive → defer                                                       |
-| `session.delete(sessionID)`                | — (no Rika delete op)                        | **CUT** in Phase D; UI hides                                          |
-| `session.status(sessionID)`                | interactive status events                    | via session feed                                                      |
-| `session.todo(sessionID)`                  | todo events                                  | via session feed                                                      |
-| `session.fork`                             | `Thread fork`                                |                                                                       |
-| `session.command/shell`                    | `Shell` command                              | terminal support                                                      |
-| `session.summarize`                        | —                                            | **CUT** (no Rika summarize)                                           |
-| `session.revert/unrevert/share/unshare`    | —                                            | **CUT** (snapshot/revert + share not in Rika)                         |
-| `permission.reply/respond`                 | `ApproveAuthorization` / `DenyAuthorization` | authorizationId from permission event                                 |
-| `question.reply/reject`                    | `ApproveAuthorization` / `DenyAuthorization` | questionId maps to authorizationId                                    |
-| `event.subscribe(...)`                     | session `events(dispatch)`                   | translation layer → opencode Event shapes (port-map §Phase B)         |
-| `project.list/current`                     | workspace (clientWorkspace) scoping          | project = workspace in Rika                                           |
-| `project.update/initGit/directories`       | —                                            | **CUT/defers**; workspace config in Phase E                           |
-| `config.get/update`                        | `Config edit`                                | Rika settings shape                                                   |
-| `global.health`                            | `/health` (HTTP) or connection ping          |                                                                       |
-| `global.dispose/event`                     | connection close                             |                                                                       |
-| `command.list`                             | Rika CLI commands                            | defer to Phase E                                                      |
-| `vcs.get/status/diff/apply`                | Rika VCS events (branch.updated)             | diff/apply **CUT** in Phase D                                         |
-| `find.files/symbols/text`                  | —                                            | **CUT** (LSP/search not in Rika)                                      |
-| `file.list/read`                           | Rika file ops (workspace FS)                 | Phase E                                                               |
-| `tool.list/ids`                            | `ToolCatalog list/show`                      |                                                                       |
-| `agent.list`, `app.agents/log/skills`      | —                                            | **CUT** (agents/skills in Rika differ; defer)                         |
-| `auth.set/remove`, `provider.*`            | `Auth` (Rika provider config)                | provider-OAuth UI **CUT**; Rika auth via config                       |
-| `mcp.*`                                    | `Mcp add` + Rika MCP tools                   | NOT cut — Rika has MCP (server catalog: @batonfx/mcp); map in Phase E |
+## Renderer method mapping
 
-## Event translation (Rika → opencode shapes)
+| Retained UI operation              | Native Rika owner                             | Contract                                                                          |
+| ---------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------- |
+| list/search Threads                | `Connection.run(Thread list/search)`          | Filter returned Threads to the directory runtime's workspace.                     |
+| create                             | `Connection.run(Thread new)`                  | Project returned Thread, then select it.                                          |
+| select/read                        | one cached `InteractiveSession` per workspace | One event consumer; selection is serialized with commands.                        |
+| submit                             | `SelectThread` then `Submit`                  | Public prompt parts are text/image only.                                          |
+| shell                              | `SelectThread` then interactive `Shell`       | Recorded shell, not an opencode PTY.                                              |
+| cancel                             | `SelectThread` then `Cancel`                  | Does not fabricate another prompt.                                                |
+| rename                             | `Thread rename`                               | Refresh the canonical Thread cache.                                               |
+| archive/unarchive                  | `Thread archive/unarchive`                    | Both are first-class Rika operations.                                             |
+| delete                             | `Thread delete`                               | First-class Rika operation.                                                       |
+| fork                               | `Thread fork`                                 | Compatibility message IDs are mapped to owning Rika Turn IDs.                     |
+| approve/deny                       | `ApproveAuthorization` / `DenyAuthorization`  | Resolve the exact `{turnId, authorizationId}` from a pending `AuthorizationCard`. |
+| “always allow”                     | unsupported                                   | Reject honestly; Rika approval is binary and non-durable.                         |
+| OpenRouter API key          | `Auth login`                                  | Never routed through opencode provider auth.                                      |
+| question/todo/share/revert/compact | unsupported                                   | Controls are cut; no empty success or unrelated command mapping.                  |
 
-Consumed by `global-sync/event-reducer.ts` (verified cases): session.created/
-updated/deleted/renamed/usage.updated/archived/moved/diff, message.updated/
-removed, message.part.updated/removed/delta, todo.updated, session.status,
-permission.asked/replied, question.asked/replied/rejected, vcs.branch.updated,
-reference.updated.
+## Projection and revision ownership
 
-- `ThreadViewSnapshot` → `session.updated` + `message.updated` per turn
-  (Turn→Message, Unit→Part mapping from the port map)
-- `ThreadViewPatch` → `message.part.delta` / `message.part.updated` /
-  `session.updated` (revision diff)
-- permission/question InteractiveEvents → `permission.asked` /
-  `question.asked` (+ `replied` after Approve/Deny)
-- turn lifecycle events → `session.status` + `message.updated`
-- todo events → `todo.updated`
+A Rika Turn projects deterministically to paired user and assistant Messages.
+Thread View provider/model/mode gaps use documented view sentinels (`rika`,
+`unknown`, `default`) only; they are not sent back to the server.
 
-## Build order for Phase B
+Units project to Parts ordered by the canonical encoded `Unit.order` followed
+by Unit key. A `ThreadViewPatch.upsert` is a complete Unit replacement, not a
+text delta. The adapter therefore:
 
-1. `rika/adapter.ts` — `createRikaClient({connection, threadId, workspace})`
-   implementing the table above (core: list/get/create/prompt/abort/
-   permission/question/event subscribe; rest stubbed with honest errors)
-2. `context/server.tsx` — slim to Rika endpoint + connection lifecycle
-3. `context/server-sdk.tsx` — `createClient` → Rika adapter; keep the
-   `ServerSDK.event` emitter fed by the translation layer
-4. Verify: `bun test src/rika/*` green; `electron-vite build` green; app
-   launches; renderer shows Rika-connected state (no global-sdk failure)
+1. caches a snapshot per Thread;
+2. validates and applies patches with `ThreadView.apply`;
+3. projects complete before/after views;
+4. commits the replacement synchronously before feed acknowledgement;
+5. emits stale removals, parent Message upserts, full
+   `message.part.updated` replacements, permission transitions, and aggregate
+   status.
+
+A revision gap or `ResyncRequired` emits no partial compatibility events and
+selects the Thread again for a fresh snapshot. Delta events are reserved for a
+future proven-append optimization.
+
+Only `AuthorizationCard(status: "pending")` projects to `permission.asked`.
+Resolved cards remove the pending request. No question/todo events are
+fabricated.
+
+## Lifecycle and security boundary
+
+Electron main owns the Rika profile, data root, server process, fd-3 readiness,
+canonical endpoint resolution, publication validation, and token read. The
+trusted main frame receives only `{url, token, identity}` through the existing
+zero-argument `awaitInitialization` IPC method. Renderer code cannot choose a
+path or read `server.json`/`server.token`.
+
+`GlobalProvider` owns one scoped physical Rika Connection for the native
+profile. It supplies cached directory runtimes; repeated compatibility
+`createClient({directory})` calls do not create another connection or feed.
+Runtime cleanup interrupts directory feeds before the connection scope closes.
+Health uses signed Rika `Connection.ping`, not an opencode health endpoint.
+
+## Unsupported surface cut
+
+The Phase B shell removes the question, todo, revert, share, compact,
+auto-accept, terminal/PTY, old MCP, LSP, file-review, and provider-OAuth
+commands from active UI paths. Any missed invocation terminates locally with a
+typed `RikaAdapterError`; the facade has no HTTP fallback.
+
+## Proof
+
+- pure snapshot/patch projection tests cover paired Messages, canonical Part
+  ordering, full Unit replacement, stale revision rejection, retry status, and
+  binary authorization indexing;
+- adapter tests cover an empty profile (`last:false`), one feed consumer per
+  workspace, real Thread listing, and selection-before-submit serialization;
+- endpoint tests cover canonical publication/token validation and trusted-frame
+  IPC confinement;
+- app and Electron Vite builds must contain no opencode event subscription and
+  a live desktop must connect, ping, create/select a Thread, and render native
+  events without `[global-sdk] event stream failed`.

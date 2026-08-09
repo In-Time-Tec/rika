@@ -67,13 +67,13 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const settings = useSettings()
 
     const id = createMemo(() => params.id || undefined)
-    const list = createMemo(() => sync().data.agent.filter((item) => item.mode !== "subagent" && !item.hidden))
+    const list = createMemo(() => (sync().data.agent ?? []).filter((item) => item.mode !== "subagent" && !item.hidden))
     const agentsVisible = createMemo(() => settings.visibility.customAgents() || hasCustomAgent(list()))
     const connected = createMemo(() => new Set(providers.connected().map((item) => item.id)))
 
     const [saved, setSaved, , savedReady] = persisted(
       {
-        ...Persist.serverWorkspace(serverSDK().scope, sdk().directory, "model-selection", ["model-selection.v1"]),
+        ...Persist.serverWorkspace(serverSDK().scope, sdk().directory, "model-selection"),
         migrate,
       },
       createStore<Saved>({
@@ -282,7 +282,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       ready: models.ready,
       current,
       recent,
-      list: models.list,
+      list: () => models.list() ?? [],
       cycle(direction: 1 | -1) {
         const items = recent()
         const item = current()

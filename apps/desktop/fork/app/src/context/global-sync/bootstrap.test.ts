@@ -8,13 +8,12 @@ import {
   bootstrapDirectory,
   loadAgentsQuery,
   loadCommands,
-  loadGlobalConfigQuery,
   loadPathQuery,
   loadProjectsQuery,
   loadProvidersQuery,
   loadReferencesQuery,
 } from "./bootstrap"
-import type { State, VcsCache } from "./types"
+import type { State } from "./types"
 import { ServerScope } from "@/utils/server-scope"
 import type { ServerApi } from "@/utils/server"
 
@@ -23,6 +22,7 @@ type ProjectApi = ServerApi["project"]
 const provider = { all: new Map(), connected: [], default: {} } satisfies NormalizedProviderListResponse
 const api = {
   agent: { list: async () => ({ location: {}, data: [] }) },
+  command: { list: async () => ({ location: {}, data: [] }) },
   provider: { list: async () => ({ location: {}, data: [] }) },
   model: {
     list: async () => ({ location: {}, data: [] }),
@@ -33,9 +33,7 @@ const api = {
     list: async () => [],
     current: async () => ({ id: "project", directory: "/project" }),
   },
-  question: { request: { list: async () => ({ location: {}, data: [] }) } },
   reference: { list: async () => ({ location: {}, data: [] }) },
-  vcs: { get: async () => ({ location: {}, data: {} }) },
 } as unknown as ServerApi
 
 function directoryState() {
@@ -57,16 +55,7 @@ function directoryState() {
     session_working(id: string) {
       return this.session_status[id]?.type !== "idle"
     },
-    session_diff: {},
-    todo: {},
     permission: {},
-    question: {},
-    mcp_ready: true,
-    mcp: {},
-    mcp_resource: {},
-    lsp_ready: true,
-    lsp: [],
-    vcs: undefined,
     limit: 5,
     message: {},
     session_message: {},
@@ -76,82 +65,12 @@ function directoryState() {
 }
 
 describe("bootstrapDirectory", () => {
-  test("uses legacy MCP endpoints while refreshing a v1 directory", async () => {
-    const legacyConfigReads: string[] = []
-    const mcpReads: string[] = []
+  test("loads native config while refreshing a directory", async () => {
     const [store, setStore] = directoryState()
 
     await bootstrapDirectory({
       directory: "/project",
       scope: ServerScope.local,
-      mcp: true,
-      global: {
-        config: {} satisfies Config,
-        path: { state: "", config: "", worktree: "/project", directory: "/project", home: "/home" },
-        project: [{ id: "project", worktree: "/project" } as Project],
-        provider,
-      },
-      sdk: {
-        app: { agents: async () => ({ data: [{ name: "build", mode: "primary" }] }) },
-        config: {
-          get: async () => {
-            legacyConfigReads.push("directory")
-            return { data: {} }
-          },
-        },
-        session: { status: async () => ({ data: {} }) },
-        vcs: { get: async () => ({ data: undefined }) },
-        command: {
-          list: async () => {
-            mcpReads.push("command")
-            return { data: [] }
-          },
-        },
-        permission: { list: async () => ({ data: [] }) },
-        question: { list: async () => ({ data: [] }) },
-        v2: { reference: { list: async () => ({ data: { data: [] } }) } },
-        mcp: {
-          status: async () => {
-            mcpReads.push("status")
-            return { data: {} }
-          },
-        },
-        experimental: {
-          resource: {
-            list: async () => {
-              mcpReads.push("resource")
-              return { data: {} }
-            },
-          },
-        },
-        provider: { list: async () => ({ data: { all: [], connected: [], default: {} } }) },
-      } as unknown as OpencodeClient,
-      api,
-      store,
-      setStore,
-      vcsCache: { setStore() {} } as unknown as VcsCache,
-      loadSessions() {},
-      translate: (key) => key,
-      queryClient: new QueryClient(),
-      protocol: Promise.resolve("v1"),
-    })
-
-    expect(store.status).toBe("partial")
-
-    await new Promise((resolve) => setTimeout(resolve, 80))
-
-    expect(store.status).toBe("complete")
-    expect(legacyConfigReads).toEqual(["directory"])
-    expect(mcpReads.sort()).toEqual(["command", "resource", "status"])
-  })
-
-  test("skips legacy config while refreshing a v2 directory", async () => {
-    const [store, setStore] = directoryState()
-
-    await bootstrapDirectory({
-      directory: "/project",
-      scope: ServerScope.local,
-      mcp: false,
       global: {
         config: {} satisfies Config,
         path: { state: "", config: "", worktree: "/project", directory: "/project", home: "/home" },
@@ -160,19 +79,15 @@ describe("bootstrapDirectory", () => {
       },
       sdk: {
         config: {
-          get: async () => {
-            throw new Error("legacy directory config should not be called")
-          },
+          get: async () => ({ data: {} }),
         },
       } as unknown as OpencodeClient,
       api,
       store,
       setStore,
-      vcsCache: { setStore() {} } as unknown as VcsCache,
       loadSessions() {},
       translate: (key) => key,
       queryClient: new QueryClient(),
-      protocol: Promise.resolve("v2"),
     })
 
     expect(store.status).toBe("partial")
@@ -180,48 +95,6 @@ describe("bootstrapDirectory", () => {
     await new Promise((resolve) => setTimeout(resolve, 80))
 
     expect(store.status).toBe("complete")
-  })
-})
-
-describe("config queries", () => {
-  test("skips legacy global config for v2 servers", async () => {
-    const sdk = {
-      global: {
-        config: {
-          get: async () => {
-            throw new Error("legacy global config should not be called")
-          },
-        },
-      },
-    } as unknown as OpencodeClient
-
-    const result = await new QueryClient().fetchQuery(
-      loadGlobalConfigQuery(ServerScope.local, sdk, Promise.resolve("v2")),
-    )
-
-    expect(result).toEqual({})
-  })
-
-  test("loads legacy global config for v1 servers", async () => {
-    const calls: string[] = []
-    const config = { shell: "zsh" } satisfies Config
-    const sdk = {
-      global: {
-        config: {
-          get: async () => {
-            calls.push("global")
-            return { data: config }
-          },
-        },
-      },
-    } as unknown as OpencodeClient
-
-    const result = await new QueryClient().fetchQuery(
-      loadGlobalConfigQuery(ServerScope.local, sdk, Promise.resolve("v1")),
-    )
-
-    expect(result).toEqual(config)
-    expect(calls).toEqual(["global"])
   })
 })
 

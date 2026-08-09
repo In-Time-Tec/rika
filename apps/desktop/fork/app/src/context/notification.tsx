@@ -233,7 +233,7 @@ function createServerNotificationState(input: {
   const currentSession = input.sessionID
 
   const [store, setStore, _, ready] = persisted(
-    Persist.serverGlobal(serverSDK().scope, "notification", ["notification.v1"]),
+    Persist.serverGlobal(serverSDK().scope, "notification"),
     createStore({
       list: [] as Notification[],
     }),

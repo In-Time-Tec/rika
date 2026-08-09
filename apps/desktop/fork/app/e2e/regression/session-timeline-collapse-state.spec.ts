@@ -255,7 +255,7 @@ test.describe("regression: session timeline local row state", () => {
 async function configurePage(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem(
-      "settings.v3",
+      "settings",
       JSON.stringify({
         general: {
           editToolPartsExpanded: true,

@@ -10,6 +10,7 @@ export function createSessionKeyReader(sessionKey: string | Accessor<string>, en
   const key = typeof sessionKey === "function" ? sessionKey : () => sessionKey
   return () => {
     const value = key()
+    if (!value) return ""
     ensure(value)
     return value
   }

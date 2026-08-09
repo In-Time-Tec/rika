@@ -31,13 +31,13 @@ export function createTimelineProjection(input: {
   })
   const projection = createMemo(() =>
     Timeline.constructSessionMessageRows(
-      input.sessionMessages(),
+      input.sessionMessages() ?? [],
       (messageID) => messageByID().get(messageID) as UserMessage | AssistantMessage | undefined,
-      input.parts,
-      input.showReasoningSummaries(),
-      input.status().type,
-      input.inlineComments(),
-      input.userMessages(),
+      (messageID) => input.parts(messageID) ?? [],
+      input.showReasoningSummaries() ?? false,
+      input.status()?.type ?? "idle",
+      input.inlineComments() ?? false,
+      input.userMessages() ?? [],
     ),
   )
   const activeMessageID = createMemo(() => projection().activeMessageID)

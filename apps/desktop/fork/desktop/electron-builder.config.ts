@@ -9,9 +9,7 @@ const execFileAsync = promisify(execFile)
 const packageDir = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(packageDir, "../..")
 const signScript = path.join(rootDir, "script", "sign-windows.ps1")
-// The Electron 42 packaging update briefly installed Linux launchers/icons under
-// "opencode-desktop". Keep that hidden desktop entry around so existing GNOME/KDE
-// pins still resolve after the canonical app id changes back to ai.opencode.desktop.
+
 const legacyDesktopEntry = path.join(packageDir, "resources", "linux", "opencode-desktop.desktop")
 const legacyDesktopEntryFpm = `${legacyDesktopEntry}=/usr/share/applications/opencode-desktop.desktop`
 
@@ -36,36 +34,22 @@ const channel = (() => {
 })()
 
 const APP_IDS = {
-  dev: "ai.opencode.desktop.dev",
-  beta: "ai.opencode.desktop.beta",
-  prod: "ai.opencode.desktop",
+  dev: "ai.rika.desktop.dev",
+  beta: "ai.rika.desktop.beta",
+  prod: "ai.rika.desktop",
 } as const
 
 const getBase = (appId: string): Configuration => ({
-  artifactName: "opencode-desktop-${os}-${arch}.${ext}",
+  artifactName: "rika-desktop-${os}-${arch}.${ext}",
   directories: {
     output: "dist",
     buildResources: "resources",
   },
-  // Linux launchers are .desktop files, so this is the desktop file name,
-  // not just the app id. For prod, app id "ai.opencode.desktop" becomes
-  // "ai.opencode.desktop.desktop".
-  // https://developer.gnome.org/documentation/guidelines/maintainer/integrating.html
-  // https://www.electron.build/docs/linux/
   extraMetadata: {
     desktopName: `${appId}.desktop`,
   },
-  files: ["out/**/*", "resources/**/*", "!resources/opencode-cli*"],
+  files: ["out/**/*", "resources/**/*"],
   extraResources: [
-    ...(channel === "dev"
-      ? [
-          {
-            from: "resources/",
-            to: "",
-            filter: ["opencode-cli*"],
-          },
-        ]
-      : []),
     {
       from: "native/",
       to: "native/",
@@ -74,7 +58,7 @@ const getBase = (appId: string): Configuration => ({
   ],
   mac: {
     category: "public.app-category.developer-tools",
-    icon: `resources/icons/icon.icns`,
+    icon: "resources/icons/icon.icns",
     hardenedRuntime: true,
     gatekeeperAssess: false,
     entitlements: "resources/entitlements.plist",
@@ -86,11 +70,11 @@ const getBase = (appId: string): Configuration => ({
     sign: true,
   },
   protocols: {
-    name: "OpenCode",
-    schemes: ["opencode"],
+    name: "Rika",
+    schemes: ["rika", "opencode"],
   },
   win: {
-    icon: `resources/icons/icon.ico`,
+    icon: "resources/icons/icon.ico",
     signtoolOptions: {
       sign: signWindows,
     },
@@ -100,17 +84,15 @@ const getBase = (appId: string): Configuration => ({
   nsis: {
     oneClick: true,
     perMachine: false,
-    installerIcon: `resources/icons/icon.ico`,
-    installerHeaderIcon: `resources/icons/icon.ico`,
+    installerIcon: "resources/icons/icon.ico",
+    installerHeaderIcon: "resources/icons/icon.ico",
   },
   linux: {
-    icon: `resources/icons`,
+    icon: "resources/icons",
     category: "Development",
     executableName: appId,
     desktop: {
       entry: {
-        // Match the installed .desktop file and hicolor icon basename so
-        // Linux shells can associate the running Electron window with its launcher.
         StartupWMClass: appId,
       },
     },
@@ -121,39 +103,37 @@ const getBase = (appId: string): Configuration => ({
 function getConfig() {
   const appId = APP_IDS[channel]
   const base = getBase(appId)
+  const publish = { provider: "github" as const, owner: "In-Time-Tec", repo: "rika", channel: "latest" }
 
   switch (channel) {
-    case "dev": {
+    case "dev":
       return {
         ...base,
         appId,
-        productName: "OpenCode Dev",
+        productName: "Rika Dev",
         deb: { fpm: [metainfoFpm(appId)] },
-        rpm: { packageName: "opencode-dev", fpm: [metainfoFpm(appId)] },
+        rpm: { packageName: "rika-dev", fpm: [metainfoFpm(appId)] },
       }
-    }
-    case "beta": {
+    case "beta":
       return {
         ...base,
         appId,
-        productName: "OpenCode Beta",
-        protocols: { name: "OpenCode Beta", schemes: ["opencode"] },
-        publish: { provider: "github", owner: "anomalyco", repo: "opencode-beta", channel: "latest" },
+        productName: "Rika Beta",
+        protocols: { name: "Rika Beta", schemes: ["rika", "opencode"] },
+        publish,
         deb: { fpm: [metainfoFpm(appId)] },
-        rpm: { packageName: "opencode-beta", fpm: [metainfoFpm(appId)] },
+        rpm: { packageName: "rika-beta", fpm: [metainfoFpm(appId)] },
       }
-    }
-    case "prod": {
+    case "prod":
       return {
         ...base,
         appId,
-        productName: "OpenCode",
-        protocols: { name: "OpenCode", schemes: ["opencode"] },
-        publish: { provider: "github", owner: "anomalyco", repo: "opencode", channel: "latest" },
+        productName: "Rika",
+        protocols: { name: "Rika", schemes: ["rika", "opencode"] },
+        publish,
         deb: { fpm: [metainfoFpm(appId), legacyDesktopEntryFpm] },
-        rpm: { packageName: "opencode", fpm: [metainfoFpm(appId), legacyDesktopEntryFpm] },
+        rpm: { packageName: "rika", fpm: [metainfoFpm(appId), legacyDesktopEntryFpm] },
       }
-    }
   }
 }
 

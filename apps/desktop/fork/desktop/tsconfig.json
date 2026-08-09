@@ -15,9 +15,41 @@
     "noEmit": true,
     "emitDeclarationOnly": false,
     "outDir": "node_modules/.ts-dist",
-    "types": ["vite/client", "node", "electron"]
+    "types": [
+      "vite/client",
+      "node",
+      "electron"
+    ],
+    "paths": {
+      "@rika/server/server-endpoint": [
+        "../../../server/src/server/process/server-endpoint.ts"
+      ],
+      "@rika/server/server-process-spawn": [
+        "../../../server/src/server/process/server-process-spawn.ts"
+      ],
+      "@rika/product/server-service": [
+        "../../../../packages/product/src/server/server-service.ts"
+      ],
+      "@rika/product/server-service-handshake": [
+        "../../../../packages/product/src/server/server-service-handshake.ts"
+      ],
+      "effect": [
+        "../../../../node_modules/effect/dist/index"
+      ],
+      "effect/*": [
+        "../../../../node_modules/effect/dist/*"
+      ],
+      "@/*": [
+        "../app/src/*"
+      ]
+    }
   },
-  "references": [{ "path": "../app" }],
-  "include": ["src", "package.json"],
-  "exclude": ["src/**/*.test.ts"]
+  "include": [
+    "src",
+    "../app/src/env.d.ts",
+    "package.json"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
+  ]
 }

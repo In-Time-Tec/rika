@@ -12,7 +12,6 @@ import {
   createDraftStore,
   ServerConnection,
   useCommand,
-  useWslServers,
   useLanguage,
 } from "@opencode-ai/app"
 import type { UpdaterState } from "@opencode-ai/app/updater"
@@ -27,7 +26,6 @@ import { initializationData } from "./initialization"
 import { DesktopFirstLaunchOnboarding } from "./onboarding"
 import { resetZoom, setPinchZoomEnabled, webviewZoom, zoomIn, zoomOut } from "./webview-zoom"
 import { windowFullscreen } from "./window-fullscreen"
-import { availableStartupServer, readyWslConnections } from "./wsl/connections"
 import "./styles.css"
 import { Splash } from "@opencode-ai/ui/logo"
 import { useTheme } from "@opencode-ai/ui/theme/context"
@@ -63,7 +61,7 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 const [updaterState, setUpdaterState] = createSignal<UpdaterState>({ status: "disabled" })
 void window.api.updater.subscribe(setUpdaterState)
 
-const deepLinkEvent = "opencode:deep-link"
+const deepLinkEvent = "rika:deep-link"
 
 type DesktopWindowState = {
   id?: string
@@ -71,9 +69,9 @@ type DesktopWindowState = {
 
 const emitDeepLinks = (urls: string[]) => {
   if (urls.length === 0) return
-  window.__OPENCODE__ ??= {}
-  const pending = window.__OPENCODE__.deepLinks ?? []
-  window.__OPENCODE__.deepLinks = [...pending, ...urls]
+  window.__RIKA__ ??= {}
+  const pending = window.__RIKA__.deepLinks ?? []
+  window.__RIKA__.deepLinks = [...pending, ...urls]
   window.dispatchEvent(new CustomEvent(deepLinkEvent, { detail: { urls } }))
 }
 
@@ -83,7 +81,7 @@ const listenForDeepLinks = () => {
 }
 
 function windowLastActiveUrlKey(windowID: string) {
-  return `opencode.desktop.window.${windowID}.last-active-url`
+  return `rika.desktop.window.${windowID}.last-active-url`
 }
 
 function getLastActiveUrl(windowID: string) {
@@ -162,8 +160,6 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
       return api
     }
   })()
-
-  const wslServersApi = os === "windows" ? window.api.wslServers : undefined
 
   return {
     platform: "desktop",
@@ -247,7 +243,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     recordFatalRendererError: (error) => window.api.recordFatalRendererError(error),
 
     restart: async () => {
-      await window.api.killSidecar().catch(() => undefined)
+      await window.api.stopRikaServer().catch(() => undefined)
       window.api.relaunch()
     },
 
@@ -257,7 +253,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
       const notification = new Notification(title, {
         body: description ?? "",
-        icon: "https://opencode.ai/favicon-96x96-v3.png",
+        icon: "/favicon-96x96.png",
       })
       notification.onclick = () => {
         void window.api.showWindow()
@@ -271,18 +267,6 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
       if (input instanceof Request) return fetch(input)
       return fetch(input, init)
     },
-
-    getDefaultServer: async () => {
-      const url = await window.api.getDefaultServerUrl().catch(() => null)
-      if (!url) return null
-      return ServerConnection.Key.make(url)
-    },
-
-    setDefaultServer: async (url: string | null) => {
-      await window.api.setDefaultServerUrl(url)
-    },
-
-    wslServers: wslServersApi,
 
     getDisplayBackend: async () => {
       return window.api.getDisplayBackend().catch(() => null)
@@ -334,7 +318,7 @@ function LoadingSplash() {
 function DesktopRoot(props: { windowState: DesktopWindowState }) {
   const platform = createPlatform(props.windowState)
   const loadLocale = async () => {
-    const current = await platform.storage?.("opencode.global.dat").getItem("language")
+    const current = await platform.storage?.("rika.global.dat").getItem("language")
     const legacy = current ? undefined : await platform.storage?.().getItem("language.v1")
     const raw = current ?? legacy
     if (!raw) return
@@ -345,10 +329,8 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
     return next satisfies Locale
   }
 
-  // Fetch sidecar credentials (available immediately, before health check)
-  const [sidecar] = createResource(() => window.api.awaitInitialization())
+  const [rika] = createResource(() => window.api.awaitInitialization())
 
-  const [defaultServer] = createResource(() => platform.getDefaultServer?.())
   const [locale] = createResource(loadLocale)
   const router = (props: BaseRouterProps) => (
     <DesktopMemoryRouter {...props} windowID={platform.windowID ?? "browser"} />
@@ -374,32 +356,22 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
   }
 
   function App() {
-    const wslServers = useWslServers()
     const language = useLanguage()
-    const ready = createMemo(
-      () => !defaultServer.loading && !sidecar.loading && !locale.loading && !wslServers.isLoading,
-    )
+    const ready = createMemo(() => !rika.loading && !locale.loading)
     const servers = createMemo(() => {
-      const data = initializationData(sidecar)
+      const data = initializationData(rika)
       const list: ServerConnection.Any[] = []
       if (data) {
         list.push({
           displayName: language.t("desktop.server.local"),
-          type: "sidecar",
-          variant: "base",
-          http: {
-            url: data.url,
-            username: data.username ?? undefined,
-            password: data.password ?? undefined,
-          },
+          type: "rika",
+          http: { url: data.url },
+          rika: data,
         })
       }
-      list.push(...readyWslConnections(wslServers.data, language.t("wsl.server.label")))
       return list
     })
-    const effectiveDefaultServer = createMemo(() =>
-      ServerConnection.Key.make(availableStartupServer(defaultServer.latest, wslServers.data)),
-    )
+    const effectiveDefaultServer = createMemo(() => ServerConnection.Key.make("rika"))
     return (
       <Show when={ready()} fallback={<LoadingSplash />}>
         <Show when={effectiveDefaultServer()} keyed>

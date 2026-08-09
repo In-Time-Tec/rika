@@ -11,7 +11,7 @@ test("tab busy indicator reflects the tab server's own session status", async ({
   await mockServers(page)
   await page.addInitScript(
     ({ serverA, serverB, sessionA, sessionB }) => {
-      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
+      localStorage.setItem("settings", JSON.stringify({ general: { newLayoutDesigns: true } }))
       localStorage.setItem("opencode.global.dat:server", JSON.stringify({ list: [serverB] }))
       localStorage.setItem(
         "opencode.window.browser.dat:tabs",
@@ -70,8 +70,8 @@ async function mockServers(page: Page) {
     if (url.pathname === `/session/${current.id}`) return json(route, current)
     if (/^\/session\/[^/]+$/.test(url.pathname)) return json(route, { name: "NotFoundError" }, 404)
     if (url.pathname === `/session/${current.id}/message`) return json(route, [])
-    if (/^\/session\/[^/]+\/(children|todo|diff)$/.test(url.pathname)) return json(route, [])
-    if (["/skill", "/command", "/lsp", "/formatter", "/permission", "/question", "/vcs/diff"].includes(url.pathname))
+    if (/^\/session\/[^/]+\/(children|diff)$/.test(url.pathname)) return json(route, [])
+    if (["/skill", "/command", "/lsp", "/formatter", "/permission", "/vcs/diff"].includes(url.pathname))
       return json(route, [])
     if (["/global/config", "/config", "/provider/auth", "/mcp"].includes(url.pathname)) return json(route, {})
     if (url.pathname === "/provider")

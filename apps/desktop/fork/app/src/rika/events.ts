@@ -7,10 +7,9 @@
 import { Effect } from "effect"
 import type { Connection } from "@rika/product/server-service"
 import type { InteractiveSession } from "@rika/product/interactive-session"
+import { OperationUnavailable } from "@rika/product/product-operation"
 
-export type ThreadFeedHandler = (
-  session: InteractiveSession,
-) => Effect.Effect<void, unknown>
+export type ThreadFeedHandler = (session: InteractiveSession) => Effect.Effect<void, unknown>
 
 /** Attach an interactive session to a thread and run its feed until closed. */
 export const runThreadFeed = (
@@ -26,7 +25,12 @@ export const runThreadFeed = (
       clientWorkspace: options.workspace,
       workspace: options.workspace,
       threadId: options.threadId,
-      last: options.threadId === undefined ? true : false,
+      last: false,
     },
-    { interactive: (_input, session) => handler(session) },
+    {
+      interactive: (_input, session) =>
+        handler(session).pipe(
+          Effect.mapError((error) => OperationUnavailable.make({ operation: "Interactive", message: String(error) })),
+        ),
+    },
   )

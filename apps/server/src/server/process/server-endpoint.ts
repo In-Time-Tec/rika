@@ -1,5 +1,6 @@
 import * as ServerService from "@rika/product/server-service"
-import { Crypto, Effect, Encoding, FileSystem, Option, Path } from "effect"
+import * as ServerHandshake from "@rika/product/server-service-handshake"
+import { Crypto, Effect, Encoding, FileSystem, Option, Path, Schema } from "effect"
 
 const tokenName = "server.token"
 const serverLog = /^server-.+-(\d+)\.open\.jsonl$/
@@ -12,6 +13,41 @@ export interface ServerEndpoint {
   readonly tokenPath: string
   readonly startupPath: string
 }
+
+export const ServerPublication = Schema.Struct({
+  port: Schema.Int,
+  pid: Schema.Int,
+  tokenPath: Schema.String,
+  version: Schema.String,
+  protocolVersion: Schema.Int,
+})
+export type ServerPublication = typeof ServerPublication.Type
+
+export class ServerPublicationError extends Schema.TaggedErrorClass<ServerPublicationError>()(
+  "ServerPublicationError",
+  {
+    reason: Schema.Literals(["unavailable", "invalid", "unsafe", "incompatible"]),
+    message: Schema.String,
+  },
+) {}
+
+export type PublishedEndpoint = {
+  readonly endpoint: ServerEndpoint
+  readonly token: string
+  readonly publication: ServerPublication
+}
+
+const publicationName = "server.json"
+const publicationMaxBytes = 16 * 1_024
+const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
+const decodePublication = Schema.decodeUnknownEffect(ServerPublication)
+const publicationFailure = (reason: ServerPublicationError["reason"], message: string) =>
+  ServerPublicationError.make({ reason, message })
+const unsafeToken = () =>
+  ServerService.ServerServiceError.make({
+    reason: "unsafe-token",
+    message: "Server credential is unsafe",
+  })
 
 export const resolve = Effect.fn("ServerEndpoint.resolve")(function* (profile: string, dataRoot: string) {
   const fs = yield* FileSystem.FileSystem
@@ -70,6 +106,38 @@ export const recordedServerProcesses = Effect.fn("ServerEndpoint.recordedProcess
   return [...processes].map(([pid, markers]) => ({ pid, markers }))
 })
 
+export const readToken = Effect.fn("ServerEndpoint.readToken")(function* (tokenPath: string) {
+  const fs = yield* FileSystem.FileSystem
+  const readLinkBefore = yield* Effect.result(fs.readLink(tokenPath))
+  if (readLinkBefore._tag === "Success") return yield* unsafeToken()
+
+  const before = yield* fs.stat(tokenPath).pipe(Effect.mapError(unsafeToken))
+  const token = (yield* fs.readFileString(tokenPath).pipe(Effect.mapError(unsafeToken))).trim()
+  const after = yield* fs.stat(tokenPath).pipe(Effect.mapError(unsafeToken))
+  const readLinkAfter = yield* Effect.result(fs.readLink(tokenPath))
+  const expectedUid = typeof process.getuid === "function" ? process.getuid() : undefined
+  const beforeUid = Option.getOrUndefined(before.uid)
+  const afterUid = Option.getOrUndefined(after.uid)
+  const beforeIno = Option.getOrUndefined(before.ino)
+  const afterIno = Option.getOrUndefined(after.ino)
+  if (
+    readLinkAfter._tag === "Success" ||
+    before.type !== "File" ||
+    after.type !== "File" ||
+    (before.mode & 0o777) !== 0o600 ||
+    (after.mode & 0o777) !== 0o600 ||
+    (expectedUid !== undefined && (beforeUid !== expectedUid || afterUid !== expectedUid)) ||
+    before.dev !== after.dev ||
+    beforeIno === undefined ||
+    afterIno === undefined ||
+    beforeIno !== afterIno ||
+    !/^[a-f0-9]{64}$/.test(token)
+  ) {
+    return yield* unsafeToken()
+  }
+  return token
+})
+
 export const readOrCreateToken = Effect.fn("ServerEndpoint.readOrCreateToken")(function* (tokenPath: string) {
   const fs = yield* FileSystem.FileSystem
   const crypto = yield* Crypto.Crypto
@@ -81,34 +149,85 @@ export const readOrCreateToken = Effect.fn("ServerEndpoint.readOrCreateToken")(f
       message: "Server credential could not be created",
     })
   }
-  if ((yield* Effect.result(fs.readLink(tokenPath)))._tag === "Success")
-    return yield* ServerService.ServerServiceError.make({
-      reason: "unsafe-token",
-      message: "Server credential is unsafe",
-    })
-  const before = yield* fs.stat(tokenPath)
-  const token = (yield* fs.readFileString(tokenPath)).trim()
-  const after = yield* fs.stat(tokenPath)
+  return yield* readToken(tokenPath)
+})
+
+export const readPublished = Effect.fn("ServerEndpoint.readPublished")(function* (input: {
+  readonly profile: string
+  readonly dataRoot: string
+}) {
+  const endpoint = yield* resolve(input.profile, input.dataRoot).pipe(
+    Effect.mapError(() => publicationFailure("unavailable", "Server publication is unavailable")),
+  )
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const publicationPath = path.join(endpoint.canonicalDataRoot, publicationName)
+  const readLinkBefore = yield* Effect.result(fs.readLink(publicationPath))
+  if (readLinkBefore._tag === "Success") {
+    return yield* publicationFailure("unsafe", "Server publication is unsafe")
+  }
+
+  const before = yield* fs
+    .stat(publicationPath)
+    .pipe(Effect.mapError(() => publicationFailure("unavailable", "Server publication is unavailable")))
   const expectedUid = typeof process.getuid === "function" ? process.getuid() : undefined
-  const ownerUid = Option.getOrUndefined(before.uid)
+  const beforeUid = Option.getOrUndefined(before.uid)
+  if (
+    before.type !== "File" ||
+    (before.mode & 0o777) !== 0o600 ||
+    (expectedUid !== undefined && beforeUid !== expectedUid) ||
+    before.size > BigInt(publicationMaxBytes)
+  ) {
+    return yield* publicationFailure("unsafe", "Server publication is unsafe")
+  }
+
+  const text = yield* fs
+    .readFileString(publicationPath)
+    .pipe(Effect.mapError(() => publicationFailure("unavailable", "Server publication is unavailable")))
+  const after = yield* fs
+    .stat(publicationPath)
+    .pipe(Effect.mapError(() => publicationFailure("unsafe", "Server publication is unsafe")))
+  const readLinkAfter = yield* Effect.result(fs.readLink(publicationPath))
+  const afterUid = Option.getOrUndefined(after.uid)
   const beforeIno = Option.getOrUndefined(before.ino)
   const afterIno = Option.getOrUndefined(after.ino)
   if (
-    before.type !== "File" ||
+    readLinkAfter._tag === "Success" ||
     after.type !== "File" ||
-    (before.mode & 0o077) !== 0 ||
-    (after.mode & 0o077) !== 0 ||
-    (expectedUid !== undefined && ownerUid !== expectedUid) ||
+    (after.mode & 0o777) !== 0o600 ||
+    (expectedUid !== undefined && afterUid !== expectedUid) ||
+    after.size > BigInt(publicationMaxBytes) ||
     before.dev !== after.dev ||
     beforeIno === undefined ||
     afterIno === undefined ||
-    beforeIno !== afterIno ||
-    !/^[a-f0-9]{64}$/.test(token)
+    beforeIno !== afterIno
   ) {
-    return yield* ServerService.ServerServiceError.make({
-      reason: "unsafe-token",
-      message: "Server credential is unsafe",
-    })
+    return yield* publicationFailure("unsafe", "Server publication is unsafe")
   }
-  return token
+
+  const json = yield* decodeJson(text).pipe(
+    Effect.mapError(() => publicationFailure("invalid", "Server publication is invalid")),
+  )
+  const publication = yield* decodePublication(json).pipe(
+    Effect.mapError(() => publicationFailure("invalid", "Server publication is invalid")),
+  )
+  if (publication.protocolVersion !== ServerHandshake.HandshakeProtocol.protocolVersion) {
+    return yield* publicationFailure("incompatible", "Server publication is incompatible")
+  }
+  if (
+    !Number.isSafeInteger(publication.pid) ||
+    publication.pid <= 0 ||
+    !Number.isSafeInteger(publication.port) ||
+    publication.port <= 0 ||
+    publication.port > 65_535 ||
+    publication.version.trim().length === 0 ||
+    publication.version.length > 1_024 ||
+    publication.port !== endpoint.port ||
+    publication.tokenPath !== endpoint.tokenPath
+  ) {
+    return yield* publicationFailure("invalid", "Server publication is invalid")
+  }
+
+  const token = yield* readToken(endpoint.tokenPath)
+  return { endpoint, token, publication } satisfies PublishedEndpoint
 })

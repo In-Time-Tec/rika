@@ -119,17 +119,6 @@ export function SessionContextTab() {
     { equals: same },
   )
 
-  const visibleUserMessages = createMemo(
-    () => {
-      const revert = info()?.revert?.messageID
-      if (!revert) return userMessages()
-      const boundary = userMessages().findIndex((message) => message.id === revert)
-      return boundary < 0 ? userMessages() : userMessages().slice(0, boundary)
-    },
-    emptyUserMessages,
-    { equals: same },
-  )
-
   const usd = createMemo(
     () =>
       new Intl.NumberFormat(language.intl(), {
@@ -157,7 +146,7 @@ export function SessionContextTab() {
   })
 
   const systemPrompt = createMemo(() => {
-    const msg = findLast(visibleUserMessages(), (m) => !!m.system)
+    const msg = findLast(userMessages(), (m) => !!m.system)
     const system = msg?.system
     if (!system) return
     const trimmed = system.trim()

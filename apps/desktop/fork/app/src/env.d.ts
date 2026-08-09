@@ -1,6 +1,7 @@
 interface ImportMetaEnv {
-  readonly VITE_OPENCODE_SERVER_HOST: string
-  readonly VITE_OPENCODE_SERVER_PORT: string
+  readonly VITE_RIKA_SERVER_URL?: string
+  readonly VITE_RIKA_SERVER_TOKEN?: string
+  readonly VITE_RIKA_SERVER_IDENTITY?: string
   readonly VITE_OPENCODE_CHANNEL?: "dev" | "beta" | "prod"
 
   readonly VITE_SENTRY_DSN?: string

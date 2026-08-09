@@ -1,18 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import type { AssistantMessage, Message, UserMessage } from "@opencode-ai/sdk/v2"
-import { isTimelineReady, loadOlderTimeline, selectUserMessages, selectVisibleUserMessages } from "./model"
+import { isTimelineReady, loadOlderTimeline, selectUserMessages } from "./model"
 
 const user = (id: string) => ({ id, role: "user" }) as UserMessage
 const assistant = (id: string) => ({ id, role: "assistant" }) as AssistantMessage
 
 describe("timeline model", () => {
-  test("selects users and applies the revert boundary", () => {
+  test("selects user messages", () => {
     const messages: Message[] = [user("msg_z"), assistant("msg_a"), user("msg_b"), user("msg_c")]
-    const users = selectUserMessages(messages)
-
-    expect(users.map((message) => message.id)).toEqual(["msg_z", "msg_b", "msg_c"])
-    expect(selectVisibleUserMessages(users, "msg_b").map((message) => message.id)).toEqual(["msg_z"])
-    expect(selectVisibleUserMessages(users)).toBe(users)
+    expect(selectUserMessages(messages).map((message) => message.id)).toEqual(["msg_z", "msg_b", "msg_c"])
   })
 
   test("waits for an assistant-only load to hydrate its user root", () => {

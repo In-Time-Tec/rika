@@ -92,6 +92,10 @@ describe("Operation thread actions", () => {
           .run({ _tag: "Thread", action: "list" })
           .pipe(Effect.provideService(Console.Console, requestConsole))
         expect(routedOutput).toHaveLength(1)
+        yield* operation
+          .run({ _tag: "ToolCatalog", action: "show", name: "read" })
+          .pipe(Effect.provideService(Console.Console, requestConsole))
+        expect(routedOutput).toHaveLength(2)
         yield* operation.run({ _tag: "Thread", action: "list", includeArchived: false, limit: 1 })
         yield* operation.run({ _tag: "Thread", action: "list", includeArchived: true, limit: 100 })
         yield* operation.run({ _tag: "Thread", action: "search", query: ["alpha", "urgent"] })

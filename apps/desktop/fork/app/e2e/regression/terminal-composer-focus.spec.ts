@@ -1,4 +1,4 @@
-import { base64Encode } from "@opencode-ai/core/util/encode"
+import { base64Encode, checksum } from "@opencode-ai/core/util/encode"
 import { expect, test, type Page } from "@playwright/test"
 import { mockOpenCodeServer } from "../utils/mock-server"
 import { expectSessionTitle } from "../utils/waits"
@@ -72,7 +72,7 @@ test.beforeEach(async ({ page }) => {
   )
   await page.routeWebSocket(new RegExp(`/api/pty/${ptyID}/connect`), () => undefined)
   await page.addInitScript(() => {
-    localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
+    localStorage.setItem("settings", JSON.stringify({ general: { newLayoutDesigns: true } }))
   })
 })
 
@@ -214,8 +214,14 @@ function seedCachedTerminal(page: Page) {
         }),
       )
     },
-    { terminalKey: `${base64Encode(directory)}/terminal.v1`, ptyID },
+    { terminalKey: terminalStorageKey(directory), ptyID },
   )
+}
+
+function terminalStorageKey(dir: string) {
+  const head = (dir.slice(0, 12) || "workspace").replace(/[^a-zA-Z0-9._-]/g, "-")
+  const sum = checksum(dir) ?? "0"
+  return `opencode.workspace.${head}.${sum}.dat:workspace:terminal`
 }
 
 function ptyLocation() {

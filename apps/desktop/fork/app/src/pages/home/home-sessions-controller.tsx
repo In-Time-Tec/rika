@@ -67,7 +67,12 @@ export function createHomeSessionsController(home: HomeController) {
       const cache = homeSessions()
       const eventSequence = cache.eventSequence()
       const index = await loadHomeSessionIndex(
-        (input, options) => ctx.sdk.client.v2.session.list(input, options),
+        (input, options) =>
+          ctx.sdk.api.session
+            .list({ limit: input.limit }, options)
+            .then((response) => ({
+              data: { data: (response.data ?? []) as unknown as Session[], cursor: {} },
+            })),
         eventSequence,
         signal,
       )
@@ -209,7 +214,6 @@ export function createHomeSessionsController(home: HomeController) {
         const ctx = home.server.focusedContext()
         if (!conn || !ctx) return
         const [, setStore] = ctx.sync.child(session.directory)
-        if ((await ctx.sdk.protocol) !== "v1") return
         await archiveHomeSession({
           server: ServerConnection.key(conn),
           session,

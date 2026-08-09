@@ -24,7 +24,7 @@ import { createEventListener } from "@solid-primitives/event-listener"
 import { matchesModelSearch } from "./dialog-select-model-search"
 
 const isFree = (provider: string, cost: { input: number } | undefined) =>
-  provider === "opencode" && (!cost || cost.input === 0)
+  provider === "openrouter" && (!cost || cost.input === 0)
 
 type ModelState = ReturnType<typeof useLocal>["model"]
 type ModelItem = ReturnType<ModelState["list"]>[number]
@@ -55,8 +55,7 @@ const ModelList: Component<{
   const language = useLanguage()
 
   const models = createMemo(() =>
-    model
-      .list()
+    (model.list() ?? [])
       .filter((m) => model.visible({ modelID: m.id, providerID: m.provider.id }))
       .filter((m) => (props.provider ? m.provider.id === props.provider : true)),
   )
@@ -259,8 +258,7 @@ function createModelSelectorController(input: {
 }) {
   const model = input.model ?? useLocal().model
   const allModels = createMemo(() =>
-    model
-      .list()
+    (model.list() ?? [])
       .filter((item) => model.visible({ modelID: item.id, providerID: item.provider.id }))
       .filter((item) => (input.provider() ? item.provider.id === input.provider() : true)),
   )

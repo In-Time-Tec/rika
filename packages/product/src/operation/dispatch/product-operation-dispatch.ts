@@ -76,7 +76,6 @@ export const productLayer = <
       Scope.Scope
     > {
       const ownerScope = yield* Effect.scope
-      const console = yield* Console.Console
       const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem)
       const path = yield* Effect.serviceOption(Path.Path)
       let activitySequence = 0
@@ -131,7 +130,6 @@ export const productLayer = <
         options,
         state,
         schedule,
-        console,
         fileSystem: Option.getOrUndefined(fileSystem),
         path: Option.getOrUndefined(path),
         executionDependencies: state.executionDependencies,

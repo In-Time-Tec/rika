@@ -4,6 +4,7 @@ import { createStore } from "solid-js/store"
 import {
   createServerProjects,
   migrateCanonicalLocalServerState,
+  migrateServerState,
   nextServerAfterRemoval,
   resolveServerList,
   ServerConnection,
@@ -11,88 +12,105 @@ import {
 import { ServerScope } from "@/utils/server-scope"
 
 describe("resolveServerList", () => {
-  test("lets startup auth_token credentials override a persisted same-url server", () => {
+  test("ignores persisted and startup HTTP connections", () => {
+    const native = {
+      type: "rika",
+      displayName: "Rika",
+      http: { url: "http://127.0.0.1:4096" },
+      rika: { url: "ws://127.0.0.1:4096/server", token: "token", identity: "desktop" },
+    } as const
+
     const list = resolveServerList({
-      stored: [{ url: "https://server.example.test" }],
+      stored: [
+        { url: "https://server.example.test", username: "legacy", password: "secret" },
+        native,
+      ],
       props: [
         {
           type: "http",
           authToken: true,
           http: {
             url: "https://server.example.test",
-            username: "opencode",
+            username: "legacy",
             password: "secret",
           },
         },
+        native,
       ],
     })
 
-    expect(list).toHaveLength(1)
-    expect(list[0]?.type).toBe("http")
-    expect(list[0]?.http).toEqual({
-      url: "https://server.example.test",
-      username: "opencode",
-      password: "secret",
-    })
-    expect(list[0]?.type === "http" ? list[0].authToken : false).toBe(true)
-    expect(ServerConnection.key(list[0]!) as string).toBe("https://server.example.test")
+    expect(list).toEqual([native])
   })
 
-  test("keeps persisted credentials when startup has no auth_token", () => {
-    const list = resolveServerList({
-      stored: [
-        {
-          url: "https://server.example.test",
-          username: "opencode",
-          password: "saved",
-        },
-      ],
-      props: [{ type: "http", http: { url: "https://server.example.test" } }],
-    })
+  test("preserves the native Rika descriptor from startup", () => {
+    const startup = {
+      type: "rika",
+      http: { url: "http://127.0.0.1:4096" },
+      rika: { url: "ws://127.0.0.1:4096/server", token: "fresh", identity: "desktop" },
+    } as const
+    const stored = {
+      type: "rika",
+      http: { url: "http://127.0.0.1:4096" },
+      rika: { url: "ws://127.0.0.1:4096/server", token: "stale", identity: "desktop" },
+    } as const
 
-    expect(list).toHaveLength(1)
-    expect(list[0]?.type).toBe("http")
-    expect(list[0]?.http).toEqual({
-      url: "https://server.example.test",
-      username: "opencode",
-      password: "saved",
-    })
-    expect(list[0]?.type === "http" ? list[0].authToken : true).toBeUndefined()
+    expect(resolveServerList({ stored: [stored], props: [startup] })).toEqual([startup])
   })
 })
 
-test("treats WSL sidecars as remote server connections", () => {
+test("migrates away legacy server records and scopes", () => {
+  const native = {
+    type: "rika",
+    http: { url: "http://127.0.0.1:4096" },
+    rika: { url: "ws://127.0.0.1:4096/server", token: "token", identity: "desktop" },
+  } as const
+  const result = migrateServerState({
+    list: [
+      { url: "https://legacy.example.test", username: "legacy", password: "secret" },
+      { type: "ssh", host: "legacy", http: { url: "http://127.0.0.1:4097" } },
+      native,
+    ],
+    projects: {
+      "https://legacy.example.test": [{ worktree: "/legacy", expanded: true }],
+      rika: [{ worktree: "/native", expanded: true }],
+    },
+    lastProject: { "https://legacy.example.test": "/legacy", rika: "/native" },
+    recentlyClosed: { "https://legacy.example.test": ["/legacy"], rika: ["/native"] },
+  }) as Record<string, unknown>
+
+  expect(result.list).toEqual([native])
+  expect(result.projects).toEqual({ rika: [{ worktree: "/native", expanded: true }] })
+  expect(result.lastProject).toEqual({ rika: "/native" })
+  expect(result.recentlyClosed).toEqual({ rika: ["/native"] })
+})
+
+test("treats the native Rika server as local", () => {
   expect(
     ServerConnection.local({
-      type: "sidecar",
-      variant: "wsl",
-      distro: "Debian",
-      http: { url: "http://127.0.0.1:4097" },
+      type: "rika",
+      http: { url: "http://127.0.0.1:4096" },
+      rika: { url: "ws://127.0.0.1:4096/server", token: "token", identity: "desktop" },
     }),
-  ).toBe(false)
-  expect(ServerConnection.local({ type: "sidecar", variant: "base", http: { url: "http://127.0.0.1:4096" } })).toBe(
-    true,
-  )
+  ).toBe(true)
   expect(ServerConnection.local({ type: "http", http: { url: "http://localhost:4096" } })).toBe(true)
   expect(ServerConnection.local({ type: "http", http: { url: "https://server.example.test" } })).toBe(false)
 })
 
 test("active server removal falls back across built-in and persisted servers", () => {
-  const local = { type: "sidecar", variant: "base", http: { url: "http://127.0.0.1:4096" } } as const
-  const debian = {
-    type: "sidecar",
-    variant: "wsl",
-    distro: "Debian",
-    http: { url: "http://127.0.0.1:4097" },
+  const local = {
+    type: "rika",
+    http: { url: "http://127.0.0.1:4096" },
+    rika: { url: "ws://127.0.0.1:4096/server", token: "token", identity: "desktop" },
   } as const
+  const remote = { type: "http", http: { url: "https://server.example.test" } } as const
 
   expect(
     nextServerAfterRemoval(
-      [local, debian],
-      ServerConnection.Key.make("wsl:Debian"),
-      ServerConnection.Key.make("sidecar"),
+      [local, remote],
+      ServerConnection.Key.make("https://server.example.test"),
+      ServerConnection.Key.make("rika"),
     ),
-  ).toBe(ServerConnection.Key.make("sidecar"))
+  ).toBe(ServerConnection.Key.make("rika"))
 })
 
 describe("createServerProjects", () => {
@@ -200,6 +218,17 @@ describe("createServerProjects", () => {
 })
 
 describe("migrateCanonicalLocalServerState", () => {
+  test("moves the legacy sidecar bucket into local scope", () => {
+    expect(
+      migrateCanonicalLocalServerState({
+        projects: { sidecar: [{ worktree: "/repo", expanded: true }] },
+        lastProject: { sidecar: "/repo" },
+      }),
+    ).toEqual({
+      projects: { local: [{ worktree: "/repo", expanded: true }] },
+      lastProject: { local: "/repo" },
+    })
+  })
   test("moves an existing canonical web bucket into local scope", () => {
     expect(
       migrateCanonicalLocalServerState(

@@ -61,9 +61,37 @@ export const validateWebSearchProviders = (credentials: Readonly<Record<string, 
       })
 }
 
+const desktopDefaults = {
+  modelAliases: {
+    "rika-free": {
+      preset: "openai",
+      provider: "openrouter",
+      candidates: ["openrouter/free"],
+      displayName: "OpenRouter Free",
+    },
+  },
+  modelRoutes: {
+    modes: {
+      low: { main: "rika-free", oracle: "rika-free" },
+      medium: { main: "rika-free", oracle: "rika-free" },
+      high: { main: "rika-free", oracle: "rika-free" },
+      ultra: { main: "rika-free", oracle: "rika-free" },
+    },
+    title: "rika-free",
+    compaction: "rika-free",
+  },
+} as const
+
+const isDesktopGlobalSettings = (filename: string) =>
+  process.env.RIKA_CLIENT === "desktop" && filename.replaceAll("\\", "/").endsWith("/.config/rika/settings.json")
+
 export const loadSettingsFile = Effect.fn("Main.loadSettingsFile")(function* (filename: string) {
   const fileSystem = yield* FileSystem.FileSystem
-  if (!(yield* fileSystem.exists(filename))) return {}
+  if (!(yield* fileSystem.exists(filename))) {
+    return isDesktopGlobalSettings(filename)
+      ? SettingsDecoder.Decoder.decodeSettingsInput(filename, desktopDefaults)
+      : {}
+  }
   const text = yield* fileSystem
     .readFileString(filename)
     .pipe(

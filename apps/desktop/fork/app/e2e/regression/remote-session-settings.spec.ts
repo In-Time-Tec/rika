@@ -153,7 +153,7 @@ type PermissionResponse = {
 async function configureServers(page: Page, tabs: { type: "session"; server: string; sessionId: string }[] = []) {
   await page.addInitScript(
     ({ serverB, tabs }) => {
-      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
+      localStorage.setItem("settings", JSON.stringify({ general: { newLayoutDesigns: true } }))
       localStorage.setItem("opencode.global.dat:server", JSON.stringify({ list: [serverB] }))
       localStorage.setItem("opencode.window.browser.dat:tabs", JSON.stringify(tabs))
     },
@@ -187,7 +187,7 @@ async function mockServers(page: Page, permissionRequests: string[], permissionR
     if (url.pathname === "/api/provider" || url.pathname === "/api/model" || url.pathname === "/api/agent")
       return json(route, { data: [] })
     if (url.pathname === "/api/model/default") return json(route, { data: null })
-    if (["/api/command", "/api/reference", "/api/permission/request", "/api/question/request"].includes(url.pathname))
+    if (["/api/command", "/api/reference", "/api/permission/request"].includes(url.pathname))
       return json(route, { location: { directory }, data: [] })
     if (url.pathname === "/api/mcp") return json(route, { location: { directory }, data: [] })
     if (url.pathname === "/api/mcp/resource")
@@ -215,12 +215,12 @@ async function mockServers(page: Page, permissionRequests: string[], permissionR
     if (current) return json(route, current)
     if (/^\/session\/[^/]+$/.test(url.pathname)) return json(route, { name: "NotFoundError" }, 404)
     if (/^\/session\/[^/]+\/message$/.test(url.pathname)) return json(route, [])
-    if (/^\/session\/[^/]+\/(children|todo|diff)$/.test(url.pathname)) return json(route, [])
+    if (/^\/session\/[^/]+\/(children|diff)$/.test(url.pathname)) return json(route, [])
     if (url.pathname === "/permission") {
       permissionRequests.push(url.toString())
       return json(route, [])
     }
-    if (["/skill", "/command", "/lsp", "/formatter", "/question", "/vcs/diff", "/pty/shells"].includes(url.pathname))
+    if (["/skill", "/command", "/lsp", "/formatter", "/vcs/diff", "/pty/shells"].includes(url.pathname))
       return json(route, [])
     if (["/global/config", "/config", "/provider/auth", "/mcp"].includes(url.pathname)) return json(route, {})
     if (url.pathname === "/provider") return json(route, provider(remote ? "server-b" : "server-a"))

@@ -4,18 +4,13 @@ import { useSettings } from "@/context/settings"
 import { createEffect, createResource } from "solid-js"
 import { createNewSessionDraftController } from "./new-session/new-session-draft-controller"
 import { NewSessionStatus, NewSessionView } from "./new-session/new-session-view"
-import { createNewSessionWorkspaceController } from "./new-session/new-session-workspace-controller"
 import { useNewSessionCommands } from "./new-session/use-new-session-commands"
 
 /** The draft-only V2 session page. Submitting promotes the draft into a real session. */
 export default function NewSessionPage() {
   const settings = useSettings()
   const rightMount = useTitlebarRightMount()
-  const workspace = createNewSessionWorkspaceController()
-  const draft = createNewSessionDraftController({
-    worktree: workspace.selection.value,
-    resetWorktree: workspace.selection.reset,
-  })
+  const draft = createNewSessionDraftController()
   const project = createPromptProjectController({
     controls: draft.project.controls,
     onDone: draft.input.restoreFocus,
@@ -42,7 +37,7 @@ export default function NewSessionPage() {
       {suspendUntilPromptReady()}
       <NewSessionStatus mount={rightMount} visible={settings.visibility.status} />
       <div class="flex-1 min-h-0 flex flex-col gap-2 p-2">
-        <NewSessionView input={draft.input} project={project} workspace={workspace} />
+        <NewSessionView input={draft.input} project={project} />
       </div>
     </div>
   )

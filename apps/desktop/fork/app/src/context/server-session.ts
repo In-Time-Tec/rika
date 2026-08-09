@@ -1,17 +1,7 @@
 import { Binary } from "@opencode-ai/core/util/binary"
 import { retry } from "@opencode-ai/core/util/retry"
 import type { OpenCodeEvent, SessionApi, SessionMessageInfo } from "@opencode-ai/client/promise"
-import type {
-  Message,
-  OpencodeClient,
-  Part,
-  PermissionRequest,
-  QuestionRequest,
-  Session,
-  SessionStatus,
-  Todo,
-} from "@opencode-ai/sdk/v2/client"
-import type { FileDiffInfo } from "@opencode-ai/client/promise"
+import type { Message, OpencodeClient, Part, PermissionRequest, Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { batch } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { message as cleanMessage } from "@/utils/diffs"
@@ -183,7 +173,7 @@ function reconcileFetched<T extends { id: string }>(
   return options.compare ? items.sort(options.compare) : items
 }
 
-type ServerSessionOptions = { retry?: typeof retry; protocol?: Promise<"v1" | "v2"> }
+type ServerSessionOptions = { retry?: typeof retry }
 
 export function createServerSession(
   client: OpencodeClient,
@@ -196,10 +186,7 @@ export function createServerSession(
   const [data, setData] = createStore({
     info: {} as Record<string, Session | undefined>,
     session_status: {} as Record<string, SessionStatus>,
-    session_diff: {} as Record<string, FileDiffInfo[]>,
-    todo: {} as Record<string, Todo[]>,
     permission: {} as Record<string, PermissionRequest[]>,
-    question: {} as Record<string, QuestionRequest[]>,
     message: {} as Record<string, Message[]>,
     session_message: {} as Record<string, SessionMessageInfo[]>,
     part: {} as Record<string, Part[]>,
@@ -210,7 +197,6 @@ export function createServerSession(
   })
   const requests = new Map<string, Promise<Session>>()
   const inflight = new Map<string, Promise<void>>()
-  const inflightTodo = new Map<string, Promise<void>>()
   const optimistic = new Map<string, Map<string, OptimisticItem>>()
   const v2 = createV2SessionReducer()
   const messageLoads = new Map<string, MessageLoadState>()
@@ -266,13 +252,9 @@ export function createServerSession(
         ...pinned.keys(),
         ...requests.keys(),
         ...inflight.keys(),
-        ...inflightTodo.keys(),
         ...messageLoads.keys(),
         ...optimistic.keys(),
         ...Object.entries(data.permission)
-          .filter(([, items]) => items.length > 0)
-          .map(([sessionID]) => sessionID),
-        ...Object.entries(data.question)
           .filter(([, items]) => items.length > 0)
           .map(([sessionID]) => sessionID),
         ...Object.entries(data.session_status)
@@ -325,8 +307,7 @@ export function createServerSession(
         !data.info[sessionID] &&
         !requests.has(sessionID) &&
         !messageLoads.has(sessionID) &&
-        !inflight.has(sessionID) &&
-        !inflightTodo.has(sessionID)
+        !inflight.has(sessionID)
       )
         generations.delete(sessionID)
     }
@@ -485,7 +466,6 @@ export function createServerSession(
       clearOptimistic(sessionID)
       requests.delete(sessionID)
       inflight.delete(sessionID)
-      inflightTodo.delete(sessionID)
       messageLoads.delete(sessionID)
       v2.clear(sessionID)
       pendingParts.delete(sessionID)
@@ -515,13 +495,9 @@ export function createServerSession(
       ...pinned.keys(),
       ...requests.keys(),
       ...inflight.keys(),
-      ...inflightTodo.keys(),
       ...messageLoads.keys(),
       ...optimistic.keys(),
       ...Object.entries(data.permission)
-        .filter(([, items]) => items.length > 0)
-        .map(([sessionID]) => sessionID),
-      ...Object.entries(data.question)
         .filter(([, items]) => items.length > 0)
         .map(([sessionID]) => sessionID),
       ...Object.entries(data.session_status)
@@ -535,7 +511,7 @@ export function createServerSession(
     )
 
   const fetchMessages = async (sessionID: string, limit: number, before?: string, onAttempt?: () => void) => {
-    if (messageApi && (await options?.protocol) !== "v1") {
+    if (messageApi) {
       const request = (cursor?: string) =>
         (options?.retry ?? retry)(() => {
           onAttempt?.()
@@ -582,7 +558,7 @@ export function createServerSession(
   }
 
   const fetchMessage = async (sessionID: string, messageID: string, onAttempt?: () => void) => {
-    if (sessionApi && (await options?.protocol) !== "v1") {
+    if (sessionApi) {
       const response = await (options?.retry ?? retry)(() => {
         onAttempt?.()
         return sessionApi.message({ sessionID, messageID })
@@ -975,12 +951,6 @@ export function createServerSession(
         next: event.data.at,
       })
     if (event.type === "session.forked") void resolve(sessionID, { force: true }).catch(() => {})
-    if (
-      event.type === "session.revert.staged" ||
-      event.type === "session.revert.cleared" ||
-      event.type === "session.revert.committed"
-    )
-      void resolve(sessionID, { force: true }).catch(() => {})
   }
 
   const apply = (event: { type: string; properties?: unknown }) => {
@@ -1015,11 +985,6 @@ export function createServerSession(
           produce((draft) => void delete draft[sessionID]),
         )
         evict([sessionID])
-        return
-      }
-      case "todo.updated": {
-        const props = event.properties as { sessionID: string; todos: Todo[] }
-        setData("todo", props.sessionID, reconcile(props.todos, { key: "id" }))
         return
       }
       case "session.status": {
@@ -1260,36 +1225,6 @@ export function createServerSession(
         )
         return
       }
-      case "question.asked": {
-        const question = event.properties as QuestionRequest
-        const questions = data.question[question.sessionID]
-        if (!questions) {
-          setData("question", question.sessionID, [question])
-          return
-        }
-        const result = Binary.search(questions, question.id, (item) => item.id)
-        if (result.found) setData("question", question.sessionID, result.index, reconcile(question))
-        if (!result.found)
-          setData(
-            "question",
-            question.sessionID,
-            produce((draft) => void draft.splice(result.index, 0, question)),
-          )
-        return
-      }
-      case "question.replied":
-      case "question.rejected": {
-        const props = event.properties as { sessionID: string; requestID: string }
-        setData(
-          "question",
-          props.sessionID,
-          produce((draft) => {
-            if (!draft) return
-            const result = Binary.search(draft, props.requestID, (item) => item.id)
-            if (result.found) draft.splice(result.index, 1)
-          }),
-        )
-      }
     }
   }
 
@@ -1376,21 +1311,6 @@ export function createServerSession(
         setData("message", input.sessionID, (messages) => messages?.filter((message) => message.id !== input.messageID))
         setData(produce((draft) => deleteMessageParts(draft, input.messageID)))
       },
-    },
-    async todo(sessionID: string, request?: { force?: boolean }) {
-      touch(sessionID)
-      if (data.todo[sessionID] !== undefined && !request?.force) return
-      if ((await options?.protocol) === "v2") {
-        setData("todo", sessionID, [])
-        return
-      }
-      return runInflight(inflightTodo, sessionID, () => {
-        const active = generation(sessionID)
-        return (options?.retry ?? retry)(() => client.session.todo({ sessionID })).then((result) => {
-          if (generations.get(sessionID) !== active) return
-          setData("todo", sessionID, reconcile(result.data ?? [], { key: "id" }))
-        })
-      })
     },
     history: {
       more: (sessionID: string) =>

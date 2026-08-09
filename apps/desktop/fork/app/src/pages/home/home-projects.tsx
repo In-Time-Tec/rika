@@ -14,17 +14,12 @@ export function HomeProjects(props: { projects: HomeProjectsController; scroll: 
       serverHealth={props.projects.server.health}
       projectsForServer={props.projects.server.projects}
       collapsed={props.projects.server.collapsed}
-      canDefaultServer={props.projects.server.canDefault}
-      defaultServerKey={props.projects.server.defaultKey}
       canRevealProject={props.projects.project.canReveal}
       unseenCount={props.projects.project.unseenCount}
       onWheel={props.scroll.viewport.containWheel}
       onChooseProject={props.projects.project.choose}
       onFocusServer={props.projects.server.focus}
       onToggleCollapsed={props.projects.server.toggleCollapsed}
-      onEditServer={props.projects.server.edit}
-      onSetDefaultServer={props.projects.server.setDefault}
-      onRemoveServer={props.projects.server.remove}
       onMoveProject={props.projects.project.move}
       onSelectProject={props.projects.project.select}
       onAddProjects={props.projects.project.add}

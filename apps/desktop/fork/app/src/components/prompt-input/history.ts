@@ -1,5 +1,5 @@
 import type { Prompt } from "@/context/prompt"
-import type { SelectedLineRange } from "@/context/file"
+import type { SelectedLineRange } from "@/context/file/types"
 
 const DEFAULT_PROMPT: Prompt = [{ type: "text", content: "", start: 0, end: 0 }]
 

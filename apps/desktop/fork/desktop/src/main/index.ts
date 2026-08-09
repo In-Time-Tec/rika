@@ -1,17 +1,19 @@
 import { randomUUID } from "node:crypto"
 import { mkdirSync, rmSync } from "node:fs"
 import * as http from "node:http"
-import { createServer } from "node:net"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { getCACertificates, setDefaultCACertificates } from "node:tls"
 import type { Event } from "electron"
 import { app, BrowserWindow } from "electron"
 
-import { Deferred, Effect, Fiber } from "effect"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as ServerProcessSpawn from "@rika/server/server-process-spawn"
+import { Deferred, Effect, Fiber, FileSystem } from "effect"
 import contextMenu from "electron-context-menu"
 
-import type { ServerReadyData } from "../preload/types"
+import type { RikaReadyData } from "../preload/types"
 import { checkAppExists, resolveAppPath } from "./apps"
 import { CHANNEL } from "./constants"
 import { registerIpcHandlers, sendDeepLinks, sendMenuCommand } from "./ipc"
@@ -24,13 +26,7 @@ import {
   isFirstLaunchOnboardingPending,
   isOldLayoutEligible,
 } from "./onboarding"
-import {
-  getDefaultServerUrl,
-  preferAppEnv,
-  setDefaultServerUrl,
-  spawnLocalServer,
-  type SidecarListener,
-} from "./server"
+import { preferDesktopEnv } from "./environment"
 import { setupAutoUpdater, showUpdaterDialog } from "./updater"
 import { safeWebContentsURL } from "./window-state"
 import {
@@ -42,30 +38,26 @@ import {
   setDockIcon,
   restoreMainWindows,
 } from "./windows"
-import { createWslServersController } from "./wsl/servers"
-import { registerWslIpcHandlers } from "./wsl/ipc"
-import { spawnWslSidecar } from "./wsl/sidecar"
 import { migrate } from "./migrate"
 import { cleanupStoreFiles } from "./store-cleanup"
-import { startBackgroundCli } from "./background-cli"
 import { setNativeTranslations } from "./native-translations"
+import { discoverRikaReadyData } from "./rika-endpoint"
 
 const APP_NAMES: Record<string, string> = {
-  dev: "OpenCode Dev",
-  beta: "OpenCode Beta",
-  prod: "OpenCode",
+  dev: "Rika Dev",
+  beta: "Rika Beta",
+  prod: "Rika",
 }
 const APP_IDS: Record<string, string> = {
-  dev: "ai.opencode.desktop.dev",
-  beta: "ai.opencode.desktop.beta",
-  prod: "ai.opencode.desktop",
+  dev: "ai.rika.desktop.dev",
+  beta: "ai.rika.desktop.beta",
+  prod: "ai.rika.desktop",
 }
 const TEST_ONBOARDING = process.env.OPENCODE_TEST_ONBOARDING === "1"
-const SIDECAR_VERSION = process.env.OPENCODE_SIDECAR_V2 === "1" ? "v2" : "v1"
 const jsCallStackFeature = "DocumentPolicyIncludeJSCallStacksInCrashReports"
 
 let logger: ReturnType<typeof initLogging>
-let server: SidecarListener | null = null
+let server: { readonly stop: () => Promise<void> } | null = null
 
 const pendingDeepLinks: string[] = []
 
@@ -85,7 +77,7 @@ function emitDeepLinks(urls: string[]) {
   if (win) sendDeepLinks(win, urls)
 }
 
-async function killSidecar() {
+async function stopRikaServer() {
   if (!server) return
   const current = server
   server = null
@@ -120,9 +112,7 @@ const main = Effect.gen(function* () {
     process.chdir(homedir())
   } catch {}
 
-  process.env.OPENCODE_DISABLE_EMBEDDED_WEB_UI = "true"
-
-  const appId = app.isPackaged ? APP_IDS[CHANNEL] : "ai.opencode.desktop.dev"
+  const appId = app.isPackaged ? APP_IDS[CHANNEL] : "ai.rika.desktop.dev"
   const onboardingTestRoot = ((): string | undefined => {
     if (!TEST_ONBOARDING) return
 
@@ -138,7 +128,7 @@ const main = Effect.gen(function* () {
     process.env.XDG_STATE_HOME = join(root, "state")
     return root
   })()
-  app.setName(app.isPackaged ? APP_NAMES[CHANNEL] : "OpenCode Dev")
+  app.setName(app.isPackaged ? APP_NAMES[CHANNEL] : "Rika Dev")
   app.setAppUserModelId(appId)
   app.setPath(
     "userData",
@@ -149,28 +139,10 @@ const main = Effect.gen(function* () {
   logger = initLogging()
   initCrashReporter()
 
-  const wslServers = createWslServersController(
-    app.getVersion(),
-    async (distro) => {
-      logger.log("spawning wsl sidecar", { distro })
-      return spawnWslSidecar(distro, {
-        onLine: (line) => logger.log("wsl sidecar", { distro, stream: line.stream, text: line.text }),
-      })
-    },
-    {
-      logger: {
-        log: (message, meta) => logger.log(message, meta),
-        error: (message, meta) => logger.error(message, meta),
-      },
-    },
-  )
-  const stopSidecars = async () => {
-    await killSidecar()
-    wslServers.stopAll()
-  }
+  const stopServer = () => stopRikaServer()
   const relaunch = () => {
     setAppQuitting()
-    void stopSidecars().finally(() => {
+    void stopServer().finally(() => {
       app.relaunch()
       app.quit()
     })
@@ -200,10 +172,10 @@ const main = Effect.gen(function* () {
     return
   }
 
-  const shellEnv = preferAppEnv(app.getPath("userData"))
+  preferDesktopEnv(app.getPath("userData"))
 
   app.on("second-instance", (_event: Event, argv: string[]) => {
-    const urls = argv.filter((arg: string) => arg.startsWith("opencode://"))
+    const urls = argv.filter((arg: string) => arg.startsWith("rika://") || arg.startsWith("opencode://"))
     if (urls.length) {
       logger.log("deep link received via second-instance", { urls })
       emitDeepLinks(urls)
@@ -221,14 +193,13 @@ const main = Effect.gen(function* () {
     emitDeepLinks([url])
   })
 
-  app.on("before-quit", () => {
+  let stoppingForQuit = false
+  app.on("before-quit", (event) => {
     setAppQuitting()
-    void stopSidecars()
-  })
-
-  app.on("will-quit", () => {
-    setAppQuitting()
-    void stopSidecars()
+    if (!server || stoppingForQuit) return
+    event.preventDefault()
+    stoppingForQuit = true
+    void stopServer().finally(() => app.quit())
   })
 
   app.on("child-process-gone", (_event, details) => {
@@ -246,11 +217,11 @@ const main = Effect.gen(function* () {
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => {
       setAppQuitting()
-      void stopSidecars().finally(() => app.quit())
+      void stopServer().finally(() => app.quit())
     })
   }
 
-  const serverReady = Deferred.makeUnsafe<ServerReadyData, unknown>()
+  const serverReady = Deferred.makeUnsafe<RikaReadyData, unknown>()
 
   yield* Effect.promise(() => app.whenReady())
 
@@ -268,10 +239,10 @@ const main = Effect.gen(function* () {
       }),
     ),
   )
-  app.setAsDefaultProtocolClient("opencode")
+  for (const scheme of ["rika", "opencode"] as const) app.setAsDefaultProtocolClient(scheme)
   registerRendererProtocol()
   setDockIcon()
-  const updater = setupAutoUpdater(stopSidecars)
+  const updater = setupAutoUpdater(stopRikaServer)
   const menuDeps = {
     trigger: (id: string) => {
       const win = getLastFocusedWindow()
@@ -281,7 +252,7 @@ const main = Effect.gen(function* () {
     relaunch,
   }
   registerIpcHandlers({
-    killSidecar: () => killSidecar(),
+    stopRikaServer: () => stopRikaServer(),
     relaunch,
     awaitInitialization: Effect.fnUntraced(
       function* () {
@@ -293,8 +264,6 @@ const main = Effect.gen(function* () {
       (e) => Effect.runPromise(e),
     ),
     consumeInitialDeepLinks: () => pendingDeepLinks.splice(0),
-    getDefaultServerUrl: () => getDefaultServerUrl(),
-    setDefaultServerUrl: (url) => setDefaultServerUrl(url),
     isFirstLaunchOnboardingPending,
     finishFirstLaunchOnboarding,
     isOldLayoutEligible,
@@ -311,7 +280,6 @@ const main = Effect.gen(function* () {
       if (setNativeTranslations(bundle)) createMenu(menuDeps)
     },
   })
-  registerWslIpcHandlers(wslServers)
   void updater.start()
   const updateTimer = setInterval(() => void updater.check(), 10 * 60 * 1000)
   updateTimer.unref()
@@ -325,83 +293,36 @@ const main = Effect.gen(function* () {
   )
 
   const loadingTask = yield* Effect.gen(function* () {
-    logger.log("sidecar connection started", { version: SIDECAR_VERSION })
+    const fs = yield* FileSystem.FileSystem
+    const profile = "default"
+    const dataRoot = join(app.getPath("userData"), "rika")
+    const executable = fileURLToPath(new URL("../../../../../server/dist/server-main.js", import.meta.url))
+    yield* fs.makeDirectory(dataRoot, { recursive: true, mode: 0o700 })
 
-    ensureLoopbackNoProxy()
-    useEnvProxy()
-
-    if (SIDECAR_VERSION === "v2") {
-      logger.log("spawning v2 sidecar")
-      const sidecar = yield* Effect.promise(() => startBackgroundCli(logger, shellEnv?.XDG_STATE_HOME))
-      yield* Deferred.succeed(serverReady, {
-        url: sidecar.url,
-        username: sidecar.username,
-        password: sidecar.password,
-      })
-
-      if (process.platform === "win32") {
-        void wslServers.initialize().catch((error) => logger.error("wsl server initialization failed", error))
-      }
-
-      logger.log("loading task finished")
-      return
-    }
-
-    const port = yield* Effect.gen(function* () {
-      const fromEnv = process.env.OPENCODE_PORT
-      if (fromEnv) {
-        const parsed = Number.parseInt(fromEnv, 10)
-        if (!Number.isNaN(parsed)) return parsed
-      }
-
-      const res = yield* Deferred.make<number, unknown>()
-      const socket = createServer()
-      socket.on("error", (e) => Deferred.failSync(res, () => e))
-      socket.listen(0, "127.0.0.1", () => {
-        const address = socket.address()
-        if (typeof address !== "object" || !address) {
-          socket.close()
-          Deferred.failSync(res, () => new Error("Failed to get port"))
-          return
-        }
-        const port = address.port
-        socket.close(() => Effect.runSync(Deferred.succeed(res, port)))
-      })
-
-      return yield* Deferred.await(res)
+    logger.log("spawning Rika server")
+    const started = yield* ServerProcessSpawn.spawn({
+      executable,
+      arguments: [],
+      cwd: homedir(),
+      environment: {
+        HOME: homedir(),
+        RIKA_INTERNAL_SERVER_DATA_ROOT: dataRoot,
+        RIKA_INTERNAL_SERVER_PROFILE: profile,
+      },
     })
-    const hostname = "127.0.0.1"
-    const url = `http://${hostname}:${port}`
-    const password = randomUUID()
+    yield* started.startup.pipe(Effect.onError(() => started.abort))
+    const ready = yield* discoverRikaReadyData({ profile, dataRoot }).pipe(Effect.onError(() => started.abort))
+    yield* started.detach.pipe(Effect.onError(() => started.abort))
 
-    logger.log("spawning sidecar", { url })
-    const { listener, health } = yield* Effect.promise(() =>
-      spawnLocalServer(hostname, port, password, {
-        userDataPath: app.getPath("userData"),
-        onStdout: (message) => writeLog("server", "stdout", { message }),
-        onStderr: (message) => writeLog("server", "stderr", { message }, "warn"),
-        onExit: (code) => writeLog("utility", "sidecar exited", { code }, "warn"),
-      }),
-    )
-    server = listener
-    yield* Deferred.succeed(serverReady, {
-      url,
-      username: "opencode",
-      password,
-    })
-
-    if (process.platform === "win32") {
-      void wslServers.initialize().catch((error) => logger.error("wsl server initialization failed", error))
+    let stopped = false
+    server = {
+      stop: () => {
+        if (stopped) return Promise.resolve()
+        stopped = true
+        return Effect.runPromise(started.abort)
+      },
     }
-
-    yield* Effect.promise(() => health.wait).pipe(
-      Effect.timeout("30 seconds"),
-      Effect.catch((e) =>
-        Effect.sync(() => {
-          logger.error("sidecar health check failed", e.toString())
-        }),
-      ),
-    )
+    yield* Deferred.succeed(serverReady, ready)
 
     logger.log("loading task finished")
   }).pipe(forwardInitializationFailure(serverReady), Effect.forkChild)
@@ -421,4 +342,4 @@ const main = Effect.gen(function* () {
   if (windows.length) createMenu(menuDeps)
 })
 
-Effect.runFork(main)
+Effect.runFork(Effect.scoped(main.pipe(Effect.provide(NodeServices.layer), Effect.andThen(Effect.never))))
