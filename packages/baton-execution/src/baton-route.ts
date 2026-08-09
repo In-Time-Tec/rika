@@ -16,6 +16,7 @@ import { CellTool, KernelPool, type KernelProfile } from "@batonfx/repl"
 import * as CellCallContext from "./baton-cell-call-context"
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
 import * as BindingModules from "@rika/kernel/binding-modules"
+import * as HarnessPromptSections from "@rika/kernel/harness-prompt-sections"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
@@ -486,13 +487,24 @@ export const configure = (
       if (name === "Title" || name === "Compaction") return Layer.orDie(model)
       return Layer.orDie(Layer.mergeAll(model, compactionLayer, cellLayer))
     }
+    const supplemental =
+      options.harnessSnapshot === undefined
+        ? ""
+        : HarnessPromptSections.block({
+            harness: options.harnessSnapshot,
+            skillListings: (options.skills ?? []).map((skill) => `- ${skill.name}`).join("\n"),
+            mcpServers: [],
+          })
     const cellSurface = BindingModules.cellInstructions({
       workspace: options.workspace,
       workspaceDigest: "",
       trustMode: options.kernel.trustMode ?? "trusted-local",
       servers: [],
     } as never)
-    const withSurface = (own: string) => agentInstructionsWith(cellSurface, own)
+    const withSurface = (own: string) =>
+      supplemental === ""
+        ? agentInstructionsWith(cellSurface, own)
+        : agentInstructionsWith(`${cellSurface}\n\n${supplemental}`, own)
     const profileInstructions = {
       Title: instructions.title,
       Oracle: instructions.Oracle,
