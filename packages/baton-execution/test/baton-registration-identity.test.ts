@@ -89,3 +89,27 @@ it.effect("fails reconstruction typed when the admitted kernel profile no longer
     }
   }),
 )
+
+it.effect("fails reconstruction typed when the host kernel profile drifts under an unchanged manifest", () =>
+  Effect.gen(function* () {
+    const executionRoute = testExecutionRoute()
+    const admitted = yield* configure({ executionRoute, workspace, kernel })
+    const drifted = yield* configure({
+      executionRoute,
+      workspace,
+      kernel: { ...kernel, trustMode: "trusted-workspace" },
+    })
+    const pinOf = (configured: {
+      readonly registrations: ReadonlyArray<{ readonly pin: string; readonly codec: string }>
+    }) => configured.registrations.find(({ codec }) => codec === Registration.codecs.kernelProfile.codec)?.pin
+    expect(pinOf(drifted)).not.toBe(pinOf(admitted))
+    const failure = yield* Effect.exit(
+      Registration.verify({
+        expected: drifted.registrations,
+        actual: admitted.registrations,
+        required: ExecutableRegistration.requiredPins(drifted.executable),
+      }),
+    )
+    expect(Exit.isFailure(failure)).toBe(true)
+  }),
+)

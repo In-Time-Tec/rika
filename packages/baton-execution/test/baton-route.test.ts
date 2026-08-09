@@ -23,6 +23,15 @@ const profileNameOf = (entry: ReturnType<typeof agentEntries>[number]) => entry.
 
 const modelCandidates = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
 
+/**
+ * Values a host holds as credentials. A registration that carried any of these would leak it into
+ * durable state, so the assertion names the real values rather than a word they happen to contain:
+ * a key like `sk-proj-0a1b2c3d` contains no such word and would pass an unconstrained search.
+ */
+const credentialValues = ["switchboard-secret", "sk-proj-0a1b2c3d4e5f", "ghp_0123456789abcdef", "hunter2"] as const
+
+const encodeRegistrations = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+
 it.effect("resolves complete ordered model candidates deterministically", () =>
   Effect.sync(() => {
     const first = ExecutionRouteResolution.resolve(Settings.Defaults.settingsDefaults, "medium", {
@@ -158,9 +167,9 @@ it.effect("builds one exact closed executable with role-specific tool and servic
     expect(() =>
       ExecutableManifest.validateRef(configured.executable.ref, configured.executable.manifest),
     ).not.toThrow()
-    expect(configured.registrations.every(({ payload }) => JSON.stringify(payload).includes("secret") === false)).toBe(
-      true,
-    )
+    const encodedRegistrations = encodeRegistrations(configured.registrations)
+    for (const credential of credentialValues) expect(encodedRegistrations).not.toContain(credential)
+
     expect(
       configured.registrations.every(
         (registration) => new TextEncoder().encode(JSON.stringify(registration)).byteLength <= 65_536,
@@ -306,6 +315,8 @@ it.effect("resolves an openai candidate through its configured api key environme
     expect(modelCandidates(selection?.registrationKey ?? "[]")).toEqual([
       ["openai", "gpt-5.6-sol", "switchboard-registration"],
     ])
+    const encoded = encodeRegistrations(configured.registrations)
+    for (const credential of credentialValues) expect(encoded).not.toContain(credential)
   }),
 )
 
