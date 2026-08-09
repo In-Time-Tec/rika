@@ -19,13 +19,10 @@ import { Effect, FileSystem, Layer, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { runtimeAgentPortLayer } from "./server-agent-port"
 
-/**
- * The workspace identity a harness `workspace` scope is keyed by. It must be a single path-safe
- * segment, so the digest of the absolute path is used rather than the path itself.
- */
 export { workspaceDigest, harnessStoreLayer, effectiveHarness } from "./server-kernel-harness"
 export type { Options } from "./server-kernel-options"
 
+/** Every executable skill the Execution pins its identity to. */
 export const discoverSkills = (options: Options) =>
   SkillRegistry.discover({
     globalRoot: globalPaths(options.home).skills,

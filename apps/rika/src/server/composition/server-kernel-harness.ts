@@ -5,6 +5,10 @@ import * as ScopePolicy from "@rika/kernel/harness-scope-policy"
 import { Crypto, Effect, Encoding, Function, Layer } from "effect"
 import type { Options } from "./server-kernel-options"
 
+/**
+ * The workspace identity a harness `workspace` scope is keyed by. It must be a single path-safe
+ * segment, so the digest of the absolute path is used rather than the path itself.
+ */
 export const workspaceDigest = (workspace: string): Effect.Effect<string, never, Crypto.Crypto> =>
   Crypto.Crypto.pipe(
     Effect.flatMap((crypto) => crypto.digest("SHA-256", new TextEncoder().encode(workspace))),
@@ -49,5 +53,3 @@ export const effectiveHarness: {
   (threadId: string | undefined): (options: Options) => ReturnType<typeof effectiveHarnessImpl>
   (options: Options, threadId: string | undefined): ReturnType<typeof effectiveHarnessImpl>
 } = Function.dual(2, effectiveHarnessImpl)
-
-/** Every executable skill the Execution pins its identity to. */

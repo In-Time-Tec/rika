@@ -51,4 +51,13 @@ describe("mounted surface", () => {
     expect(text).toContain('scope: "thread"|"workspace"|"global"')
     expect(text).toContain('profile: "Oracle"')
   })
+
+  it("refuses to describe an operation whose input is not a struct", () => {
+    // Printing an empty argument list would tell a model the operation takes nothing, which it would
+    // believe. No binding does this today, so the guard is what keeps it that way.
+    const odd = [{ name: "odd", operations: [{ name: "one", input: Schema.String }] }] as unknown as Parameters<
+      typeof surfaceOf
+    >[0]
+    expect(() => surfaceOf(odd)).toThrow("rika.odd.one has an input that is not a struct")
+  })
 })

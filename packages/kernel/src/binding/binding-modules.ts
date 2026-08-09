@@ -55,7 +55,14 @@ export const surfaceOf = (modules: ReadonlyArray<HostBindingRegistry.Module<Bind
             readonly members?: ReadonlyArray<Literal>
             readonly fields?: Record<string, Literal>
           }
-          const shape = (operation.input as unknown as { readonly fields?: Record<string, Literal> }).fields ?? {}
+          /**
+           * Every operation takes a struct, and one that does not cannot be described field by
+           * field. Defaulting to none would tell a model the operation takes no argument, so this
+           * refuses rather than describing a surface that is not there.
+           */
+          const shape = (operation.input as unknown as { readonly fields?: Record<string, Literal> }).fields
+          if (shape === undefined)
+            throw new Error(`rika.${module.name}.${operation.name} has an input that is not a struct`)
           const fields = Object.entries(shape).map(([field, value]) => {
             // An optional field wraps the schema it makes optional, so the allowed values sit one
             // level in. Naming them matters more than naming the field: a model that invents one
