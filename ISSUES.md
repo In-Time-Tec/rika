@@ -18,6 +18,6 @@ Dispatching on the incoming prompt instead was considered and rejected: a model 
 
 ## Twenty-two size findings the policy still reports
 
-`repository-policy` reports 15 export counts, 6 dependency counts, and 2 file sizes over their limits. Most predate this migration; the ones it added are the Server's kernel and product composition, which name every binding module, store, and service the runtime is built from. A composition root has high fan-in by nature, and splitting one to satisfy a count moves the wiring somewhere it reads worse.
+`repository-policy` reports 13 export counts, 6 dependency counts, and 2 file sizes over their limits. Every export count predates this migration except one that is genuinely shared across rendering modules; the counts this migration added are the Server's kernel and product composition, which name every binding module, store, and service the runtime is built from. A composition root has high fan-in by nature, and splitting one to satisfy a count moves the wiring somewhere it reads worse.
 
 The policy has no exemption for a composition boundary, which is the honest gap: either it grows one, or those two files are counted like any other and stay reported. Both are decisions about the rule rather than the code, so neither was made here.

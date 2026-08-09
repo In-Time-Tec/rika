@@ -51,13 +51,13 @@ const usage = (input: { readonly inputTokens?: number; readonly outputTokens?: n
   })
 
 /** One `rika.<module>.<operation>(input)` call a scripted cell makes. */
-export interface BindingCall {
+interface BindingCall {
   readonly module: string
   readonly operation: string
   readonly input?: unknown
 }
 
-export interface SpawnRequest {
+interface SpawnRequest {
   readonly profile: Profile
   readonly prompt: string
   readonly name?: string
