@@ -1,0 +1,17 @@
+# TypeScript cell
+
+Every conversational Rika Agent advertises exactly one model-facing tool, `typescript({ code })`. The Title Agent advertises none. A call is one TypeScript cell evaluated by a persistent Bun kernel owned per Baton Session, so declarations, imports, and values made in one cell remain available to later cells of the same Thread.
+
+Cells are never parallel-safe. One namespace means one cell at a time, and every call is an authored-order exclusive barrier. A cell returns its result value, `stdout`, `stderr`, duration, kernel epoch, sequence, and per-channel truncation counts. Source is bounded at 65,536 bytes, each output channel at 262,144 bytes, and one cell at a 120,000 millisecond deadline; a kernel released after five idle minutes is rebuilt on the next cell. Output beyond a bound is dropped and reported as dropped bytes and events rather than silently trimmed.
+
+Before the model's first cell, Rika evaluates one bootstrap cell that defines exactly two globals: `rika`, assembled from the mounted binding modules, and `context`, the current `rika.context.current({})` value. It runs on every worker start after snapshot restore, so both are live bindings over the current worker rather than restored values. A cell also reaches `console`, `require`, `Bun`, `process`, `fetch`, timers, and the other host globals the kernel provides, and dynamic `import` works and is recorded so it can be replayed on restore.
+
+The kernel profile pins the Bun runtime identity, the workspace and data root, the limits, the trust mode, and a bindings digest over the mounted module names, the bootstrap source, the importable executable skills, and the enabled MCP servers. Changing any of those yields a different profile digest and a new kernel epoch instead of a worker running a stale surface. The profile is registered under the `rika-kernel-profile` codec so a replayed Execution reconstructs the same kernel identity.
+
+Kernel memory is not durable authority. Baton operations, events, Session entries, and children are the only truth. Namespace snapshots are best-effort per-Session files under the data root: a missing snapshot is simply absent and a corrupt one is a typed, non-fatal report rather than a cell failure.
+
+What a snapshot can carry is narrower than what a cell can hold. Serializable values are captured as values, plain functions and classes as source that is re-evaluated, and dynamic imports as specifiers that are re-imported. A live handle, a module object, or anything unserializable is dropped with its reason. Restored and lost binding names are reported into the transcript, so a cell must never treat in-memory state as surviving a restart.
+
+A cell failure reaches the model as data. `CellExecutionFailed` means the cell threw: it carries the name, message, stack, and both output channels, and the namespace, the kernel, and every prior binding survive. `KernelUnavailable` means nothing was evaluated. `KernelProtocolViolation` means the kernel broke the cell protocol. `CellOutcomeUnknown` means the cell may or may not have committed its effects; it is resolved explicitly and is never replayed.
+
+The kernel runs with the authority of the OS user who started Rika. It is a lifecycle boundary, not a sandbox.
