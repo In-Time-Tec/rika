@@ -50,14 +50,14 @@ const InboxInput = Schema.Struct({ limit: Schema.Int.check(Schema.isGreaterThan(
 const Empty = Schema.Struct({})
 
 /**
- * The admission key is derived from the ambient operation identity and the host-assigned ordinal,
- * never from cell input, so two cells cannot collide and a replayed cell cannot mint a second child.
+ * The key one spawn is admitted under. It names the profile and the host-assigned ordinal, never
+ * cell input, so a replayed cell recomputes the same value and is recognised as the repeat it is.
  *
- * The operation identity is named once, by the ordinal's own scope: Baton composes the invocation
- * from the tool call and the origin it is given, so repeating the operation key here would embed the
- * same identity twice and grow it at every level of nesting.
+ * The cell it belongs to is named by the invocation Baton composes around this key, from the tool
+ * call and the origin the host supplies. Repeating that identity here would embed it twice and grow
+ * it at every level of nesting, which is what pushed a child's Session identity past its bound.
  */
-const admissionKey = (profile: string, ordinal: number) => Effect.succeed(`${profile}#${ordinal}`)
+const admissionKey = (profile: string, ordinal: number) => `${profile}#${ordinal}`
 
 export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<AgentPort | Requirements>> = [
   operation({
@@ -67,11 +67,9 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<AgentPor
     failure: Failure,
     handle: (input) =>
       Effect.flatMap(AgentPort, (port) =>
-        Effect.flatMap(admissionKey(input.profile, 0), (key) =>
-          nested(
-            { kind: "agents.spawn", payload: { profile: input.profile, prompt: input.prompt }, replayPolicy: "never" },
-            port.spawn({ profile: input.profile, prompt: input.prompt, key }),
-          ),
+        nested(
+          { kind: "agents.spawn", payload: { profile: input.profile, prompt: input.prompt }, replayPolicy: "never" },
+          port.spawn({ profile: input.profile, prompt: input.prompt, key: admissionKey(input.profile, 0) }),
         ),
       ),
   }),
