@@ -90,4 +90,6 @@ Running `subagent-live-stream.tui.test.ts` as a whole file exits 1 with five of 
 
 The lane it dies in is the largest one, and it dies after its renderer starts and before teardown. It passes alone, four times out of four. With its five predecessors it fails three times out of three, and with one or two predecessors it is intermittent, so the earlier lanes push something over a threshold rather than any pair being wrong together.
 
-Ruled out: renderer height, transcript volume, JS heap size, pool isolation, and a native crash — a failing run produces no crash report. Cause not yet found. Per-lane runs pass, which is how this was previously recorded as a green gate; it is not one.
+Ruled out: renderer height, transcript volume, JS heap size, pool isolation, leaked kernel worker processes, and a native crash report. Worker RSS grows monotonically across lanes — 459MB to 998MB over twelve samples — and the process dies at the peak. Raising the JavaScript RAM ceiling to 4GB made it worse rather than better, and a setup file registering exit, uncaught-exception, and abort-signal handlers produces no output at all, so the process is aborted without unwinding.
+
+That combination points at native allocation in the test renderer rather than JavaScript heap exhaustion. Cause not yet confirmed. Per-lane runs pass, which is how this was previously recorded as a green gate; it is not one.
