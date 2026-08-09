@@ -1,0 +1,17 @@
+# Open issues
+
+## A finished subagent keeps its name on the activity line
+
+A real session left `Running 1 subagent` on the activity line minutes after the turn that delegated had completed. Durable state was correct throughout: every turn `completed`, the `SubagentCard` read `complete`, and all Baton runs succeeded. The projection also tracked the child correctly _while_ it ran. Only the live client's own model kept a card in a running status.
+
+Not reproduced by any harness. The in-process suite clears the line in both the single-turn and second-turn shapes, so `terminal-overlay-reducer`'s guard on a matching active turn is not the mechanism — that hypothesis was tested and refuted. `apps/rika/test/subagent-live-stream.tui.test.ts` now holds the property a reader depends on and fails when a snapshot retains a stale activity.
+
+Reproducing it needs the real client with a child that answers, which the process harness cannot script today. See the note below.
+
+## The process harness serves one script to every profile
+
+`RIKA_TEST_MODEL_SCRIPT` carries a single script, registered once, and the server resolves the real execution route, so every profile reaches the same steps and a spawned child never answers. The in-process harness supports one lane per profile because `baton-test-harness` rewrites each profile's registration identity in a route it builds for tests.
+
+Closing this means giving the scripted model the same per-profile registration and applying those identities in the server when a test script is present. That places test-only routing in production composition, which is a real cost and the reason it has not been done for a presentation defect alone.
+
+Dispatching on the incoming prompt instead was considered and rejected: a model request carries no profile, so the only discriminator is the instruction text, and coupling a harness to prompt wording breaks the moment anyone rewords an instruction.
