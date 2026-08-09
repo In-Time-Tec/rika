@@ -60,6 +60,7 @@ it.effect("reports Baton's duplicate admission rather than always claiming a fre
     const admitted = yield* withPort(
       {
         spawn: () => Effect.succeed({ runId: "child-1", messageId: "m", acceptedSequence: 1, duplicate: true }),
+        inspect: () => Effect.succeed(runInspection("run-self") as never),
         inspectTree: () =>
           Effect.succeed({
             _tag: "Active",
@@ -94,6 +95,7 @@ it.effect("maps every Baton run status onto a status the cell contract names", (
     for (const status of statuses) {
       const mapped = yield* withPort(
         {
+          inspect: () => Effect.succeed(runInspection("run-self") as never),
           inspectTree: () =>
             Effect.succeed({
               _tag: "Active",

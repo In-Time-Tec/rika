@@ -17,8 +17,25 @@ const SpawnInput = Schema.Struct({
   prompt: Schema.String.check(Schema.isNonEmpty()),
 })
 const InspectInput = Schema.Struct({ childRunId: Schema.String.check(Schema.isNonEmpty()) })
+/**
+ * The longest a cell may wait for children, and the longest the host will wait however the cell
+ * asks. A cell may only narrow it: a larger request is rejected at decode rather than quietly
+ * clamped, so an author learns the bound instead of guessing at it. It stays far below the profile's
+ * cell deadline, so waiting here can never be what ends the cell that waits.
+ */
+export const maxWaitMillis = 30_000
+
+/** How often a wait re-reads durable child state. */
+const pollIntervalMillis = 50
+
+/** The statuses a child can no longer leave, matching Baton's own terminal rule. */
+const terminalStatuses: ReadonlySet<typeof ChildInspection.Type.status> = new Set(["succeeded", "failed", "cancelled"])
+
 const JoinInput = Schema.Struct({
   childRunIds: Schema.Array(Schema.String.check(Schema.isNonEmpty())).check(Schema.isMaxLength(64)),
+  waitMillis: Schema.optionalKey(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(maxWaitMillis)),
+  ),
 })
 const CancelInput = Schema.Struct({
   childRunId: Schema.String.check(Schema.isNonEmpty()),
@@ -73,9 +90,12 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<AgentPor
     handle: (input) => Effect.flatMap(AgentPort, (port) => port.inspect(input.childRunId)),
   }),
   /**
-   * Named for what it does. A cell runs under a deadline the host enforces, so a call that blocked
-   * until children settled would turn a slow child into the deadline of the cell that spawned it.
-   * Admission is non-blocking and observation is explicit; a cell that wants to wait polls this.
+   * Named for what it does: it reports, and `waitMillis` only says how long it is willing to look.
+   *
+   * Admission stays non-blocking, so a cell that wants a child's result waits here explicitly and
+   * under a ceiling the host owns. A wait that elapses is not a failure — the children are reported
+   * in whatever state they are in and the cell reads `status`, because a child still working is an
+   * ordinary outcome rather than an error every authored cell must handle.
    */
   operation({
     name: "inspectAll",
@@ -83,7 +103,24 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<AgentPor
     output: Schema.Array(ChildInspection),
     failure: Failure,
     handle: (input) =>
-      Effect.flatMap(AgentPort, (port) => Effect.forEach(input.childRunIds, (childRunId) => port.inspect(childRunId))),
+      Effect.flatMap(AgentPort, (port) => {
+        const inspectAll = Effect.forEach(input.childRunIds, (childRunId) => port.inspect(childRunId))
+        if (input.waitMillis === undefined) return inspectAll
+        const deadline = Math.min(input.waitMillis, maxWaitMillis)
+        const settled = (children: ReadonlyArray<typeof ChildInspection.Type>) =>
+          children.every((child) => terminalStatuses.has(child.status))
+        const poll = (
+          remaining: number,
+        ): Effect.Effect<ReadonlyArray<typeof ChildInspection.Type>, AgentDirectoryUnavailable> =>
+          Effect.flatMap(inspectAll, (children) =>
+            settled(children) || remaining <= 0
+              ? Effect.succeed(children)
+              : Effect.sleep(Math.min(pollIntervalMillis, remaining)).pipe(
+                  Effect.andThen(Effect.suspend(() => poll(remaining - pollIntervalMillis))),
+                ),
+          )
+        return poll(deadline)
+      }),
   }),
   operation({
     name: "cancel",

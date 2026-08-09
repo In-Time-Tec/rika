@@ -67,8 +67,10 @@ export interface SpawnRequest {
  * A cell that awaits one binding and returns its value. The model can only act through the cell, so
  * a scripted tool call is scripted cell source, and the source is what the transcript projects.
  */
-const bindingSource = (call: BindingCall): string =>
-  `await rika.${call.module}.${call.operation}(${JSON.stringify(call.input ?? {})})`
+const callSource = (call: BindingCall): string =>
+  `rika.${call.module}.${call.operation}(${JSON.stringify(call.input ?? {})})`
+
+const bindingSource = (call: BindingCall): string => `await ${callSource(call)}`
 
 const spawnCall = (child: SpawnRequest): BindingCall => ({
   module: "agents",
@@ -96,11 +98,16 @@ export const step = {
   cell: (code: string, id: string): Part => TestModel.toolCall(CellTool.name, { code }, { id }),
   binding: (call: BindingCall, id: string): Part => step.cell(bindingSource(call), id),
   bindings: (calls: ReadonlyArray<BindingCall>, id: string): Part => step.cell(calls.map(bindingSource).join("\n"), id),
+  /**
+   * Several children are admitted concurrently, so the calls enter `Promise.all` UNAWAITED. An
+   * `await` inside the array literal settles each admission before the next begins, which is
+   * sequential delegation wearing the shape of parallel delegation.
+   */
   spawn: (children: ReadonlyArray<SpawnRequest>, id: string): Part =>
     step.cell(
       children.length === 1
         ? bindingSource(spawnCall(children[0]!))
-        : `await Promise.all([${children.map((child) => bindingSource(spawnCall(child))).join(", ")}])`,
+        : `await Promise.all([${children.map((child) => callSource(spawnCall(child))).join(", ")}])`,
       id,
     ),
   failure: (description: string, delayMillis?: number): Step =>

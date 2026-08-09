@@ -121,10 +121,28 @@ const ambientRuntime = Effect.flatMap(Effect.serviceOption(Runtime.Runtime), (ru
  * honest when a cell somehow reaches it outside an execution.
  */
 const make: Effect.Effect<AgentPort["Service"]> = Effect.sync(() => {
+  /**
+   * A Run's direct children, read from its TREE.
+   *
+   * The tree is addressed by its ROOT, not by any Run in it: Baton records a tree root only for a
+   * Run whose id is its own root, so inspecting a nested parent directly reports no such tree. A
+   * subagent that spawns its own child is exactly that case, so the root is resolved first and the
+   * children are filtered out of the whole tree.
+   */
+  const rootOf = (
+    runtime: Runtime.Runtime["Service"],
+    runId: string,
+  ): Effect.Effect<string, AgentDirectoryUnavailable> =>
+    runtime.inspect(runId).pipe(
+      Effect.mapError(failed),
+      Effect.flatMap((own) =>
+        own.parentRunId === undefined ? Effect.succeed(runId) : rootOf(runtime, own.parentRunId),
+      ),
+    )
   const children = (parentRunId: string) =>
     Effect.flatMap(ambientRuntime, (runtime) =>
-      RunTree.inspect(parentRunId).pipe(
-        Effect.provideService(Runtime.Runtime, runtime),
+      rootOf(runtime, parentRunId).pipe(
+        Effect.flatMap((rootRunId) => RunTree.inspect(rootRunId).pipe(Effect.provideService(Runtime.Runtime, runtime))),
         Effect.map((inspection) =>
           inspection.runs
             .filter((entry) => entry.parentRunId === parentRunId)
@@ -141,18 +159,27 @@ const make: Effect.Effect<AgentPort["Service"]> = Effect.sync(() => {
       ),
     )
   /**
-   * The ordinal a spawn is admitted under, counted from the children this operation has already
-   * admitted in durable state rather than from an in-process counter.
+   * The ordinal one spawn is admitted under, read from the children this operation already admitted
+   * under the SAME admission key.
    *
-   * The ordinal is what makes two spawns of the SAME profile from one cell distinct: the admission
-   * key the binding supplies names only the profile, so without this both would carry one key and
-   * Baton would treat the second as a duplicate of the first and admit one child instead of two.
+   * The ordinal separates two spawns that share a key, which is what two spawns of one profile from
+   * one cell do. It cannot be a count of all children this operation admitted: a replayed cell
+   * re-runs its spawns, and a count would climb past the ordinals the first attempt used and mint a
+   * fresh child for every replay. Scoping the sequence to the key makes it recompute the same
+   * values, so a replayed spawn presents the key Baton already recorded and is recognised as the
+   * duplicate it is.
    */
-  const originFor = (self: { readonly runId: string; readonly toolCallId: string }) =>
-    Effect.map(children(self.runId), (admitted) => ({
-      operationKey: self.toolCallId,
-      ordinal: admitted.filter((child) => child.origin?.operationKey === self.toolCallId).length,
-    }))
+  const originFor = (self: { readonly runId: string; readonly toolCallId: string }, key: string) =>
+    Effect.map(children(self.runId), (admitted) => {
+      const ordinals = admitted.flatMap((child) =>
+        child.origin?.operationKey === self.toolCallId &&
+        child.invocationId !== undefined &&
+        ChildAdmission.admissionOf(child.invocationId)?.key === key
+          ? [child.origin.ordinal]
+          : [],
+      )
+      return { operationKey: self.toolCallId, ordinal: ordinals.length }
+    })
   const ownedChild = (parentRunId: string, childRunId: string) =>
     Effect.flatMap(children(parentRunId), (all) => {
       const found = all.find((child) => child.childRunId === childRunId)
@@ -163,7 +190,7 @@ const make: Effect.Effect<AgentPort["Service"]> = Effect.sync(() => {
   return AgentPort.of({
     spawn: (input) =>
       Effect.flatMap(identity, (self) =>
-        Effect.flatMap(originFor(self), (origin) =>
+        Effect.flatMap(originFor(self, input.key), (origin) =>
           Effect.flatMap(ambientRuntime, (runtime) =>
             runtime
               .spawn({

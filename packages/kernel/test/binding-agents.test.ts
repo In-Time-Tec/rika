@@ -127,6 +127,61 @@ describe("agents binding", () => {
     }),
   )
 
+  it.live("inspectAll waits until every child is terminal, then reports them", () =>
+    Effect.gen(function* () {
+      let reads = 0
+      const mounted = yield* registry(
+        port({
+          inspect: (childRunId) => {
+            reads = reads + 1
+            // The child settles only after the first poll, so a returned "succeeded" proves waiting.
+            return Effect.succeed({ childRunId, status: reads > 2 ? ("succeeded" as const) : ("running" as const) })
+          },
+        }),
+      )
+      const response = yield* mounted.invoke({
+        module: "agents",
+        operation: "inspectAll",
+        input: { childRunIds: ["a"], waitMillis: 5_000 },
+      })
+      expect(response).toEqual({ _tag: "Success", output: [{ childRunId: "a", status: "succeeded" }] })
+    }),
+  )
+
+  it.effect("inspectAll reports a still-running child when the wait elapses rather than failing", () =>
+    Effect.gen(function* () {
+      const mounted = yield* registry()
+      const response = yield* mounted.invoke({
+        module: "agents",
+        operation: "inspectAll",
+        input: { childRunIds: ["a"], waitMillis: 0 },
+      })
+      // A child that is still working is an ordinary outcome, so the cell reads status rather than
+      // handling an error.
+      expect(response).toEqual({ _tag: "Success", output: [{ childRunId: "a", status: "running" }] })
+    }),
+  )
+
+  it.effect("refuses a wait longer than the host ceiling instead of silently clamping it", () =>
+    Effect.gen(function* () {
+      const mounted = yield* registry()
+      // A bound the schema rejects never reaches the handler, so it fails the call rather than
+      // returning an outcome: a cell that asks for more than the host allows is told so.
+      const refused = yield* Effect.flip(
+        mounted.invoke({
+          module: "agents",
+          operation: "inspectAll",
+          input: { childRunIds: ["a"], waitMillis: AgentsBinding.maxWaitMillis + 1 },
+        }),
+      )
+      expect(refused._tag).toBe("@batonfx/repl/HostBindingSchemaFailure")
+      if (refused._tag === "@batonfx/repl/HostBindingSchemaFailure") {
+        expect(refused.stage).toBe("decode-input")
+        expect(refused.message).toContain(String(AgentsBinding.maxWaitMillis))
+      }
+    }),
+  )
+
   it.effect("journals spawn and cancel across the durable seam and leaves reads alone", () =>
     Effect.gen(function* () {
       const recorder = journal()
