@@ -18,7 +18,7 @@ export function WordmarkV2(props: Pick<ComponentProps<"svg">, "class">) {
         <g mask={`url(#${mask})`}>
           <g opacity="0.16">
             <g opacity="0.7">
-              <RikaWordmarkPaths leadingFill="currentColor" trailingFill="currentColor" />
+              <RikaWordmarkPaths fill="currentColor" />
             </g>
           </g>
         </g>

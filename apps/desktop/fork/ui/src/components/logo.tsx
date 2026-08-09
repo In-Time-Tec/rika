@@ -31,7 +31,7 @@ export const Logo = (props: { class?: string }) => {
       aria-label="Rika"
       classList={{ [props.class ?? ""]: !!props.class }}
     >
-      <RikaWordmarkPaths leadingFill="var(--icon-base)" trailingFill="var(--icon-strong-base)" />
+      <RikaWordmarkPaths fill="var(--icon-strong-base)" />
     </svg>
   )
 }
