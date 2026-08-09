@@ -177,6 +177,84 @@ const program = Effect.scoped(
         "packaged run",
         `Deterministic packaged run did not complete a cell turn: ${executed.slice(0, 2_000)}`,
       )
+    /**
+     * A refinement a cell makes is read once per Server, so proving it reached anything needs two
+     * runs: one that writes it and a second whose prompt carries it. The packaged binary is the only
+     * place this shows, because a harness that never reaches a prompt still stores and reads back
+     * exactly like one that does.
+     */
+    const refineScript = yield* Schema.encodeUnknownEffect(UnknownJson)([
+      {
+        parts: [
+          {
+            type: "toolCall",
+            name: "typescript",
+            params: {
+              code: [
+                `const pinned = await rika.harness.snapshot({"scope":"global"})`,
+                `const content = ["RELEASE", "SMOKE", "HARNESS", "MARKER"].join("_")`,
+                `await rika.harness.createMemory({"id":"release-smoke","title":"Release smoke","content":content,"baseSnapshot":pinned.snapshotId,"scope":"global"})`,
+                `"refined"`,
+              ].join("\n"),
+            },
+          },
+        ],
+      },
+      { parts: [{ type: "text", text: "SMOKE_COMPLETE" }] },
+    ]).pipe(mapFailure("encode refinement script"))
+    /**
+     * A Server outlives the `run` that started it and keeps the script it booted with, so these two
+     * runs need a home of their own: sharing the one above would replay that run's script instead of
+     * these, and the second assertion would pass against the wrong cell entirely.
+     */
+    const harnessHome = path.join(temporary, "harness-home")
+    yield* fileSystem.makeDirectory(harnessHome, { recursive: true }).pipe(mapFailure("seed harness home"))
+    /**
+     * The two runs need separate durable journals, which live under the home rather than at
+     * RIKA_DATABASE: sharing one replays the first run's turn and the second assertion passes
+     * against a cell that never ran. Copying the harness store between the two homes is what leaves
+     * the refinement, and only the refinement, carried across.
+     */
+    const recallHome = path.join(temporary, "recall-home")
+    yield* fileSystem.makeDirectory(recallHome, { recursive: true }).pipe(mapFailure("seed recall home"))
+    const refined = yield* output(["run", "--stream-json", "refine"], {
+      HOME: harnessHome,
+      RIKA_DATABASE: path.join(harnessHome, "rika.db"),
+      RIKA_TEST_MODEL_SCRIPT: refineScript,
+    })
+    if (!refined.includes(`"result":"refined"`))
+      return yield* failure("packaged harness", `Packaged run did not refine its harness: ${refined.slice(-2_000)}`)
+    const recallScript = yield* Schema.encodeUnknownEffect(UnknownJson)([
+      {
+        parts: [
+          {
+            type: "toolCall",
+            name: "typescript",
+            params: {
+              code: [
+                `const pinned = await rika.harness.snapshot({"scope":"global"})`,
+                `pinned.entries.memory.some((entry) => entry.content === ["RELEASE", "SMOKE", "HARNESS", "MARKER"].join("_")) ? "carried" : "lost"`,
+              ].join("\n"),
+            },
+          },
+        ],
+      },
+      { parts: [{ type: "text", text: "SMOKE_COMPLETE" }] },
+    ]).pipe(mapFailure("encode recall script"))
+    yield* fileSystem
+      .copy(path.join(harnessHome, ".config"), path.join(recallHome, ".config"))
+      .pipe(mapFailure("carry the harness store"))
+    const carried = yield* output(["run", "--stream-json", "recall"], {
+      HOME: recallHome,
+      RIKA_DATABASE: path.join(recallHome, "rika.db"),
+      RIKA_TEST_MODEL_SCRIPT: recallScript,
+    })
+    const stored = yield* fileSystem.exists(path.join(harnessHome, ".config", "rika", "harness", "global.json"))
+    if (!carried.includes(`"result":"carried"`))
+      return yield* failure(
+        "packaged harness",
+        `A refinement one run stored was not readable by the next: ${carried.slice(-2_000)} stored=${stored} carriedTail=${carried.slice(-600)}`,
+      )
     const threads = yield* output(["threads", "list"])
     const decoded = yield* Schema.decodeUnknownEffect(ThreadsJson)(threads).pipe(mapFailure("decode threads list"))
     if (decoded.length !== 1) return yield* failure("threads list", `Expected one thread, saw ${decoded.length}`)

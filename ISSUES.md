@@ -59,3 +59,11 @@ The join is covered by running the packaged binary: a memory written in one turn
 So rollback is usable for the most recent refinement and nothing else, and the reason it gives describes the entry rather than the ordering. Either the derived proposal should not carry a historical baseline, or a non-latest rollback should say that plainly.
 
 Worth noting for whoever fixes it: `rollback` is the one binding operation reaching `applyTrustedProposal` rather than `applyProposal`, which is correct — the inverse of a delete has to restore the original version and timestamps — and it is safe because the proposal is derived from a stored event rather than from cell input.
+
+## The stream shows what a model did, not what it was told
+
+`--stream-json` carries the projection: turns, tool calls, cell source, cell results. It never carries the system prompt. `available on rika`, which is in every agent's instructions, appears zero times in it.
+
+That matters because a marker written by a cell appears in the stream anyway — echoed back inside the source of the turn that wrote it. Counting occurrences of a marker across two runs therefore proves nothing about the prompt, and reads as a convincing pass. The release-smoke round trip asserts on a value the second cell computed by reading the harness back, which is a claim the stream can actually support: a refinement one run stores is readable by the next.
+
+What still has no automated proof is the last hop, that the supplement reaches the model's instructions. It is a one-line composition covered by inspection only, for the reason recorded above.
