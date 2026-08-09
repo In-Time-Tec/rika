@@ -22,6 +22,12 @@ Dispatching on the incoming prompt instead was considered and rejected: a model 
 
 The policy has no exemption for a composition boundary, which is the honest gap: either it grows one, or those two files are counted like any other and stay reported. Both are decisions about the rule rather than the code, so neither was made here.
 
+## A process a cell starts cannot be watched or stopped
+
+`processes.start` returns an id, and both `status` and `stop` reject it. Start reaches the registry the coding-tool runtime builds for itself; stop resolves `ShellProcessRegistry.Service` from the binding surface, and each build closes over its own counter and entry map. Verified against the packaged binary with a live cell: `start` succeeds and returns `processId` `"1"`, and a `status` call naming that id fails before producing a result.
+
+So a cell can launch work and then neither watch it nor end it, which leaves waiting for the turn to finish as the only option. The two registries have to become one, and the change carries a lifetime question: the registry's finalizer terminates every process it tracks, so whichever scope owns it decides when a user's work is killed.
+
 ## Workspace search needs a tool the product does not ship
 
 `rika.workspace.search` shells out to ripgrep, which a machine that installed Rika has not necessarily installed. Under a bare `PATH` the call fails, and a live subagent asked to find a file worked around it with a shell `find` before reading the file directly — it recovered, but it spent turns doing so and told the user about it.
