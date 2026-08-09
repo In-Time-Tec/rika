@@ -12,9 +12,17 @@ describe("mounted surface", () => {
       trustMode: "trusted-local",
       servers: [] as ReadonlyArray<McpDiscovery.ConfiguredServer>,
     } as never)
-    const described = mounted.map(
-      (module) => `rika.${module.name}: ${module.operations.map((operation) => operation.name).join(", ")}`,
-    )
-    expect(surface.split("\n")).toEqual(described)
+    const lines = surface({
+      workspace: "/workspace",
+      workspaceDigest: "digest",
+      trustMode: "trusted-local",
+      servers: [] as ReadonlyArray<McpDiscovery.ConfiguredServer>,
+    } as never).split("\n")
+    expect(lines).toHaveLength(mounted.length)
+    for (const [index, module] of mounted.entries()) {
+      const line = lines[index] ?? ""
+      expect(line).toContain(`rika.${module.name} -> `)
+      for (const operation of module.operations) expect(line).toContain(`${operation.name}(`)
+    }
   })
 })

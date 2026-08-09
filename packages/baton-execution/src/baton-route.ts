@@ -82,12 +82,7 @@ export interface ResolverOptions {
 }
 
 const instructions = {
-  root: [
-    "Work directly on the user's request. Inspect relevant evidence, make necessary changes, and verify the result.",
-    "",
-    "Your one tool runs TypeScript in a persistent Bun kernel. These bindings are already in scope:",
-    BindingModules.surface,
-  ].join("\n"),
+  root: "Work directly on the user's request. Inspect relevant evidence, make necessary changes, and verify the result.",
   title: "Return a concise title for the supplied request and nothing else.",
   Oracle: "Analyze the supplied problem deeply. Return a precise recommendation with risks and supporting reasoning.",
   Librarian: "Research the supplied question and return a concise evidence-backed report.",
@@ -480,6 +475,24 @@ export const configure = (
       if (name === "Title" || name === "Compaction") return Layer.orDie(model)
       return Layer.orDie(Layer.mergeAll(model, compactionLayer, cellLayer))
     }
+    const surface = BindingModules.surface({
+      workspace: options.workspace,
+      workspaceDigest: "",
+      trustMode: options.kernel.trustMode ?? "trusted-local",
+      servers: [],
+    } as never)
+    const rootInstructions = [
+      instructions.root,
+      "",
+      "You have exactly one tool, named typescript. It runs a cell in a persistent Bun kernel.",
+      "The kernel exposes a `rika` object your cell code can await. It is not a tool; the only tool",
+      "name that exists is typescript. Example cell body:",
+      "",
+      '  const found = await rika.workspace.search({ pattern: "secret" })',
+      "",
+      "// available on rika:",
+      surface,
+    ].join("\n")
     const profileInstructions = {
       Title: instructions.title,
       Oracle: instructions.Oracle,
@@ -538,7 +551,7 @@ export const configure = (
       route.main,
       routed.Root,
       "Root",
-      instructions.root,
+      rootInstructions,
       roleTools.Root,
       environment("Root"),
       rootChildNames.map((selection) => ({ selection, agent: profiles[selection].pinned.pin })),
