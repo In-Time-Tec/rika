@@ -99,7 +99,7 @@ const isReleasedFrameworkImport = (owner: string | undefined, specifier: string,
   (owner === "@rika/baton-execution" && specifier.startsWith("@batonfx/")) ||
   (owner === "@rika/kernel" && specifier.startsWith("@batonfx/")) ||
   (owner === "@rika/cli" &&
-    (filePath.startsWith("apps/rika/src/server/composition/") || filePath.startsWith("apps/rika/test/")) &&
+    (filePath.startsWith("apps/rika/src/server/composition/") || filePath.startsWith("apps/rika/test/server-")) &&
     specifier.startsWith("@batonfx/"))
 const sourceImportDiagnostics = (filePath: string, text: string): PolicyDiagnostic[] => {
   const owner = packageOwner(filePath)
