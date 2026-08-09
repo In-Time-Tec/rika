@@ -1,7 +1,8 @@
 import { ToolContext } from "@batonfx/core"
-import { AgentDirectory, ChildAdmission, Runtime, RunTree } from "@batonfx/runtime"
+import { Address, ChildAdmission, Run, Runtime, RunTree } from "@batonfx/runtime"
 import { AgentDirectoryUnavailable, AgentPort } from "@rika/kernel/agent-port"
 import { Effect, Layer } from "effect"
+import type { Prompt } from "effect/unstable/ai"
 
 const unavailable = (reason: AgentDirectoryUnavailable["reason"], cause: unknown) =>
   AgentDirectoryUnavailable.make({
@@ -35,12 +36,36 @@ const identity = Effect.gen(function* () {
   return { runId, sessionId: context.sessionId, toolCallId: context.toolCallId ?? context.operationKey ?? runId }
 })
 
-const statusOf = (status: string) =>
-  status === "queued" || status === "needs-resolution" ? ("pending" as const) : (status as never)
+type ChildStatus = "pending" | "running" | "waiting" | "cancelling" | "succeeded" | "failed" | "cancelled"
+
+/**
+ * Baton's `queued` and `needs-resolution` are both "admitted but not yet producing", which is the
+ * one state the cell contract calls `pending`. The mapping is total over Baton's RunStatus, so a
+ * status Rika does not name cannot reach a cell unmapped.
+ */
+const statusOf = (status: Run.RunStatus): ChildStatus => {
+  switch (status) {
+    case "queued":
+    case "needs-resolution":
+      return "pending"
+    case "running":
+      return "running"
+    case "waiting":
+      return "waiting"
+    case "cancelling":
+      return "cancelling"
+    case "succeeded":
+      return "succeeded"
+    case "failed":
+      return "failed"
+    case "cancelled":
+      return "cancelled"
+  }
+}
 
 const inspectionOf = (input: {
   readonly runId: string
-  readonly status: string
+  readonly status: Run.RunStatus
   readonly invocationId?: string | undefined
   readonly outcome?: unknown
 }) => {
@@ -52,6 +77,35 @@ const inspectionOf = (input: {
     ...(origin === undefined ? {} : { origin }),
     ...(input.outcome === undefined ? {} : { outcome: input.outcome }),
   }
+}
+
+/**
+ * A mailbox entry carries a `Prompt`, never a string. The cell reads the message a sender wrote, so
+ * the text parts are joined rather than the envelope being serialized as JSON.
+ */
+const promptText = (prompt: Prompt.Prompt): string =>
+  prompt.content
+    .flatMap((message) =>
+      message.role === "user" || message.role === "assistant"
+        ? message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+        : [],
+    )
+    .join("\n")
+
+/**
+ * The relationship the port reports is derived from durable parentage, exactly as Baton derives it.
+ * An entry Baton reached under host policy rather than a derived link has no relationship, and is
+ * reported as `policy` rather than being claimed as a child.
+ */
+const relationshipOf = (
+  sender: { readonly runId: string; readonly parentRunId?: string | undefined },
+  target: { readonly runId: string; readonly parentRunId?: string | undefined },
+): "self" | "parent" | "child" | "sibling" | "policy" => {
+  if (sender.runId === target.runId) return "self"
+  if (sender.parentRunId !== undefined && sender.parentRunId === target.runId) return "parent"
+  if (target.parentRunId !== undefined && target.parentRunId === sender.runId) return "child"
+  if (sender.parentRunId !== undefined && sender.parentRunId === target.parentRunId) return "sibling"
+  return "policy"
 }
 
 const ambientRuntime = Effect.flatMap(Effect.serviceOption(Runtime.Runtime), (runtime) =>
@@ -107,7 +161,7 @@ const make: Effect.Effect<AgentPort["Service"]> = Effect.sync(() => {
               metadata: { productIntent: "cell-child", originOperation: self.toolCallId },
             })
             .pipe(
-              Effect.map((receipt) => ({ childRunId: receipt.runId, key: input.key, duplicate: false })),
+              Effect.map((receipt) => ({ childRunId: receipt.runId, key: input.key, duplicate: receipt.duplicate })),
               Effect.mapError(failed),
             ),
         ),
@@ -131,7 +185,7 @@ const make: Effect.Effect<AgentPort["Service"]> = Effect.sync(() => {
         Effect.flatMap(ambientRuntime, (runtime) =>
           runtime
             .sendMessage({
-              to: AgentDirectory.sessionAddress(input.to),
+              to: Address.make(input.to),
               fromRunId: self.runId,
               idempotencyKey: input.idempotencyKey,
               prompt: input.prompt,
@@ -156,7 +210,7 @@ const make: Effect.Effect<AgentPort["Service"]> = Effect.sync(() => {
                 entryId: entry.entryId,
                 sequence: entry.sequence,
                 from: String(entry.from),
-                prompt: typeof entry.prompt === "string" ? entry.prompt : JSON.stringify(entry.prompt),
+                prompt: promptText(entry.prompt),
                 messageId: entry.messageId,
                 ...(entry.correlationId === undefined ? {} : { correlationId: entry.correlationId }),
                 ...(entry.inReplyTo === undefined ? {} : { inReplyTo: entry.inReplyTo }),
@@ -168,17 +222,19 @@ const make: Effect.Effect<AgentPort["Service"]> = Effect.sync(() => {
       ),
     directory: Effect.flatMap(identity, (self) =>
       Effect.flatMap(ambientRuntime, (runtime) =>
-        runtime.directory(self.runId).pipe(
-          Effect.map((entries) =>
+        Effect.map(
+          Effect.all([
+            runtime.directory(self.runId).pipe(Effect.mapError(failed)),
+            runtime.inspect(self.runId).pipe(Effect.mapError(failed)),
+          ]),
+          ([entries, own]) =>
             entries.map((entry) => ({
               address: String(entry.address),
               runId: entry.runId,
               sessionId: entry.sessionId,
               ...(entry.name === undefined ? {} : { name: String(entry.name) }),
-              relationship: "child" as const,
+              relationship: relationshipOf({ runId: self.runId, parentRunId: own.parentRunId }, entry),
             })),
-          ),
-          Effect.mapError(failed),
         ),
       ),
     ),

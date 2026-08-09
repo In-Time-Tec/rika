@@ -146,6 +146,8 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   )
   const executionBackendLayer = backendLayer({
     filename: path.join(root, "baton.db"),
+    workspace,
+    dataRoot: root,
     registryLayer: laneModels.registryLayer,
     toolRuntimeLayer,
     queryFactoryLayer,

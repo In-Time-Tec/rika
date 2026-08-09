@@ -29,10 +29,13 @@ const derivedKernelOptions = (filename: string): KernelOptions => {
 
 const kernelOptions = (options: Options): KernelOptions => options.kernel ?? derivedKernelOptions(options.filename)
 
+/** The kernel a cell runs in, plus the seam that answers its host requests. */
+export type KernelPoolServices = KernelPool.KernelPool | CellCallContext.CellCallContext
+
 export interface Options {
   readonly filename: string
   readonly kernel?: KernelOptions
-  readonly kernelPool?: Layer.Layer<KernelPool.KernelPool | CellCallContext.CellCallContext>
+  readonly kernelPool?: Layer.Layer<KernelPoolServices>
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: HarnessState.HarnessState
   readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolServices, never, never>

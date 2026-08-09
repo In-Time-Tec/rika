@@ -361,12 +361,17 @@ const cellExecutor = (
 ): Layer.Layer<ToolExecutor.ToolExecutor> =>
   Layer.effect(
     ToolExecutor.ToolExecutor,
-    Layer.build(pool).pipe(
-      Effect.map((context) =>
-        ToolExecutor.ToolExecutor.of({
-          execute: (request) =>
-            CellTool.route.matches(request)
-              ? Effect.scoped(
+    /**
+     * The pool is built by the first cell rather than by the agent that may call one. Every
+     * conversational profile closes over this executor, so building it here would boot a kernel for
+     * a turn that only ever produced text, and pay for it once per profile per turn.
+     */
+    Effect.map(Effect.cached(Layer.build(pool)), (built) =>
+      ToolExecutor.ToolExecutor.of({
+        execute: (request) =>
+          CellTool.route.matches(request)
+            ? Effect.scoped(
+                Effect.flatMap(built, (context) =>
                   Context.get(context, CellCallContext.CellCallContext)
                     .enter(request.sessionId)
                     .pipe(
@@ -378,10 +383,10 @@ const cellExecutor = (
                           ),
                       ),
                     ),
-                )
-              : missingKernel(request.call.name),
-        }),
-      ),
+                ),
+              )
+            : missingKernel(request.call.name),
+      }),
     ),
   )
 

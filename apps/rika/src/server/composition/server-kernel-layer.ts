@@ -6,6 +6,9 @@ import * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry
 import { globalPaths, workspacePaths } from "@rika/configuration/configuration-paths"
 import * as McpDiscovery from "@rika/extensions/mcp-discovery"
 import * as McpRuntime from "@rika/extensions/mcp-runtime"
+import type { KernelPool } from "@batonfx/repl"
+import type * as GoalRepository from "@rika/product/goal-repository"
+import type * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as SkillRegistry from "@rika/extensions/skill-registry"
 import * as SkillFileSystem from "@rika/extensions/skill-file-system"
 import * as ArtifactStore from "@rika/kernel/artifact-store"
@@ -37,9 +40,9 @@ export interface Options {
   readonly home: string
   readonly dataRoot: string
   readonly runtimeVersion: string
-  readonly goalRepositoryLayer: Layer.Layer<import("@rika/product/goal-repository").Service>
+  readonly goalRepositoryLayer: Layer.Layer<GoalRepository.Service>
   readonly queryFactory: Layer.Layer<ThreadQuery.Factory>
-  readonly toolRuntimeLayer: Layer.Layer<import("@rika/coding-tools/coding-tool-runtime").Service>
+  readonly toolRuntimeLayer: Layer.Layer<CodingToolRuntime.Service>
 }
 
 const harnessRoots = (options: Options): HarnessStoreLocations.Roots => ({
@@ -136,7 +139,7 @@ const mountingPlaceholders: Layer.Layer<
 export const layer = (
   options: Options,
 ): Layer.Layer<
-  import("@batonfx/repl").KernelPool.KernelPool | CellCallContext.CellCallContext,
+  KernelPool.KernelPool | CellCallContext.CellCallContext,
   never,
   ChildProcessSpawner.ChildProcessSpawner
 > =>
