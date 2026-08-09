@@ -225,4 +225,30 @@ describe("harness binding", () => {
         expect((response.output as { readonly snapshotId: string }).snapshotId).toMatch(/^harness-snapshot:v1:sha256:/)
     }),
   )
+
+  it.effect("keeps a bounded refinement history however many refinements a scope accumulates", () =>
+    Effect.gen(function* () {
+      const backing = store()
+      const mounted = yield* registry(backing)
+      // A refinement event copies every entry it touched, so an unbounded history grows a scope by
+      // its own past rather than by what it knows.
+      for (let index = 0; index < 210; index += 1) {
+        const current = backing.states.get("thread:session") ?? HarnessState.empty("thread:session")
+        const response = yield* mounted.invoke({
+          module: "harness",
+          operation: "createMemory",
+          input: {
+            id: `note-${index}`,
+            title: "t",
+            content: "c",
+            baseSnapshot: HarnessState.snapshotId(current),
+          },
+        })
+        expect(response._tag).toBe("Success")
+      }
+      const stored = backing.states.get("thread:session")
+      expect(stored?.entries.memory).toHaveLength(210)
+      expect(stored?.refinements).toHaveLength(200)
+    }),
+  )
 })

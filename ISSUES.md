@@ -67,3 +67,11 @@ Worth noting for whoever fixes it: `rollback` is the one binding operation reach
 That matters because a marker written by a cell appears in the stream anyway — echoed back inside the source of the turn that wrote it. Counting occurrences of a marker across two runs therefore proves nothing about the prompt, and reads as a convincing pass. The release-smoke round trip asserts on a value the second cell computed by reading the harness back, which is a claim the stream can actually support: a refinement one run stores is readable by the next.
 
 The last hop, that the supplement reaches the model's instructions, is asserted in `baton-route.test.ts` by reading `resolverEntries[0].agent.instructions` — an agent carries its instructions as a readable property, so the composition is reachable after all. An earlier note here claimed it was not; that was wrong, and it was wrong because a first attempt recreated the composition rather than looking for it.
+
+## A bounded refinement history costs a rollback
+
+Refinement events are now capped at 200 per scope, because each one copies every entry it touched and retaining them all grows a scope by its own past. The prompt was never at risk: `HarnessOverview` already bounds what it reads to eight entries per kind.
+
+The cost is that a refinement older than the bound can no longer be rolled back — its event is gone. That compounds with the rollback limitation above, where only the newest refinement can be undone in practice, so the reachable window is already far smaller than 200.
+
+Entry counts are deliberately left unbounded. Capacity is checked against the entries a proposal would leave behind, so binding it would start refusing a model's writes once a scope filled up, which is a worse failure than a large file.

@@ -69,6 +69,16 @@ const RollbackInput = Schema.Struct({
   scope: Schema.optionalKey(Scope),
 })
 
+/**
+ * A refinement event carries a copy of every entry it touched, so retaining them all makes a
+ * long-lived scope grow with its own history rather than with what it knows. The overview already
+ * bounds what a prompt reads, so this bounds only what the store keeps.
+ *
+ * Entry counts are deliberately left unbounded: capacity is checked against the entries a proposal
+ * would leave behind, so binding it would start refusing a model's writes once a scope filled up.
+ */
+const applyOptions = { maxRefinements: 200 } as const
+
 const rejected = (reason: string, message: string, target?: string) =>
   HarnessRejected.make({ reason, message, ...(target === undefined ? {} : { target }) })
 
@@ -132,7 +142,7 @@ export const make = (options: Options): HostBindingRegistry.Module<HarnessStore.
         edits: input.edits,
       }).pipe(Effect.mapError((error) => rejected(error.reason, error.message)))
       const state = yield* load(input.scope)
-      const result = Refinement.applyProposal(state, proposal)
+      const result = Refinement.applyProposal(state, proposal, applyOptions)
       if (Result.isFailure(result))
         return yield* rejected(result.failure.reason, result.failure.message, result.failure.target)
       const store = yield* HarnessStore.HarnessStore
