@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest"
 import * as InteractiveController from "../src/interactive/controller/interactive-controller"
 import * as ViewState from "@rika/terminal/terminal-state"
 import { update as reduceModel } from "@rika/terminal/terminal-state-reducer"
+import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
 import * as ThreadView from "@rika/product/thread-view"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 
-const snapshot = (threadId = "thread", revision = 4): ThreadView.ThreadViewSnapshot => ({
+const snapshot = (threadId = Thread.ThreadId.make("thread"), revision = 4): ThreadView.ThreadViewSnapshot => ({
   thread: {
     id: threadId,
     workspace: "/workspace",
@@ -30,7 +32,7 @@ const snapshot = (threadId = "thread", revision = 4): ThreadView.ThreadViewSnaps
 const state = (): InteractiveController.State => ({ model: ViewState.initial("/workspace", "medium") })
 
 const patch = (changes: Partial<ThreadView.ThreadViewPatch> = {}): ThreadView.ThreadViewPatch => ({
-  threadId: "thread",
+  threadId: Thread.ThreadId.make("thread"),
   baseRevision: 4,
   revision: 5,
   upsert: [],
@@ -71,7 +73,7 @@ describe("interactive ThreadView controller", () => {
     expect(
       InteractiveController.update(loaded, {
         _tag: "ThreadViewPatch",
-        patch: patch({ threadId: "other" }),
+        patch: patch({ threadId: Thread.ThreadId.make("other") }),
       }),
     ).toMatchObject({ resync: true, rejection: "thread" })
     expect(
@@ -92,8 +94,8 @@ describe("interactive ThreadView controller", () => {
           {
             turn: {
               kind: "agent",
-              id: "turn",
-              threadId: "thread",
+              id: Turn.TurnId.make("turn"),
+              threadId: Thread.ThreadId.make("thread"),
               prompt: "prompt",
               status: "cancelling",
               author: { _tag: "Human" },
@@ -124,8 +126,8 @@ describe("interactive ThreadView controller", () => {
           {
             turn: {
               kind: "agent",
-              id: "turn",
-              threadId: "thread",
+              id: Turn.TurnId.make("turn"),
+              threadId: Thread.ThreadId.make("thread"),
               prompt: "prompt",
               status: "running",
               author: { _tag: "Human" },
@@ -167,8 +169,8 @@ describe("interactive ThreadView controller", () => {
 
   it("keeps editing a queued turn across snapshot re-projections", () => {
     const pending = [
-      { id: "q1", prompt: "queued one", createdAt: 1 },
-      { id: "q2", prompt: "queued two", createdAt: 2 },
+      { id: Turn.TurnId.make("q1"), prompt: "queued one", createdAt: 1 },
+      { id: Turn.TurnId.make("q2"), prompt: "queued two", createdAt: 2 },
     ]
     const loaded = InteractiveController.update(state(), {
       _tag: "ThreadViewSnapshot",
@@ -199,7 +201,7 @@ describe("interactive ThreadView controller", () => {
       snapshot: {
         ...snapshot(),
         turns: [],
-        pending: [{ id: "q1", prompt: "queued one", createdAt: 1 }],
+        pending: [{ id: Turn.TurnId.make("q1"), prompt: "queued one", createdAt: 1 }],
       },
     })
     const model = {
@@ -266,9 +268,12 @@ describe("interactive ThreadView controller", () => {
 
   it("never returns to the welcome state after a submit while the created-thread snapshot arrives", () => {
     const welcome = (model: ViewState.Model) => model.entries.length === 0 && model.blocks.length === 0
-    let current = state()
-    current.model = { ...current.model, input: "hello", cursor: 5 }
-    current.model = reduceModel(current.model, { _tag: "Submitted", submissionId: "submission-1" })
+    const initial = state()
+    const typed = { ...initial, model: { ...initial.model, input: "hello", cursor: 5 } }
+    let current = {
+      ...typed,
+      model: reduceModel(typed.model, { _tag: "Submitted", submissionId: "submission-1" }),
+    }
     expect(welcome(current.model)).toBe(false)
     expect(current.model.busy).toBe(true)
     const loaded = InteractiveController.update(current, {
@@ -280,8 +285,8 @@ describe("interactive ThreadView controller", () => {
           {
             turn: {
               kind: "agent",
-              id: "turn",
-              threadId: "thread",
+              id: Turn.TurnId.make("turn"),
+              threadId: Thread.ThreadId.make("thread"),
               prompt: "hello",
               status: "accepted",
               author: { _tag: "Human" },

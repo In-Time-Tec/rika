@@ -176,8 +176,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
         event._tag !== "ContextDiagnostics" &&
         event._tag !== "ThreadsListed" &&
         event._tag !== "ThreadTitled" &&
-        event._tag !== "ThreadPreviewLoaded" &&
-        event._tag !== "TurnStarted"
+        event._tag !== "ThreadPreviewLoaded"
       )
         model = TerminalReducer.update(model, event)
       surface.update(model)
