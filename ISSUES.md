@@ -31,3 +31,11 @@ The kernel worker and its runtime ship with the product for exactly this reason.
 ## The workspace boundary is proved against a stand-in for path
 
 `workspace-boundary.test.ts` builds its own `relative`, `resolve`, and `isAbsolute` rather than using the platform's. It proves the containment logic given those, which is a real property, but a difference between them and the real implementation would pass. The boundary itself is exercised for real by the interactive suite, so this is a gap in the unit proof rather than in the behaviour.
+
+## A tool a server gains mid-cell is not reachable until the next one
+
+The `rika.mcp` proxy reads a server's tool names once per kernel and keeps them, so a name it has not
+seen is refused without asking. The binding behind it re-reads the server on every call and resolves
+against the current list, so a tool that is renamed or withdrawn is caught by the server rather than
+by the cache — the staleness only costs a tool the server has newly gained, and only until the cell
+that cached the list is done.
