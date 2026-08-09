@@ -85,12 +85,20 @@ const desktopDefaults = {
 const isDesktopGlobalSettings = (filename: string) =>
   process.env.RIKA_CLIENT === "desktop" && filename.replaceAll("\\", "/").endsWith("/.config/rika/settings.json")
 
+type SettingsInput = ReturnType<typeof SettingsDecoder.Decoder.decodeSettingsInput>
+const applyDesktopDefaults = (filename: string, settings: SettingsInput): SettingsInput => {
+  if (!isDesktopGlobalSettings(filename)) return settings
+  return {
+    ...settings,
+    modelAliases: { ...settings.modelAliases, ...desktopDefaults.modelAliases },
+    modelRoutes: desktopDefaults.modelRoutes,
+  }
+}
+
 export const loadSettingsFile = Effect.fn("Main.loadSettingsFile")(function* (filename: string) {
   const fileSystem = yield* FileSystem.FileSystem
   if (!(yield* fileSystem.exists(filename))) {
-    return isDesktopGlobalSettings(filename)
-      ? SettingsDecoder.Decoder.decodeSettingsInput(filename, desktopDefaults)
-      : {}
+    return applyDesktopDefaults(filename, {})
   }
   const text = yield* fileSystem
     .readFileString(filename)
@@ -107,7 +115,7 @@ export const loadSettingsFile = Effect.fn("Main.loadSettingsFile")(function* (fi
       }),
     ),
   )
-  return SettingsDecoder.Decoder.decodeSettingsInput(filename, value)
+  return applyDesktopDefaults(filename, SettingsDecoder.Decoder.decodeSettingsInput(filename, value))
 })
 
 export const route = {
