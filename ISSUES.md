@@ -83,3 +83,11 @@ Every Session on a machine reads and writes one `<dataRoot>/artifacts` directory
 Reading another session's artifact requires guessing a 64-bit id derived from content you would have to already know, so the guessability concern is weak. The real hazard was that two different values hashing alike would silently overwrite, and a later read would return a value its own id did not describe. A put that finds a different value already under its id now fails instead.
 
 What remains open is per-session isolation. It is a real boundary and not a small change, and nothing about the current layout makes one session's artifacts discoverable by another.
+
+## The TUI worker dies partway through a file, and the reporter says nothing
+
+Running `subagent-live-stream.tui.test.ts` as a whole file exits 1 with five of eight lanes reported passed, no failures, and `Worker exited unexpectedly`. `app.tui.test.ts` behaves the same at six of fourteen. The default reporter prints no summary line at all in this state, so the run reads as a pass unless the exit code is checked; `--reporter=json` gives truthful counts.
+
+The lane it dies in is the largest one, and it dies after its renderer starts and before teardown. It passes alone, four times out of four. With its five predecessors it fails three times out of three, and with one or two predecessors it is intermittent, so the earlier lanes push something over a threshold rather than any pair being wrong together.
+
+Ruled out: renderer height, transcript volume, JS heap size, pool isolation, and a native crash — a failing run produces no crash report. Cause not yet found. Per-lane runs pass, which is how this was previously recorded as a green gate; it is not one.
