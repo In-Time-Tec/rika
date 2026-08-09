@@ -6,23 +6,22 @@ import {
   LanguageModel,
   ModelRegistry,
   Pins,
-  ProgramManifest,
-  SandboxExecutor,
   ToolExecutor,
   TurnPolicy,
 } from "@batonfx/core"
 import { AmazonBedrock, Anthropic, Deterministic, ModelRoute, OpenAi, OpenRouter } from "@batonfx/providers"
-import { ChildRuns, Errors, ExecutableRegistration, ExecutableResolver } from "@batonfx/runtime"
+import { Errors, ExecutableRegistration, ExecutableResolver } from "@batonfx/runtime"
+import type { HarnessState } from "@batonfx/harness"
+import { CellTool, KernelPool, type KernelProfile } from "@batonfx/repl"
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
+import * as ExecutionPins from "@rika/kernel/execution-pins"
+import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
-import { Config, Context, Effect, Layer, Option, Redacted, Scope } from "effect"
+import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import { providerHttpClientLayer } from "./baton-provider-http"
-import * as Program from "./baton-program"
-import * as ProgramBindings from "./baton-program-bindings"
 import * as Registration from "./baton-registration"
-import * as Sandbox from "./baton-sandbox-identity"
 
 type CandidateSnapshot = ExecutionRoute.ExecutionRouteModelCandidateSnapshot
 type ModelSnapshot = ExecutionRoute.ExecutionRouteModelSnapshot
@@ -37,14 +36,26 @@ export type AgentToolHandlers =
   | Tool.HandlersFor<typeof RoleToolkits.surgeon.tools>
   | Tool.HandlersFor<typeof RoleToolkits.task.tools>
 
-type ProgramToolHandlers = Tool.HandlersFor<typeof Program.toolkit.tools>
-
 type ResolvedAgent = ExecutableResolver.StaticAgentExecutable["agent"]
+
+/**
+ * The exact values the Session's kernel is built from. The admitted profile pin is derived from
+ * these and from nothing else, so a pin can never describe a kernel the host did not run.
+ */
+export interface KernelOptions {
+  readonly runtimeVersion: string
+  readonly dataRoot: string
+  readonly limits?: KernelProfile.Limits
+  readonly trustMode?: KernelProfile.TrustMode
+}
 
 export interface ConfigureOptions {
   readonly executionRoute: RouteSnapshot
   readonly workspace: string
-  readonly sandbox: SandboxExecutor.Interface
+  readonly kernel: KernelOptions
+  readonly kernelPool?: Layer.Layer<KernelPool.KernelPool>
+  readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
+  readonly harnessSnapshot?: HarnessState.HarnessState
   readonly agentServices?: Layer.Layer<AgentToolHandlers>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
 }
@@ -54,11 +65,14 @@ export interface ConfiguredExecutable {
   readonly registrations: ReadonlyArray<ExecutableRegistration.ExecutableRegistration>
   readonly resolverEntries: ReadonlyArray<ExecutableResolver.StaticAgentExecutable>
   readonly profiles: Readonly<Record<string, AgentManifest.PinnedAgent>>
-  readonly programAuthority: AgentManifest.ProgramAuthority
+  readonly kernelProfile: KernelProfile.KernelProfile
 }
 
 export interface ResolverOptions {
-  readonly sandbox: SandboxExecutor.Interface
+  readonly kernel: KernelOptions
+  readonly kernelPool?: Layer.Layer<KernelPool.KernelPool>
+  readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
+  readonly harnessSnapshot?: HarnessState.HarnessState
   readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolHandlers>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
 }
@@ -271,7 +285,11 @@ const agentDefinition = (
   applicationContextPin: ReturnType<typeof applicationPin>,
   compaction: AgentManifest.CompactionIdentity | undefined,
   tokenBudget: number | undefined,
-  programAuthority?: AgentManifest.ProgramAuthority,
+  kernelProfilePin: Pins.CapabilityPin | undefined,
+  capabilities: {
+    readonly skills: ReadonlyArray<AgentManifest.NamedCapability>
+    readonly services: ReadonlyArray<AgentManifest.NamedCapability>
+  },
 ): AgentDefinition => {
   const agent = Agent.withTools(
     Agent.make({
@@ -279,10 +297,7 @@ const agentDefinition = (
       instructions: agentInstructions,
       model: routed.selection,
       policy: TurnPolicy.both(TurnPolicy.recurs(80), TurnPolicy.forever),
-      toolScheduling: {
-        maxConcurrency: 4,
-        parallelSafe: tools.map((tool) => tool.name).filter((toolName) => parallelSafeToolNames.has(toolName)),
-      },
+      toolScheduling: tools.length === 0 ? { maxConcurrency: 1, parallelSafe: [] } : CellTool.scheduling,
       metadata: { productProfile: name },
       budget: { ...agentBudget, ...(tokenBudget === undefined ? {} : { totalTokens: tokenBudget }) },
     }),
@@ -291,110 +306,76 @@ const agentDefinition = (
   const pinned = AgentManifest.fromLiveAgent(agent, {
     model: modelPin(route),
     tools: toolPins(agent.toolkit),
-    skills: [],
+    skills: capabilities.skills,
     services: [
       { name: "model-registry", pin: modelRegistryPin(route) },
       { name: "rika-application-context", pin: applicationContextPin },
       ...(compaction === undefined ? [] : [{ name: "compaction", pin: compaction.service }]),
+      ...(kernelProfilePin === undefined ? [] : [{ name: "rika-kernel-profile", pin: kernelProfilePin }]),
+      ...capabilities.services,
     ],
     policy: { _tag: "Portable", policy: agent.policy.snapshot! },
     budget: agent.budget ?? {},
     children,
     ...(compaction === undefined ? {} : { compaction }),
-    ...(programAuthority === undefined ? {} : { programAuthority }),
   })
   return { agent: Agent.close(agent, environment), pinned }
 }
 
-const parallelSafeToolNames = new Set([
-  "grep",
-  "read",
-  "web_search",
-  "read_web_page",
-  "view_media",
-  "search_threads",
-  "read_thread_transcript",
-  "find_thread",
-])
-
 const rootChildNames = ["Title", "Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
 const taskChildNames = ["Oracle", "Librarian", "Painter", "ReadThread", "Surgeon"] as const
 
-const childTools = {
-  Root: ChildRuns.makeTools({ children: rootChildNames.map((selection) => ({ selection })) }),
-  Task: ChildRuns.makeTools({ children: taskChildNames.map((selection) => ({ selection })) }),
-} as const
-
-const withChildTools = <Tools extends Record<string, Tool.Any>>(
-  base: Toolkit.Toolkit<Tools>,
-  children: ReturnType<typeof ChildRuns.makeTools>,
-) => Toolkit.make(...Object.values(base.tools), children.runChild, children.startChildGroup, children.awaitChildGroup)
-
-const rootToolkit = withChildTools(RoleToolkits.root, childTools.Root)
-const taskToolkit = withChildTools(RoleToolkits.task, childTools.Task)
-
-const roleTools: Readonly<Record<RoleName, ReadonlyArray<Tool.Any>>> = {
-  Root: Object.values(rootToolkit.tools),
-  Title: [],
-  Oracle: Object.values(RoleToolkits.oracle.tools),
-  Librarian: Object.values(RoleToolkits.librarian.tools),
-  Painter: Object.values(RoleToolkits.painter.tools),
-  ReadThread: Object.values(RoleToolkits.readThread.tools),
-  Review: Object.values(RoleToolkits.oracle.tools),
-  Surgeon: Object.values(RoleToolkits.surgeon.tools),
-  Task: Object.values(taskToolkit.tools),
-}
-
 type RoleName = "Root" | "Title" | "Oracle" | "Librarian" | "Painter" | "ReadThread" | "Review" | "Surgeon" | "Task"
 
-type ExecutorRole = Exclude<RoleName, "Title">
+/**
+ * Every conversational profile advertises the one cell tool and nothing else. Title returns a
+ * string and never acts, so it advertises no tool at all.
+ */
+const roleTools: Readonly<Record<RoleName, ReadonlyArray<Tool.Any>>> = {
+  Root: [CellTool.tool],
+  Title: [],
+  Oracle: [CellTool.tool],
+  Librarian: [CellTool.tool],
+  Painter: [CellTool.tool],
+  ReadThread: [CellTool.tool],
+  Review: [CellTool.tool],
+  Surgeon: [CellTool.tool],
+  Task: [CellTool.tool],
+}
 
-type RoleExecutor = (handlers: Layer.Layer<AgentToolHandlers>) => Layer.Layer<ToolExecutor.ToolExecutor>
-
-const missingChildHost = (tool: string) =>
+const missingKernel = (tool: string) =>
   ToolExecutor.FrameworkFailure.make({
     stage: "handler",
     tool,
-    message: "child Agent tools require the Baton execution host",
+    message: "the typescript cell requires a kernel pool",
   })
 
-const roleExecutor = <Tools extends Record<string, Tool.Any>>(
-  codingTools: Toolkit.Toolkit<Tools>,
-  includeChildTools: boolean,
-  handlers: Layer.Layer<Tool.HandlersFor<Tools>>,
-): Layer.Layer<ToolExecutor.ToolExecutor> =>
+/**
+ * The cell route resolves its KernelPool per call rather than at layer-build time, so the ambient
+ * per-call ToolContext the Baton host installs around each tool execution is the one the cell sees.
+ * Binding it when the layer is built would freeze one call's identity into every later cell.
+ */
+const cellExecutor = (pool: Layer.Layer<KernelPool.KernelPool>): Layer.Layer<ToolExecutor.ToolExecutor> =>
   Layer.effect(
     ToolExecutor.ToolExecutor,
-    ToolExecutor.routeToolkit(codingTools).pipe(
-      Effect.map((codingRoute) =>
+    Layer.build(pool).pipe(
+      Effect.map((context) =>
         ToolExecutor.ToolExecutor.of({
-          execute: (request) => {
-            if (!includeChildTools || !ChildRuns.route.matches(request)) return codingRoute.execute(request)
-            return Effect.serviceOption(ChildRuns.ChildRuns).pipe(
-              Effect.flatMap(
-                Option.match({
-                  onNone: () => missingChildHost(request.call.name),
-                  onSome: (children) =>
-                    ChildRuns.route.execute(request).pipe(Effect.provideService(ChildRuns.ChildRuns, children)),
-                }),
-              ),
-            )
-          },
+          execute: (request) =>
+            CellTool.route.matches(request)
+              ? CellTool.route
+                  .execute(request)
+                  .pipe(Effect.provideService(KernelPool.KernelPool, Context.get(context, KernelPool.KernelPool)))
+              : missingKernel(request.call.name),
         }),
       ),
     ),
-  ).pipe(Layer.provide(handlers))
+  )
 
-const roleExecutors: Readonly<Record<ExecutorRole, RoleExecutor>> = {
-  Root: (handlers) => roleExecutor(RoleToolkits.root, true, handlers),
-  Oracle: (handlers) => roleExecutor(RoleToolkits.oracle, false, handlers),
-  Librarian: (handlers) => roleExecutor(RoleToolkits.librarian, false, handlers),
-  Painter: (handlers) => roleExecutor(RoleToolkits.painter, false, handlers),
-  ReadThread: (handlers) => roleExecutor(RoleToolkits.readThread, false, handlers),
-  Review: (handlers) => roleExecutor(RoleToolkits.oracle, false, handlers),
-  Surgeon: (handlers) => roleExecutor(RoleToolkits.surgeon, false, handlers),
-  Task: (handlers) => roleExecutor(RoleToolkits.task, true, handlers),
-}
+const unavailableKernelExecutor: Layer.Layer<ToolExecutor.ToolExecutor> = Layer.succeed(
+  ToolExecutor.ToolExecutor,
+  ToolExecutor.ToolExecutor.of({ execute: (request) => missingKernel(request.call.name) }),
+)
 
 export interface ConfigureOptionsWithCredentialStore extends ConfigureOptions {
   readonly credentialStore?: ProviderCredentialStoreShape
@@ -407,7 +388,6 @@ export const configure = (
   ModelRoute.AvailabilitySemanticsMissing | Errors.ExecutableRegistrationInvalid
 > =>
   Effect.gen(function* () {
-    const sandboxIdentity = yield* Sandbox.decode(options.sandbox)
     const route = options.executionRoute
     const contextPin = applicationPin(route, options.workspace)
     const routes = {
@@ -451,15 +431,27 @@ export const configure = (
       summaryPrompt: route.compaction.summaryPrompt,
       summaryModel: Layer.orDie(summaryModel),
     })
+    const kernelProfile = KernelProfileRegistration.make({
+      runtimeVersion: options.kernel.runtimeVersion,
+      workspace: options.workspace,
+      dataRoot: options.kernel.dataRoot,
+      ...(options.kernel.limits === undefined ? {} : { limits: options.kernel.limits }),
+      ...(options.kernel.trustMode === undefined ? {} : { trustMode: options.kernel.trustMode }),
+    })
+    const kernelProfilePin = yield* Schema.decodeUnknownEffect(Pins.CapabilityPin)(
+      KernelProfileRegistration.pin(kernelProfile),
+    ).pipe(Effect.mapError((cause) => Errors.ExecutableRegistrationInvalid.make({ message: String(cause) })))
+    const skillPins = ExecutionPins.skills(options.skills ?? [])
+    const harnessPins =
+      options.harnessSnapshot === undefined
+        ? { capabilities: [], registrations: [] }
+        : ExecutionPins.harness(options.harnessSnapshot)
+    const pinnedCapabilities = { skills: skillPins.capabilities, services: harnessPins.capabilities }
+    const cellLayer = options.kernelPool === undefined ? unavailableKernelExecutor : cellExecutor(options.kernelPool)
     const environment = (name: keyof typeof routes): AgentEnvironment => {
       const model = routed[name].layer
       if (name === "Title" || name === "Compaction") return Layer.orDie(model)
-      const handlers = options.agentServices
-      return Layer.orDie(
-        handlers === undefined
-          ? Layer.mergeAll(model, compactionLayer)
-          : Layer.mergeAll(model, compactionLayer, roleExecutors[name](handlers)),
-      )
+      return Layer.orDie(Layer.mergeAll(model, compactionLayer, cellLayer))
     }
     const profileInstructions = {
       Title: instructions.title,
@@ -483,6 +475,8 @@ export const configure = (
         contextPin,
         name === "Title" ? undefined : compactionIdentity,
         route.tokenBudget,
+        name === "Title" ? undefined : kernelProfilePin,
+        name === "Title" ? { skills: [], services: [] } : pinnedCapabilities,
       )
     const leafProfiles = {
       Title: leaf("Title"),
@@ -504,6 +498,8 @@ export const configure = (
       contextPin,
       compactionIdentity,
       route.tokenBudget,
+      kernelProfilePin,
+      pinnedCapabilities,
     )
     const profiles: Readonly<Record<keyof typeof profileInstructions, AgentDefinition>> = {
       ...leafProfiles,
@@ -511,15 +507,6 @@ export const configure = (
     }
     const profileNames = ["Title", "Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
     const nestedNames = new Set<string>(rootChildNames)
-    const programAuthority = Program.authority({
-      workspace: options.workspace,
-      sandbox: sandboxIdentity,
-      tools: toolPins(Program.toolkit),
-      agents: Program.agentSelections.map((selection) => ({
-        selection,
-        agent: profiles[selection].pinned.pin,
-      })),
-    })
     const root = agentDefinition(
       route.main,
       routed.Root,
@@ -531,7 +518,8 @@ export const configure = (
       contextPin,
       compactionIdentity,
       route.tokenBudget,
-      programAuthority,
+      kernelProfilePin,
+      pinnedCapabilities,
     )
     const childEntries = rootChildNames.map((name) => agentEntry(profiles[name].pinned))
     const entries = [agentEntry(root.pinned), ...childEntries]
@@ -575,41 +563,13 @@ export const configure = (
       }),
     )
     registrationMap.set(
-      programAuthority.sandbox,
-      Registration.make(
-        Registration.codecs.programSandbox,
-        programAuthority.sandbox,
-        Sandbox.payload(sandboxIdentity, options.workspace),
-      ),
+      kernelProfilePin,
+      Registration.make(Registration.codecs.kernelProfile, kernelProfilePin, kernelProfile),
     )
-    registrationMap.set(
-      Program.pins.input,
-      Registration.make(Registration.codecs.programInput, Program.pins.input, {
-        schema: Program.schemas.inputDocument,
-      }),
-    )
-    registrationMap.set(
-      Program.pins.output,
-      Registration.make(Registration.codecs.programOutput, Program.pins.output, {
-        schema: Program.schemas.outputDocument,
-      }),
-    )
-    registrationMap.set(
-      Program.pins.agentInput,
-      Registration.make(Registration.codecs.programAgentInput, Program.pins.agentInput, {
-        schema: Program.schemas.agentInputDocument,
-      }),
-    )
-    const registeredToolkits: ReadonlyArray<Toolkit.Any> = [
-      rootToolkit,
-      RoleToolkits.oracle,
-      RoleToolkits.librarian,
-      RoleToolkits.painter,
-      RoleToolkits.readThread,
-      RoleToolkits.oracle,
-      RoleToolkits.surgeon,
-      taskToolkit,
-    ]
+    for (const registration of [...skillPins.registrations, ...harnessPins.registrations]) {
+      registrationMap.set(registration.pin, registration)
+    }
+    const registeredToolkits: ReadonlyArray<Toolkit.Any> = [CellTool.toolkit]
     for (const toolkit of registeredToolkits) {
       for (const tool of Object.values(toolkit.tools)) {
         registrationMap.set(
@@ -625,7 +585,7 @@ export const configure = (
         : Effect.succeed(registration)
     })
     return {
-      programAuthority,
+      kernelProfile,
       executable,
       registrations,
       resolverEntries: [
@@ -665,48 +625,6 @@ export const configure = (
 
 const invalid = (cause: unknown) => Errors.ExecutableRegistrationInvalid.make({ message: String(cause) })
 
-const programCall = (
-  runId: string,
-  services: Layer.Layer<ProgramToolHandlers>,
-): Effect.Effect<ProgramBindings.ToolCall, never, Scope.Scope> =>
-  Effect.gen(function* () {
-    const context = yield* Layer.build(services)
-    const route = yield* ToolExecutor.routeToolkit(Program.toolkit).pipe(Effect.provide(context))
-    const signal = yield* Effect.abortSignal
-    return {
-      route,
-      context: { signal, emit: () => Effect.void, sessionId: runId, runId },
-      sessionId: runId,
-    }
-  })
-
-const resolveProgram = (
-  options: ResolverOptions,
-  input: ExecutableResolver.Input,
-  program: ProgramManifest.ProgramManifest,
-): Effect.Effect<
-  ExecutableResolver.Resolution,
-  Errors.ExecutablePinMissing | Errors.ExecutableRegistrationInvalid | Errors.ExecutableRegistrationMissing,
-  Scope.Scope
-> =>
-  Effect.gen(function* () {
-    const identity = yield* Sandbox.decode(options.sandbox)
-    const registration = input.registrations.find(({ pin }) => pin === program.sandbox)
-    if (registration === undefined) return yield* Errors.ExecutableRegistrationMissing.make({ pin: program.sandbox })
-    const persisted = yield* Registration.decode(Registration.codecs.programSandbox, registration)
-    const services = options.agentServices === undefined ? undefined : options.agentServices(persisted.workspace)
-    const call = services === undefined ? undefined : yield* programCall(input.runId, services)
-    return yield* ExecutableResolver.makeDynamic({
-      agents: [],
-      program: ProgramBindings.reconstruction({
-        workspace: persisted.workspace,
-        identity,
-        call,
-        sandbox: options.sandbox,
-      }),
-    }).resolve(input)
-  })
-
 export interface ResolverOptionsWithCredentialStore extends ResolverOptions {
   readonly credentialStore?: ProviderCredentialStoreShape
 }
@@ -717,12 +635,14 @@ export const makeResolver = (options: ResolverOptionsWithCredentialStore): Execu
       Effect.gen(function* () {
         const active = input.manifest.entries.find((entry) => entry.pin === input.ref.active)
         if (active === undefined) return yield* Errors.ExecutablePinMissing.make({ runId: input.runId, ref: input.ref })
-        if (active._tag === "Program") return yield* resolveProgram(options, input, active.manifest)
         const context = yield* Registration.read(Registration.codecs.applicationContext, input.registrations)
         const configured = yield* configure({
           executionRoute: context.executionRoute,
           workspace: context.workspace,
-          sandbox: options.sandbox,
+          kernel: options.kernel,
+          ...(options.kernelPool === undefined ? {} : { kernelPool: options.kernelPool }),
+          ...(options.skills === undefined ? {} : { skills: options.skills }),
+          ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
           ...(options.credentialStore === undefined ? {} : { credentialStore: options.credentialStore }),
           ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices(context.workspace) }),
           ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),

@@ -32,6 +32,7 @@ export interface ProjectorCheckpointInput {
   readonly authorizations: Map<string, AuthorizationState>
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
   readonly toolBlock: (node: Node, rawId: string) => Extract<Block, { readonly _tag: "ToolCall" }> | undefined
+  readonly cellBlock: (node: Node, rawId: string) => Extract<Block, { readonly _tag: "Cell" }> | undefined
 }
 
 export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): ProjectorCheckpointCodec => {
@@ -49,6 +50,7 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
     authorizations,
     localId,
     toolBlock,
+    cellBlock,
   } = input
 
   const compactState = () => {
@@ -68,6 +70,10 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
       for (const tool of node.tools.values()) {
         const block = toolBlock(node, tool.rawId)
         if (block?.status === "running") retained.add(tool.key)
+      }
+      for (const cell of node.cells.values()) {
+        const block = cellBlock(node, cell.rawId)
+        if (block?.status === "running" || block?.status === "unknown") retained.add(cell.key)
       }
     }
     const compactCards = [...cardsByInvocation.values()]
@@ -195,6 +201,7 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
         ...(persisted.parentBlockId === undefined ? {} : { parentBlockId: persisted.parentBlockId }),
         hidden: persisted.hidden,
         tools: new Map(persisted.tools),
+        cells: new Map(persisted.cells),
         phase: persisted.phase,
         status: persisted.status,
         lifecycle: persisted.lifecycle,

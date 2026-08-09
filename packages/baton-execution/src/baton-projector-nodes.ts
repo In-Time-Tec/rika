@@ -32,6 +32,7 @@ const compactNodeImpl = (node: Node, retained: ReadonlySet<string>): PersistedPr
   started: node.started,
   ...(node.attempt === undefined ? {} : { attempt: node.attempt }),
   tools: [...node.tools].filter(([, tool]) => retained.has(tool.key)),
+  cells: [...node.cells].filter(([, cell]) => retained.has(cell.key)),
 })
 
 export const compactNode: {

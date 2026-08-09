@@ -1,6 +1,7 @@
 import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Effect, Stream } from "effect"
+import * as ExecutionProjection from "@rika/product/execution-projection"
 
 const link = { runId: "opaque", turnId: "turn-1", threadId: "thread-1" }
 
@@ -42,12 +43,14 @@ it.effect("passes one opaque execution link through all gateway operations", () 
       executionRoute: {} as never,
     })
     yield* gateway
-      .watchTurn(started, { checkpoint: { version: 1, cursor: "opaque-cursor", state: "{}" } })
+      .watchTurn(started, {
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "opaque-cursor", state: "{}" },
+      })
       .pipe(Stream.runDrain)
     yield* gateway.steerTurn(started, { text: "adjust", idempotencyKey: "steer-1" })
     const authorization = {
       authorizationId: "authorization",
-      checkpoint: { version: 1, cursor: "opaque-cursor", state: "{}" },
+      checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "opaque-cursor", state: "{}" },
     }
     yield* gateway.approveTurn(started, authorization)
     yield* gateway.denyTurn(started, authorization)
@@ -55,7 +58,11 @@ it.effect("passes one opaque execution link through all gateway operations", () 
     yield* gateway.inspectTurn(started)
     expect(observed).toEqual([
       ["start", "turn-1"],
-      ["watch", link, { checkpoint: { version: 1, cursor: "opaque-cursor", state: "{}" } }],
+      [
+        "watch",
+        link,
+        { checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "opaque-cursor", state: "{}" } },
+      ],
       ["steer", link, { text: "adjust", idempotencyKey: "steer-1" }],
       ["approve", link, authorization],
       ["deny", link, authorization],

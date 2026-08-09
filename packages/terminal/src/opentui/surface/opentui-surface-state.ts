@@ -20,6 +20,7 @@ import {
 } from "../../presentation/transcript/transcript-virtual-index"
 import { maxMountedTranscriptEntries } from "../rendering/opentui-render-transcript-window"
 import type { WelcomeController } from "./opentui-welcome-controller"
+import type { GoalController } from "./opentui-goal-controller"
 import type { LoaderController } from "./opentui-loader-controller"
 import type { HoverController } from "./opentui-hover-controller"
 import { PointerController } from "./opentui-pointer-controller"
@@ -95,10 +96,12 @@ export class SurfaceState {
   }
   public changedFilesText!: TextRenderable
   public statusLabel!: TextRenderable
+  public goalLabel!: TextRenderable
   public toastBox!: BoxRenderable
   public toast!: TextRenderable
   protected lastPaste: { readonly text: string; readonly at: number } | undefined
   protected welcomeController!: WelcomeController
+  protected goalController!: GoalController
   protected loaderController!: LoaderController
   protected hoverController!: HoverController
   protected readonly pointerController = new PointerController()
@@ -156,6 +159,23 @@ export class SurfaceState {
   }
   public mountedTranscriptRowCount(): number {
     return this.transcriptChildren.length
+  }
+  public animationDiagnostics(): {
+    readonly loaderRunning: boolean
+    readonly welcomeRunning: boolean
+    readonly goalRunning: boolean
+    readonly loaderPhase: number
+    readonly welcomePhase: number
+    readonly goalPhase: number
+  } {
+    return {
+      loaderRunning: this.loaderController.running,
+      welcomeRunning: this.welcomeController.running,
+      goalRunning: this.goalController.running,
+      loaderPhase: this.loaderController.phase,
+      welcomePhase: this.welcomeController.phase,
+      goalPhase: this.goalController.phase,
+    }
   }
   public transcriptDiagnostics(): {
     readonly rows: ReadonlyArray<TextRenderable>

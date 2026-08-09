@@ -13,7 +13,7 @@ const projectionSnapshotImpl = (
 ): ExecutionProjection.Snapshot => ({
   _tag: "ProjectionSnapshot",
   revision: 0,
-  checkpoint: { version: 1, cursor, state: "{}" },
+  checkpoint: { version: ExecutionProjection.projectionVersion, cursor, state: "{}" },
   units:
     text === undefined
       ? []
@@ -43,7 +43,7 @@ const projectionPatchImpl = (
   _tag: "ProjectionPatch",
   baseRevision,
   revision,
-  checkpoint: { version: 1, cursor, state: "{}" },
+  checkpoint: { version: ExecutionProjection.projectionVersion, cursor, state: "{}" },
   upsert: [],
   remove: [],
   state: {

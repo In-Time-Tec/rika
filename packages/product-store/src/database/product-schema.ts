@@ -114,6 +114,21 @@ export const create = Effect.gen(function* () {
     thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
     last_read_at INTEGER NOT NULL
   )`
+  yield* sql`CREATE TABLE rika_goals (
+    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    objective TEXT NOT NULL CHECK (length(objective) > 0 AND length(objective) <= 4096),
+    status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'complete', 'errored')),
+    budget_tokens INTEGER CHECK (budget_tokens IS NULL OR budget_tokens > 0),
+    budget_wall_clock_millis INTEGER CHECK (budget_wall_clock_millis IS NULL OR budget_wall_clock_millis > 0),
+    usage_tokens INTEGER NOT NULL DEFAULT 0 CHECK (usage_tokens >= 0),
+    usage_elapsed_millis INTEGER NOT NULL DEFAULT 0 CHECK (usage_elapsed_millis >= 0),
+    usage_turns INTEGER NOT NULL DEFAULT 0 CHECK (usage_turns >= 0),
+    started_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    summary TEXT,
+    CHECK ((status = 'complete') = (completed_at IS NOT NULL))
+  )`
   yield* sql`CREATE VIRTUAL TABLE rika_thread_search USING fts5(
     thread_id UNINDEXED,
     title,
@@ -337,6 +352,7 @@ export const schemaObjects: ReadonlyArray<string> = [
   "table:rika_thread_turn_activity",
   "index:rika_thread_turn_activity_summary",
   "table:rika_thread_read_state",
+  "table:rika_goals",
   "table:rika_thread_search",
   "table:rika_thread_search_data",
   "table:rika_thread_search_idx",

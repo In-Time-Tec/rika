@@ -1,4 +1,4 @@
-import { ModelRegistry, SandboxExecutor } from "@batonfx/core"
+import { ModelRegistry } from "@batonfx/core"
 import { TestModel } from "@batonfx/test"
 import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
@@ -11,21 +11,13 @@ import { layer } from "../src/baton-execution"
 
 const fanOutJoin = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
 
-const sandbox = SandboxExecutor.makeTest(() => Effect.die(new Error("unexpected Program execution")), {
-  language: "javascript",
-  implementation: "rika-review-test-sandbox",
-  version: "1",
-  memoryBytes: 1024,
-  stackBytes: 1024,
-})
-
 const testLayer = (filename: string, fixture: TestModel.Fixture) =>
   layer({
     filename,
     modelServices: ModelRegistry.layer([
       Effect.succeed({ ...fixture.registration, isAvailabilityFailure: () => false }),
     ]),
-  }).pipe(Layer.provide(Layer.succeed(SandboxExecutor.SandboxExecutor, sandbox)))
+  })
 
 const input = (route: ReturnType<typeof testExecutionRoute>) => ({
   threadId: "review-thread",

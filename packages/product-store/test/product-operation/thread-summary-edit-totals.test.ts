@@ -37,7 +37,7 @@ const patch = ["--- a/src/a.ts", "+++ b/src/a.ts", "@@ -1,2 +1,3 @@", "-before",
 const editSnapshot: ExecutionProjection.Snapshot = {
   _tag: "ProjectionSnapshot",
   revision: 0,
-  checkpoint: { version: 1, cursor: "cursor-a", state: "{}" },
+  checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "cursor-a", state: "{}" },
   units: [
     {
       key: "tool:edit",

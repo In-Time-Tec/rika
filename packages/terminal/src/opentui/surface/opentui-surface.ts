@@ -17,6 +17,7 @@ import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { ToolSpinner } from "../rendering/opentui-spinner"
 import { SurfaceLifecycle } from "./opentui-surface-lifecycle"
 import { WelcomeController } from "./opentui-welcome-controller"
+import { GoalController } from "./opentui-goal-controller"
 import { LoaderController } from "./opentui-loader-controller"
 import { HoverController } from "./opentui-hover-controller"
 import type { Handlers, SurfaceOptions } from "./opentui-surface-state"
@@ -73,6 +74,7 @@ export class Surface extends SurfaceLifecycle {
     this.clock = options.clock ?? new SystemClock()
     this.welcomeController = new WelcomeController({ clock: this.clock, destroyed: () => this.destroyed })
     this.loaderController = new LoaderController({ clock: this.clock })
+    this.goalController = new GoalController({ clock: this.clock })
     this.hoverController = new HoverController({ renderer, destroyed: () => this.destroyed })
     const monotonicStartedAt = this.clock.now()
     const epochStartedAt = options.epochMillis ?? Effect.runSync(Clock.currentTimeMillis)
@@ -244,6 +246,14 @@ export class Surface extends SurfaceLifecycle {
       content: "",
       position: "absolute",
       bottom: 0,
+      left: 1,
+      zIndex: 30,
+      selectable: false,
+    })
+    this.goalLabel = new TextRenderable(renderer, {
+      content: "",
+      position: "absolute",
+      top: 0,
       left: 1,
       zIndex: 30,
       selectable: false,
@@ -436,6 +446,7 @@ export class Surface extends SurfaceLifecycle {
     renderer.root.add(this.main)
     renderer.root.add(this.modeLabel)
     renderer.root.add(this.statusLabel)
+    renderer.root.add(this.goalLabel)
     renderer.root.add(this.workspaceLabel)
     renderer.root.add(this.paletteBox)
     renderer.root.add(this.overlayHintOne)

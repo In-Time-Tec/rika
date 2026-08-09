@@ -2,7 +2,6 @@ import * as BatonExecution from "@rika/baton-execution/baton-execution"
 import type { LaneModels } from "@rika/baton-execution/baton-test-harness"
 import { Catalog as CodingToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
-import * as JavaScriptSandbox from "@rika/javascript-sandbox/javascript-sandbox"
 import * as ThreadQuery from "@rika/product/thread-query-service"
 import * as ThreadToolAction from "@rika/product/thread-tool-action"
 import { Layer } from "effect"
@@ -24,4 +23,4 @@ export const backendLayer = (options: BackendOptions) =>
         ThreadToolAction.handlerLayerForWorkspace(workspace).pipe(Layer.provide(options.queryFactoryLayer)),
         ThreadToolAction.findHandlerLayerForWorkspace(workspace).pipe(Layer.provide(options.queryFactoryLayer)),
       ) as Layer.Layer<BatonExecution.AgentToolServices>,
-  }).pipe(Layer.provide(JavaScriptSandbox.layer()))
+  })

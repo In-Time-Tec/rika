@@ -1,14 +1,25 @@
 import { expect, it } from "@effect/vitest"
 import { ExecutableManifest } from "@batonfx/core"
-import { ChildRuns, ExecutableRegistration } from "@batonfx/runtime"
+import { CellTool } from "@batonfx/repl"
+import { ExecutableRegistration } from "@batonfx/runtime"
 import * as Settings from "@rika/configuration/configuration-settings"
+import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
-import * as JavaScriptSandbox from "@rika/javascript-sandbox/javascript-sandbox"
 import { Cause, ConfigProvider, Effect, Exit, Schema } from "effect"
+import * as Registration from "../src/baton-registration"
 import { configure } from "../src/baton-route"
 
-const sandbox = JavaScriptSandbox.make()
+const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const
+
+const conversationalProfiles = ["Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
+
+type Configured = Effect.Success<ReturnType<typeof configure>>
+
+const agentEntries = (configured: Configured) =>
+  configured.executable.manifest.entries.flatMap((entry) => (entry._tag === "Agent" ? [entry] : []))
+
+const profileNameOf = (entry: ReturnType<typeof agentEntries>[number]) => entry.manifest.name.replace("rika-", "")
 
 const modelCandidates = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
 
@@ -71,7 +82,7 @@ it.effect("builds one exact closed executable with role-specific tool and servic
         registrationIdentity: "test-compaction-route" as (typeof route.compactionSummary)["registrationIdentity"],
       },
     }
-    const configured = yield* configure({ executionRoute, workspace: "/workspace", sandbox })
+    const configured = yield* configure({ executionRoute, workspace: "/workspace", kernel })
     expect(Object.keys(configured.profiles)).toEqual([
       "Title",
       "Oracle",
@@ -102,29 +113,15 @@ it.effect("builds one exact closed executable with role-specific tool and servic
       "Title",
     ])
     const rootToolNames = rootEntry?._tag === "Agent" ? rootEntry.manifest.tools.map(({ name }) => name) : []
-    expect(
-      rootToolNames.filter((name) => ["run_child", "start_child_group", "await_child_group"].includes(name)),
-    ).toEqual(["await_child_group", "run_child", "start_child_group"])
-    expect(rootToolNames).toContain("read")
-    expect(rootToolNames).not.toEqual(expect.arrayContaining(["title", "oracle", "librarian", "task"]))
+    expect(rootToolNames).toEqual([CellTool.name])
     expect(configured.profiles.Title!.manifest.tools).toEqual([])
     for (const profile of Object.values(configured.profiles)) {
       expect(profile.manifest.budget.totalTokens).toBe(10_000_000)
       expect(profile.manifest.budget.modelCalls).toBeGreaterThan(0)
     }
-    expect(configured.profiles.Librarian!.manifest.tools.map(({ name }) => name)).toEqual([
-      "read_web_page",
-      "web_search",
-    ])
-    expect(configured.profiles.Painter!.manifest.tools.map(({ name }) => name)).toEqual(["read", "view_media"])
-    expect(configured.profiles.Surgeon!.manifest.tools.map(({ name }) => name)).toEqual([
-      "bash",
-      "edit",
-      "grep",
-      "read",
-      "shell_command_status",
-      "write",
-    ])
+    for (const name of conversationalProfiles) {
+      expect(configured.profiles[name]!.manifest.tools.map(({ name: toolName }) => toolName)).toEqual([CellTool.name])
+    }
     expect(configured.profiles.Task!.manifest.children.map(({ selection }) => selection)).toEqual([
       "Librarian",
       "Oracle",
@@ -133,99 +130,10 @@ it.effect("builds one exact closed executable with role-specific tool and servic
       "Surgeon",
     ])
     expect(configured.profiles.Task!.manifest.children.map(({ selection }) => selection)).not.toContain("Task")
-    expect(
-      configured.profiles
-        .Task!.manifest.tools.map(({ name }) => name)
-        .filter((name) => ["run_child", "start_child_group", "await_child_group"].includes(name)),
-    ).toEqual(["await_child_group", "run_child", "start_child_group"])
-    const rootAgent = rootResolution.agent
-    const taskAgent = configured.resolverEntries.find(({ agent }) => agent.name === "rika-task")!.agent
-    const rootRunChild = rootAgent.toolkit.tools.run_child!
-    const rootStartGroup = rootAgent.toolkit.tools.start_child_group!
-    const taskRunChild = taskAgent.toolkit.tools.run_child!
-    expect(
-      (yield* Schema.decodeUnknownEffect(rootRunChild.parametersSchema as typeof ChildRuns.Parameters)({
-        selection: "Review",
-        prompt: "review",
-      })).selection,
-    ).toBe("Review")
-    expect(() =>
-      Schema.decodeUnknownSync(rootRunChild.parametersSchema as typeof ChildRuns.Parameters)({
-        selection: "Unknown",
-        prompt: "unknown",
-      }),
-    ).toThrow()
-    expect(
-      (yield* Schema.decodeUnknownEffect(rootStartGroup.parametersSchema as typeof ChildRuns.StartGroupParameters)({
-        concurrency: 2,
-        members: [
-          { key: "first", selection: "Task", prompt: "first" },
-          { key: "second", selection: "Oracle", prompt: "second" },
-        ],
-      })).members.map(({ selection }) => selection),
-    ).toEqual(["Task", "Oracle"])
-    expect(
-      (yield* Schema.decodeUnknownEffect(taskRunChild.parametersSchema as typeof ChildRuns.Parameters)({
-        selection: "Surgeon",
-        prompt: "fix",
-      })).selection,
-    ).toBe("Surgeon")
-    expect(() =>
-      Schema.decodeUnknownSync(taskRunChild.parametersSchema as typeof ChildRuns.Parameters)({
-        selection: "Task",
-        prompt: "recurse",
-      }),
-    ).toThrow()
-    expect(rootEntry?._tag === "Agent" ? rootEntry.manifest.toolScheduling : undefined).toEqual({
-      maxConcurrency: 4,
-      parallelSafe: [
-        "grep",
-        "read",
-        "read_thread_transcript",
-        "read_web_page",
-        "search_threads",
-        "view_media",
-        "web_search",
-      ],
-    })
-    expect(configured.profiles.Task!.manifest.toolScheduling).toEqual({
-      maxConcurrency: 4,
-      parallelSafe: ["grep", "read", "read_web_page", "view_media", "web_search"],
-    })
-    expect(configured.profiles.Surgeon!.manifest.toolScheduling).toEqual({
-      maxConcurrency: 4,
-      parallelSafe: ["grep", "read"],
-    })
-    const expectedParallelSafe = new Set([
-      "grep",
-      "read",
-      "web_search",
-      "read_web_page",
-      "view_media",
-      "search_threads",
-      "read_thread_transcript",
-      "find_thread",
-    ])
-    for (const entry of configured.executable.manifest.entries) {
-      if (entry._tag !== "Agent") continue
-      expect(entry.manifest.toolScheduling).toEqual({
-        maxConcurrency: 4,
-        parallelSafe: entry.manifest.tools
-          .map(({ name }) => name)
-          .filter((name) => expectedParallelSafe.has(name))
-          .toSorted(),
-      })
-      expect(entry.manifest.toolScheduling.parallelSafe).not.toEqual(
-        expect.arrayContaining([
-          "write",
-          "edit",
-          "bash",
-          "shell_command_status",
-          "run_child",
-          "start_child_group",
-          "await_child_group",
-        ]),
-      )
+    for (const entry of agentEntries(configured)) {
+      const names = entry.manifest.tools.map(({ name }) => name)
+      expect(names).toEqual(profileNameOf(entry) === "title" ? [] : [CellTool.name])
+      expect(entry.manifest.toolScheduling).toEqual({ maxConcurrency: 1, parallelSafe: [] })
     }
     expect(rootEntry?._tag === "Agent" ? rootEntry.manifest.compaction : undefined).toMatchObject({
       contextWindow: executionRoute.main.compaction.contextWindow,
@@ -261,13 +169,22 @@ it.effect("builds one exact closed executable with role-specific tool and servic
     const registrationPins = new Set(configured.registrations.map(({ pin }) => pin))
     expect(registrationPins).toEqual(ExecutableRegistration.requiredPins(configured.executable))
     yield* ExecutableRegistration.validate(configured.executable, configured.registrations)
+    expect(
+      configured.registrations
+        .filter(({ codec }) => codec === "rika-tool")
+        .map(({ payload }) => (payload as { readonly name: string }).name),
+    ).toContain(CellTool.name)
     for (const name of ["run_child", "start_child_group", "await_child_group"]) {
       expect(
         configured.registrations.some(
           ({ codec, payload }) => codec === "rika-tool" && (payload as { readonly name?: string }).name === name,
         ),
-      ).toBe(true)
+      ).toBe(false)
     }
+    const advertised = new Set(
+      agentEntries(configured).flatMap((entry) => entry.manifest.tools.map(({ name }) => name)),
+    )
+    expect([...advertised]).toEqual([CellTool.name])
     for (const entry of configured.executable.manifest.entries) {
       if (entry._tag !== "Agent") continue
       expect(registrationPins.has(entry.manifest.model)).toBe(true)
@@ -301,7 +218,7 @@ it.effect("delegates persisted provider-option decoding to Baton", () =>
       },
     }
     const executionRoute = { ...route, main: { ...route.main, candidates: [candidate] } }
-    const configured = yield* configure({ executionRoute, workspace: "/workspace", sandbox })
+    const configured = yield* configure({ executionRoute, workspace: "/workspace", kernel })
     const root = configured.resolverEntries[0]!
     const selection = "agent" in root ? root.agent.model : undefined
     expect(modelCandidates(selection?.registrationKey ?? "[]")).toEqual([
@@ -314,7 +231,7 @@ it.effect("delegates persisted provider-option decoding to Baton", () =>
         main: { ...executionRoute.main, candidates: [{ ...candidate, providerOptions: { max_tokens: 4_096 } }] },
       },
       workspace: "/workspace",
-      sandbox,
+      kernel,
     }).pipe(Effect.exit)
     expect(Exit.isFailure(invalid)).toBe(true)
     if (Exit.isFailure(invalid)) expect(Cause.pretty(invalid.cause)).toContain("max_tokens")
@@ -331,9 +248,9 @@ it.effect("changes executable identity for candidate order and workspace", () =>
     }
     const ordered = { ...first, main: { ...first.main, candidates: [first.main.candidates[0]!, secondCandidate] } }
     const reversed = { ...ordered, main: { ...ordered.main, candidates: ordered.main.candidates.toReversed() } }
-    const orderedExecutable = yield* configure({ executionRoute: ordered, workspace: "/one", sandbox })
-    const reversedExecutable = yield* configure({ executionRoute: reversed, workspace: "/one", sandbox })
-    const otherWorkspace = yield* configure({ executionRoute: ordered, workspace: "/two", sandbox })
+    const orderedExecutable = yield* configure({ executionRoute: ordered, workspace: "/one", kernel })
+    const reversedExecutable = yield* configure({ executionRoute: reversed, workspace: "/one", kernel })
+    const otherWorkspace = yield* configure({ executionRoute: ordered, workspace: "/two", kernel })
     const orderedRoot = orderedExecutable.resolverEntries[0]!
     const orderedSelection = "agent" in orderedRoot ? orderedRoot.agent.model : undefined
     expect(modelCandidates(orderedSelection?.registrationKey ?? "[]")).toEqual([
@@ -350,7 +267,7 @@ it.effect("pins the product token budget into every Agent manifest", () =>
     const executable = yield* configure({
       executionRoute: { ...testExecutionRoute(), tokenBudget: 12_000 },
       workspace: "/workspace",
-      sandbox,
+      kernel,
     })
     expect(
       executable.executable.manifest.entries.every(
@@ -378,7 +295,7 @@ it.effect("resolves an openai candidate through its configured api key environme
       providerOptions: { max_output_tokens: 4_096 },
     }
     const executionRoute = { ...route, main: { ...route.main, candidates: [candidate] } }
-    const configured = yield* configure({ executionRoute, workspace: "/workspace", sandbox }).pipe(
+    const configured = yield* configure({ executionRoute, workspace: "/workspace", kernel }).pipe(
       Effect.provideService(
         ConfigProvider.ConfigProvider,
         ConfigProvider.fromEnv({ env: { SWITCHBOARD_API_KEY: "switchboard-secret" } }),
@@ -410,7 +327,7 @@ it.effect("reports the missing api key environment variable by name instead of a
       providerOptions: { max_output_tokens: 4_096 },
     }
     const executionRoute = { ...route, main: { ...route.main, candidates: [candidate] } }
-    const failed = yield* configure({ executionRoute, workspace: "/workspace", sandbox }).pipe(
+    const failed = yield* configure({ executionRoute, workspace: "/workspace", kernel }).pipe(
       Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: {} })),
       Effect.exit,
     )
@@ -457,8 +374,8 @@ it.effect("registers one stable payload per model registry pin regardless of whi
         task: distinct(base.agents.task, "identity-task"),
       },
     })
-    const asOracle = yield* configure({ executionRoute: spread("oracle"), workspace: "/workspace", sandbox })
-    const asSurgeon = yield* configure({ executionRoute: spread("surgeon"), workspace: "/workspace", sandbox })
+    const asOracle = yield* configure({ executionRoute: spread("oracle"), workspace: "/workspace", kernel })
+    const asSurgeon = yield* configure({ executionRoute: spread("surgeon"), workspace: "/workspace", kernel })
     const first = registryPayloads(asOracle.registrations)
     const second = registryPayloads(asSurgeon.registrations)
     const shared = [...first.keys()].filter((pin) => second.has(pin))
@@ -466,5 +383,267 @@ it.effect("registers one stable payload per model registry pin regardless of whi
     for (const pin of shared) expect([pin, second.get(pin)]).toEqual([pin, first.get(pin)])
     yield* ExecutableRegistration.validate(asOracle.executable, asOracle.registrations)
     yield* ExecutableRegistration.validate(asSurgeon.executable, asSurgeon.registrations)
+  }),
+)
+
+it.effect("advertises exactly one tool named typescript per conversational profile and none for Title", () =>
+  Effect.gen(function* () {
+    const configured = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      kernel,
+    })
+    const advertised = new Map(
+      agentEntries(configured).map((entry) => [profileNameOf(entry), entry.manifest.tools.map(({ name }) => name)]),
+    )
+    expect([...advertised.keys()].toSorted()).toEqual([
+      "librarian",
+      "oracle",
+      "painter",
+      "readthread",
+      "review",
+      "root",
+      "surgeon",
+      "task",
+      "title",
+    ])
+    expect(advertised.get("title")).toEqual([])
+    for (const [name, tools] of advertised) {
+      if (name === "title") continue
+      expect(tools).toEqual(["typescript"])
+      expect(tools).toHaveLength(1)
+    }
+  }),
+)
+
+it.effect("schedules the cell as an exclusive barrier that is never parallel safe", () =>
+  Effect.gen(function* () {
+    const configured = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      kernel,
+    })
+    for (const entry of agentEntries(configured)) {
+      expect(entry.manifest.toolScheduling.maxConcurrency).toBe(1)
+      expect(entry.manifest.toolScheduling.parallelSafe).toEqual([])
+    }
+  }),
+)
+
+it.effect("pins the kernel profile the host builds its pool from into every conversational profile", () =>
+  Effect.gen(function* () {
+    const configured = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      kernel,
+    })
+    const expected = KernelProfileRegistration.pin(
+      KernelProfileRegistration.make({
+        runtimeVersion: kernel.runtimeVersion,
+        workspace: "/workspace",
+        dataRoot: kernel.dataRoot,
+      }),
+    )
+    expect(KernelProfileRegistration.digest(configured.kernelProfile)).toBe(
+      KernelProfileRegistration.digest(
+        KernelProfileRegistration.make({
+          runtimeVersion: kernel.runtimeVersion,
+          workspace: "/workspace",
+          dataRoot: kernel.dataRoot,
+        }),
+      ),
+    )
+    for (const entry of agentEntries(configured)) {
+      const pinned = entry.manifest.services.find(({ name }) => name === "rika-kernel-profile")
+      if (profileNameOf(entry) === "title") {
+        expect(pinned).toBeUndefined()
+        continue
+      }
+      expect(pinned?.pin).toBe(expected)
+    }
+    const registration = configured.registrations.find(({ pin }) => pin === expected)
+    expect(registration?.codec).toBe("rika-kernel-profile")
+    expect(registration?.payload).toMatchObject({
+      workspace: { root: "/workspace", dataRoot: kernel.dataRoot },
+      runtime: { name: "bun", version: kernel.runtimeVersion },
+      trustMode: "trusted-local",
+    })
+  }),
+)
+
+it.effect("round-trips the pinned kernel profile registration back to the exact profile", () =>
+  Effect.gen(function* () {
+    const configured = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      kernel,
+    })
+    const decoded = yield* Registration.read(Registration.codecs.kernelProfile, configured.registrations)
+    expect(decoded).toEqual(configured.kernelProfile)
+    expect(KernelProfileRegistration.pin(decoded)).toBe(KernelProfileRegistration.pin(configured.kernelProfile))
+  }),
+)
+
+it.effect("changes the admitted executable when any kernel profile input changes", () =>
+  Effect.gen(function* () {
+    const base = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      kernel,
+    })
+    const changed = yield* Effect.forEach(
+      [
+        { ...kernel, runtimeVersion: "9.9.9" },
+        { ...kernel, dataRoot: "/other-data" },
+        { ...kernel, trustMode: "trusted-workspace" as const },
+        { ...kernel, limits: { sourceBytes: 1_024, channelBytes: 2_048, cellDeadlineMillis: 5_000 } },
+      ],
+      (variant) => configure({ executionRoute: testExecutionRoute(), workspace: "/workspace", kernel: variant }),
+    )
+    for (const variant of changed) {
+      expect(KernelProfileRegistration.digest(variant.kernelProfile)).not.toBe(
+        KernelProfileRegistration.digest(base.kernelProfile),
+      )
+      expect(variant.executable.ref.active).not.toBe(base.executable.ref.active)
+    }
+    const otherWorkspace = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/elsewhere",
+      kernel,
+    })
+    expect(KernelProfileRegistration.digest(otherWorkspace.kernelProfile)).not.toBe(
+      KernelProfileRegistration.digest(base.kernelProfile),
+    )
+  }),
+)
+
+it.effect("rejects a registration whose kernel profile payload no longer matches its pin", () =>
+  Effect.gen(function* () {
+    const configured = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      kernel,
+    })
+    const tampered = configured.registrations.map((registration) =>
+      registration.codec === "rika-kernel-profile"
+        ? {
+            ...registration,
+            payload: {
+              ...(registration.payload as Record<string, unknown>),
+              trustMode: "trusted-workspace",
+            },
+          }
+        : registration,
+    )
+    const failure = yield* Effect.exit(
+      Registration.verify({
+        expected: configured.registrations,
+        actual: tampered,
+        required: ExecutableRegistration.requiredPins(configured.executable),
+      }),
+    )
+    expect(Exit.isFailure(failure)).toBe(true)
+    if (Exit.isFailure(failure)) expect(Cause.pretty(failure.cause)).toContain("registration payload changed")
+  }),
+)
+
+it.effect("keeps parent-relative child selection authority pinned after the cell swap", () =>
+  Effect.gen(function* () {
+    const configured = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      kernel,
+    })
+    const rootEntry = configured.executable.manifest.entries.find(({ pin }) => pin === configured.executable.ref.active)
+    expect(rootEntry?._tag === "Agent" ? rootEntry.manifest.children.map(({ selection }) => selection) : []).toEqual([
+      "Librarian",
+      "Oracle",
+      "Painter",
+      "ReadThread",
+      "Review",
+      "Surgeon",
+      "Task",
+      "Title",
+    ])
+    expect(configured.profiles.Task!.manifest.children.map(({ selection }) => selection)).toEqual([
+      "Librarian",
+      "Oracle",
+      "Painter",
+      "ReadThread",
+      "Surgeon",
+    ])
+    for (const name of ["Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon"] as const) {
+      expect(configured.profiles[name]!.manifest.children).toEqual([])
+    }
+    for (const entry of agentEntries(configured)) {
+      for (const child of entry.manifest.children) {
+        expect(configured.executable.manifest.entries.some(({ pin }) => pin === child.agent)).toBe(true)
+      }
+    }
+  }),
+)
+
+it.effect("pins discovered skills into every conversational profile and registers each one", () =>
+  Effect.gen(function* () {
+    const skills = [
+      { name: "writing-rika-tests", digest: "digest-tests" },
+      { name: "debugging-rika", digest: "digest-debug", importName: "debugging_rika" },
+    ]
+    const configured = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      kernel,
+      skills,
+    })
+    for (const entry of agentEntries(configured)) {
+      const names = entry.manifest.skills.map(({ name }) => name)
+      expect(names).toEqual(profileNameOf(entry) === "title" ? [] : ["debugging-rika", "writing-rika-tests"])
+    }
+    const registrationPins = new Set(configured.registrations.map(({ pin }) => pin))
+    for (const capability of configured.profiles.Task!.manifest.skills) {
+      expect(registrationPins.has(capability.pin)).toBe(true)
+    }
+    expect(registrationPins).toEqual(ExecutableRegistration.requiredPins(configured.executable))
+    yield* ExecutableRegistration.validate(configured.executable, configured.registrations)
+  }),
+)
+
+it.effect("changes the admitted executable when a pinned skill digest changes", () =>
+  Effect.gen(function* () {
+    const base = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      kernel,
+      skills: [{ name: "writing-rika-tests", digest: "digest-one" }],
+    })
+    const changed = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      kernel,
+      skills: [{ name: "writing-rika-tests", digest: "digest-two" }],
+    })
+    expect(changed.executable.ref.active).not.toBe(base.executable.ref.active)
+  }),
+)
+
+it.effect("keeps the admitted executable stable when skill discovery order churns", () =>
+  Effect.gen(function* () {
+    const skills = [
+      { name: "alpha", digest: "digest-alpha" },
+      { name: "beta", digest: "digest-beta" },
+    ]
+    const forward = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      kernel,
+      skills,
+    })
+    const reversed = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      kernel,
+      skills: skills.toReversed(),
+    })
+    expect(reversed.executable.ref.active).toBe(forward.executable.ref.active)
   }),
 )

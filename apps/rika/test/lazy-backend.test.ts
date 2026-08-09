@@ -3,6 +3,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Layer, Stream } from "effect"
 import { lazyBackendLayer } from "../src/server/composition/lazy-execution-backend"
+import * as ExecutionProjection from "@rika/product/execution-projection"
 
 it.effect("delegates the five execution operations through the deferred backend", () =>
   Effect.scoped(
@@ -37,7 +38,7 @@ it.effect("delegates the five execution operations through the deferred backend"
       yield* backend.steerTurn(link, { text: "continue", idempotencyKey: "steer-1" })
       const authorization = {
         authorizationId: "authorization",
-        checkpoint: { version: 1, cursor: "cursor", state: "{}" },
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "cursor", state: "{}" },
       }
       yield* backend.approveTurn(link, authorization)
       yield* backend.denyTurn(link, authorization)

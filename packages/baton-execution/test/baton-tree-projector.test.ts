@@ -175,6 +175,134 @@ describe("Baton tree projector", () => {
     })
   })
 
+  it("produces identical cell units live and after a checkpoint reload", () => {
+    resetEventPosition()
+    const source = "// warm up\nconst answer = 6 * 7\nanswer"
+    const call = {
+      type: "tool-call" as const,
+      id: "cell-resume",
+      name: "typescript",
+      params: { code: source },
+      providerExecuted: false,
+      metadata: {},
+    }
+    const live = TreeProjector.make("turn-cell-resume", "run a cell")
+    live.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
+    live.apply(treeEvent("raw-root-run", { _tag: "ToolExecutionStarted", turn: 0, call } as never))
+    const patch = live.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolProgress",
+        turn: 0,
+        toolCallId: "cell-resume",
+        message: "Stdout",
+        data: { _tag: "Stdout", cellId: "cell-resume", sequence: 0, text: "partial output" },
+      } as never),
+    )
+    const reloaded = TreeProjector.make("turn-cell-resume", "run a cell", patch.checkpoint, live.snapshot().units)
+    expect(reloaded.snapshot().units).toEqual(live.snapshot().units)
+    const completion = (projector: ReturnType<typeof TreeProjector.make>) =>
+      projector.apply(
+        treeEvent("raw-root-run", {
+          _tag: "ToolExecutionCompleted",
+          turn: 0,
+          call,
+          result: {
+            type: "tool-result",
+            id: "cell-resume",
+            name: "typescript",
+            result: {
+              cellId: "cell-resume",
+              epoch: 1,
+              sequence: 2,
+              value: "42",
+              stdout: "partial output",
+              stderr: "",
+              durationMillis: 8,
+              truncation: [],
+            },
+            encodedResult: {},
+            isFailure: false,
+            providerExecuted: false,
+            preliminary: false,
+            metadata: {},
+          },
+        } as never),
+      )
+    resetEventPosition()
+    const livePosition = completion(live)
+    resetEventPosition()
+    const reloadedPosition = completion(reloaded)
+    expect(reloadedPosition.upsert).toEqual(livePosition.upsert)
+    expect(reloaded.snapshot().units).toEqual(live.snapshot().units)
+    expect(
+      reloaded.snapshot().units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Cell")
+        ?.content,
+    ).toEqual({
+      _tag: "Block",
+      block: expect.objectContaining({ status: "complete", result: "42", durationMillis: 8, epoch: 1 }),
+    })
+  })
+
+  it("keeps a running cell across a Server restart and drops a settled one from the checkpoint", () => {
+    resetEventPosition()
+    const cellCall = (id: string, code: string) => ({
+      type: "tool-call" as const,
+      id,
+      name: "typescript",
+      params: { code },
+      providerExecuted: false,
+      metadata: {},
+    })
+    const projector = TreeProjector.make("turn-cell-retention", "retain")
+    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
+    projector.apply(
+      treeEvent("raw-root-run", { _tag: "ToolExecutionStarted", turn: 0, call: cellCall("done", "1") } as never),
+    )
+    projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolExecutionCompleted",
+        turn: 0,
+        call: cellCall("done", "1"),
+        result: {
+          type: "tool-result",
+          id: "done",
+          name: "typescript",
+          result: {
+            cellId: "done",
+            epoch: 0,
+            sequence: 1,
+            value: "1",
+            stdout: "",
+            stderr: "",
+            durationMillis: 1,
+            truncation: [],
+          },
+          encodedResult: {},
+          isFailure: false,
+          providerExecuted: false,
+          preliminary: false,
+          metadata: {},
+        },
+      } as never),
+    )
+    const patch = projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolExecutionStarted",
+        turn: 0,
+        call: cellCall("live", "await forever()"),
+      } as never),
+    )
+    const persisted = JSON.parse(patch.checkpoint.state) as {
+      readonly nodes: ReadonlyArray<{ readonly cells: ReadonlyArray<readonly [string, unknown]> }>
+    }
+    expect(persisted.nodes.flatMap((node) => node.cells.map(([rawId]) => rawId))).toEqual(["live"])
+    const resumed = TreeProjector.make("turn-cell-retention", "retain", patch.checkpoint, projector.snapshot().units)
+    const settled = resumed.apply(treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "restarted" } as never))
+    expect(
+      settled.upsert.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Cell")?.content,
+    ).toEqual({ _tag: "Block", block: expect.objectContaining({ status: "cancelled" }) })
+  })
+
   it("restores partial model output and topology from one opaque checkpoint", () => {
     resetEventPosition()
     const first = TreeProjector.make("turn-resume", "continue")

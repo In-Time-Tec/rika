@@ -78,10 +78,12 @@ export const boundedTranscriptModel: {
       return { ...model, entries, blocks, items }
     }
     const itemPositionByBlockId = new Map<string, number>()
+    const cellBlockIds = new Set<string>()
     for (const [position, item] of allItems.entries()) {
       if (item._tag !== "Block") continue
       const block = model.blocks[item.index] as TranscriptBlock | undefined
       if (block?._tag === "ToolCall" || block?._tag === "SubagentCard") itemPositionByBlockId.set(block.id, position)
+      if (block?._tag === "Cell") cellBlockIds.add(block.id)
     }
     const rootPositionOf = (start: number): number => {
       let position = start
@@ -120,6 +122,7 @@ export const boundedTranscriptModel: {
         seen.add(current)
         const parentId = allItems[current]?.parentId
         if (parentId === undefined) break
+        if (cellBlockIds.has(parentId)) break
         if (!expandedRows.has(`tool:${parentId}`) && !expandedRows.has(`subagent:${parentId}`)) {
           visible = false
           break

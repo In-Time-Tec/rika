@@ -1,4 +1,4 @@
-import { ModelRegistry, SandboxExecutor } from "@batonfx/core"
+import { ModelRegistry } from "@batonfx/core"
 import { Approval, Run, RunTree, Runtime } from "@batonfx/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import type { Status } from "@rika/product/execution-status"
@@ -6,16 +6,28 @@ import { ProviderCredentialStore, type ProviderCredentialStoreShape } from "@rik
 export type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 export type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
 import { Cause, Context, Effect, Layer, Schedule, Schema, Stream } from "effect"
-import type { AgentToolHandlers } from "./baton-route"
+import type { AgentToolHandlers, KernelOptions } from "./baton-route"
 import { configure, makeResolver } from "./baton-route"
 import { TreeProjector, titleInvocationId } from "./baton-tree-projector"
 
 export type AgentToolServices = AgentToolHandlers
 
-export type SandboxService = (typeof SandboxExecutor.SandboxExecutor)["Identifier"]
+/**
+ * The runtime database always lives directly under the profile data root as `<dataRoot>/baton.db`,
+ * so the root the kernel pins is derived from the one path the composition root already supplies
+ * rather than threaded through the product Turn contract. Deriving it keeps the pinned profile
+ * describing the kernel this host actually runs; a supplied value overrides it verbatim.
+ */
+const derivedKernelOptions = (filename: string): KernelOptions => {
+  const separator = filename.lastIndexOf("/")
+  return { runtimeVersion: Bun.version, dataRoot: separator > 0 ? filename.slice(0, separator) : "." }
+}
+
+const kernelOptions = (options: Options): KernelOptions => options.kernel ?? derivedKernelOptions(options.filename)
 
 export interface Options {
   readonly filename: string
+  readonly kernel?: KernelOptions
   readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolServices, never, never>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry, never, never>
   readonly credentialStore?: Layer.Layer<ProviderCredentialStore, never, never>
@@ -80,11 +92,7 @@ const status = (value: Run.RunStatus): Status => {
   }
 }
 
-const make = (
-  options: Options,
-  sandbox: SandboxExecutor.Interface,
-  credentialStore: ProviderCredentialStoreShape | undefined,
-) =>
+const make = (options: Options, credentialStore: ProviderCredentialStoreShape | undefined) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime.Runtime
     // A replayPolicy:"never" operation interrupted by cancellation parks the Run in
@@ -167,7 +175,7 @@ const make = (
           const configured = yield* configure({
             executionRoute: input.executionRoute,
             workspace: input.workspace,
-            sandbox,
+            kernel: kernelOptions(options),
             ...(credentialStore === undefined ? {} : { credentialStore }),
             ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices(input.workspace) }),
             ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
@@ -267,13 +275,9 @@ const make = (
     })
   })
 
-export const layer = (
-  options: Options,
-): Layer.Layer<ExecutionGateway.Service, ExecutionGateway.StartTurnFailure, SandboxService> =>
+export const layer = (options: Options): Layer.Layer<ExecutionGateway.Service, ExecutionGateway.StartTurnFailure> =>
   Layer.unwrap(
     Effect.gen(function* () {
-      const context = yield* Effect.context<SandboxService>()
-      const sandbox = Context.get(context, SandboxExecutor.SandboxExecutor)
       const credentialStore: ProviderCredentialStoreShape | undefined =
         options.credentialStore === undefined
           ? undefined
@@ -281,7 +285,7 @@ export const layer = (
       const runtimeLayer = Runtime.layerSqlite({
         filename: options.filename,
         resolver: makeResolver({
-          sandbox,
+          kernel: kernelOptions(options),
           ...(credentialStore === undefined ? {} : { credentialStore }),
           ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices }),
           ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
@@ -291,7 +295,7 @@ export const layer = (
           ? {}
           : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
       })
-      const executionLayer = Layer.effect(ExecutionGateway.Service, make(options, sandbox, credentialStore)).pipe(
+      const executionLayer = Layer.effect(ExecutionGateway.Service, make(options, credentialStore)).pipe(
         Layer.provide(runtimeLayer),
       )
       return executionLayer.pipe(

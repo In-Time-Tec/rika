@@ -6,6 +6,7 @@ import type { ThreadItem } from "../../state/model/terminal-thread-state"
 import { isLoading } from "../../state/model/terminal-loadable-state"
 import { activeTimeIcon } from "../../state/model/terminal-activity-time"
 import { colors, spacing } from "../../presentation/terminal/terminal-theme"
+import { contentColumnWidth } from "../../state/model/terminal-layout-state"
 import { homeRelativePath } from "../../presentation/terminal/terminal-format"
 import { orbGeometry, orbRows, type OrbImpulse } from "./opentui-welcome-orb"
 export const panelLoading = (model: Model): string | undefined => {
@@ -33,6 +34,16 @@ export const animationActive = (model: Model): boolean =>
     (model.threads as ReadonlyArray<ThreadItem>).some(
       (thread) => thread.status !== "idle" && thread.status !== "error",
     ))
+
+/**
+ * Gates the goal timer's EXISTENCE. `model.goal !== undefined` would pin the timer on forever after
+ * any goal is ever set; only an active goal animates.
+ */
+export const goalAnimationActive = (model: Model): boolean => model.goal?.status === "active"
+
+/** The goal indicator shares the context meter's width threshold so narrow terminals stay legible. */
+export const goalIndicatorVisible = (model: Model): boolean =>
+  goalAnimationActive(model) && contentColumnWidth(model) >= 24
 
 export const compactWorkspace = (workspace: string): string => {
   const home = homeRelativePath(workspace)

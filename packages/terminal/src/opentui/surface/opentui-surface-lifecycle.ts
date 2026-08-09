@@ -4,8 +4,8 @@ import { maxMountedTranscriptEntries } from "../rendering/opentui-render-transcr
 import type { Model } from "../../state/model/terminal-state"
 import { contentColumnWidth } from "../../state/model/terminal-layout-state"
 import { idleSpinnerFrame, spinnerInterval } from "../rendering/opentui-spinner"
-import { animationActive } from "./opentui-surface-content"
-import { welcomeAnimationActive } from "./opentui-welcome-state"
+import { animationActive, goalAnimationActive } from "./opentui-surface-content"
+import { welcomeAnimationActive, welcomeAnimationSettled } from "./opentui-welcome-state"
 import { prependedTranscriptItems } from "./opentui-lifecycle-transcript"
 import { SurfaceLayout } from "./opentui-surface-layout"
 
@@ -102,10 +102,15 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
     if (this.options.animate !== false && loaderActive) {
       this.loaderController.start(spinnerInterval, () => this.tickLoader())
     } else if (this.options.animate === false || !loaderActive) this.loaderController.stop()
-    const welcomeActive = welcomeAnimationActive(model)
+    const welcomeActive =
+      welcomeAnimationActive(model) &&
+      !welcomeAnimationSettled(this.welcomeController.phase, this.welcomeController.impulses)
     if (this.options.animate !== false && welcomeActive) {
       this.welcomeController.start(spinnerInterval, () => this.tickWelcome())
     } else if (this.options.animate === false || !welcomeActive) this.welcomeController.stop()
+    const goalActive = goalAnimationActive(model)
+    if (this.options.animate !== false && goalActive) this.goalController.start(spinnerInterval, () => this.tickGoal())
+    else if (this.options.animate === false || !goalActive) this.goalController.stop()
     this.updateOverlay(
       model,
       transcriptLayout.contentLeft,
@@ -120,6 +125,7 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
     this.destroyed = true
     this.loaderController.release()
     this.welcomeController.release()
+    this.goalController.release()
     if (this.loaderController.publishedFrame !== undefined) this.publishWorkingFrame(undefined)
     this.scrollGeneration += 1
     this.focusController.release()

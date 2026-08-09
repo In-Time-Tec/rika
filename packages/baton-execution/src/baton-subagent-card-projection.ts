@@ -1,9 +1,16 @@
 import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import type { Block, Unit } from "@rika/product/execution-transcript-contract"
+import { childOrder, unitOrder } from "@rika/product/execution-transcript-contract"
 import { type Card, type Node } from "./baton-projector-model"
 import { type ProjectorCore } from "./baton-projector-persistence"
 import { projectorNames, bounded, record, optionalString, string, toolTextLimit } from "./baton-projector-values"
 import { promptText } from "./baton-projector-decoding"
+
+export interface CellAttachment {
+  readonly blockId: string
+  readonly unitKey: string
+  readonly ordinal: number
+}
 
 export interface SubagentCardProjection {
   readonly cardFor: (
@@ -13,6 +20,7 @@ export interface SubagentCardProjection {
     cardPrompt: string,
     groupKey?: string,
     orderPart?: number,
+    attachment?: CellAttachment,
   ) => Card
   readonly updateCard: (
     card: Card,
@@ -37,6 +45,7 @@ interface PendingGroup {
 }
 
 export interface SubagentCardProjectionInput {
+  readonly cellFor: (parent: Node, invocationId: string) => CellAttachment | undefined
   readonly core: ProjectorCore
   readonly units: Map<string, Unit>
   readonly nodes: Map<string, Node>
@@ -52,6 +61,7 @@ export interface SubagentCardProjectionInput {
 
 export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): SubagentCardProjection => {
   const {
+    cellFor,
     core,
     units,
     nodes,
@@ -72,6 +82,7 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
     cardPrompt: string,
     groupKey?: string,
     orderPart = 0,
+    attachment?: CellAttachment,
   ): Card => {
     const invocationKey = `${node.rawRunId}\u0000${rawInvocationId}`
     const existing = cardsByInvocation.get(invocationKey)
@@ -99,7 +110,19 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
       status: "running",
       activity: [],
     }
-    put(unit(node, card.unitKey, { _tag: "Block", block }, orderPart))
+    const created = unit(node, card.unitKey, { _tag: "Block", block }, orderPart)
+    if (attachment === undefined) {
+      put(created)
+      return card
+    }
+    const anchor = units.get(attachment.unitKey)
+    put({
+      ...created,
+      parentId: attachment.blockId,
+      ...(anchor === undefined
+        ? {}
+        : { order: childOrder(anchor.order, attachment.blockId, unitOrder(card.unitKey, 0, attachment.ordinal)) }),
+    })
     return card
   }
 
@@ -177,8 +200,12 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
   ) => {
     let card = cardsByInvocation.get(`${parent.rawRunId}\u0000${invocationId}`) ?? groupMemberCard(parent, invocationId)
     const displayPrompt = promptText(linkedPrompt)
+    const attachment = cellFor(parent, invocationId)
     if (card === undefined && invocationId !== projectorNames.titleInvocationId)
-      card = cardFor(parent, invocationId, selection, displayPrompt)
+      card =
+        attachment === undefined
+          ? cardFor(parent, invocationId, selection, displayPrompt)
+          : cardFor(parent, invocationId, selection, displayPrompt, undefined, attachment.ordinal, attachment)
     if (card !== undefined && card.prompt.length === 0 && displayPrompt.length > 0) {
       card.prompt = bounded(displayPrompt, toolTextLimit)
       card.promptTruncated = displayPrompt.length > toolTextLimit

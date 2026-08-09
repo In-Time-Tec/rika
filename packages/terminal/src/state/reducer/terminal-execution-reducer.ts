@@ -210,7 +210,8 @@ const reduceExecutionImpl = (
       const blocks = [...model.blocks, message.block]
       const items = [...model.items, { _tag: "Block" as const, index: model.blocks.length }]
       const activityForAddedBlock = (): Activity => {
-        if (message.block._tag === "ToolCall") return runningToolsActivity({ ...model, blocks, items })
+        if (message.block._tag === "ToolCall" || message.block._tag === "Cell")
+          return runningToolsActivity({ ...model, blocks, items })
         if (message.block._tag === "ToolResult") return { _tag: "Waiting" }
         if (message.block._tag === "Compaction") {
           return message.block.status === "running" ? { _tag: "Compacting" } : { _tag: "Waiting" }

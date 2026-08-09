@@ -1,4 +1,4 @@
-import { Data, Effect, FileSystem, Path } from "effect"
+import { Data, Effect, FileSystem, Function, Path } from "effect"
 
 export type PerformanceRole = "launcher" | "interactive" | "server"
 
@@ -50,7 +50,7 @@ export const roleRuntimes = (input: {
   }
 }
 
-interface PsRow {
+export interface PsRow {
   readonly pid: number
   readonly parent: number
   readonly rss: number
@@ -59,7 +59,7 @@ interface PsRow {
   readonly command: string
 }
 
-class ProcessObservationError extends Data.TaggedError("ProcessObservationError")<{
+export class ProcessObservationError extends Data.TaggedError("ProcessObservationError")<{
   readonly message: string
   readonly cause?: unknown
 }> {}
@@ -93,12 +93,12 @@ const psRows = (): ReadonlyArray<PsRow> => {
     })
 }
 
-const readProcessRows = Effect.try({
+export const readProcessRows = Effect.try({
   try: psRows,
   catch: (cause) => new ProcessObservationError({ message: "Unable to sample the process table", cause }),
 })
 
-const descendants = (rows: ReadonlyArray<PsRow>, root: number) => {
+const descendantsImpl = (rows: ReadonlyArray<PsRow>, root: number) => {
   const ids = new Set([root])
   let changed = true
   while (changed) {
@@ -111,6 +111,11 @@ const descendants = (rows: ReadonlyArray<PsRow>, root: number) => {
   }
   return rows.filter((row) => ids.has(row.pid))
 }
+
+export const descendants: {
+  (rows: ReadonlyArray<PsRow>, root: number): ReadonlyArray<PsRow>
+  (root: number): (rows: ReadonlyArray<PsRow>) => ReadonlyArray<PsRow>
+} = Function.dual(2, descendantsImpl)
 
 const killTree = (pid: number) => {
   try {

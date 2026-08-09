@@ -21,7 +21,6 @@
     "@rika/product": "workspace:*",
     "@rika/configuration": "workspace:*",
     "@rika/extensions": "workspace:*",
-    "@rika/javascript-sandbox": "workspace:*",
     "@rika/product-store": "workspace:*",
     "@rika/coding-tools": "workspace:*",
     "@rika/terminal": "workspace:*",

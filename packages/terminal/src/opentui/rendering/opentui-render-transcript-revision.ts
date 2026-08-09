@@ -54,6 +54,10 @@ const transcriptUnitRevisionImpl = (
     ids.push(identityRevision(block))
     if (block._tag === "Compaction" && block.status === "complete")
       bits.push(`rainbow:${model.compactionShimmer?.tick ?? 0}`)
+    if (block._tag === "Cell") {
+      pushExpanded(`cell:${block.id}`)
+      for (const file of block.files) pushExpanded(`file:${file.key}`)
+    }
   }
   const walkAgentResponse = (state: AgentResponseState | undefined) => {
     const response = state === undefined ? undefined : agentResponseOutcome(state)
@@ -74,6 +78,7 @@ const transcriptUnitRevisionImpl = (
       break
     case "reasoning":
     case "diff":
+    case "cell":
     case "block":
       walkBlock(unit.block)
       break

@@ -7,6 +7,13 @@ export interface ToolState {
   readonly blockId: string
 }
 
+export interface CellState {
+  readonly rawId: string
+  readonly key: string
+  readonly blockId: string
+  partial: string
+}
+
 export interface Node {
   rawRunId: string
   readonly publicId: string
@@ -15,6 +22,7 @@ export interface Node {
   readonly parentBlockId?: string
   readonly hidden: boolean
   readonly tools: Map<string, ToolState>
+  readonly cells: Map<string, CellState>
   phase: number
   status: "running" | "waiting" | "completed" | "failed" | "cancelled"
   lifecycle: "unknown" | "accepted" | "active" | "waiting" | "terminal"

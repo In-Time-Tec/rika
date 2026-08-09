@@ -6,10 +6,11 @@ import { contentColumnWidth } from "../../state/model/terminal-layout-state"
 import { spacing, colors } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { formatActivity } from "../../state/model/terminal-activity-state"
-import { loaderFrame, spinnerFrames } from "../rendering/opentui-spinner"
+import { loaderFrame, spinnerFrames, spinnerInterval } from "../rendering/opentui-spinner"
 import { renderSidebar } from "../rendering/opentui-render-block"
-import { panelLoading, welcomeContent } from "./opentui-surface-content"
-import { welcomeAnimationActive } from "./opentui-welcome-state"
+import { goalAnimationActive, goalIndicatorVisible, panelLoading, welcomeContent } from "./opentui-surface-content"
+import { goalLabelContent } from "./opentui-goal-controller"
+import { welcomeAnimationActive, welcomeAnimationSettled } from "./opentui-welcome-state"
 import { ToastController } from "./opentui-toast-controller"
 import { SurfaceOverlay } from "./opentui-surface-overlay"
 
@@ -61,6 +62,10 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
     if (this.destroyed || !this.welcomeController.running) return
     const current = this.model
     if (current === undefined || !welcomeAnimationActive(current) || this.welcomeController.child === undefined) return
+    if (welcomeAnimationSettled(this.welcomeController.phase, this.welcomeController.impulses)) {
+      this.welcomeController.stop()
+      return
+    }
     this.welcomeController.advance()
     const welcomeWidth = this.welcomeWidthFor(current)
     const impulses = this.welcomeController.impulses
@@ -79,7 +84,22 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
     const child = this.welcomeController.child
     if (this.destroyed || current === undefined || child === undefined) return
     this.welcomeController.strike(this.welcomeWidthFor(current), current.height, event.x - child.x, event.y - child.y)
+    if (this.options.animate !== false && welcomeAnimationActive(current))
+      this.welcomeController.start(spinnerInterval, () => this.tickWelcome())
     this.renderer.requestRender()
+  }
+  protected tickGoal(): void {
+    if (this.destroyed || !this.goalController.running) return
+    const current = this.model
+    if (current === undefined || !goalAnimationActive(current)) return
+    this.goalController.advance()
+    this.renderGoalLabel(current)
+    this.renderer.requestRender()
+  }
+  protected renderGoalLabel(model: Model): void {
+    this.goalLabel.content = goalIndicatorVisible(model)
+      ? goalLabelContent(this.goalController.frame, this.currentTimeMillis() - model.goal!.startedAtMillis)
+      : ""
   }
   protected tickLoader(): void {
     if (this.destroyed || !this.loaderController.running) return

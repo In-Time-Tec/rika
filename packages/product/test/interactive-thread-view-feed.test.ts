@@ -67,7 +67,11 @@ describe("interactive ThreadView feed", () => {
       change: {
         _tag: "ProjectionSnapshot",
         revision: 0,
-        checkpoint: { version: 1, cursor: "gateway:snapshot", state: "secret-state" },
+        checkpoint: {
+          version: ExecutionProjection.projectionVersion,
+          cursor: "gateway:snapshot",
+          state: "secret-state",
+        },
         units: [unit("answer", "one")],
         hasOlder: false,
         state: state(),
@@ -75,7 +79,7 @@ describe("interactive ThreadView feed", () => {
     })
     expect(started[0]).toMatchObject({
       _tag: "ThreadViewPatch",
-      patch: { baseRevision: 0, revision: 1, header: { source: { projectionVersion: 1 } } },
+      patch: { baseRevision: 0, revision: 1, header: { source: { projectionVersion: 2 } } },
     })
 
     const patched = feed.publish({
@@ -86,7 +90,7 @@ describe("interactive ThreadView feed", () => {
         _tag: "ProjectionPatch",
         baseRevision: 0,
         revision: 1,
-        checkpoint: { version: 1, cursor: "gateway:patch", state: "secret-state" },
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "gateway:patch", state: "secret-state" },
         upsert: [unit("answer", "done")],
         remove: [],
         state: state("completed"),
@@ -94,7 +98,7 @@ describe("interactive ThreadView feed", () => {
     })
     expect(patched[0]).toMatchObject({
       _tag: "ThreadViewPatch",
-      patch: { baseRevision: 1, revision: 2, header: { source: { projectionVersion: 1 } } },
+      patch: { baseRevision: 1, revision: 2, header: { source: { projectionVersion: 2 } } },
     })
     expect(JSON.stringify([...selected, ...started, ...patched])).not.toMatch(/gateway:|secret-state|checkpoint/)
   })
@@ -151,7 +155,7 @@ describe("interactive ThreadView feed", () => {
         _tag: "ProjectionPatch",
         baseRevision: 9,
         revision: 10,
-        checkpoint: { version: 1, cursor: "gap", state: "gap" },
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "gap", state: "gap" },
         upsert: [],
         remove: [],
         state: state(),
@@ -267,7 +271,7 @@ describe("interactive ThreadView feed", () => {
         _tag: "ProjectionPatch",
         baseRevision: 0,
         revision: 1,
-        checkpoint: { version: 1, cursor: "private", state: "private" },
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "private", state: "private" },
         upsert: [],
         remove: [],
         state: { status: "completed", usage: secondUsage, steering: { steeringMessages: 0, followUpMessages: 0 } },
@@ -325,7 +329,7 @@ describe("interactive ThreadView feed", () => {
         _tag: "ProjectionPatch",
         baseRevision: 0,
         revision: 1,
-        checkpoint: { version: 1, cursor: "private", state: "private" },
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "private", state: "private" },
         upsert: [unit("answer", "live")],
         remove: [],
         state: state(),
@@ -376,7 +380,7 @@ describe("interactive ThreadView feed", () => {
         change: {
           _tag: "ProjectionSnapshot",
           revision: 1,
-          checkpoint: { version: 1, cursor: "private", state: "private" },
+          checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "private", state: "private" },
           units: [{ ...unit("shell", "ALLOWED"), turnId: String(newTurn.id) }],
           state: state("completed"),
         },
@@ -412,7 +416,7 @@ describe("interactive ThreadView feed", () => {
         change: {
           _tag: "ProjectionSnapshot",
           revision: 1,
-          checkpoint: { version: 1, cursor: "private", state: "private" },
+          checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "private", state: "private" },
           units: [{ ...unit("shell-live", "ALLOWED"), turnId: String(newTurn.id) }],
           state: state("completed"),
         },
@@ -443,7 +447,7 @@ describe("interactive ThreadView feed", () => {
       change: {
         _tag: "ProjectionSnapshot",
         revision: 1,
-        checkpoint: { version: 1, cursor: "private", state: "private" },
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "private", state: "private" },
         units,
         hasOlder: false,
         state: state(),
@@ -475,7 +479,7 @@ describe("interactive ThreadView feed", () => {
       change: {
         _tag: "ProjectionSnapshot",
         revision: 1,
-        checkpoint: { version: 1, cursor: "private", state: "private" },
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "private", state: "private" },
         units: [unit("first", "first"), unit("second", "second")],
         hasOlder: false,
         state: state(),
@@ -488,7 +492,7 @@ describe("interactive ThreadView feed", () => {
       change: {
         _tag: "ProjectionSnapshot",
         revision: 2,
-        checkpoint: { version: 1, cursor: "private", state: "private" },
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "private", state: "private" },
         units: [unit("second", "second")],
         hasOlder: true,
         state: state(),

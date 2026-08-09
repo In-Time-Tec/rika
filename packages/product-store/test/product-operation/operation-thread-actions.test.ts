@@ -12,7 +12,7 @@ import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Console, Effect, Layer, Ref, Stream } from "effect"
 import { TestConsole } from "effect/testing"
-const projectionVersion = 1
+const projectionVersion = 2
 
 import { provideLayer } from "../support/product-test-layer"
 

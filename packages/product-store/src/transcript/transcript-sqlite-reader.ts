@@ -50,13 +50,13 @@ export const readTranscriptProjection = Effect.fn("TranscriptRepository.read")(f
   if (projectorValues.some((value) => value !== null) && projectorValues.some((value) => value === null))
     return yield* RepositoryError.make({ message: `Transcript ${turnId} has a partial projector checkpoint` })
   const projectorCheckpoint =
-    row.projector_version === null
-      ? undefined
-      : {
-          version: row.projector_version as 1,
+    Number(row.projector_version) === ExecutionProjection.projectionVersion
+      ? {
+          version: ExecutionProjection.projectionVersion,
           cursor: String(row.projector_cursor),
           state: String(row.projector_state),
         }
+      : undefined
   return {
     turn,
     units,

@@ -32,7 +32,10 @@ const sameChangedFiles = (left: ReadonlyArray<ChangedFile>, right: ReadonlyArray
 const cancelTranscriptBlocks = (blocks: ReadonlyArray<TranscriptBlock>): ReadonlyArray<TranscriptBlock> =>
   blocks.map((block) => {
     if (
-      (block._tag === "ToolCall" || block._tag === "SubagentCard" || block._tag === "Compaction") &&
+      (block._tag === "ToolCall" ||
+        block._tag === "SubagentCard" ||
+        block._tag === "Compaction" ||
+        block._tag === "Cell") &&
       block.status === "running"
     )
       return { ...block, status: "cancelled" as const }

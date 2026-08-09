@@ -14,7 +14,7 @@ import {
 } from "./terminal-text-adapter"
 import { renderToolSummary } from "./terminal-diff-text-adapter"
 import type { TerminalTextChunk } from "../../presentation/markdown/styled-text"
-import { renderDiffBody, renderPlainBody, toolOutputDisplayed } from "./opentui-render-unit-bodies"
+import { renderCellBody, renderDiffBody, renderPlainBody, toolOutputDisplayed } from "./opentui-render-unit-bodies"
 import { toolDetail, toolDetails } from "../../presentation/transcript/transcript-tool-detail"
 import {
   isExpandableUnit,
@@ -378,6 +378,10 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       if (range !== undefined) nestedRanges.push(range)
     }
   }
+  const renderCellUnitBody = (index: number, selected: boolean, expanded: boolean) => {
+    const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "Cell" }>
+    renderCellBody(block, selected, expanded, transcriptWrapWidth(model.width), spinnerFrame, append)
+  }
   const renderDiffUnitBody = (index: number, selected: boolean, expanded: boolean) => {
     const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "Diff" }>
     renderDiffBody(block, selected, expanded, transcriptWrapWidth(model.width), append, appendAll)
@@ -431,6 +435,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     if (unit.kind === "entry") renderEntryBody(unit.entry)
     else if (unit.kind === "reasoning") renderReasoningBody(unit.block, selected)
     else if (unit.kind === "subagent") renderSubagentUnitBody(unit, expanded)
+    else if (unit.kind === "cell") renderCellUnitBody(unit.block, selected, expanded)
     else if (unit.kind === "diff") renderDiffUnitBody(unit.block, selected, expanded)
     else if (unit.kind === "block") renderPlainBlock(unit.block, selected, expanded)
     else if (unit.children !== undefined || unit.agentResponse !== undefined) {
@@ -481,7 +486,8 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       const status = (model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "SubagentCard" }>).status
       const answerDelivered = unit.agentResponse?._tag === "Streaming"
       animated = !answerDelivered && (status === "running" || status === "waiting" || status === "cancelling")
-    }
+    } else if (unit.kind === "cell")
+      animated = (model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "Cell" }>).status === "running"
     let targets: ReadonlyArray<{ readonly path: string; readonly line?: number; readonly column?: number }> | undefined
     if (unit.kind === "tool") {
       targets = toolDetails(model, unit).flatMap((detail) => (detail.target === undefined ? [] : [detail.target]))

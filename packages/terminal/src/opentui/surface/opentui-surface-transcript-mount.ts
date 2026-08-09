@@ -37,6 +37,7 @@ export abstract class SurfaceTranscriptMount extends SurfaceModeLabel {
     this.modeLabel.bg = cutoutBackground(this.renderer)
     this.workspaceLabel.bg = cutoutBackground(this.renderer)
     this.statusLabel.bg = cutoutBackground(this.renderer)
+    this.goalLabel.bg = cutoutBackground(this.renderer)
     if (model.shortcutsOpen) this.setComposerResizePointer(false)
     const inputHeight = composerHeight(model)
     let renderedInputHeight = inputHeight

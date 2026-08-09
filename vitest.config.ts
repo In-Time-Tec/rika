@@ -3,6 +3,9 @@ import { dirname, resolve } from "node:path"
 import { defineConfig } from "vitest/config"
 
 export default defineConfig({
+  resolve: {
+    dedupe: ["effect"],
+  },
   plugins: [
     {
       name: "prompt-text",

@@ -21,6 +21,17 @@ export interface Options {
   readonly globalRoot: string
   readonly workspaceRoot: string
   readonly descriptionCap?: number
+  readonly workspaceTrusted?: boolean
+}
+
+export type Origin = "global" | "workspace"
+
+export interface Executable {
+  readonly name: string
+  readonly importName: string
+  readonly digest: string
+  readonly origin: Origin
+  readonly importable: boolean
 }
 
 export interface Resource {
@@ -36,7 +47,9 @@ export interface Activation {
 export interface Discovered {
   readonly source: SkillSource.Interface
   readonly listings: ReadonlyArray<string>
+  readonly executable: ReadonlyArray<Executable>
   readonly digest: string
+  readonly executableDigest: string
   readonly activate: (name: string) => Effect.Effect<Activation, SkillRegistryError>
 }
 
@@ -56,6 +69,19 @@ const failure = (operation: string, path: string, cause: unknown) =>
 const contained = (path: Path.Path, root: string, candidate: string): boolean => {
   const relative = path.relative(path.resolve(root), path.resolve(candidate))
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))
+}
+
+const importNameOf = (manifest: string): string | undefined => {
+  const parsed: unknown = JSON.parse(manifest)
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined
+  const document = parsed as Record<string, unknown>
+  const rika = document["rika"]
+  if (typeof rika !== "object" || rika === null || Array.isArray(rika)) return undefined
+  if ((rika as Record<string, unknown>)["kind"] !== "skill") return undefined
+  const declared = (rika as Record<string, unknown>)["importName"]
+  if (typeof declared === "string" && declared.length > 0) return declared
+  const name = document["name"]
+  return typeof name === "string" && name.length > 0 ? name : undefined
 }
 
 const discoverImplementation = (
@@ -81,6 +107,58 @@ const discoverImplementation = (
     const canonical = skills.toSorted((left, right) => left.frontmatter.name.localeCompare(right.frontmatter.name))
     const digestBytes = yield* crypto
       .digest("SHA-256", new TextEncoder().encode(canonical.map((skill) => skill.listing).join("\n")))
+      .pipe(Effect.mapError(failure.bind(undefined, "digest", options.workspaceRoot)))
+    const executable: Array<Executable> = []
+    for (const skill of canonical) {
+      const name = skill.frontmatter.name
+      const workspaceSkill = yield* workspace.get(name).pipe(Effect.mapError(failure.bind(undefined, "discover", name)))
+      const origin: Origin = workspaceSkill === undefined ? "global" : "workspace"
+      const directory = path.join(path.resolve(origin === "global" ? options.globalRoot : options.workspaceRoot), name)
+      const manifestPath = path.join(directory, "package.json")
+      const present = yield* skillFileSystem
+        .exists(manifestPath)
+        .pipe(Effect.mapError((cause) => failure("discover", manifestPath, cause)))
+      if (!present) continue
+      const isFile = yield* skillFileSystem
+        .isFile(manifestPath)
+        .pipe(Effect.mapError((cause) => failure("discover", manifestPath, cause)))
+      if (!isFile) continue
+      const realDirectory = yield* skillFileSystem
+        .realPath(directory)
+        .pipe(Effect.mapError((cause) => failure("discover", directory, cause)))
+      const realManifest = yield* skillFileSystem
+        .realPath(manifestPath)
+        .pipe(Effect.mapError((cause) => failure("discover", manifestPath, cause)))
+      if (!contained(path, realDirectory, realManifest))
+        return yield* failure("discover", manifestPath, "Skill manifest escapes skill directory")
+      const content = yield* skillFileSystem
+        .readFileString(realManifest)
+        .pipe(Effect.mapError((cause) => failure("discover", manifestPath, cause)))
+      const importName = yield* Effect.try({
+        try: () => importNameOf(content),
+        catch: (cause) => failure("discover", manifestPath, cause),
+      })
+      if (importName === undefined) continue
+      const entryBytes = yield* crypto
+        .digest("SHA-256", new TextEncoder().encode(`${name}\0${importName}\0${content}`))
+        .pipe(Effect.mapError(failure.bind(undefined, "digest", manifestPath)))
+      executable.push({
+        name,
+        importName,
+        digest: Encoding.encodeHex(entryBytes),
+        origin,
+        importable: origin === "global" || options.workspaceTrusted === true,
+      })
+    }
+    const executableDigestBytes = yield* crypto
+      .digest(
+        "SHA-256",
+        new TextEncoder().encode(
+          executable
+            .map((entry) => `${entry.name}\0${entry.importName}\0${entry.digest}\0${entry.importable}`)
+            .join("\n"),
+        ),
+      )
       .pipe(Effect.mapError(failure.bind(undefined, "digest", options.workspaceRoot)))
     const activate = Effect.fn("SkillRegistry.activate")((name: string) =>
       Effect.gen(function* () {
@@ -134,7 +212,9 @@ const discoverImplementation = (
     return {
       source,
       listings: canonical.map((skill) => skill.listing),
+      executable,
       digest: Encoding.encodeHex(digestBytes),
+      executableDigest: Encoding.encodeHex(executableDigestBytes),
       activate,
     }
   })

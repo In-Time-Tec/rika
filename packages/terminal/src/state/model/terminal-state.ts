@@ -11,6 +11,7 @@ import { QueueItem as QueueItemSchema } from "./terminal-queue-item"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Entry } from "./terminal-message"
 import { ContextUsage } from "./terminal-context-usage"
+import { GoalIndicator } from "./terminal-goal"
 
 export const Mode = ModeId
 export type Mode = typeof Mode.Type
@@ -118,6 +119,7 @@ export const Model = Schema.Struct({
   activity: Schema.optional(Activity),
   costUsd: Schema.optional(Schema.Finite),
   contextUsage: Schema.optional(ContextUsage),
+  goal: Schema.optional(GoalIndicator),
   contextAnimation: ContextAnimationSchema,
   animationTick: Schema.Finite,
   retryCountdown: Schema.Finite,
@@ -202,6 +204,7 @@ const initialImpl: {
     cancelPending: false,
     busy: false,
     contextUsage: { _tag: "Loading" },
+    goal: undefined,
     contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
     animationTick: 0,
     retryCountdown: 0,

@@ -1,7 +1,7 @@
 import stringWidth from "string-width"
 import { StyledText, dim, fg, bold, type TextChunk } from "@opentui/core"
 import type { Model } from "../../state/model/terminal-state"
-import { boundedThreadSidebarWidth, isNarrow } from "../../state/model/terminal-layout-state"
+import { boundedThreadSidebarWidth, contentColumnWidth, isNarrow } from "../../state/model/terminal-layout-state"
 import { colors } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { shortcutsContent } from "./opentui-composer-region"
@@ -168,6 +168,11 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
         this.statusLabel.content = ""
       }
     }
+    const goalChanged =
+      previousModel === undefined ||
+      previousModel.goal !== model.goal ||
+      contentColumnWidth(previousModel) !== contentColumnWidth(model)
+    if (goalChanged) this.renderGoalLabel(model)
     this.workspaceLabel.right = sidebarWidth + 2
     const workspaceChanged =
       previousModel === undefined ||

@@ -38,6 +38,7 @@ export const isSemanticTranscriptEntry = (entry: TranscriptPage.Entry): boolean 
   entry.unit.parentId === undefined &&
   (entry.unit.content._tag === "Entry" ||
     entry.unit.content.block._tag === "Compaction" ||
+    entry.unit.content.block._tag === "Cell" ||
     entry.unit.executionOutcome !== undefined)
 
 const boundTurnEntriesImpl = (

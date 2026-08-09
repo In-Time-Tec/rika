@@ -46,7 +46,7 @@
     },
     "apps/rika": {
       "name": "@rika/cli",
-      "version": "0.3.17",
+      "version": "0.4.3",
       "bin": {
         "rika": "./dist/client-main.js",
       },
@@ -57,7 +57,6 @@
         "@rika/coding-tools": "workspace:*",
         "@rika/configuration": "workspace:*",
         "@rika/extensions": "workspace:*",
-        "@rika/javascript-sandbox": "workspace:*",
         "@rika/product": "workspace:*",
         "@rika/product-store": "workspace:*",
         "@rika/terminal": "workspace:*",
@@ -86,17 +85,19 @@
       "version": "0.0.0",
       "dependencies": {
         "@batonfx/core": "catalog:",
+        "@batonfx/harness": "catalog:",
         "@batonfx/providers": "catalog:",
+        "@batonfx/repl": "catalog:",
         "@batonfx/runtime": "catalog:",
         "@batonfx/test": "catalog:",
         "@rika/coding-tools": "workspace:*",
+        "@rika/kernel": "workspace:*",
         "@rika/product": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
         "@effect/vitest": "catalog:",
         "@rika/configuration": "workspace:*",
-        "@rika/javascript-sandbox": "workspace:*",
         "@types/bun": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
@@ -149,16 +150,21 @@
         "vitest": "catalog:",
       },
     },
-    "packages/javascript-sandbox": {
-      "name": "@rika/javascript-sandbox",
+    "packages/kernel": {
+      "name": "@rika/kernel",
       "version": "0.0.0",
       "dependencies": {
         "@batonfx/core": "catalog:",
-        "@jitl/quickjs-singlefile-cjs-release-sync": "0.32.0",
+        "@batonfx/harness": "catalog:",
+        "@batonfx/repl": "catalog:",
+        "@rika/coding-tools": "workspace:*",
+        "@rika/configuration": "workspace:*",
+        "@rika/extensions": "workspace:*",
+        "@rika/product": "workspace:*",
         "effect": "catalog:",
-        "quickjs-emscripten-core": "0.32.0",
       },
       "devDependencies": {
+        "@effect/platform-bun": "catalog:",
         "@effect/vitest": "catalog:",
         "@types/bun": "catalog:",
         "typescript": "catalog:",
@@ -276,14 +282,26 @@
       },
     },
   },
+  "overrides": {
+    "@batonfx/core": "file:/tmp/baton-tgz/batonfx-core-0.20.0.tgz",
+    "@batonfx/harness": "file:/tmp/baton-tgz/batonfx-harness-0.20.0.tgz",
+    "@batonfx/mcp": "file:/tmp/baton-tgz/batonfx-mcp-0.20.0.tgz",
+    "@batonfx/providers": "file:/tmp/baton-tgz/batonfx-providers-0.20.0.tgz",
+    "@batonfx/repl": "file:/tmp/baton-tgz/batonfx-repl-0.20.0.tgz",
+    "@batonfx/runtime": "file:/tmp/baton-tgz/batonfx-runtime-0.20.0.tgz",
+    "@batonfx/skills": "file:/tmp/baton-tgz/batonfx-skills-0.20.0.tgz",
+    "@batonfx/test": "file:/tmp/baton-tgz/batonfx-test-0.20.0.tgz",
+  },
   "catalog": {
     "@ast-grep/cli": "0.44.0",
-    "@batonfx/core": "0.19.2",
-    "@batonfx/mcp": "0.19.2",
-    "@batonfx/providers": "0.19.2",
-    "@batonfx/runtime": "0.19.2",
-    "@batonfx/skills": "0.19.2",
-    "@batonfx/test": "0.19.2",
+    "@batonfx/core": "file:/tmp/baton-tgz/batonfx-core-0.20.0.tgz",
+    "@batonfx/harness": "file:/tmp/baton-tgz/batonfx-harness-0.20.0.tgz",
+    "@batonfx/mcp": "file:/tmp/baton-tgz/batonfx-mcp-0.20.0.tgz",
+    "@batonfx/providers": "file:/tmp/baton-tgz/batonfx-providers-0.20.0.tgz",
+    "@batonfx/repl": "file:/tmp/baton-tgz/batonfx-repl-0.20.0.tgz",
+    "@batonfx/runtime": "file:/tmp/baton-tgz/batonfx-runtime-0.20.0.tgz",
+    "@batonfx/skills": "file:/tmp/baton-tgz/batonfx-skills-0.20.0.tgz",
+    "@batonfx/test": "file:/tmp/baton-tgz/batonfx-test-0.20.0.tgz",
     "@effect/platform-bun": "4.0.0-beta.98",
     "@effect/sql-mysql2": "4.0.0-beta.98",
     "@effect/sql-sqlite-bun": "4.0.0-beta.98",
@@ -419,17 +437,21 @@
 
     "@babel/types": ["@babel/types@7.29.7", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA=="],
 
-    "@batonfx/core": ["@batonfx/core@0.19.2", "", { "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-8Ik4zMngoFArtKGotXKJU8KYxHsDgdJSLTpxmkA0EIwbIOAuuvxwZ5T6vj6v9GqcXHsqfQKWJX5dmwbUar8Ndg=="],
+    "@batonfx/core": ["@batonfx/core@/tmp/baton-tgz/batonfx-core-0.20.0.tgz", { "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-Dit0GHfFvRRCubNzaYnCjsdxar7aiqEgG/0TjBPYt3Of+yloyRTMTR256icwuXJHC0aZx7pKHEJuwrFFGub5Qg=="],
 
-    "@batonfx/mcp": ["@batonfx/mcp@0.19.2", "", { "dependencies": { "@batonfx/core": "0.19.2", "@modelcontextprotocol/sdk": "1.29.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-l2B8mXdpjrq5xNv6LQ1PqfGBTSeX0qwlvUmGbHVP45E3cZx/IspiHTlET64MwPJtDMQCJ1Ze9kyh1/kd3KkOgg=="],
+    "@batonfx/harness": ["@batonfx/harness@/tmp/baton-tgz/batonfx-harness-0.20.0.tgz", { "dependencies": { "@batonfx/core": "0.20.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-9kfhVC/n5iPQ7qs+7c20ddzLKIVKf9PgoECe5eVtaF5EQ1zITdjFEc2CLQE3rajQYLCr9pGQh4Kdg/LOrgWOsQ=="],
 
-    "@batonfx/providers": ["@batonfx/providers@0.19.2", "", { "dependencies": { "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@batonfx/core": "0.19.2", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@smithy/types": "4.3.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-5ZdHBvUEg/DPcEPk/Hhm15w2f26FFTc816YpyVpsrbnb9EclD2Gm5UHTaao5Z1tOChsIf0+zNYkVTlqBKC67Vw=="],
+    "@batonfx/mcp": ["@batonfx/mcp@/tmp/baton-tgz/batonfx-mcp-0.20.0.tgz", { "dependencies": { "@batonfx/core": "0.20.0", "@modelcontextprotocol/sdk": "1.29.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-Ro6FVvnSkKD8zKz2M7iyu5zFxh62atUFTLHQ5gyrj0e01tHeqQtIMORDuur4x7crlUeQCrHYYNWXB9KmipDhwA=="],
 
-    "@batonfx/runtime": ["@batonfx/runtime@0.19.2", "", { "dependencies": { "@batonfx/core": "0.19.2", "@effect/sql-mysql2": "4.0.0-beta.98", "@effect/sql-pg": "4.0.0-beta.98", "@effect/sql-sqlite-bun": "4.0.0-beta.98" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-DdNSd+kAQbuosIKgT+pJX0Bd8JIr4BtodhXCmYJADpJ2JSfi3PGSRfTEgxChCEjT8gr/12DyNre6C4VLVgUPXA=="],
+    "@batonfx/providers": ["@batonfx/providers@/tmp/baton-tgz/batonfx-providers-0.20.0.tgz", { "dependencies": { "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@batonfx/core": "0.20.0", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@smithy/types": "4.3.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-fTVA/Y44WhB0XbDZZ26uUuQX2eNE16FxgBTD+kqFUT+6LTD5Mn+1IPQhUYnArWMCmlySUQcn9HPUf/Txogl7Dw=="],
 
-    "@batonfx/skills": ["@batonfx/skills@0.19.2", "", { "dependencies": { "@batonfx/core": "0.19.2" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-9cIRupJlNKOl0uWl+WS4CmmSYVaFTRtvZmmTwSc3Uc5IEslf7XhSAhN3pFG62DHiEnDvaMD0jFbI2wz5Jdrs2Q=="],
+    "@batonfx/repl": ["@batonfx/repl@/tmp/baton-tgz/batonfx-repl-0.20.0.tgz", { "dependencies": { "@batonfx/core": "0.20.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-zccgnDh3RzRkFiQNesjBsagcD++d/QRKAZhLXJJRcew3UHz0nOjLSm8E0UqYe6bYLjQhtY8ZR7iPU/bLCJXeUQ=="],
 
-    "@batonfx/test": ["@batonfx/test@0.19.2", "", { "dependencies": { "@batonfx/core": "0.19.2" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-uCnBmwny1ZTzxehyXS6al1P3c+wH4iI/iV5jClb0faEDCmd1b1ouDFL6a98qqQQNw9v+hV0xYsjrbaHS3fLviQ=="],
+    "@batonfx/runtime": ["@batonfx/runtime@/tmp/baton-tgz/batonfx-runtime-0.20.0.tgz", { "dependencies": { "@batonfx/core": "0.20.0", "@effect/sql-mysql2": "4.0.0-beta.98", "@effect/sql-pg": "4.0.0-beta.98", "@effect/sql-sqlite-bun": "4.0.0-beta.98" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-j9Fug93mfWAPj9WYwZfh6Neia9/95BdcYTfxF1EFWTN3q4MnUIH57EHcogo4d/1bfc5NdlTM9nKvR2uFHBYQaA=="],
+
+    "@batonfx/skills": ["@batonfx/skills@/tmp/baton-tgz/batonfx-skills-0.20.0.tgz", { "dependencies": { "@batonfx/core": "0.20.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-mqh25EMxHv2jLV8d74R2GqXh2ieRb5Z4fzxPfYYLXIT8qCyqJ0U2t1wvwlRZMTWRgq0LcLBdH3CtPbgBPEoDzw=="],
+
+    "@batonfx/test": ["@batonfx/test@/tmp/baton-tgz/batonfx-test-0.20.0.tgz", { "dependencies": { "@batonfx/core": "0.20.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-HkM8idNiV9ScKYUwRY2EdVGfRlP4Ux/jIWtRpar93DuKluMlj4sBSfQ8OEpePw6gtkduoHhl2uPPpgcgLvkoug=="],
 
     "@bcoe/v8-coverage": ["@bcoe/v8-coverage@1.0.2", "", {}, "sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA=="],
 
@@ -547,10 +569,6 @@
 
     "@humanwhocodes/retry": ["@humanwhocodes/retry@0.4.3", "", {}, "sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ=="],
 
-    "@jitl/quickjs-ffi-types": ["@jitl/quickjs-ffi-types@0.32.0", "", {}, "sha512-v9T+GQpmk43VDJ7d72sf0Nexhk+ArvtUihW27dy7lqAl0zBObFKtSBBIm5RBjwIhE8VwsPPm9PNuvPvNqLWUEg=="],
-
-    "@jitl/quickjs-singlefile-cjs-release-sync": ["@jitl/quickjs-singlefile-cjs-release-sync@0.32.0", "", { "dependencies": { "@jitl/quickjs-ffi-types": "0.32.0" } }, "sha512-NjUUcw26PoeJHND6nmflAH8nIvAJvxJ2qkSPi95wfiBqPim80GtcdWommroiWb8hh1/7fVettEwodAsGt2Mrsg=="],
-
     "@jridgewell/resolve-uri": ["@jridgewell/resolve-uri@3.1.2", "", {}, "sha512-bRISgCIjP20/tbWSPWMEi54QVPRZExkuD9lJL+UIxUKtwVJA8wW1Trb1jMs1RFXo1CBTNZ/5hpC9QvmKWdopKw=="],
 
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.5.5", "", {}, "sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og=="],
@@ -655,7 +673,7 @@
 
     "@rika/extensions": ["@rika/extensions@workspace:packages/extensions"],
 
-    "@rika/javascript-sandbox": ["@rika/javascript-sandbox@workspace:packages/javascript-sandbox"],
+    "@rika/kernel": ["@rika/kernel@workspace:packages/kernel"],
 
     "@rika/product": ["@rika/product@workspace:packages/product"],
 
@@ -1358,8 +1376,6 @@
     "pure-rand": ["pure-rand@8.4.2", "", {}, "sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng=="],
 
     "qs": ["qs@6.15.3", "", { "dependencies": { "es-define-property": "^1.0.1", "side-channel": "^1.1.1" } }, "sha512-O9gl3zCl5h5blw1KGUzQKhA5oUXSl8rwUIM5o0S3nCXMliSvy5Dzx7/DJcI+SwgICv+IneSZwhBh1oSyEHA71A=="],
-
-    "quickjs-emscripten-core": ["quickjs-emscripten-core@0.32.0", "", { "dependencies": { "@jitl/quickjs-ffi-types": "0.32.0" } }, "sha512-QFnPfjFey8EqknSrSxe1hZrf1/8z7/6s1QzGOmKo6++02r7QRRX7ZoyNaZh7JuVjWsVW87KnQrbZqnHkOAzUyg=="],
 
     "range-parser": ["range-parser@1.3.0", "", {}, "sha512-hek2mFQpPuI4E1BBKrSto+BU3e3x4xuarsbiwr3+lf7p44juvFMV0XFWQAP3xUyqXA4RrXLIoaSUGbSt056ZMw=="],
 

@@ -1,3 +1,4 @@
+import { ChildAdmission } from "@batonfx/runtime"
 import type { RunEvent, RunTree } from "@batonfx/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import * as UnitOrder from "@rika/product/execution-transcript-contract"
@@ -5,6 +6,7 @@ import type { Unit } from "@rika/product/execution-transcript-contract"
 import { Function } from "effect"
 import { completeTool } from "./baton-tool-projection"
 import { makeAuthorizationProjection } from "./baton-authorization-projection"
+import { cellToolName, makeCellProjection } from "./baton-cell-projection"
 import { makeDiagnosticProjection } from "./baton-diagnostic-projection"
 import { makeStreamedTextProjection } from "./baton-streamed-text-projection"
 import { makeSubagentCardProjection } from "./baton-subagent-card-projection"
@@ -29,6 +31,7 @@ import {
   textLimit,
   toolTextLimit,
 } from "./baton-projector-values"
+
 import { scopedId } from "./baton-projector-identity"
 import { encoded, providerCostNanoUsd, token } from "./baton-projector-decoding"
 
@@ -146,7 +149,18 @@ const make = (
 
   const { toolState, toolBlock, putTool, updateTool } = makeToolUnitProjection({ units, localId, put, unit })
 
+  const { cellBlock, cellForOperationKey, openCell, appendCellSource, progressCell, completeCell, settleRunningCells } =
+    makeCellProjection({ units, localId, put, unit, notice, error })
+
   const { cardFor, updateCard, groupCards, bindFanOut, bindChild } = makeSubagentCardProjection({
+    cellFor: (parent, invocationId) => {
+      const origin = ChildAdmission.originOf(invocationId)
+      if (origin === undefined) return undefined
+      const candidate = cellForOperationKey(parent, origin.operationKey)
+      return candidate === undefined
+        ? undefined
+        : { blockId: candidate.blockId, unitKey: candidate.key, ordinal: origin.ordinal }
+    },
     core,
     units,
     nodes,
@@ -174,6 +188,7 @@ const make = (
       ...(card === undefined ? {} : { parentUnitKey: card.unitKey, parentBlockId: card.blockId }),
       hidden,
       tools: new Map(),
+      cells: new Map(),
       phase: -1,
       status: "running",
       lifecycle: "unknown",
@@ -185,6 +200,7 @@ const make = (
 
   const settleNode = (node: Node, status: "completed" | "failed" | "cancelled", detail?: string) => {
     node.status = status
+    settleRunningCells(node, status === "completed" ? "cancelled" : status)
     for (const rawId of node.tools.keys())
       updateTool(node, rawId, (tool) =>
         tool.status === "running" && tool.process?.running !== true
@@ -206,12 +222,15 @@ const make = (
       case "reasoning-delta":
         return reasoning(node, part.delta)
       case "tool-params-start":
+        if (part.name === cellToolName) return openCell(node, part.id, "")
         return putTool(node, part.id, part.name, "")
       case "tool-params-delta": {
+        if (node.cells.has(part.id)) return appendCellSource(node, part.id, part.delta)
         const previous = toolBlock(node, part.id)
         return putTool(node, part.id, previous?.name ?? "tool", `${previous?.input ?? ""}${part.delta}`)
       }
       case "tool-call":
+        if (part.name === cellToolName) return openCell(node, part.id, string(record(part.params).code, ""))
         if (part.name === projectorNames.runChild) {
           const input = record(part.params)
           cardFor(node, part.id, string(input.selection, "Subagent"), optionalString(input.prompt))
@@ -269,6 +288,8 @@ const make = (
       case "ModelPart":
         return applyModelPart(node, event)
       case "ToolExecutionStarted":
+        if (event.call.name === cellToolName)
+          return openCell(node, event.call.id, string(record(event.call.params).code, ""))
         if (event.call.name === projectorNames.runChild) {
           const input = record(event.call.params)
           cardFor(node, event.call.id, string(input.selection, "Subagent"), optionalString(input.prompt))
@@ -281,6 +302,7 @@ const make = (
         if (event.call.name === projectorNames.awaitChildGroup) return remove(toolState(node, event.call.id).key)
         return putTool(node, event.call.id, event.call.name, encoded(event.call.params))
       case "ToolProgress":
+        if (node.cells.has(event.toolCallId)) return progressCell(node, event.toolCallId, event.data)
         return updateTool(node, event.toolCallId, (tool) => ({
           ...tool,
           ...(event.message === undefined
@@ -293,6 +315,8 @@ const make = (
               }),
         }))
       case "ToolExecutionCompleted": {
+        if (event.call.name === cellToolName)
+          return completeCell(node, event.call.id, event.result.result, event.result.isFailure)
         if (event.call.name === projectorNames.runChild) {
           const card = cardsByInvocation.get(`${node.rawRunId}\u0000${event.call.id}`)
           const result = record(event.result.result)
@@ -549,6 +573,7 @@ const make = (
     authorizations,
     localId,
     toolBlock,
+    cellBlock,
   })
 
   if (resume === undefined) {
@@ -592,6 +617,7 @@ const make = (
           publicId: "root",
           hidden: false,
           tools: new Map(),
+          cells: new Map(),
           phase: -1,
           status: "running",
           lifecycle: "unknown",

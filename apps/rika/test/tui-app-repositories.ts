@@ -108,7 +108,7 @@ export const seedHistoricalTranscript = Effect.fn("TuiApp.seedHistoricalTranscri
   yield* transcripts.commitProjection(turn, {
     _tag: "ProjectionSnapshot",
     revision: fixture.entryCount,
-    checkpoint: { version: 1, cursor, state: "{}" },
+    checkpoint: { version: ExecutionProjection.projectionVersion, cursor, state: "{}" },
     units,
     hasOlder: false,
     state: {

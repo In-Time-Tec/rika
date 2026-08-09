@@ -1,4 +1,5 @@
 import { Function } from "effect"
+import { cellBodyText, cellCollapsedLine } from "@rika/transcript/cell-presentation"
 import type { Model } from "../../state/model/terminal-state"
 import type { TranscriptBlock, TranscriptItem } from "../../state/model/terminal-transcript-state"
 import { spacing } from "../terminal/terminal-theme"
@@ -37,6 +38,8 @@ const blockText = (block: TranscriptBlock | undefined): string => {
       return block.summary
     case "ContextUsage":
       return block.text
+    case "Cell":
+      return [cellCollapsedLine(block), cellBodyText(block), ...block.files.map((file) => file.path)].join("\n")
     default:
       return ""
   }

@@ -74,6 +74,13 @@ const continuationIsFolded = (
 const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
   const units: Array<TranscriptUnit> = []
   const childItems = new Map<string, Array<TranscriptItem>>()
+  const cellBlockIds = new Set(
+    orderedTranscriptItems(model).flatMap((item) => {
+      if (item._tag !== "Block") return []
+      const block = model.blocks[item.index] as TranscriptBlock
+      return block._tag === "Cell" ? [block.id] : []
+    }),
+  )
   for (const item of orderedTranscriptItems(model)) {
     if (item.parentId === undefined) continue
     childItems.set(item.parentId, [...(childItems.get(item.parentId) ?? []), item])
@@ -151,7 +158,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
     toolRun = []
   }
   for (const item of orderedTranscriptItems(model)) {
-    if (item.parentId !== undefined) continue
+    if (item.parentId !== undefined && !cellBlockIds.has(item.parentId)) continue
     if (item._tag === "Entry") {
       flush()
       units.push({ kind: "entry", entry: item.index })
@@ -193,6 +200,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
         ...(agentResponse === undefined ? {} : { agentResponse }),
       })
     } else if (block._tag === "Diff") units.push({ kind: "diff", block: item.index })
+    else if (block._tag === "Cell") units.push({ kind: "cell", block: item.index })
     else units.push({ kind: "block", block: item.index })
   }
   flush()
@@ -209,6 +217,17 @@ export const isExpandableUnit: {
       return (
         (block._tag === "Error" && block.detail.length > 0) ||
         (block._tag === "AuthorizationCard" && (block.status === "pending" || block.input.length > 0))
+      )
+    }
+    if (unit.kind === "cell") {
+      const block = model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "Cell" }>
+      return (
+        block.source.text.length > 0 ||
+        block.output.stdout.length > 0 ||
+        block.output.stderr.length > 0 ||
+        block.result !== undefined ||
+        block.error !== undefined ||
+        block.notices.length > 0
       )
     }
     return unit.kind === "reasoning" || unit.kind === "diff" || unit.kind === "subagent"
@@ -281,6 +300,10 @@ export const transcriptUnitId: {
     const block = model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "SubagentCard" }>
     return `subagent:${block.id}`
   }
+  if (unit.kind === "cell") {
+    const block = model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "Cell" }>
+    return `cell:${block.id}`
+  }
   if (unit.kind === "tool") {
     const block = model.blocks[unit.blocks[0]!] as Extract<TranscriptBlock, { _tag: "ToolCall" }>
     return `tool:${block.id}`
@@ -297,6 +320,6 @@ export const transcriptUnitId: {
 
 export const unitToggleTargets = (unit: TranscriptUnit): ReadonlyArray<number> => {
   if (unit.kind === "tool") return unit.blocks
-  if (unit.kind === "reasoning" || unit.kind === "diff") return [unit.block]
+  if (unit.kind === "reasoning" || unit.kind === "diff" || unit.kind === "cell") return [unit.block]
   return []
 }

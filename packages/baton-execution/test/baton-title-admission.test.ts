@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { ModelRegistry, SandboxExecutor } from "@batonfx/core"
+import { ModelRegistry } from "@batonfx/core"
 import { TestModel } from "@batonfx/test"
 import { Database } from "bun:sqlite"
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
@@ -21,16 +21,7 @@ const stubHandlers = <Tools extends Record<string, Tool.Any>>(toolkit: Toolkit.T
 
 const agentServices = Layer.mergeAll(stubHandlers(RoleToolkits.root), stubHandlers(RoleToolkits.readThread))
 
-const sandbox = SandboxExecutor.makeTest(() => Effect.die(new Error("unexpected Program execution")), {
-  language: "javascript",
-  implementation: "rika-title-admission-test-sandbox",
-  version: "1",
-  memoryBytes: 1024,
-  stackBytes: 1024,
-})
-
-const testLayer = (options: Parameters<typeof layer>[0]) =>
-  layer(options).pipe(Layer.provide(Layer.succeed(SandboxExecutor.SandboxExecutor, sandbox)))
+const testLayer = (options: Parameters<typeof layer>[0]) => layer(options)
 
 type RouteModel = ReturnType<typeof testExecutionRoute>["main"]
 

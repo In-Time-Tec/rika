@@ -50,7 +50,7 @@ it.effect("returns stored terminal state and units when checkpoint resume yields
         usage: ExecutionProjection.emptyUsageState(),
         steering: { steeringMessages: 0, followUpMessages: 0 },
       },
-      projectorCheckpoint: { version: 1 as const, cursor: "stored-cursor", state: "{}" },
+      projectorCheckpoint: { version: ExecutionProjection.projectionVersion, cursor: "stored-cursor", state: "{}" },
       projectionVersion: 1,
     }
     const owner = yield* make(

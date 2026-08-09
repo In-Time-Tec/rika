@@ -1,6 +1,7 @@
 import type { ColorInput, TextChunk } from "@opentui/core"
 import { Function } from "effect"
 import { subagentPhrase } from "@rika/transcript/subagent-presentation"
+import { cellBodyText, cellCollapsedLine } from "@rika/transcript/cell-presentation"
 import stringWidth from "string-width"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
 import type { ChangedFile } from "../../state/model/terminal-changed-file"
@@ -114,6 +115,18 @@ export const renderBlock: {
           block.width !== undefined && block.height !== undefined ? ` · ${block.width}×${block.height}` : ""
         const size = block.bytes === undefined ? "" : ` · ${formatBytes(block.bytes)}`
         return `▧ ${block.name} · ${block.mediaType}${dimensions}${size}`
+      }
+      case "Cell": {
+        const running = block.status === "running"
+        const icon = iconChar(
+          block.status === "failed" || block.status === "unknown",
+          running,
+          "⠿",
+          block.status === "cancelled",
+        )
+        const detail = cellCollapsedLine(block)
+        const output = cellBodyText(block)
+        return `${icon} ${detail}${output.length === 0 ? "" : `\n${body(output)}`}`
       }
     }
   },

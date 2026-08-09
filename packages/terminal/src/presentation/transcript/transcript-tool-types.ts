@@ -20,11 +20,16 @@ export type SubagentTranscriptUnit = {
   readonly children: ReadonlyArray<ToolTranscriptUnit>
   readonly agentResponse?: AgentResponseState
 }
+export type CellTranscriptUnit = {
+  readonly kind: "cell"
+  readonly block: number
+}
 export type TranscriptUnit =
   | { readonly kind: "entry"; readonly entry: number }
   | ToolTranscriptUnit
   | { readonly kind: "reasoning"; readonly block: number }
   | { readonly kind: "diff"; readonly block: number }
   | SubagentTranscriptUnit
+  | CellTranscriptUnit
   | { readonly kind: "block"; readonly block: number }
 export type TranscriptUnitId = string

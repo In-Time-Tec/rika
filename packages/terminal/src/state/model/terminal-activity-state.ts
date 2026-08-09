@@ -72,6 +72,10 @@ export const runningToolsActivity = (model: Model): Activity => {
   let tools = 0
   for (const [index, candidate] of model.blocks.entries()) {
     const block = candidate as TranscriptBlock
+    if (block._tag === "Cell") {
+      if (block.status === "running") tools += 1
+      continue
+    }
     if (block._tag !== "ToolCall" || block.status !== "running") continue
     if (block.presentation.family === "agent") {
       if (!nestedBlocks.has(index)) subagents += 1
