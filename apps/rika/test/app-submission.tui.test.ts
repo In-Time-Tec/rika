@@ -120,7 +120,10 @@ test(
         const app = yield* TuiApp.tuiApp({
           workspaceFiles: { "fixture.txt": "steer fixture body" },
           script: [
-            model.turn([model.tool("read", { path: "fixture.txt" }, "steer-read")], { delayMillis: 12_000 }),
+            model.turn(
+              [model.binding({ module: "workspace", operation: "read", input: { path: "fixture.txt" } }, "steer-read")],
+              { delayMillis: 12_000 },
+            ),
             model.text("ACTIVE_STEER_COMPLETE"),
           ],
         })

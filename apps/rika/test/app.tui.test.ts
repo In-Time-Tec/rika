@@ -23,14 +23,14 @@ test(
           lanes: [
             {
               steps: [
-                model.turn([model.runChild("Task", "Run top-level work.", "top-agent")]),
+                model.turn([model.spawn([{ profile: "Task", prompt: "Run top-level work." }], "top-agent")]),
                 model.failure("ROOT_RELOAD_FAILED"),
               ],
             },
             {
               profile: "Task",
               steps: [
-                model.turn([model.runChild("Oracle", "Run nested work.", "nested-agent")]),
+                model.turn([model.spawn([{ profile: "Oracle", prompt: "Run nested work." }], "nested-agent")]),
                 model.text("TOP_LEVEL_RELOAD_COMPLETE"),
               ],
             },
@@ -148,7 +148,9 @@ test(
               root,
               workspaceFiles: { "timer.txt": "TIMER" },
               script: [
-                model.turn([model.tool("read", { path: "timer.txt" }, "timer-read")]),
+                model.turn([
+                  model.binding({ module: "workspace", operation: "read", input: { path: "timer.txt" } }, "timer-read"),
+                ]),
                 model.text("PERSISTED_TIMER_COMPLETE", 1_500),
               ],
             })
@@ -193,14 +195,19 @@ test(
           lanes: [
             {
               steps: [
-                model.turn([model.runChild("Oracle", "Read the nested fixture.", "oracle-style")]),
+                model.turn([model.spawn([{ profile: "Oracle", prompt: "Read the nested fixture." }], "oracle-style")]),
                 model.text("ROOT_STYLE_RESULT"),
               ],
             },
             {
               profile: "Oracle",
               steps: [
-                model.turn([model.tool("read", { path: "nested.txt" }, "nested-read")]),
+                model.turn([
+                  model.binding(
+                    { module: "workspace", operation: "read", input: { path: "nested.txt" } },
+                    "nested-read",
+                  ),
+                ]),
                 model.text("## Oracle result\n\n**ORACLE_STYLE_RESULT**"),
               ],
             },
@@ -244,21 +251,26 @@ test(
           lanes: [
             {
               steps: [
-                model.turn([model.runChild("Task", "PARENT_AGENT_PROMPT", "parent-agent")]),
+                model.turn([model.spawn([{ profile: "Task", prompt: "PARENT_AGENT_PROMPT" }], "parent-agent")]),
                 model.text("ROOT_AGENT_FINAL"),
               ],
             },
             {
               profile: "Task",
               steps: [
-                model.turn([model.runChild("Oracle", "NESTED_AGENT_PROMPT", "nested-agent")]),
+                model.turn([model.spawn([{ profile: "Oracle", prompt: "NESTED_AGENT_PROMPT" }], "nested-agent")]),
                 model.text("PARENT_AGENT_FINAL"),
               ],
             },
             {
               profile: "Oracle",
               steps: [
-                model.turn([model.tool("read", { path: "nested.txt" }, "nested-read")]),
+                model.turn([
+                  model.binding(
+                    { module: "workspace", operation: "read", input: { path: "nested.txt" } },
+                    "nested-read",
+                  ),
+                ]),
                 model.text("NESTED_AGENT_FINAL"),
               ],
             },
@@ -293,15 +305,37 @@ test(
             : undefined
         expect(parentId, "parent SubagentCard").toBeDefined()
         expect(nestedId, "nested SubagentCard").toBeDefined()
-        expect(nestedCard?.parentId).toBe(parentId)
+        const cardUnit = (childId: string | undefined) =>
+          units.find(
+            (unit) =>
+              unit.content._tag === "Block" &&
+              unit.content.block._tag === "SubagentCard" &&
+              unit.content.block.id === childId,
+          )
+        const cellOwning = (childId: string | undefined) =>
+          units.find(
+            (unit) =>
+              unit.content._tag === "Block" &&
+              unit.content.block._tag === "Cell" &&
+              unit.content.block.id === cardUnit(childId)?.parentId,
+          )
+        const parentSpawningCell = cellOwning(parentId)
+        const nestedSpawningCell = cellOwning(nestedId)
+        expect(parentSpawningCell, "the root cell that spawned Task").toBeDefined()
+        expect(nestedSpawningCell, "the Task cell that spawned Oracle").toBeDefined()
+        expect(nestedSpawningCell?.parentId).toBe(parentId)
         const owner = (text: string) =>
           units.find((unit) => unit.content._tag === "Entry" && unit.content.text.includes(text))?.parentId
         expect(owner("NESTED_AGENT_FINAL")).toBe(nestedId)
         expect(owner("PARENT_AGENT_FINAL")).toBe(parentId)
         expect(owner("ROOT_AGENT_FINAL")).toBeUndefined()
-        expect(
-          units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "ToolCall")?.parentId,
-        ).toBe(nestedId)
+        const nestedReadCell = units.find(
+          (unit) =>
+            unit.content._tag === "Block" &&
+            unit.content.block._tag === "Cell" &&
+            unit.content.block.source.text.includes("nested.txt"),
+        )
+        expect(nestedReadCell?.parentId).toBe(nestedId)
 
         app.pressKey("\t")
         app.pressEnter()
@@ -331,11 +365,11 @@ test(
           lanes: [
             {
               steps: [
-                model.turn([model.runChild("Task", "REPORTING_AGENT_PROMPT", "reporting-agent")]),
+                model.turn([model.spawn([{ profile: "Task", prompt: "REPORTING_AGENT_PROMPT" }], "reporting-agent")]),
                 model.text("ROOT_AFTER_REPORT"),
-                model.turn([model.runChild("Task", "TOOL_ONLY_AGENT_PROMPT", "tool-only-agent")]),
+                model.turn([model.spawn([{ profile: "Task", prompt: "TOOL_ONLY_AGENT_PROMPT" }], "tool-only-agent")]),
                 model.text("ROOT_AFTER_TOOL_ONLY"),
-                model.turn([model.runChild("Task", "FAILING_AGENT_PROMPT", "failing-agent")]),
+                model.turn([model.spawn([{ profile: "Task", prompt: "FAILING_AGENT_PROMPT" }], "failing-agent")]),
                 model.text("ROOT_AFTER_FAILURE"),
               ],
             },
@@ -343,7 +377,12 @@ test(
               profile: "Task",
               steps: [
                 model.text("REPORTING_AGENT_FINDING"),
-                model.turn([model.tool("read", { path: "silent.txt" }, "silent-read")]),
+                model.turn([
+                  model.binding(
+                    { module: "workspace", operation: "read", input: { path: "silent.txt" } },
+                    "silent-read",
+                  ),
+                ]),
                 model.text("SILENT_AGENT_TOOL_ONLY"),
                 model.failure("CHILD_STREAM_FAILED"),
               ],
@@ -384,7 +423,7 @@ test(
 )
 
 test(
-  "settles repeated process waits while the original shell row owns process liveness",
+  "settles repeated process waits while the launching cell owns process liveness",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -392,9 +431,24 @@ test(
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
           script: [
-            model.turn([model.tool("bash", { command, timeout_ms: 0 }, "bash-wait")]),
-            model.turn([model.tool("shell_command_status", { processId: "1", waitMillis: 0 }, "wait-immediate")]),
-            model.turn([model.tool("shell_command_status", { processId: "1", waitMillis: 10_000 }, "wait-final")]),
+            model.turn([
+              model.binding(
+                { module: "processes", operation: "start", input: { command, timeoutMillis: 0 } },
+                "bash-wait",
+              ),
+            ]),
+            model.turn([
+              model.binding(
+                { module: "processes", operation: "status", input: { processId: "1", waitMillis: 0 } },
+                "wait-immediate",
+              ),
+            ]),
+            model.turn([
+              model.binding(
+                { module: "processes", operation: "status", input: { processId: "1", waitMillis: 10_000 } },
+                "wait-final",
+              ),
+            ]),
             model.text("SHELL_WAIT_COMPLETE"),
           ],
         })
@@ -404,18 +458,22 @@ test(
         yield* app.waitFrame("SHELL_WAIT_COMPLETE", 20_000)
         yield* app.settled
 
-        const shellCalls = (yield* app.transcript(Turn.TurnId.make("tui-turn-0")))?.units.flatMap((unit) =>
-          unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? [unit.content.block] : [],
+        const cells = (yield* app.transcript(Turn.TurnId.make("tui-turn-0")))?.units.flatMap((unit) =>
+          unit.content._tag === "Block" && unit.content.block._tag === "Cell" ? [unit.content.block] : [],
         )
-        expect(shellCalls?.map(({ name }) => name)).toEqual(["bash", "shell_command_status", "shell_command_status"])
-        expect(shellCalls?.at(0)?.process?.processId).toBe("1")
-        expect(shellCalls?.at(0)?.status, "the launching row keeps owning the live process").toBe("running")
-        expect(shellCalls?.at(1)?.output).toContain("EARLY_OUTPUT")
-        expect(shellCalls?.at(1)?.process?.running).toBe(true)
-        expect(shellCalls?.at(2)?.output).toContain("FINAL_OUTPUT")
-        expect(shellCalls?.at(2)?.process?.running).toBe(false)
-        expect(shellCalls?.at(2)?.process?.exitCode).toBe(0)
-        expect(shellCalls?.at(2)?.status).toBe("complete")
+        expect(cells?.map(({ source }) => source.text)).toEqual([
+          `await rika.processes.start({"command":"${command}","timeoutMillis":0})`,
+          'await rika.processes.status({"processId":"1","waitMillis":0})',
+          'await rika.processes.status({"processId":"1","waitMillis":10000})',
+        ])
+        expect(cells?.at(0)?.result, "the launching cell reports the registered process").toContain('"processId":"1"')
+        expect(cells?.at(0)?.result, "the launching cell leaves the process running").toContain('"running":true')
+        expect(cells?.at(1)?.result).toContain("EARLY_OUTPUT")
+        expect(cells?.at(1)?.result, "the immediate wait observes a live process").toContain('"running":true')
+        expect(cells?.at(2)?.result).toContain("FINAL_OUTPUT")
+        expect(cells?.at(2)?.result, "the final wait observes a settled process").toContain('"running":false')
+        expect(cells?.at(2)?.result, "the settled process reports its exit code").toContain('"exitCode":0')
+        expect(cells?.every(({ status }) => status === "complete")).toBe(true)
 
         app.pressKey("\t")
         app.pressEnter()
@@ -438,7 +496,12 @@ test(
           workspaceFiles: { "src/alpha.ts": "alpha", "src/beta.ts": "beta", "README.md": "readme" },
           script: [
             model.text("HARNESS_RESPONSE"),
-            model.turn([model.tool("bash", { command: "printf TOOL_OK" }, "ordinary-tool")]),
+            model.turn([
+              model.binding(
+                { module: "processes", operation: "start", input: { command: "printf TOOL_OK" } },
+                "ordinary-tool",
+              ),
+            ]),
             model.text("ORDINARY_COMPLETE"),
             model.text("MENTION_COMPLETE"),
           ],
@@ -536,9 +599,20 @@ test(
         const app = yield* TuiApp.tuiApp({
           workspaceFiles: { "notes.txt": "APPROVAL_NOTES" },
           script: [
-            model.turn([model.tool("read", { path: "notes.txt" }, "approved-read")]),
+            model.turn([
+              model.binding({ module: "workspace", operation: "read", input: { path: "notes.txt" } }, "approved-read"),
+            ]),
             model.text("APPROVAL_COMPLETE"),
-            model.turn([model.tool("bash", { command: "printf CANCEL_PROOF > cancel-proof.txt" }, "cancelled-tool")]),
+            model.turn([
+              model.binding(
+                {
+                  module: "processes",
+                  operation: "start",
+                  input: { command: "printf CANCEL_PROOF > cancel-proof.txt" },
+                },
+                "cancelled-tool",
+              ),
+            ]),
             model.text("BASH_COMPLETE"),
           ],
         })
@@ -581,9 +655,19 @@ test(
           inspectTranscript: true,
           height: 44,
           script: [
-            model.turn([model.tool("write", { path: "approved.txt", content: "APPROVED_BODY" }, "write-approved")]),
+            model.turn([
+              model.binding(
+                { module: "workspace", operation: "write", input: { path: "approved.txt", content: "APPROVED_BODY" } },
+                "write-approved",
+              ),
+            ]),
             model.text("APPROVED_WRITE_COMPLETE"),
-            model.turn([model.tool("write", { path: "denied.txt", content: "DENIED_BODY" }, "write-denied")]),
+            model.turn([
+              model.binding(
+                { module: "workspace", operation: "write", input: { path: "denied.txt", content: "DENIED_BODY" } },
+                "write-denied",
+              ),
+            ]),
             model.text("DENIED_WRITE_COMPLETE"),
           ],
         })

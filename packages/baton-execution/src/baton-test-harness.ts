@@ -1,9 +1,9 @@
 import { AiError, ModelRegistry, Response as AiResponse } from "@batonfx/core"
+import { CellTool } from "@batonfx/repl"
 import { TestModel } from "@batonfx/test"
 import type * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
-import { ChildRuns } from "@batonfx/runtime"
-import { Context, Effect, Layer, Scope, Stream } from "effect"
+import { Context, Effect, Layer, Scope } from "effect"
 import { LanguageModel } from "effect/unstable/ai"
 
 export type Profile =
@@ -50,6 +50,36 @@ const usage = (input: { readonly inputTokens?: number; readonly outputTokens?: n
     outputTokens: { total: input.outputTokens, text: input.outputTokens, reasoning: undefined },
   })
 
+/** One `rika.<module>.<operation>(input)` call a scripted cell makes. */
+export interface BindingCall {
+  readonly module: string
+  readonly operation: string
+  readonly input?: unknown
+}
+
+export interface SpawnRequest {
+  readonly profile: Profile
+  readonly prompt: string
+  readonly name?: string
+}
+
+/**
+ * A cell that awaits one binding and returns its value. The model can only act through the cell, so
+ * a scripted tool call is scripted cell source, and the source is what the transcript projects.
+ */
+const bindingSource = (call: BindingCall): string =>
+  `await rika.${call.module}.${call.operation}(${JSON.stringify(call.input ?? {})})`
+
+const spawnCall = (child: SpawnRequest): BindingCall => ({
+  module: "agents",
+  operation: "spawn",
+  input: {
+    profile: child.profile,
+    prompt: child.prompt,
+    ...(child.name === undefined ? {} : { name: child.name }),
+  },
+})
+
 export const step = {
   text: (value: string, delayMillis?: number): Step =>
     TestModel.turn([TestModel.text(value)], delayMillis === undefined ? {} : { delay: `${delayMillis} millis` }),
@@ -63,19 +93,16 @@ export const step = {
     }),
   part: (value: string): Part => TestModel.text(value),
   reasoning: (value: string): Part => TestModel.reasoning(value),
-  tool: (name: string, params: unknown, id: string): Part => TestModel.toolCall(name, params, { id }),
-  runChild: (selection: string, prompt: string, id: string): Part =>
-    TestModel.toolCall("run_child", { selection, prompt }, { id }),
-  startChildGroup: (
-    members: ReadonlyArray<{ readonly key: string; readonly selection: string; readonly prompt: string }>,
-    options: { readonly id: string; readonly concurrency?: number },
-  ): Part =>
-    TestModel.toolCall(
-      "start_child_group",
-      { members, concurrency: options.concurrency ?? members.length },
-      { id: options.id },
+  cell: (code: string, id: string): Part => TestModel.toolCall(CellTool.name, { code }, { id }),
+  binding: (call: BindingCall, id: string): Part => step.cell(bindingSource(call), id),
+  bindings: (calls: ReadonlyArray<BindingCall>, id: string): Part => step.cell(calls.map(bindingSource).join("\n"), id),
+  spawn: (children: ReadonlyArray<SpawnRequest>, id: string): Part =>
+    step.cell(
+      children.length === 1
+        ? bindingSource(spawnCall(children[0]!))
+        : `await Promise.all([${children.map((child) => bindingSource(spawnCall(child))).join(", ")}])`,
+      id,
     ),
-  awaitChildGroup: (groupId: string, id: string): Part => TestModel.toolCall("await_child_group", { groupId }, { id }),
   failure: (description: string, delayMillis?: number): Step =>
     TestModel.failure(
       AiError.make({
@@ -131,36 +158,6 @@ export interface LaneModels {
   readonly requestCountFor: (profile: Profile) => Effect.Effect<number>
 }
 
-const groupPattern = /"groupId":"(fanout_[a-z0-9]+)"/u
-
-const admittedGroup = (prompt: LanguageModel.ProviderOptions["prompt"]): string | undefined => {
-  const matches = [...JSON.stringify(prompt.content).matchAll(new RegExp(groupPattern, "gu"))]
-  return matches.at(-1)?.[1]
-}
-
-const withAdmittedGroup =
-  (prompt: LanguageModel.ProviderOptions["prompt"]) =>
-  <A>(part: A): A => {
-    const candidate = part as { readonly type?: string; readonly name?: string }
-    if (candidate.type !== "tool-call" || candidate.name !== ChildRuns.awaitGroupToolName) return part
-    const groupId = admittedGroup(prompt)
-    return groupId === undefined ? part : ({ ...candidate, params: { groupId } } as A)
-  }
-
-const resolvingGroupReceipts = (service: LanguageModel.Service): LanguageModel.Service =>
-  ({
-    ...service,
-    generateText: (options: LanguageModel.ProviderOptions) =>
-      service.generateText(options as never).pipe(
-        Effect.map((response: { readonly content: ReadonlyArray<unknown> }) => ({
-          ...response,
-          content: response.content.map(withAdmittedGroup(options.prompt)),
-        })),
-      ) as never,
-    streamText: (options: LanguageModel.ProviderOptions) =>
-      service.streamText(options as never).pipe(Stream.map(withAdmittedGroup(options.prompt))) as never,
-  }) as LanguageModel.Service
-
 export const makeLaneModels = Effect.fn("BatonTestHarness.makeLaneModels")(function* (
   lanes: ReadonlyArray<Lane>,
 ): Effect.gen.Return<LaneModels, never, Scope.Scope> {
@@ -179,10 +176,7 @@ export const makeLaneModels = Effect.fn("BatonTestHarness.makeLaneModels")(funct
           provider: "test",
           model: "test",
           registrationKey: identityFor(profiles[index]!),
-          layer: Layer.succeed(
-            LanguageModel.LanguageModel,
-            resolvingGroupReceipts(Context.get(context, LanguageModel.LanguageModel)),
-          ),
+          layer: Layer.succeed(LanguageModel.LanguageModel, Context.get(context, LanguageModel.LanguageModel)),
         }),
       ),
     ),

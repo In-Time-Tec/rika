@@ -20,22 +20,26 @@ test(
             {
               steps: [
                 model.turn([
-                  model.startChildGroup(
+                  model.spawn(
                     [
-                      { key: "reader", selection: "Oracle", prompt: "READER_CHILD_PROMPT" },
-                      { key: "worker", selection: "Task", prompt: "WORKER_CHILD_PROMPT" },
+                      { profile: "Oracle", prompt: "READER_CHILD_PROMPT" },
+                      { profile: "Task", prompt: "WORKER_CHILD_PROMPT" },
                     ],
-                    { id: "live-group" },
+                    "live-group",
                   ),
                 ]),
-                model.turn([model.awaitChildGroup("pending", "live-join")]),
                 model.text("ROOT_FINISHED_AFTER_CHILD_STREAM"),
               ],
             },
             {
               profile: "Oracle",
               steps: [
-                model.turn([model.tool("read", { path: "live-child.txt" }, "live-read")]),
+                model.turn([
+                  model.binding(
+                    { module: "workspace", operation: "read", input: { path: "live-child.txt" } },
+                    "live-read",
+                  ),
+                ]),
                 model.text("READER_CHILD_FINISHED", 400),
               ],
             },
@@ -91,15 +95,14 @@ test(
             {
               steps: [
                 model.turn([
-                  model.startChildGroup(
+                  model.spawn(
                     [
-                      { key: "first", selection: "Oracle", prompt: "FIRST_GROUP_PROMPT" },
-                      { key: "second", selection: "Surgeon", prompt: "SECOND_GROUP_PROMPT" },
+                      { profile: "Oracle", prompt: "FIRST_GROUP_PROMPT" },
+                      { profile: "Surgeon", prompt: "SECOND_GROUP_PROMPT" },
                     ],
-                    { id: "dedupe-group" },
+                    "dedupe-group",
                   ),
                 ]),
-                model.turn([model.awaitChildGroup("pending", "dedupe-join")]),
                 model.text("ROOT_DEDUPE_COMPLETE"),
               ],
             },
@@ -142,7 +145,9 @@ test(
           inspectTranscript: true,
           workspaceFiles: { "restart.txt": "RESTART_FIXTURE" },
           script: [
-            model.turn([model.tool("read", { path: "restart.txt" }, "restart-read")]),
+            model.turn([
+              model.binding({ module: "workspace", operation: "read", input: { path: "restart.txt" } }, "restart-read"),
+            ]),
             model.text("RESTART_TURN_COMPLETE"),
           ],
         })
@@ -180,7 +185,7 @@ test(
           lanes: [
             {
               steps: [
-                model.turn([model.runChild("Task", "RESPONSIVE_CHILD_PROMPT", "responsive-child")]),
+                model.turn([model.spawn([{ profile: "Task", prompt: "RESPONSIVE_CHILD_PROMPT" }], "responsive-child")]),
                 model.text("RESPONSIVE_ROOT_COMPLETE"),
               ],
             },
@@ -218,7 +223,7 @@ test(
           lanes: [
             {
               steps: [
-                model.turn([model.runChild("Task", "HELD_CHILD_PROMPT", "held-child")]),
+                model.turn([model.spawn([{ profile: "Task", prompt: "HELD_CHILD_PROMPT" }], "held-child")]),
                 model.text("ROOT_SETTLED_AFTER_HOLD"),
               ],
             },
@@ -265,7 +270,10 @@ test(
         const marker = "PRIOR_TURN_HISTORY_MARKER"
         const threadId = "tui-pageup-thread"
         const toolCalls = Array.from({ length: 24 }, (_, index) =>
-          model.tool("read", { path: "volume.txt" }, `volume-read-${index}`),
+          model.binding(
+            { module: "workspace", operation: "read", input: { path: "volume.txt" } },
+            `volume-read-${index}`,
+          ),
         )
         let reloadTurnIds: ReadonlyArray<string> = []
         const olderPageCursors: Array<string> = []
@@ -292,17 +300,16 @@ test(
                 model.turn(toolCalls, { delayMillis: 300 }),
                 model.turn(
                   [
-                    model.startChildGroup(
+                    model.spawn(
                       [
-                        { key: "alpha", selection: "Oracle", prompt: "Volume child A" },
-                        { key: "beta", selection: "Task", prompt: "Volume child B" },
+                        { profile: "Oracle", prompt: "Volume child A" },
+                        { profile: "Task", prompt: "Volume child B" },
                       ],
-                      { id: "volume-group" },
+                      "volume-group",
                     ),
                   ],
                   { delayMillis: 300 },
                 ),
-                model.turn([model.awaitChildGroup("pending", "volume-join")]),
                 model.text("REALISTIC_VOLUME_ROOT_FINISHED", 200),
               ],
             },
