@@ -31,9 +31,3 @@ The kernel worker and its runtime ship with the product for exactly this reason.
 ## The workspace boundary is proved against a stand-in for path
 
 `workspace-boundary.test.ts` builds its own `relative`, `resolve`, and `isAbsolute` rather than using the platform's. It proves the containment logic given those, which is a real property, but a difference between them and the real implementation would pass. The boundary itself is exercised for real by the interactive suite, so this is a gap in the unit proof rather than in the behaviour.
-
-## The skill containment check is unproven
-
-`skill-registry.ts:133` resolves a manifest's real path and refuses one that escapes its skill directory, which is the guard that keeps executable content inside the two roots. Nothing tests it.
-
-An attempt to write that test did not reach the check: discovery dies earlier with `TypeError: undefined is not an object (evaluating 'self.build')` whether the guard is present or not, so the test passed for a reason unrelated to containment and was removed rather than kept as proof it is not. Whatever that failure is — a layer the contract harness does not provide on this path, most likely — has to be understood before the guard can be exercised, since a test that cannot reach a security check is worse than none.

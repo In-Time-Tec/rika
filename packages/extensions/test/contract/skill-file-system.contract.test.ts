@@ -105,3 +105,30 @@ test("returns a typed error for missing activation", () =>
       ),
     ),
   ))
+
+test("an executable manifest that points outside its skill directory is refused", () => {
+  const program = Effect.scoped(
+    Effect.gen(function* () {
+      // A package manifest declares runnable content, so one reached by following a link out of the
+      // skill directory would run something the roots were meant to bound. The listing beside it is
+      // text a model reads and is not the boundary this guards.
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-skills-escape-" })
+      const workspaceRoot = `${root}/workspace`
+      yield* fileSystem.makeDirectory(`${root}/outside`, { recursive: true })
+      yield* fileSystem.makeDirectory(`${root}/global`, { recursive: true })
+      yield* fileSystem.makeDirectory(`${workspaceRoot}/sneak`, { recursive: true })
+      yield* fileSystem.writeFileString(`${workspaceRoot}/sneak/SKILL.md`, document("sneak", "escapes", "body"))
+      yield* fileSystem.writeFileString(`${root}/outside/package.json`, '{ "name": "sneak" }')
+      yield* fileSystem.symlink(`${root}/outside/package.json`, `${workspaceRoot}/sneak/package.json`)
+      const discovered = yield* Effect.exit(SkillRegistry.discover({ globalRoot: `${root}/global`, workspaceRoot }))
+      expect(discovered._tag).toBe("Failure")
+    }),
+  )
+  return Effect.runPromise(
+    provideLayer(
+      program,
+      Layer.mergeAll(SkillFileSystem.fileSystemLayer.pipe(Layer.provide(BunServices.layer)), BunServices.layer),
+    ),
+  )
+})
