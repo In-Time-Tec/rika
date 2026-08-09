@@ -13,6 +13,7 @@ import { Cause, Context, Effect, Layer, Schedule, Schema, Stream } from "effect"
 import type { AgentToolHandlers, KernelOptions } from "./baton-route"
 import { configure, makeResolver } from "./baton-route"
 import { TreeProjector, titleInvocationId } from "./baton-tree-projector"
+import type { Scope } from "effect"
 
 export type AgentToolServices = AgentToolHandlers
 
@@ -35,7 +36,7 @@ export type KernelPoolServices = KernelPool.KernelPool | CellCallContext.CellCal
 export interface Options {
   readonly filename: string
   readonly kernel?: KernelOptions
-  readonly kernelPool?: Layer.Layer<KernelPoolServices>
+  readonly kernelPool?: Effect.Effect<Context.Context<KernelPoolServices>, never, Scope.Scope>
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: HarnessState.HarnessState
   readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolServices, never, never>

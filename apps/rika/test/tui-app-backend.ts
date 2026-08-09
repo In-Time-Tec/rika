@@ -4,13 +4,18 @@ import { Catalog as CodingToolCatalog } from "@rika/coding-tools/coding-tool-cat
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as ThreadQuery from "@rika/product/thread-query-service"
 import * as ThreadToolAction from "@rika/product/thread-tool-action"
-import { Layer } from "effect"
-import { ChildProcessSpawner } from "effect/unstable/process"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import { Context, Effect, Layer } from "effect"
 import * as GoalRepository from "@rika/product/goal-repository"
 import * as ServerKernel from "../src/server/composition/server-kernel-layer"
 
 export interface BackendOptions {
   readonly filename: string
+  readonly kernelPool: Effect.Effect<
+    Context.Context<BatonExecution.KernelPoolServices>,
+    never,
+    import("effect").Scope.Scope
+  >
   readonly workspace: string
   readonly dataRoot: string
   readonly registryLayer: LaneModels["registryLayer"]
@@ -18,7 +23,12 @@ export interface BackendOptions {
   readonly queryFactoryLayer: Layer.Layer<ThreadQuery.Factory>
 }
 
-const kernelOptions = (options: BackendOptions): ServerKernel.Options => ({
+const kernelOptions = (options: {
+  readonly workspace: string
+  readonly dataRoot: string
+  readonly queryFactoryLayer: Layer.Layer<ThreadQuery.Factory>
+  readonly toolRuntimeLayer: Layer.Layer<ToolRuntime.Service>
+}): ServerKernel.Options => ({
   workspace: options.workspace,
   home: options.dataRoot,
   dataRoot: options.dataRoot,
@@ -33,13 +43,18 @@ const kernelOptions = (options: BackendOptions): ServerKernel.Options => ({
  * tool is a cell, and a backend without a pool answers every call with a framework failure rather
  * than running anything.
  */
-const kernelPool = (options: BackendOptions): Layer.Layer<BatonExecution.KernelPoolServices> =>
-  ServerKernel.layer(kernelOptions(options)).pipe(Layer.provide(ChildProcessSpawner.layer))
+/** One pool for the whole interactive session, built once so a turn does not boot its own kernel. */
+export const kernelPoolFor = (options: {
+  readonly workspace: string
+  readonly dataRoot: string
+  readonly queryFactoryLayer: Layer.Layer<ThreadQuery.Factory>
+  readonly toolRuntimeLayer: Layer.Layer<ToolRuntime.Service>
+}) => Effect.cached(Layer.build(ServerKernel.layer(kernelOptions(options)).pipe(Layer.provide(BunServices.layer))))
 
 export const backendLayer = (options: BackendOptions) =>
   BatonExecution.layer({
     filename: options.filename,
-    kernelPool: kernelPool(options),
+    kernelPool: options.kernelPool,
 
     modelServices: options.registryLayer,
     agentServices: (workspace) =>

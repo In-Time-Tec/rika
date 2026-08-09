@@ -20,6 +20,7 @@ import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ThreadQuery from "@rika/product/thread-query-service"
 import { makeAgentServices } from "./server-agent-services"
 import { defaultWorkspaceToolRuntimeLayer } from "./server-runtime-tools"
+import * as SkillFileSystem from "@rika/extensions/skill-file-system"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -137,16 +138,25 @@ const createOperationLayerImpl = (
         queryFactory,
         toolRuntimeLayer: defaultWorkspaceToolRuntimeLayer(workspaceRoot, effectiveConfigForWorkspace),
       }
-      const kernelPool = ServerKernel.layer(kernelOptions).pipe(Layer.provide(BunServices.layer))
+      /**
+       * One pool for the Server, built here rather than inside an Agent environment. Baton builds a
+       * resolved Agent's environment once per Run, so a pool that lived there would boot a fresh
+       * kernel for every turn and discard the namespace the previous turn left behind.
+       */
+      const kernelPool = yield* Effect.cached(
+        Layer.build(ServerKernel.layer(kernelOptions).pipe(Layer.provide(BunServices.layer))),
+      )
       /**
        * The harness the NEXT Execution is pinned to, and the executable skills it may import. Both
        * are read once per Server rather than per Turn: a refinement a cell makes lands in the
        * following Execution, which is exactly the boundary the snapshot pin defines.
        */
-      const harnessSnapshot = yield* ServerKernel.effectiveHarness(kernelOptions, workspaceRoot).pipe(
+      const harnessSnapshot = yield* ServerKernel.effectiveHarness(kernelOptions, undefined).pipe(
         provideLayerScoped(Layer.merge(ServerKernel.harnessStoreLayer(kernelOptions), BunServices.layer)),
       )
-      const skills = yield* ServerKernel.discoverSkills(kernelOptions).pipe(provideLayerScoped(BunServices.layer))
+      const skills = yield* ServerKernel.discoverSkills(kernelOptions).pipe(
+        provideLayerScoped(Layer.merge(SkillFileSystem.fileSystemLayer, BunServices.layer)),
+      )
       const backendLayer = configuredBackendLayer({
         filename: options.batonDatabase,
         kernelPool,

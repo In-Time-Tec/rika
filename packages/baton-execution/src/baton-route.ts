@@ -23,6 +23,7 @@ import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect
 import { Tool, Toolkit } from "effect/unstable/ai"
 import { providerHttpClientLayer } from "./baton-provider-http"
 import * as Registration from "./baton-registration"
+import type { Scope } from "effect"
 
 type CandidateSnapshot = ExecutionRoute.ExecutionRouteModelCandidateSnapshot
 type ModelSnapshot = ExecutionRoute.ExecutionRouteModelSnapshot
@@ -54,7 +55,11 @@ export interface ConfigureOptions {
   readonly executionRoute: RouteSnapshot
   readonly workspace: string
   readonly kernel: KernelOptions
-  readonly kernelPool?: Layer.Layer<KernelPool.KernelPool | CellCallContext.CellCallContext>
+  readonly kernelPool?: Effect.Effect<
+    Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>,
+    never,
+    Scope.Scope
+  >
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: HarnessState.HarnessState
   readonly agentServices?: Layer.Layer<AgentToolHandlers>
@@ -71,7 +76,11 @@ export interface ConfiguredExecutable {
 
 export interface ResolverOptions {
   readonly kernel: KernelOptions
-  readonly kernelPool?: Layer.Layer<KernelPool.KernelPool | CellCallContext.CellCallContext>
+  readonly kernelPool?: Effect.Effect<
+    Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>,
+    never,
+    Scope.Scope
+  >
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: HarnessState.HarnessState
   readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolHandlers>
@@ -357,37 +366,30 @@ const missingKernel = (tool: string) =>
  * Binding it when the layer is built would freeze one call's identity into every later cell.
  */
 const cellExecutor = (
-  pool: Layer.Layer<KernelPool.KernelPool | CellCallContext.CellCallContext>,
+  pool: Effect.Effect<Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>, never, Scope.Scope>,
 ): Layer.Layer<ToolExecutor.ToolExecutor> =>
-  Layer.effect(
+  Layer.succeed(
     ToolExecutor.ToolExecutor,
-    /**
-     * The pool is built by the first cell rather than by the agent that may call one. Every
-     * conversational profile closes over this executor, so building it here would boot a kernel for
-     * a turn that only ever produced text, and pay for it once per profile per turn.
-     */
-    Effect.map(Effect.cached(Layer.build(pool)), (built) =>
-      ToolExecutor.ToolExecutor.of({
-        execute: (request) =>
-          CellTool.route.matches(request)
-            ? Effect.scoped(
-                Effect.flatMap(built, (context) =>
-                  Context.get(context, CellCallContext.CellCallContext)
-                    .enter(request.sessionId)
-                    .pipe(
-                      Effect.andThen(
-                        CellTool.route
-                          .execute(request)
-                          .pipe(
-                            Effect.provideService(KernelPool.KernelPool, Context.get(context, KernelPool.KernelPool)),
-                          ),
-                      ),
+    ToolExecutor.ToolExecutor.of({
+      execute: (request) =>
+        CellTool.route.matches(request)
+          ? Effect.scoped(
+              Effect.flatMap(pool, (context) =>
+                Context.get(context, CellCallContext.CellCallContext)
+                  .enter(request.sessionId)
+                  .pipe(
+                    Effect.andThen(
+                      CellTool.route
+                        .execute(request)
+                        .pipe(
+                          Effect.provideService(KernelPool.KernelPool, Context.get(context, KernelPool.KernelPool)),
+                        ),
                     ),
-                ),
-              )
-            : missingKernel(request.call.name),
-      }),
-    ),
+                  ),
+              ),
+            )
+          : missingKernel(request.call.name),
+    }),
   )
 
 const unavailableKernelExecutor: Layer.Layer<ToolExecutor.ToolExecutor> = Layer.succeed(

@@ -62,20 +62,25 @@ export const harnessStoreLayer = (options: Options): Layer.Layer<HarnessStore.Ha
  * A Turn reads this BEFORE it starts, so a refinement a cell makes during the Turn lands in the
  * NEXT Execution rather than rewriting the running model's prompt.
  */
-const effectiveHarnessImpl = (options: Options, threadId: string) =>
+const effectiveHarnessImpl = (options: Options, threadId: string | undefined) =>
   Effect.gen(function* () {
     const store = yield* HarnessStore.HarnessStore
     const digest = yield* workspaceDigest(options.workspace)
-    const identity = { thread: threadId, workspaceDigest: digest }
-    const states = yield* Effect.forEach(ScopePolicy.mergeOrder, (level) =>
-      store.load(ScopePolicy.scopeString(level, identity)),
-    )
+    const identity = { thread: threadId ?? "", workspaceDigest: digest }
+    /**
+     * A Server has no Thread yet, so it pins the global and workspace scopes only. A Thread's own
+     * scope is named by its Session identity, which does not exist until a Turn starts, and naming
+     * it after something else — a workspace path, say — would both fail the scope segment and
+     * pin one Thread's refinements onto every Thread.
+     */
+    const levels = threadId === undefined ? ["global" as const, "workspace" as const] : ScopePolicy.mergeOrder
+    const states = yield* Effect.forEach(levels, (level) => store.load(ScopePolicy.scopeString(level, identity)))
     return states.reduce((outer, inner) => HarnessMerge.mergeStates(outer, inner))
   })
 
 export const effectiveHarness: {
-  (threadId: string): (options: Options) => ReturnType<typeof effectiveHarnessImpl>
-  (options: Options, threadId: string): ReturnType<typeof effectiveHarnessImpl>
+  (threadId: string | undefined): (options: Options) => ReturnType<typeof effectiveHarnessImpl>
+  (options: Options, threadId: string | undefined): ReturnType<typeof effectiveHarnessImpl>
 } = Function.dual(2, effectiveHarnessImpl)
 
 /** Every executable skill the Execution pins its identity to. */

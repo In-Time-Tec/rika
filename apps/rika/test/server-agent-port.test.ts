@@ -35,8 +35,7 @@ const directoryEntry = (runId: string, parentRunId?: string) => ({
   ...(parentRunId === undefined ? {} : { parentRunId }),
 })
 
-const runtimeLayer = (overrides: Partial<Runtime.Interface>) =>
-  Layer.succeed(Runtime.Runtime, Runtime.Runtime.of(overrides as Runtime.Interface))
+const runtimeOf = (overrides: Partial<Runtime.Interface>) => Runtime.Runtime.of(overrides as Runtime.Interface)
 
 /**
  * The port reads the executing cell's identity per call rather than at layer build, so the ambient
@@ -51,7 +50,7 @@ const withPort = <A, E>(
     Effect.flatMap(Layer.build(runtimeAgentPortLayer), (context) =>
       use(Context.get(context, AgentPort)).pipe(
         Effect.provideService(ToolContext.ToolContext, cellContext(runId)),
-        Effect.provide(runtimeLayer(runtime)),
+        Effect.provideService(Runtime.Runtime, runtimeOf(runtime)),
       ),
     ),
   )

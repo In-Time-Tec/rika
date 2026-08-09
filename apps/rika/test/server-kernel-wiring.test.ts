@@ -119,7 +119,7 @@ it.effect("routes an admitted cell through the pool the composition root supplie
       executionRoute: testExecutionRoute(),
       workspace: "/workspace",
       kernel,
-      kernelPool: pool,
+      kernelPool: Layer.build(pool),
     })
     const entry = configured.resolverEntries.find(({ agent }) => agent.name === "rika-root")!
     const environment = entry.agent.open((_agent, agentEnvironment) => agentEnvironment)

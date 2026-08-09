@@ -18,7 +18,7 @@ import {
 } from "./tui-app-repositories"
 import type { Lane } from "./tui-app-model"
 import { tuiToolRuntimeLayer } from "./tui-app-tool-runtime"
-import { backendLayer } from "./tui-app-backend"
+import { backendLayer, kernelPoolFor } from "./tui-app-backend"
 import { laneExecutionRoute, makeLaneModels } from "./tui-app-model"
 
 const activityMarkers = ["Waiting", "Streaming", "Running 1 tool", "Thinking"] as const
@@ -144,10 +144,15 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   const queryFactoryLayer = Layer.succeedContext(
     yield* Layer.buildWithScope(ThreadQuery.Runtime.factoryLayer.pipe(Layer.provide(repositories)), resourceScope),
   )
-  const executionBackendLayer = backendLayer({
-    filename: path.join(root, "baton.db"),
+  const kernelPool = yield* kernelPoolFor({
     workspace,
     dataRoot: root,
+    queryFactoryLayer,
+    toolRuntimeLayer,
+  })
+  const executionBackendLayer = backendLayer({
+    filename: path.join(root, "baton.db"),
+    kernelPool,
     registryLayer: laneModels.registryLayer,
     toolRuntimeLayer,
     queryFactoryLayer,
