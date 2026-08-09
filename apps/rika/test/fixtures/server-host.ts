@@ -42,7 +42,7 @@ const fixtureThread = (threadId: Thread.ThreadId): Thread.Thread => ({
 })
 
 const makeFixtureView = (
-  dispatch: (event: InteractiveEvent) => void,
+  dispatch: (event: InteractiveEvent.InteractiveEvent) => void,
   threadId: Thread.ThreadId,
   turnId: Turn.TurnId,
   prompt: string,
@@ -435,10 +435,10 @@ const program = Effect.gen(function* () {
               newThread: Effect.void,
               selectThread: () => Effect.void,
               readQueue: () => Effect.void,
-              loadOlder: () => Effect.void,
-              loadNewer: () => Effect.void,
               previewThread: () => Effect.void,
-              reopenThread: () => Effect.void,
+              reopenThread: Effect.void,
+              approveAuthorization: () => Effect.void,
+              denyAuthorization: () => Effect.void,
             })
           },
         })

@@ -43,7 +43,15 @@ it("projects a full snapshot beyond the old 120-unit window bound without trunca
   })
 
   let state = initialState()
-  for (const event of selected) state = InteractiveController.update(state, event).state
+  // The feed emits every client event; the controller projects the transcript ones.
+  for (const event of selected)
+    if (
+      event._tag === "ThreadViewSnapshot" ||
+      event._tag === "ThreadViewPatch" ||
+      event._tag === "ResyncRequired" ||
+      event._tag === "ThreadRefolding"
+    )
+      state = InteractiveController.update(state, event).state
 
   const keys = state.view?.turns.flatMap((value) => value.units.map((unit) => unit.key)) ?? []
   expect(keys).toHaveLength(130)
@@ -92,7 +100,15 @@ it("bounds the in-memory timeline to the newest units when a snapshot exceeds th
   })
 
   let state = initialState()
-  for (const event of selected) state = InteractiveController.update(state, event).state
+  // The feed emits every client event; the controller projects the transcript ones.
+  for (const event of selected)
+    if (
+      event._tag === "ThreadViewSnapshot" ||
+      event._tag === "ThreadViewPatch" ||
+      event._tag === "ResyncRequired" ||
+      event._tag === "ThreadRefolding"
+    )
+      state = InteractiveController.update(state, event).state
 
   expect(state.model.items.length).toBe(maxInMemoryTranscriptUnits)
   expect(state.model.entries[0]?.text).toBe(`unit:${String(5).padStart(6, "0")}`)
