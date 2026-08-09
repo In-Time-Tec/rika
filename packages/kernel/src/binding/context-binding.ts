@@ -24,6 +24,7 @@ const Page = Schema.Struct({
   hasAfter: Schema.Boolean,
   firstEntryId: Schema.optionalKey(Schema.String),
   lastEntryId: Schema.optionalKey(Schema.String),
+  unknownCursors: Schema.optionalKey(Schema.Array(Schema.String)),
 })
 
 const Found = Schema.Struct({ entries: Schema.Array(Entry), hasMore: Schema.Boolean })
@@ -120,6 +121,7 @@ export const make = (options: {
             hasAfter: page.hasAfter,
             ...(page.firstEntryId === undefined ? {} : { firstEntryId: page.firstEntryId }),
             ...(page.lastEntryId === undefined ? {} : { lastEntryId: page.lastEntryId }),
+            ...(page.unknownCursors === undefined ? {} : { unknownCursors: page.unknownCursors }),
           }
         }),
     }),

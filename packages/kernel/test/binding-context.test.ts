@@ -153,4 +153,19 @@ describe("context binding", () => {
       expect(journalled.kinds).toEqual([])
     }),
   )
+
+  it.effect("names a cursor the log does not hold rather than answering as though it did", () =>
+    Effect.gen(function* () {
+      // A page asked for entries before something returns the newest ones when the cursor names no
+      // position, which a caller must not read as an answer to what it asked.
+      const mounted = yield* registry(sessionStore([message("1", "one"), message("2", "two")]))
+      const response = yield* mounted.invoke({
+        module: "context",
+        operation: "historyPage",
+        input: { limit: 2, before: "no-such-entry" },
+      })
+      expect(response._tag).toBe("Success")
+      if (response._tag === "Success") expect(response.output).toMatchObject({ unknownCursors: ["no-such-entry"] })
+    }),
+  )
 })
