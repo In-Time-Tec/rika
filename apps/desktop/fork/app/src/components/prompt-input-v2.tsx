@@ -77,6 +77,14 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
 }
 
 export function usePromptInputV2Controller(props: PromptInputV2ControllerProps): PromptInputV2ComposerController {
+  // Route/query teardown can briefly clear the memo before this controller unmounts.
+  // Keep the last complete controls snapshot so reactive view getters cannot crash during that handoff.
+  let latestControls = props.controls
+  const controls = () => {
+    const next = props.controls as PromptInputProps["controls"] | undefined
+    if (next !== undefined) latestControls = next
+    return latestControls
+  }
   const sdk = useSDK()
   const sync = useSync()
   const comments = useComments()
@@ -91,8 +99,11 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
   const interaction = createPromptInputV2State()
   const mode = () => interaction[0].mode
   const history = props.history ?? createPersistedPromptInputHistory()
-  const info = createMemo(() => (props.controls.session.id ? sync().session.get(props.controls.session.id) : undefined))
-  const working = createMemo(() => sync().data.session_working(props.controls.session.id ?? ""))
+  const info = createMemo(() => {
+    const sessionID = controls().session.id
+    return sessionID ? sync().session.get(sessionID) : undefined
+  })
+  const working = createMemo(() => sync().data.session_working(controls().session.id ?? ""))
   const attachments = createMemo(() =>
     prompt.current().filter((part): part is ImageAttachmentPart => part.type === "image"),
   )
@@ -190,7 +201,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     onQueue: props.onQueue,
     onAbort: props.onAbort,
     onSubmit: props.onSubmit,
-    model: props.controls.model.selection,
+    model: controls().model.selection,
   })
 
   const referenceDescription = (reference: ReferenceInfo) =>
@@ -218,7 +229,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
   const context = createMemo<PromptInputV2Suggestion[]>(() => {
     const referenceItems = typeof references === "function" ? references() ?? [] : []
     const recentItems: string[] = []
-    const agents = (props.controls.agents.available ?? [])
+    const agents = (controls().agents.available ?? [])
       .filter((agent) => !agent.hidden && agent.mode !== "primary")
       .map((agent) => ({
         id: `agent:${agent.name}`,
@@ -269,7 +280,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       keybind: command.keybindParts(item.id),
     })),
   )
-  const variants = createMemo(() => ["default", ...props.controls.model.selection.variant.list()])
+  const variants = createMemo(() => ["default", ...controls().model.selection.variant.list()])
   const controller = createPromptInputV2Controller({
     store: () => prompt.capture().store,
     state: interaction,
@@ -326,19 +337,19 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     view: {
       placeholder: designPlaceholder,
       get agent() {
-        return props.controls.agents.visible && props.controls.agents.options.length > 0
+        return controls().agents.visible && controls().agents.options.length > 0
           ? {
-              options: () => props.controls.agents.options.map((name) => ({ id: name, label: name })),
-              current: () => props.controls.agents.current,
-              onSelect: (value: string) => props.controls.agents.select(value),
+              options: () => controls().agents.options.map((name) => ({ id: name, label: name })),
+              current: () => controls().agents.current,
+              onSelect: (value: string) => controls().agents.select(value),
               keybind: () => command.keybindParts("agent.cycle"),
             }
           : undefined
       },
       variant: {
         options: () => variants().map((value) => ({ id: value, label: value })),
-        current: () => props.controls.model.selection.variant.current() ?? "default",
-        onSelect: (value) => props.controls.model.selection.variant.set(value === "default" ? undefined : value),
+        current: () => controls().model.selection.variant.current() ?? "default",
+        onSelect: (value) => controls().model.selection.variant.set(value === "default" ? undefined : value),
         keybind: () => command.keybindParts("model.variant.cycle"),
       },
       submit: {
@@ -349,7 +360,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       },
     },
   })
-  Object.defineProperty(controller, "model", { get: () => props.controls.model })
+  Object.defineProperty(controller, "model", { get: () => controls().model })
 
   command.register("prompt-input", () => [
     {
