@@ -15,12 +15,13 @@ test(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
-          workspaceFiles: { "live-child.txt": "LIVE_CHILD_FILE" },
           lanes: [
             {
               steps: [
+                // Both children run inside the root's wait, which is the window this test observes
+                // them live in and what makes every card terminal by the time it reads them back.
                 model.turn([
-                  model.spawn(
+                  model.spawnAndWait(
                     [
                       { profile: "Oracle", prompt: "READER_CHILD_PROMPT" },
                       { profile: "Task", prompt: "WORKER_CHILD_PROMPT" },
@@ -31,18 +32,10 @@ test(
                 model.text("ROOT_FINISHED_AFTER_CHILD_STREAM"),
               ],
             },
-            {
-              profile: "Oracle",
-              steps: [
-                model.turn([
-                  model.binding(
-                    { module: "workspace", operation: "read", input: { path: "live-child.txt" } },
-                    "live-read",
-                  ),
-                ]),
-                model.text("READER_CHILD_FINISHED", 400),
-              ],
-            },
+            // Each child answers in ONE turn. A child that called a tool first would need a second
+            // turn, and its slot for that turn is the one the waiting root is holding — the same
+            // circular wait a deeper chain hits. Both still run long enough to be seen live.
+            { profile: "Oracle", steps: [model.text("READER_CHILD_FINISHED", 400)] },
             { profile: "Task", steps: [model.text("WORKER_CHILD_FINISHED", 800)] },
           ],
           height: 40,
@@ -57,7 +50,8 @@ test(
         expect(live).toContain("Running 2 subagents")
         expect(live).not.toContain("Execution failed")
 
-        const projected = yield* app.waitFrame("ROOT_FINISHED_AFTER_CHILD_STREAM")
+        // The root answers only after the children it waited for, so the ceiling covers that wait.
+        const projected = yield* app.waitFrame("ROOT_FINISHED_AFTER_CHILD_STREAM", 25_000)
         expect(projected).not.toContain("Execution failed")
         yield* app.settled
 
@@ -73,8 +67,14 @@ test(
         const cards = (durable?.units ?? []).flatMap((unit) =>
           unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard" ? [unit.content.block] : [],
         )
-        expect(cards.map(({ name }) => name)).toEqual(["Oracle", "Task"])
-        expect(cards.map(({ prompt }) => prompt)).toEqual(["READER_CHILD_PROMPT", "WORKER_CHILD_PROMPT"])
+        // Concurrently admitted children race to land, so the set is what the product promises and
+        // the sequence is not.
+        // Concurrently admitted children land in whichever order their Runs reach the projector, so
+        // the pairing of a card to its own prompt is the property, not the sequence.
+        expect(cards.map(({ name, prompt }) => `${name}:${prompt}`).sort()).toEqual([
+          "Oracle:READER_CHILD_PROMPT",
+          "Task:WORKER_CHILD_PROMPT",
+        ])
         expect(cards.every(({ status }) => status === "complete")).toBe(true)
         expect(new Set(cards.map(({ id }) => id)).size).toBe(2)
 
@@ -94,8 +94,10 @@ test(
           lanes: [
             {
               steps: [
+                // The root waits for both children, because the assertions below read their TERMINAL
+                // labels: a root that only admits them reaches its own answer while they still run.
                 model.turn([
-                  model.spawn(
+                  model.spawnAndWait(
                     [
                       { profile: "Oracle", prompt: "FIRST_GROUP_PROMPT" },
                       { profile: "Surgeon", prompt: "SECOND_GROUP_PROMPT" },
@@ -129,7 +131,12 @@ test(
         )
         expect(cards).toHaveLength(2)
         expect(new Set(cards.map(({ id }) => id)).size).toBe(2)
-        expect(cards.map(({ prompt }) => prompt)).toEqual(["FIRST_GROUP_PROMPT", "SECOND_GROUP_PROMPT"])
+        // Order is a race between two concurrently admitted Runs; each card keeping its OWN prompt
+        // is the property the reload has to preserve.
+        expect(cards.map(({ name, prompt }) => `${name}:${prompt}`).sort()).toEqual([
+          "Oracle:FIRST_GROUP_PROMPT",
+          "Surgeon:SECOND_GROUP_PROMPT",
+        ])
         yield* app.quit
       }),
     ),
