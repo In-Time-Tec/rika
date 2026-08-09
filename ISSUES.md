@@ -90,6 +90,8 @@ Running `subagent-live-stream.tui.test.ts` as a whole file exits 1 with five of 
 
 The lane it dies in is the largest one, and it dies after its renderer starts and before teardown. It passes alone, four times out of four. With its five predecessors it fails three times out of three, and with one or two predecessors it is intermittent, so the earlier lanes push something over a threshold rather than any pair being wrong together.
 
-Ruled out: renderer height, transcript volume, JS heap size, pool isolation, leaked kernel worker processes, and a native crash report. Worker RSS grows monotonically across lanes — 459MB to 998MB over twelve samples — and the process dies at the peak. Raising the JavaScript RAM ceiling to 4GB made it worse rather than better, and a setup file registering exit, uncaught-exception, and abort-signal handlers produces no output at all, so the process is aborted without unwinding.
+Ruled out: renderer height, transcript volume, JS heap size, pool isolation, leaked kernel worker processes, a native crash, the OpenTUI test renderer itself (twelve create-and-destroy cycles cost two megabytes), and the kernel pool's scope.
 
-That combination points at native allocation in the test renderer rather than JavaScript heap exhaustion. Cause not yet confirmed. Per-lane runs pass, which is how this was previously recorded as a green gate; it is not one.
+Eight identical lanes in a scratch file measure the residue directly, and it scales with what a lane does rather than how large it is. A lane that builds the app and quits leaves about five megabytes behind. A lane that runs one turn leaves about thirty. A lane whose turn spawns a child leaves about fifty-five, and the worker dies on the eighth. Running a turn at all also raises the starting baseline by roughly two hundred megabytes that never comes back.
+
+So something is retained per turn, and again per child run, that closing the lane's scope does not release. Naming it needs a heap snapshot diff between two lanes. Per-lane runs pass, which is how this was previously recorded as a green gate; it is not one.
