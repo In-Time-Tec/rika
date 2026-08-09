@@ -409,3 +409,36 @@ test(
     ),
   tuiTestTimeout,
 )
+
+test(
+  "returns the activity line to idle once every child has finished",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        // Every lane here proves the counter goes up. A reader also needs it to come down: a line
+        // that still says a subagent is running after one finished describes work nobody is doing.
+        const app = yield* TuiApp.tuiApp({
+          lanes: [
+            {
+              steps: [
+                model.turn([model.spawnAndWait([{ profile: "Oracle", prompt: "IDLE_CHILD_PROMPT" }], "idle-agent")]),
+                model.text("IDLE_ROOT_DONE"),
+              ],
+            },
+            { profile: "Oracle", steps: [model.text("IDLE_CHILD_DONE")] },
+          ],
+          height: 40,
+        })
+
+        yield* Effect.promise(() => app.type("Delegate once."))
+        app.pressEnter()
+        yield* app.waitFrame("IDLE_ROOT_DONE", 25_000)
+        yield* app.settled
+        const settled = app.frame()
+        expect(settled).toContain("Oracle has spoken")
+        expect(settled).not.toContain("Running 1 subagent")
+        yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)
