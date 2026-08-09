@@ -27,3 +27,7 @@ The policy has no exemption for a composition boundary, which is the honest gap:
 `rika.workspace.search` shells out to ripgrep, which a machine that installed Rika has not necessarily installed. Under a bare `PATH` the call fails, and a live subagent asked to find a file worked around it with a shell `find` before reading the file directly — it recovered, but it spent turns doing so and told the user about it.
 
 The kernel worker and its runtime ship with the product for exactly this reason. Search is the remaining binding that reaches for something outside the archive, so it either ships too, falls back to a search the product owns, or says plainly in its failure that ripgrep is missing rather than reporting a grep error.
+
+## The workspace boundary is proved against a stand-in for path
+
+`workspace-boundary.test.ts` builds its own `relative`, `resolve`, and `isAbsolute` rather than using the platform's. It proves the containment logic given those, which is a real property, but a difference between them and the real implementation would pass. The boundary itself is exercised for real by the interactive suite, so this is a gap in the unit proof rather than in the behaviour.
