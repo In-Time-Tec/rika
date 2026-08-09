@@ -475,16 +475,13 @@ export const configure = (
       if (name === "Title" || name === "Compaction") return Layer.orDie(model)
       return Layer.orDie(Layer.mergeAll(model, compactionLayer, cellLayer))
     }
-    const rootInstructions = [
-      instructions.root,
-      "",
-      BindingModules.cellInstructions({
-        workspace: options.workspace,
-        workspaceDigest: "",
-        trustMode: options.kernel.trustMode ?? "trusted-local",
-        servers: [],
-      } as never),
-    ].join("\n")
+    const cellSurface = BindingModules.cellInstructions({
+      workspace: options.workspace,
+      workspaceDigest: "",
+      trustMode: options.kernel.trustMode ?? "trusted-local",
+      servers: [],
+    } as never)
+    const withSurface = (own: string) => (own === instructions.title ? own : [own, "", cellSurface].join("\n"))
     const profileInstructions = {
       Title: instructions.title,
       Oracle: instructions.Oracle,
@@ -500,7 +497,7 @@ export const configure = (
         routes[name],
         routed[name],
         name,
-        profileInstructions[name],
+        withSurface(profileInstructions[name]),
         roleTools[name],
         environment(name),
         [],
@@ -523,7 +520,7 @@ export const configure = (
       routes.Task,
       routed.Task,
       "Task",
-      profileInstructions.Task,
+      withSurface(profileInstructions.Task),
       roleTools.Task,
       environment("Task"),
       taskChildNames.map((selection) => ({ selection, agent: leafProfiles[selection].pinned.pin })),
@@ -543,7 +540,7 @@ export const configure = (
       route.main,
       routed.Root,
       "Root",
-      rootInstructions,
+      withSurface(instructions.root),
       roleTools.Root,
       environment("Root"),
       rootChildNames.map((selection) => ({ selection, agent: profiles[selection].pinned.pin })),
