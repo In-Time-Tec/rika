@@ -90,6 +90,33 @@ export const productLayer = <
         for (const [sessionId, sink] of interactiveSinks) if (sessionId !== origin) sink(origin, published)
         return published
       }
+      /**
+       * A Turn is the only place goal usage can be accounted honestly: it is where the work the
+       * goal spent actually settles. Publishing the goal here is what makes the indicator live
+       * rather than a value the TUI invented. A Thread with no goal publishes nothing.
+       */
+      const publishGoal = (threadId: string) =>
+        options.goals === undefined
+          ? Effect.void
+          : options.goals.get(threadId).pipe(
+              Effect.map((goal) =>
+                publishInteractiveActivity(0, {
+                  _tag: "GoalChanged",
+                  threadId,
+                  ...(goal === undefined
+                    ? {}
+                    : {
+                        goal: {
+                          objective: goal.objective,
+                          status: goal.status,
+                          startedAtMillis: goal.startedAtMillis,
+                        },
+                      }),
+                }),
+              ),
+              Effect.asVoid,
+              Effect.ignore,
+            )
       const publishTurnSettled = (turn: import("@rika/product/turn-record").Turn, responseArrived?: boolean) => {
         const status = turn.status
         if (status !== "completed" && status !== "failed" && status !== "cancelled") return Effect.void
@@ -103,7 +130,7 @@ export const productLayer = <
             status,
             ...(responseArrived === undefined ? {} : { agentResponseArrived: responseArrived }),
           }),
-        ).pipe(Effect.asVoid)
+        ).pipe(Effect.andThen(publishGoal(String(turn.threadId))), Effect.asVoid)
       }
       const state = yield* makeProductOperationRuntimeState({
         options,

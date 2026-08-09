@@ -9,6 +9,9 @@ import { validateWebSearchProviders } from "./server-configuration-adapter"
 
 export const configuredBackendLayer = (options: {
   readonly filename: string
+  readonly kernelPool?: BatonExecution.Options["kernelPool"]
+  readonly skills?: BatonExecution.Options["skills"]
+  readonly harnessSnapshot?: BatonExecution.Options["harnessSnapshot"]
   readonly agentServices?: (workspace: string) => Layer.Layer<BatonExecution.AgentToolServices, never, never>
   readonly credentialStore?: Layer.Layer<BatonExecution.ProviderCredentialStore, never, never>
   readonly testModel?: { readonly script?: string; readonly response?: string }
@@ -16,6 +19,9 @@ export const configuredBackendLayer = (options: {
   const backend = (): Layer.Layer<ExecutionGateway.Service, ExecutionGateway.StartTurnFailure> =>
     BatonExecution.layer({
       filename: options.filename,
+      ...(options.kernelPool === undefined ? {} : { kernelPool: options.kernelPool }),
+      ...(options.skills === undefined ? {} : { skills: options.skills }),
+      ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
       ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices }),
       ...(options.credentialStore === undefined ? {} : { credentialStore: options.credentialStore }),
       ...(options.testModel === undefined ? {} : { modelServices: ScriptedModel.layer(options.testModel) }),

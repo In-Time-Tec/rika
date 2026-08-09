@@ -76,6 +76,9 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
     case "ThreadTitled":
       latestKey = `title:${event.threadId}`
       break
+    case "GoalChanged":
+      latestKey = `goal:${event.threadId}`
+      break
     case "ThreadActivated":
       latestKey = "activated"
       break

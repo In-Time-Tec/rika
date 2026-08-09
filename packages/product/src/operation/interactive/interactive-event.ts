@@ -67,6 +67,17 @@ export const InteractiveEventSchema = Schema.Union([
     steeringText: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({ _tag: Schema.tag("ThreadTitled"), threadId: Schema.String, title: Schema.String }),
+  Schema.Struct({
+    _tag: Schema.tag("GoalChanged"),
+    threadId: Schema.String,
+    goal: Schema.optionalKey(
+      Schema.Struct({
+        objective: Schema.String,
+        status: Schema.Literals(["active", "paused", "complete", "errored"]),
+        startedAtMillis: Schema.Finite,
+      }),
+    ),
+  }),
   Schema.Struct({ _tag: Schema.tag("ThreadActivated"), threadId: Schema.String, title: Schema.String }),
   Schema.Struct({
     _tag: Schema.tag("ThreadPreviewLoaded"),

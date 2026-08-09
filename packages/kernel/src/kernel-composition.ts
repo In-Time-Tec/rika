@@ -4,6 +4,7 @@ import { HostBindingRegistry } from "@batonfx/repl"
 import { Duration, Layer } from "effect"
 import type { FileSystem, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
+import * as KernelBootstrap from "./kernel-bootstrap"
 import { make as makeModules, type BindingRequirements, type Options as ModuleOptions } from "./binding/binding-modules"
 import { make as makeProfile, type Options as ProfileOptions } from "./kernel-profile-registration"
 import { layer as stateStoreLayer } from "./kernel-state-store-file-system"
@@ -74,17 +75,29 @@ export const pool = (
     runtimeCommand: options.runtimeCommand ?? "bun",
     workerModule,
     startTimeoutMillis: options.startTimeoutMillis ?? 20_000,
+    bootstrap: KernelBootstrap.source(),
     interruptGraceMillis: options.interruptGraceMillis ?? 250,
     maxConcurrentBoots: options.maxConcurrentBoots ?? 4,
     idleTimeToLive: options.idleTimeToLive ?? defaultIdleTimeToLive,
     environment: options.environment ?? {},
   }).pipe(Layer.provide(state(options.dataRoot)))
 
-/** The kernel a Rika Execution runs cells in, plus the surface those cells can call. */
+/**
+ * The kernel a Rika Execution runs cells in, plus the surface those cells can call.
+ *
+ * The surface is a dependency of the pool rather than its sibling. A pool reads its surface from
+ * its own build context, and merged layers build independently, so a sibling surface would be
+ * invisible: the pool would mount nothing, every cell would boot with no `rika` at all, and it
+ * would do so silently, because an absent surface is indistinguishable from one a host chose not
+ * to supply.
+ */
 export const layer = (
   options: Options,
 ): Layer.Layer<
   KernelPool.KernelPool | HostBindingRegistry.HostBindingRegistry,
   HostBindingRegistry.HostBindingConflict,
   BindingRequirements | ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
-> => Layer.merge(pool(options), bindings(moduleOptions(options)))
+> => {
+  const surface = bindings(moduleOptions(options))
+  return Layer.merge(pool(options).pipe(Layer.provide(surface)), surface)
+}

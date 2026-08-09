@@ -9,10 +9,12 @@ import { lazyBackendLayer } from "./lazy-execution-backend"
 import { workspacePaths } from "@rika/configuration/configuration-paths"
 import * as ServerConfiguration from "./server-configuration-adapter"
 import * as ServerExecution from "./server-execution-layer"
+import * as ServerKernel from "./server-kernel-layer"
 import * as ServerAuth from "./server-auth-layer"
 import type { ServerProductOptions } from "./server-auth-layer"
 import * as ServerRepository from "./server-repository-layer"
 import * as ServerProductContext from "./server-product-context"
+import * as GoalService from "@rika/product/goal-service"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ThreadQuery from "@rika/product/thread-query-service"
@@ -51,6 +53,7 @@ const createOperationLayerImpl = (
     threadSummaryRepositoryLayer,
     threadSearchRepositoryLayer,
     transcriptRepositoryLayer,
+    goalRepositoryLayer,
   } = ServerRepository.makeServerRepositoryLayers(database)
   const resolvedContextLayer = ServerProductContext.layer(workspaceGlob)
   return Layer.unwrap(
@@ -124,14 +127,42 @@ const createOperationLayerImpl = (
         yield* Layer.build(ThreadQuery.Runtime.factoryLayer.pipe(Layer.provide(repositories))),
       )
       const agentServices = makeAgentServices({ effectiveConfigForWorkspace, queryFactory })
+      const goalRepositories = Layer.succeedContext(yield* Layer.build(goalRepositoryLayer))
+      const kernelOptions = {
+        workspace: workspaceRoot,
+        home,
+        dataRoot: ServerRepository.dataRootOf(options.batonDatabase),
+        runtimeVersion: Bun.version,
+        goalRepositoryLayer: goalRepositories,
+        queryFactory,
+        toolRuntimeLayer: defaultWorkspaceToolRuntimeLayer(workspaceRoot, effectiveConfigForWorkspace),
+      }
+      const kernelPool = ServerKernel.layer(kernelOptions).pipe(Layer.provide(BunServices.layer))
+      /**
+       * The harness the NEXT Execution is pinned to, and the executable skills it may import. Both
+       * are read once per Server rather than per Turn: a refinement a cell makes lands in the
+       * following Execution, which is exactly the boundary the snapshot pin defines.
+       */
+      const harnessSnapshot = yield* ServerKernel.effectiveHarness(kernelOptions, workspaceRoot).pipe(
+        provideLayerScoped(Layer.merge(ServerKernel.harnessStoreLayer(kernelOptions), BunServices.layer)),
+      )
+      const skills = yield* ServerKernel.discoverSkills(kernelOptions).pipe(provideLayerScoped(BunServices.layer))
       const backendLayer = configuredBackendLayer({
         filename: options.batonDatabase,
+        kernelPool,
+        skills,
+        harnessSnapshot,
         agentServices,
         credentialStore: ServerAuth.createProviderCredentialStoreLayer(options.database, options.profileIdentity),
         ...(testModel === undefined ? {} : { testModel }),
       })
       const configAdapter = ServerConfiguration.productConfigAdapter(editor)
+      const goals = Context.get(
+        yield* Layer.build(GoalService.layer.pipe(Layer.provide(goalRepositories))),
+        GoalService.GoalService,
+      )
       const operationLayer = Operation.productLayer({
+        goals,
         repositoryLayer: repositories,
         turnRepositoryLayer: repositories,
         threadSummaryRepositoryLayer: repositories,

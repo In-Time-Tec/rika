@@ -49,6 +49,7 @@ export const isCritical = (event: InteractiveEvent): boolean => {
     case "ShellCompleted":
     case "ExecutionControlled":
     case "ThreadTitled":
+    case "GoalChanged":
     case "ThreadPreviewLoaded":
     case "ThreadPreviewFailed":
     case "TurnSettled":
@@ -106,6 +107,7 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
     case "ShellCompleted":
     case "ExecutionControlled":
     case "ThreadTitled":
+    case "GoalChanged":
     case "ThreadPreviewLoaded":
     case "ThreadPreviewFailed":
       if (state.critical.length >= capacity) state.criticalOverflowed = true

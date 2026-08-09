@@ -13,6 +13,7 @@ import { AmazonBedrock, Anthropic, Deterministic, ModelRoute, OpenAi, OpenRouter
 import { Errors, ExecutableRegistration, ExecutableResolver } from "@batonfx/runtime"
 import type { HarnessState } from "@batonfx/harness"
 import { CellTool, KernelPool, type KernelProfile } from "@batonfx/repl"
+import * as CellCallContext from "./baton-cell-call-context"
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
@@ -53,7 +54,7 @@ export interface ConfigureOptions {
   readonly executionRoute: RouteSnapshot
   readonly workspace: string
   readonly kernel: KernelOptions
-  readonly kernelPool?: Layer.Layer<KernelPool.KernelPool>
+  readonly kernelPool?: Layer.Layer<KernelPool.KernelPool | CellCallContext.CellCallContext>
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: HarnessState.HarnessState
   readonly agentServices?: Layer.Layer<AgentToolHandlers>
@@ -70,7 +71,7 @@ export interface ConfiguredExecutable {
 
 export interface ResolverOptions {
   readonly kernel: KernelOptions
-  readonly kernelPool?: Layer.Layer<KernelPool.KernelPool>
+  readonly kernelPool?: Layer.Layer<KernelPool.KernelPool | CellCallContext.CellCallContext>
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: HarnessState.HarnessState
   readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolHandlers>
@@ -355,7 +356,9 @@ const missingKernel = (tool: string) =>
  * per-call ToolContext the Baton host installs around each tool execution is the one the cell sees.
  * Binding it when the layer is built would freeze one call's identity into every later cell.
  */
-const cellExecutor = (pool: Layer.Layer<KernelPool.KernelPool>): Layer.Layer<ToolExecutor.ToolExecutor> =>
+const cellExecutor = (
+  pool: Layer.Layer<KernelPool.KernelPool | CellCallContext.CellCallContext>,
+): Layer.Layer<ToolExecutor.ToolExecutor> =>
   Layer.effect(
     ToolExecutor.ToolExecutor,
     Layer.build(pool).pipe(
@@ -363,9 +366,19 @@ const cellExecutor = (pool: Layer.Layer<KernelPool.KernelPool>): Layer.Layer<Too
         ToolExecutor.ToolExecutor.of({
           execute: (request) =>
             CellTool.route.matches(request)
-              ? CellTool.route
-                  .execute(request)
-                  .pipe(Effect.provideService(KernelPool.KernelPool, Context.get(context, KernelPool.KernelPool)))
+              ? Effect.scoped(
+                  Context.get(context, CellCallContext.CellCallContext)
+                    .enter(request.sessionId)
+                    .pipe(
+                      Effect.andThen(
+                        CellTool.route
+                          .execute(request)
+                          .pipe(
+                            Effect.provideService(KernelPool.KernelPool, Context.get(context, KernelPool.KernelPool)),
+                          ),
+                      ),
+                    ),
+                )
               : missingKernel(request.call.name),
         }),
       ),

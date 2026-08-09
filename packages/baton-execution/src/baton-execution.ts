@@ -1,4 +1,8 @@
 import { ModelRegistry } from "@batonfx/core"
+import type { HarnessState } from "@batonfx/harness"
+import type { KernelPool } from "@batonfx/repl"
+import type * as ExecutionPins from "@rika/kernel/execution-pins"
+import type * as CellCallContext from "./baton-cell-call-context"
 import { Approval, Run, RunTree, Runtime } from "@batonfx/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import type { Status } from "@rika/product/execution-status"
@@ -28,6 +32,9 @@ const kernelOptions = (options: Options): KernelOptions => options.kernel ?? der
 export interface Options {
   readonly filename: string
   readonly kernel?: KernelOptions
+  readonly kernelPool?: Layer.Layer<KernelPool.KernelPool | CellCallContext.CellCallContext>
+  readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
+  readonly harnessSnapshot?: HarnessState.HarnessState
   readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolServices, never, never>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry, never, never>
   readonly credentialStore?: Layer.Layer<ProviderCredentialStore, never, never>
@@ -176,6 +183,9 @@ const make = (options: Options, credentialStore: ProviderCredentialStoreShape | 
             executionRoute: input.executionRoute,
             workspace: input.workspace,
             kernel: kernelOptions(options),
+            ...(options.kernelPool === undefined ? {} : { kernelPool: options.kernelPool }),
+            ...(options.skills === undefined ? {} : { skills: options.skills }),
+            ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
             ...(credentialStore === undefined ? {} : { credentialStore }),
             ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices(input.workspace) }),
             ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
@@ -286,6 +296,9 @@ export const layer = (options: Options): Layer.Layer<ExecutionGateway.Service, E
         filename: options.filename,
         resolver: makeResolver({
           kernel: kernelOptions(options),
+          ...(options.kernelPool === undefined ? {} : { kernelPool: options.kernelPool }),
+          ...(options.skills === undefined ? {} : { skills: options.skills }),
+          ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
           ...(credentialStore === undefined ? {} : { credentialStore }),
           ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices }),
           ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),

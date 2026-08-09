@@ -56,6 +56,7 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "plugin-digest",
     "plugin-registry",
     "skill-prompt-listing",
+    "skill-file-system",
     "skill-registry",
   ],
   "@rika/transcript": [

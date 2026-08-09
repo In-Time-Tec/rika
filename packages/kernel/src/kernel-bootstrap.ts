@@ -12,6 +12,12 @@ import { moduleNames } from "./binding/binding-modules"
  * This source text is an input to `bindingsDigest`, so changing the surface changes the kernel
  * profile and starts a new epoch.
  */
+/**
+ * The bootstrap runs at worker start, outside any cell, so a host that answers binding requests
+ * under the executing cell's identity has none to answer under and refuses this one. That refusal
+ * is expected rather than exceptional: `context` describes the cell that is running, and at boot no
+ * cell is. It is filled on the first cell that asks for it instead of failing the worker's start.
+ */
 export const source = (names: ReadonlyArray<string> = moduleNames): string => `
 globalThis.rika = { ${names.map((name) => `${name}: globalThis[${JSON.stringify(name)}]`).join(", ")} }
 globalThis.rika.mcp = (() => {
@@ -46,7 +52,7 @@ globalThis.rika.mcp = (() => {
     },
   })
 })()
-globalThis.context = await globalThis.rika.context.current({})
+globalThis.context = await globalThis.rika.context.current({}).catch(() => undefined)
 `
 
 /** Every global the bootstrap defines. Nothing else may leak into the kernel namespace. */

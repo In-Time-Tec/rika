@@ -5,6 +5,7 @@ import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Layer } from "effect"
 import { Response } from "effect/unstable/ai"
 import { configure } from "../src/baton-route"
+import * as CellCallContext from "../src/baton-cell-call-context"
 
 const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const
 
@@ -58,7 +59,7 @@ it.effect("routes an admitted cell call through the kernel pool the host supplie
       executionRoute: testExecutionRoute(),
       workspace: "/workspace",
       kernel,
-      kernelPool: pool,
+      kernelPool: Layer.merge(pool, CellCallContext.layer),
     })
     const environment = executorFor(configured, "rika-root")
     const context = yield* Layer.build(environment)
@@ -85,7 +86,7 @@ it.effect("uses the per-call tool context of each cell rather than one bound at 
       executionRoute: testExecutionRoute(),
       workspace: "/workspace",
       kernel,
-      kernelPool: pool,
+      kernelPool: Layer.merge(pool, CellCallContext.layer),
     })
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
     const executor = Context.get(context, ToolExecutor.ToolExecutor)
@@ -127,7 +128,7 @@ it.effect("refuses any tool name other than the one advertised cell tool", () =>
       executionRoute: testExecutionRoute(),
       workspace: "/workspace",
       kernel,
-      kernelPool: pool,
+      kernelPool: Layer.merge(pool, CellCallContext.layer),
     })
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
     const executor = Context.get(context, ToolExecutor.ToolExecutor)

@@ -154,6 +154,12 @@ export const makeEventRouter = (runtime: Runtime) => {
     } else if (event._tag === "ThreadTitled") {
       loop.model = update(loop.model, { _tag: "ThreadTitleChanged", threadId: event.threadId, title: event.title })
       if (loop.model.currentThreadId === event.threadId) refreshTerminalTitle()
+    } else if (event._tag === "GoalChanged") {
+      if (loop.model.currentThreadId !== event.threadId) return
+      loop.model = update(loop.model, {
+        _tag: "GoalChanged",
+        ...(event.goal === undefined ? {} : { goal: event.goal }),
+      })
     } else if (event._tag === "ThreadActivated") {
       loop.requestedThreadId = event.threadId
       loop.model = update(loop.model, { _tag: "ThreadActivated", threadId: event.threadId, title: event.title })

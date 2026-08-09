@@ -495,6 +495,7 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       case "AssistantCompleted":
       case "ShellCompleted":
       case "ThreadTitled":
+      case "GoalChanged":
       case "ThreadActivated":
       case "ThreadPreviewLoaded":
       case "ThreadPreviewFailed":
