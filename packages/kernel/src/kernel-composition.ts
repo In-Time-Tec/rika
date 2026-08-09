@@ -22,6 +22,7 @@ export interface Options extends ProfileOptions {
   readonly servers: ModuleOptions["servers"]
   readonly skills?: NonNullable<ProfileOptions["environment"]>["skills"]
   readonly runtimeCommand?: string
+  readonly workerModule?: string
   readonly startTimeoutMillis?: number
   readonly interruptGraceMillis?: number
   readonly maxConcurrentBoots?: number
@@ -61,7 +62,8 @@ export const state = (
  *
  * `workerModule` is resolved by `@batonfx/repl/bun` against its own module URL: the worker is not an
  * importable entrypoint and its layout is an implementation detail, so a host must never name a dist
- * path itself.
+ * path itself. A host whose modules are compiled into a single executable is the exception — that URL
+ * no longer names a file anything can spawn — so it supplies the path it shipped the worker to.
  */
 export const pool = (
   options: Options,
@@ -73,7 +75,7 @@ export const pool = (
   BunKernelPool.layer({
     profile: makeProfile(profileOptions(options)),
     runtimeCommand: options.runtimeCommand ?? "bun",
-    workerModule,
+    workerModule: options.workerModule ?? workerModule,
     startTimeoutMillis: options.startTimeoutMillis ?? 20_000,
     bootstrap: KernelBootstrap.source(),
     interruptGraceMillis: options.interruptGraceMillis ?? 250,
