@@ -139,13 +139,12 @@ const createOperationLayerImpl = (
         toolRuntimeLayer: defaultWorkspaceToolRuntimeLayer(workspaceRoot, effectiveConfigForWorkspace),
       }
       /**
-       * One pool for the Server, built here rather than inside an Agent environment. Baton builds a
-       * resolved Agent's environment once per Run, so a pool that lived there would boot a fresh
-       * kernel for every turn and discard the namespace the previous turn left behind.
+       * One pool for the Server, built here rather than inside an Agent environment or a cell.
+       * Baton builds a resolved Agent's environment once per Run, and a cell's own scope ends with
+       * that cell, so a pool owned by either would be released while later turns still needed it.
+       * This scope is the Server's, which is the lifetime the pool actually has.
        */
-      const kernelPool = yield* Effect.cached(
-        Layer.build(ServerKernel.layer(kernelOptions).pipe(Layer.provide(BunServices.layer))),
-      )
+      const kernelPool = yield* Layer.build(ServerKernel.layer(kernelOptions).pipe(Layer.provide(BunServices.layer)))
       /**
        * The harness the NEXT Execution is pinned to, and the executable skills it may import. Both
        * are read once per Server rather than per Turn: a refinement a cell makes lands in the

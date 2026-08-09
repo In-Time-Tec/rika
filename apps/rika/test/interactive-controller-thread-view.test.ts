@@ -4,6 +4,7 @@ import * as ViewState from "@rika/terminal/terminal-state"
 import { update as reduceModel } from "@rika/terminal/terminal-state-reducer"
 import * as ThreadView from "@rika/product/thread-view"
 import * as ExecutionProjection from "@rika/product/execution-projection"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 
 const snapshot = (threadId = "thread", revision = 4): ThreadView.ThreadViewSnapshot => ({
   thread: {
@@ -109,6 +110,59 @@ describe("interactive ThreadView controller", () => {
     })
     expect(loaded.state.model.busy).toBe(true)
     expect(loaded.state.model.activeTurnId).toBe("turn")
+  })
+
+  it("reports a running cell as running work rather than leaving the line at Waiting", () => {
+    // A cell is how a turn does work now. Counting only the tool call it replaced left the activity
+    // line saying "Waiting" for the whole of a long cell, with nothing telling the reader it is live.
+    const source = 'await rika.processes.start({"command":"sleep 10"})'
+    const loaded = InteractiveController.update(state(), {
+      _tag: "ThreadViewSnapshot",
+      snapshot: {
+        ...snapshot(),
+        turns: [
+          {
+            turn: {
+              kind: "agent",
+              id: "turn",
+              threadId: "thread",
+              prompt: "prompt",
+              status: "running",
+              author: { _tag: "Human" },
+              lineage: { _tag: "Original" },
+              createdAt: 1,
+              updatedAt: 2,
+            },
+            projectionRevision: 2,
+            usage: ExecutionProjection.emptyUsageState(),
+            units: [
+              {
+                key: "turn:cell",
+                turnId: "turn",
+                order: TranscriptOrdering.unitOrder("turn:cell", 1),
+                revision: 1,
+                content: {
+                  _tag: "Block",
+                  block: {
+                    _tag: "Cell",
+                    id: "cell",
+                    status: "running",
+                    visual: "ts",
+                    summary: source,
+                    source: { text: source, lines: 1, truncated: false },
+                    output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
+                    epoch: 0,
+                    notices: [],
+                    files: [],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    })
+    expect(loaded.state.model.activity).toEqual({ _tag: "RunningTools", subagents: 0, tools: 1 })
   })
 
   it("keeps editing a queued turn across snapshot re-projections", () => {

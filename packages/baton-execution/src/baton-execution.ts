@@ -13,7 +13,6 @@ import { Cause, Context, Deferred, Effect, Layer, Option, Schedule, Schema, Stre
 import type { AgentToolHandlers, KernelOptions } from "./baton-route"
 import { configure, makeResolver } from "./baton-route"
 import { TreeProjector, titleInvocationId } from "./baton-tree-projector"
-import type { Scope } from "effect"
 
 export type AgentToolServices = AgentToolHandlers
 
@@ -36,7 +35,12 @@ export type KernelPoolServices = KernelPool.KernelPool | CellCallContext.CellCal
 export interface Options {
   readonly filename: string
   readonly kernel?: KernelOptions
-  readonly kernelPool?: Effect.Effect<Context.Context<KernelPoolServices>, never, Scope.Scope>
+  /**
+   * The kernel a cell runs in, already built and owned by the caller's scope. It outlives every
+   * cell, so a host builds it once where a Server-lifetime scope exists rather than letting the
+   * first cell that needs one decide how long it lives.
+   */
+  readonly kernelPool?: Context.Context<KernelPoolServices>
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: HarnessState.HarnessState
   readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolServices, never, never>

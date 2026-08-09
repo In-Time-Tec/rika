@@ -15,7 +15,10 @@ const activeUnitActivity = (entry: ThreadView.ThreadViewTurn | undefined): Model
   for (const unit of entry.units) {
     if (unit.content._tag !== "Block") continue
     const block = unit.content.block
-    if (block._tag === "ToolCall" && block.status === "running") {
+    // A cell is how work happens now, so a running one is what the reader is waiting on. Counting
+    // only the tool call it used to be leaves the line saying "Waiting" for the whole of a long cell.
+    if (block._tag === "Cell" && block.status === "running") tools += 1
+    else if (block._tag === "ToolCall" && block.status === "running") {
       if (block.presentation.family === "agent") subagents += 1
       else tools += 1
     } else if (

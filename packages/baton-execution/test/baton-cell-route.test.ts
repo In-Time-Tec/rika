@@ -59,7 +59,7 @@ it.effect("routes an admitted cell call through the kernel pool the host supplie
       executionRoute: testExecutionRoute(),
       workspace: "/workspace",
       kernel,
-      kernelPool: Layer.build(Layer.merge(pool, CellCallContext.layer)),
+      kernelPool: yield* Layer.build(Layer.merge(pool, CellCallContext.layer)),
     })
     const environment = executorFor(configured, "rika-root")
     const context = yield* Layer.build(environment)
@@ -69,6 +69,38 @@ it.effect("routes an admitted cell call through the kernel pool the host supplie
       .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-a")))
     expect(outcome._tag).toBe("Success")
     expect(executed).toEqual(["1 + 1"])
+  }).pipe(Effect.scoped),
+)
+
+it.effect("keeps the pool alive for a second cell rather than releasing it with the first", () =>
+  Effect.gen(function* () {
+    const executed: Array<string> = []
+    const pool = TestKernel.layerTestPool({
+      profile,
+      script: (input) => {
+        executed.push(input.code)
+        return { _tag: "Value", value: `evaluated:${input.code}` }
+      },
+    })
+    const configured = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      kernel,
+      kernelPool: yield* Layer.build(Layer.merge(pool, CellCallContext.layer)),
+    })
+    const context = yield* Layer.build(executorFor(configured, "rika-root"))
+    const executor = Context.get(context, ToolExecutor.ToolExecutor)
+    const run = (code: string) =>
+      executor
+        .execute(request(code, "session-a"))
+        .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-a")))
+    // A pool owned by the first cell's scope is released when that cell ends, and the closed map
+    // answers the next cell with an interrupt rather than a worker, so the second cell never runs.
+    const first = yield* run("1 + 1")
+    const second = yield* run("2 + 2")
+    expect(first._tag).toBe("Success")
+    expect(second._tag).toBe("Success")
+    expect(executed).toEqual(["1 + 1", "2 + 2"])
   }).pipe(Effect.scoped),
 )
 
@@ -86,7 +118,7 @@ it.effect("uses the per-call tool context of each cell rather than one bound at 
       executionRoute: testExecutionRoute(),
       workspace: "/workspace",
       kernel,
-      kernelPool: Layer.build(Layer.merge(pool, CellCallContext.layer)),
+      kernelPool: yield* Layer.build(Layer.merge(pool, CellCallContext.layer)),
     })
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
     const executor = Context.get(context, ToolExecutor.ToolExecutor)
@@ -128,7 +160,7 @@ it.effect("refuses any tool name other than the one advertised cell tool", () =>
       executionRoute: testExecutionRoute(),
       workspace: "/workspace",
       kernel,
-      kernelPool: Layer.build(Layer.merge(pool, CellCallContext.layer)),
+      kernelPool: yield* Layer.build(Layer.merge(pool, CellCallContext.layer)),
     })
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
     const executor = Context.get(context, ToolExecutor.ToolExecutor)

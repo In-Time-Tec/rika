@@ -23,7 +23,6 @@ import { Config, Context, Effect, Function, Layer, Option, Redacted, Schema } fr
 import { Tool, Toolkit } from "effect/unstable/ai"
 import { providerHttpClientLayer } from "./baton-provider-http"
 import * as Registration from "./baton-registration"
-import type { Scope } from "effect"
 
 type CandidateSnapshot = ExecutionRoute.ExecutionRouteModelCandidateSnapshot
 type ModelSnapshot = ExecutionRoute.ExecutionRouteModelSnapshot
@@ -55,11 +54,7 @@ export interface ConfigureOptions {
   readonly executionRoute: RouteSnapshot
   readonly workspace: string
   readonly kernel: KernelOptions
-  readonly kernelPool?: Effect.Effect<
-    Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>,
-    never,
-    Scope.Scope
-  >
+  readonly kernelPool?: Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>
   readonly durableRuntime?: Effect.Effect<Option.Option<Runtime.Runtime["Service"]>>
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: HarnessState.HarnessState
@@ -77,11 +72,7 @@ export interface ConfiguredExecutable {
 
 export interface ResolverOptions {
   readonly kernel: KernelOptions
-  readonly kernelPool?: Effect.Effect<
-    Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>,
-    never,
-    Scope.Scope
-  >
+  readonly kernelPool?: Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>
   readonly durableRuntime?: Effect.Effect<Option.Option<Runtime.Runtime["Service"]>>
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: HarnessState.HarnessState
@@ -363,15 +354,17 @@ const missingKernel = (tool: string) =>
   })
 
 /**
- * The cell route resolves its KernelPool per call rather than at layer-build time, so the ambient
- * per-call ToolContext the Baton host installs around each tool execution is the one the cell sees.
- * Binding it when the layer is built would freeze one call's identity into every later cell.
+ * The pool arrives already built, owned by the composition root's own scope, because it outlives
+ * every cell that uses it. Building it here instead would give it whichever cell forced it first,
+ * and that cell's scope closes when it finishes — leaving every later cell holding a released map
+ * that answers `RcMap.get` with an interrupt rather than a worker.
  *
- * The durable Runtime is supplied around `enter` rather than awaited before it, so a host that has
- * no Runtime still runs cells: only `rika.agents` needs one, and it reports its own absence.
+ * Only `enter` is scoped per call: it registers this cell's identity for the duration of this cell
+ * and must be removed when it ends. The durable Runtime is supplied around it rather than awaited
+ * before it, so a host with no Runtime still runs cells and only `rika.agents` reports its absence.
  */
 const cellExecutor = (
-  pool: Effect.Effect<Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>, never, Scope.Scope>,
+  pool: Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>,
   runtime: Effect.Effect<Option.Option<Runtime.Runtime["Service"]>> | undefined,
 ): Layer.Layer<ToolExecutor.ToolExecutor> =>
   Layer.succeed(
@@ -380,23 +373,17 @@ const cellExecutor = (
       execute: (request) =>
         CellTool.route.matches(request)
           ? Effect.scoped(
-              Effect.flatMap(pool, (context) =>
-                Effect.flatMap(runtime ?? Effect.succeedNone, (durable) =>
-                  Context.get(context, CellCallContext.CellCallContext)
-                    .enter(request.sessionId)
-                    .pipe(
-                      Option.isNone(durable)
-                        ? Function.identity
-                        : Effect.provideService(Runtime.Runtime, durable.value),
-                      Effect.andThen(
-                        CellTool.route
-                          .execute(request)
-                          .pipe(
-                            Effect.provideService(KernelPool.KernelPool, Context.get(context, KernelPool.KernelPool)),
-                          ),
-                      ),
+              Effect.flatMap(runtime ?? Effect.succeedNone, (durable) =>
+                Context.get(pool, CellCallContext.CellCallContext)
+                  .enter(request.sessionId)
+                  .pipe(
+                    Option.isNone(durable) ? Function.identity : Effect.provideService(Runtime.Runtime, durable.value),
+                    Effect.andThen(
+                      CellTool.route
+                        .execute(request)
+                        .pipe(Effect.provideService(KernelPool.KernelPool, Context.get(pool, KernelPool.KernelPool))),
                     ),
-                ),
+                  ),
               ),
             )
           : missingKernel(request.call.name),

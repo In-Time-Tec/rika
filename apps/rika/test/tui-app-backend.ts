@@ -5,17 +5,13 @@ import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as ThreadQuery from "@rika/product/thread-query-service"
 import * as ThreadToolAction from "@rika/product/thread-tool-action"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Context, Effect, Layer } from "effect"
+import { Context, Layer } from "effect"
 import * as GoalRepository from "@rika/product/goal-repository"
 import * as ServerKernel from "../src/server/composition/server-kernel-layer"
 
 export interface BackendOptions {
   readonly filename: string
-  readonly kernelPool: Effect.Effect<
-    Context.Context<BatonExecution.KernelPoolServices>,
-    never,
-    import("effect").Scope.Scope
-  >
+  readonly kernelPool: Context.Context<BatonExecution.KernelPoolServices>
   readonly workspace: string
   readonly dataRoot: string
   readonly registryLayer: LaneModels["registryLayer"]
@@ -43,13 +39,16 @@ const kernelOptions = (options: {
  * tool is a cell, and a backend without a pool answers every call with a framework failure rather
  * than running anything.
  */
-/** One pool for the whole interactive session, built once so a turn does not boot its own kernel. */
+/**
+ * One pool for the whole interactive session, owned by the caller's scope. A pool built inside a
+ * cell would be released when that cell ends, leaving every later cell holding a closed kernel map.
+ */
 export const kernelPoolFor = (options: {
   readonly workspace: string
   readonly dataRoot: string
   readonly queryFactoryLayer: Layer.Layer<ThreadQuery.Factory>
   readonly toolRuntimeLayer: Layer.Layer<ToolRuntime.Service>
-}) => Effect.cached(Layer.build(ServerKernel.layer(kernelOptions(options)).pipe(Layer.provide(BunServices.layer))))
+}) => Layer.build(ServerKernel.layer(kernelOptions(options)).pipe(Layer.provide(BunServices.layer)))
 
 export const backendLayer = (options: BackendOptions) =>
   BatonExecution.layer({
