@@ -6,13 +6,13 @@ import { Context, Effect, Layer } from "effect"
 import { Prompt } from "effect/unstable/ai"
 import { runtimeAgentPortLayer } from "../src/server/composition/server-agent-port"
 
-const cellContext = (runId: string) =>
+const cellContext = (runId: string, toolCallId = "call-1") =>
   ToolContext.ToolContext.of({
     signal: new AbortController().signal,
     emit: () => Effect.void,
     sessionId: "session-a",
     runId,
-    toolCallId: "call-1",
+    toolCallId,
     operationKey: "operation-1",
   })
 
@@ -45,11 +45,12 @@ const withPort = <A, E>(
   runtime: Partial<Runtime.Interface>,
   use: (port: AgentPortInterface) => Effect.Effect<A, E>,
   runId = "run-self",
+  toolCallId = "call-1",
 ) =>
   Effect.scoped(
     Effect.flatMap(Layer.build(runtimeAgentPortLayer), (context) =>
       use(Context.get(context, AgentPort)).pipe(
-        Effect.provideService(ToolContext.ToolContext, cellContext(runId)),
+        Effect.provideService(ToolContext.ToolContext, cellContext(runId, toolCallId)),
         Effect.provideService(Runtime.Runtime, runtimeOf(runtime)),
       ),
     ),
@@ -200,5 +201,41 @@ it.effect("derives each directory relationship from durable parentage rather tha
       (value) => value.directory,
     )
     expect(entries.map((entry) => entry.relationship)).toEqual(["parent", "child", "sibling", "policy"])
+  }),
+)
+
+it.effect("scopes a spawn's ordinal to the cell that admitted it, not to the profile alone", () =>
+  Effect.gen(function* () {
+    // The admission key names the profile and its ordinal; the cell it belongs to is named by the
+    // invocation Baton composes around it, which carries the tool call twice over — once directly and
+    // once through the origin. Two cells spawning one profile must still be told apart.
+    const invocations: Array<{ readonly toolCallId: string; readonly invocationId: string }> = []
+    const runtime = (toolCallId: string) => ({
+      spawn: (input: { readonly invocationId: string }) => {
+        invocations.push({ toolCallId, invocationId: input.invocationId })
+        return Effect.succeed({ runId: "child", messageId: "m", acceptedSequence: 1, duplicate: false })
+      },
+      inspect: () => Effect.succeed(runInspection("run-self") as never),
+      inspectTree: () =>
+        Effect.succeed({
+          _tag: "Active",
+          rootRunId: "run-self",
+          cursor: "c",
+          runs: [],
+          usage: [],
+          compactions: [],
+          activeRunIds: [],
+        } as never),
+    })
+    for (const toolCallId of ["call-a", "call-b"])
+      yield* withPort(
+        runtime(toolCallId) as never,
+        (value) => value.spawn({ profile: "Task", prompt: "p", key: "Task#0" }),
+        "run-self",
+        toolCallId,
+      )
+    expect(invocations.map(({ toolCallId }) => toolCallId)).toEqual(["call-a", "call-b"])
+    expect(invocations[0]?.invocationId).not.toBe(invocations[1]?.invocationId)
+    for (const { toolCallId, invocationId } of invocations) expect(invocationId).toContain(toolCallId)
   }),
 )
