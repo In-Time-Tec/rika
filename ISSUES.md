@@ -45,3 +45,9 @@ seen is refused without asking. The binding behind it re-reads the server on eve
 against the current list, so a tool that is renamed or withdrawn is caught by the server rather than
 by the cache — the staleness only costs a tool the server has newly gained, and only until the cell
 that cached the list is done.
+
+## What a model is told is proved by running it, not by a unit test
+
+`harnessSupplement` and `agentInstructionsWith` are each held by tests, but nothing unit-level holds the line that joins them: an agent's instructions live in its closure, and the manifest a configured route exposes carries tools and pins rather than prompt text. A test asserting the join by composing the two functions itself passes when the product stops composing them, which is the shape that let the harness stay disconnected through this whole migration.
+
+The join is covered by running the packaged binary: a memory written in one turn appears four times in the next turn's prompt, and zero times with the wiring removed. That is a real proof and it is not a gate, so a regression here fails only when someone runs it.

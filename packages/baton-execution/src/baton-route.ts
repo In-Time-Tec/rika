@@ -98,6 +98,22 @@ const instructions = {
  * An agent that runs cells is told what its cell can reach. The Title agent carries no tool, so it
  * keeps the one sentence it was given rather than a description of a surface it cannot use.
  */
+/**
+ * What one Execution's harness adds to the prompt every agent in it reads. An absent harness adds
+ * nothing rather than an empty section, so a session with no refinements looks exactly as it did.
+ */
+const harnessSupplement = (
+  harness: HarnessState.HarnessState | undefined,
+  skills: ReadonlyArray<ExecutionPins.SkillPin>,
+): string =>
+  harness === undefined
+    ? ""
+    : HarnessPromptSections.block({
+        harness,
+        skillListings: skills.map((skill) => `- ${skill.name}`).join("\n"),
+        mcpServers: [],
+      })
+
 export const agentInstructionsWith: {
   (own: string): (surface: string) => string
   (surface: string, own: string): string
@@ -487,14 +503,7 @@ export const configure = (
       if (name === "Title" || name === "Compaction") return Layer.orDie(model)
       return Layer.orDie(Layer.mergeAll(model, compactionLayer, cellLayer))
     }
-    const supplemental =
-      options.harnessSnapshot === undefined
-        ? ""
-        : HarnessPromptSections.block({
-            harness: options.harnessSnapshot,
-            skillListings: (options.skills ?? []).map((skill) => `- ${skill.name}`).join("\n"),
-            mcpServers: [],
-          })
+    const supplemental = harnessSupplement(options.harnessSnapshot, options.skills ?? [])
     const cellSurface = BindingModules.cellInstructions({
       workspace: options.workspace,
       workspaceDigest: "",
