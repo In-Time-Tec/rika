@@ -17,6 +17,11 @@ export const PtyAction = Schema.Struct({
   after: Schema.String,
   write: Schema.String,
   checkRunning: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Match the text a reader sees rather than the bytes a terminal wrote. The fixture strips control
+   * sequences before it looks, which is what a marker the renderer styles or redraws through needs.
+   */
+  visible: Schema.optionalKey(Schema.Boolean),
   signal: Schema.optionalKey(Schema.Literals(["SIGINT", "SIGTERM", "SIGKILL", "SIGHUP"])),
   closePty: Schema.optionalKey(Schema.Boolean),
   turnPrompt: Schema.optionalKey(Schema.String),
