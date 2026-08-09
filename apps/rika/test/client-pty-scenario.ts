@@ -45,6 +45,7 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     readonly after: string
     readonly write: string
     readonly checkRunning?: boolean
+    readonly visible?: boolean
     readonly signal?: "SIGINT" | "SIGTERM" | "SIGKILL" | "SIGHUP"
     readonly closePty?: boolean
     readonly turnPrompt?: string
