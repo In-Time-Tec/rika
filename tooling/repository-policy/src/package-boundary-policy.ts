@@ -659,6 +659,7 @@ const scanSourcePolicies = Effect.fn("RepositoryPolicy.scanSourcePolicies")(func
 })
 
 export const repositoryPolicy = {
+  checkSourceImports: sourceImportDiagnostics,
   checkDependencyManifests,
   checkPackageMetadata,
   checkExportMaps,

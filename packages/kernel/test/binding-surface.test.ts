@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import * as McpDiscovery from "@rika/extensions/mcp-discovery"
 import { Schema } from "effect"
-import { cellInstructions, surface, surfaceOf } from "../src/binding/binding-modules"
+import { cellInstructions, make, surfaceOf } from "../src/binding/binding-modules"
 
 const options = {
   workspace: "/workspace",
@@ -47,7 +47,7 @@ describe("mounted surface", () => {
   it("names the values a field will accept when it accepts only a few", () => {
     // A model spent a turn inventing a scope that does not exist, and another guessing at profiles.
     // A field with a closed set of values is cheaper to name than to discover.
-    const text = surface(options)
+    const text = surfaceOf(make(options))
     expect(text).toContain('scope: "thread"|"workspace"|"global"')
     expect(text).toContain('profile: "Oracle"')
   })

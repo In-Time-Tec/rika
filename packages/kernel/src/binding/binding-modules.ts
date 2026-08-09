@@ -140,7 +140,7 @@ export const bindingsDigest = (environment?: Environment): string =>
  * rather than a catalogue, because a model shown a bare list of module names answers with one of
  * them as a tool name — and the only tool that exists is the cell.
  */
-export const surface = (options: Options): string => surfaceOf(make(options))
+const surface = (options: Options): string => surfaceOf(make(options))
 
 export const cellInstructions = (options: Options): string =>
   [

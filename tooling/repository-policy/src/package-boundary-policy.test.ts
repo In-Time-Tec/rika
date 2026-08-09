@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest"
 import { repositoryPolicy } from "./package-boundary-policy"
 
 const {
+  checkSourceImports,
   checkDependencyManifests,
   checkExportMaps,
   checkManifests,
@@ -125,6 +126,33 @@ describe("repository policy", () => {
     expect(checkSourceBasename("test/integration/vitest.config.ts")).toBeUndefined()
     expect(checkSourceBasename("test/integration/custom-vitest.config.ts")).toEqual(
       expect.objectContaining({ rule: "basename", severity: "error" }),
+    )
+  })
+})
+
+describe("source imports", () => {
+  const rules = (filePath: string, specifier: string) =>
+    checkSourceImports(filePath, `import { x } from "${specifier}"`).map((one) => one.rule)
+
+  test("the application composes the runtime it runs on", () => {
+    expect(rules("apps/rika/src/server/composition/server-kernel-layer.ts", "@batonfx/repl")).toEqual([])
+    expect(rules("apps/rika/test/server-kernel-live.proc.test.ts", "@batonfx/repl")).toEqual([])
+  })
+
+  test("everywhere else in the application a framework import belongs behind its adapter", () => {
+    // The allowance exists for the boundary that builds the runtime, so a reducer or an ordinary
+    // test naming the framework is the thing it was narrowed to keep catching.
+    expect(rules("apps/rika/src/interactive/controller/terminal-interactive-feed.ts", "@batonfx/repl")).toContain(
+      "forbidden-external-import",
+    )
+    expect(rules("apps/rika/test/cli-operations.test.ts", "@batonfx/core")).toContain("forbidden-external-import")
+  })
+
+  test("a package that owns its adapter may name the framework", () => {
+    expect(rules("packages/kernel/src/binding/agents-binding.ts", "@batonfx/repl")).toEqual([])
+    expect(rules("packages/baton-execution/src/baton-route.ts", "@batonfx/core")).toEqual([])
+    expect(rules("packages/terminal/src/state/terminal-state.ts", "@batonfx/core")).toContain(
+      "forbidden-external-import",
     )
   })
 })
