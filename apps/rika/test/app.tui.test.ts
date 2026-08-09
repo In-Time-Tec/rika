@@ -453,13 +453,13 @@ test(
           'await rika.processes.status({"processId":"1","waitMillis":0})',
           'await rika.processes.status({"processId":"1","waitMillis":10000})',
         ])
-        expect(cells?.at(0)?.result, "the launching cell reports the registered process").toContain('"processId":"1"')
-        expect(cells?.at(0)?.result, "the launching cell leaves the process running").toContain('"running":true')
+        expect(cells?.at(0)?.result, "the launching cell reports the registered process").toContain('processId: "1"')
+        expect(cells?.at(0)?.result, "the launching cell leaves the process running").toContain("running: true")
         expect(cells?.at(1)?.result).toContain("EARLY_OUTPUT")
-        expect(cells?.at(1)?.result, "the immediate wait observes a live process").toContain('"running":true')
+        expect(cells?.at(1)?.result, "the immediate wait observes a live process").toContain("running: true")
         expect(cells?.at(2)?.result).toContain("FINAL_OUTPUT")
-        expect(cells?.at(2)?.result, "the final wait observes a settled process").toContain('"running":false')
-        expect(cells?.at(2)?.result, "the settled process reports its exit code").toContain('"exitCode":0')
+        expect(cells?.at(2)?.result, "the final wait observes a settled process").toContain("running: false")
+        expect(cells?.at(2)?.result, "the settled process reports its exit code").toContain("exitCode: 0")
         expect(cells?.every(({ status }) => status === "complete")).toBe(true)
 
         app.pressKey("\t")
@@ -467,7 +467,9 @@ test(
         const completed = yield* app.waitFrame("FINAL_OUTPUT", 20_000)
         expect(completed).not.toContain("Waited for")
         expect(completed).not.toContain("Waiting for")
-        expect(completed.match(/printf EARLY_OUTPUT; sleep 1; printf FINAL_OUTPUT/g) ?? []).toHaveLength(1)
+        // A cell shows its own source, and the launching cell's result echoes the command it ran,
+        // so the command appears once per cell that names it rather than once in the frame.
+        expect(completed.match(/printf EARLY_OUTPUT; sleep 1; printf FINAL_OUTPUT/g) ?? []).toHaveLength(2)
         yield* app.quit
       }),
     ),
