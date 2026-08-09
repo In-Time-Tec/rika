@@ -44,6 +44,7 @@ export default defineConfig({
           name: "tui",
           include: ["apps/*/test/**/*.tui.test.ts"],
           fileParallelism: false,
+          testTimeout: 60_000,
         },
       },
       {

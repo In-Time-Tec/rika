@@ -148,6 +148,42 @@ describe("agents binding", () => {
     }),
   )
 
+  it.live("charges a wait's budget for the time its inspections take, not only for its sleeps", () =>
+    Effect.gen(function* () {
+      // Each pass reads durable state before it sleeps. Charging the budget only for the sleep lets
+      // the wait outlast its ceiling by however long those reads took, which grows with the budget.
+      const inspectCostMillis = 30
+      const pollIntervalMillis = 50
+      const waitMillis = 1_000
+      let reads = 0
+      const mounted = yield* registry(
+        port({
+          inspect: (childRunId) =>
+            Effect.sleep(`${inspectCostMillis} millis`).pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  reads = reads + 1
+                  return { childRunId, status: "running" as const }
+                }),
+              ),
+            ),
+        }),
+      )
+      yield* mounted.invoke({
+        module: "agents",
+        operation: "inspectAll",
+        input: { childRunIds: ["a"], waitMillis },
+      })
+      // Counting inspections is the reading the fix changes: an elapsed-time budget admits about
+      // waitMillis / (inspect + interval) of them, where a sleep-only budget admits one per interval
+      // regardless of what each read cost.
+      const sleepOnlyBudget = Math.ceil(waitMillis / pollIntervalMillis)
+      const elapsedBudget = Math.ceil(waitMillis / (inspectCostMillis + pollIntervalMillis))
+      expect(reads).toBeLessThan(sleepOnlyBudget)
+      expect(reads).toBeLessThanOrEqual(elapsedBudget + 1)
+    }),
+  )
+
   it.effect("inspectAll reports a still-running child when the wait elapses rather than failing", () =>
     Effect.gen(function* () {
       const mounted = yield* registry()

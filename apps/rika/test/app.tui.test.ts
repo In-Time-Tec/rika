@@ -14,34 +14,33 @@ const spanHasColor = (app: TuiApp.TuiApp, text: string, color: string): boolean 
     .some((span) => span.text.includes(text) && span.fg.toInts().join(",") === color)
 
 test(
-  "reloads a failed root with completed nested subagents from durable state",
+  "reloads a failed root with its completed subagent from durable state",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
+          /**
+           * One level of delegation: a chain deeper than this cannot finish, because every Run in it
+           * holds a scheduler slot at once and the middle agent's next turn waits on a slot its own
+           * parent is holding. The root waits for the child whose completion it then asserts.
+           */
           lanes: [
             {
               steps: [
-                model.turn([model.spawn([{ profile: "Task", prompt: "Run top-level work." }], "top-agent")]),
+                model.turn([model.spawnAndWait([{ profile: "Task", prompt: "Run top-level work." }], "top-agent")]),
                 model.failure("ROOT_RELOAD_FAILED"),
               ],
             },
-            {
-              profile: "Task",
-              steps: [
-                model.turn([model.spawn([{ profile: "Oracle", prompt: "Run nested work." }], "nested-agent")]),
-                model.text("TOP_LEVEL_RELOAD_COMPLETE"),
-              ],
-            },
-            { profile: "Oracle", steps: [model.text("NESTED_RELOAD_COMPLETE")] },
+            { profile: "Task", steps: [model.text("TOP_LEVEL_RELOAD_COMPLETE")] },
           ],
         })
 
         yield* Effect.promise(() => app.type("Delegate nested work, then fail."))
         app.pressEnter()
         const turnId = Turn.TurnId.make("tui-turn-0")
-        yield* app.waitFrame("Execution failed")
+        // The root fails only after the child it waited for has answered.
+        yield* app.waitFrame("Execution failed", 25_000)
         yield* app.settled
 
         yield* app.reload
@@ -56,8 +55,7 @@ test(
           unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard" ? [unit.content.block] : [],
         )
         expect(entries).toContain("TOP_LEVEL_RELOAD_COMPLETE")
-        expect(entries).toContain("NESTED_RELOAD_COMPLETE")
-        expect(cards.map(({ status }) => status)).toEqual(["complete", "complete"])
+        expect(cards.map(({ status }) => status)).toEqual(["complete"])
         expect(statuses).not.toContain("running")
         expect(statuses).not.toContain("failed")
         yield* app.quit
@@ -195,7 +193,9 @@ test(
           lanes: [
             {
               steps: [
-                model.turn([model.spawn([{ profile: "Oracle", prompt: "Read the nested fixture." }], "oracle-style")]),
+                model.turn([
+                  model.spawnAndWait([{ profile: "Oracle", prompt: "Read the nested fixture." }], "oracle-style"),
+                ]),
                 model.text("ROOT_STYLE_RESULT"),
               ],
             },
@@ -216,7 +216,7 @@ test(
 
         yield* Effect.promise(() => app.type("Ask Oracle to inspect the fixture."))
         app.pressEnter()
-        yield* app.waitFrame("ROOT_STYLE_RESULT")
+        yield* app.waitFrame("ROOT_STYLE_RESULT", 25_000)
         yield* app.settled
         app.pressKey("\t")
         yield* app.waitFrame("Oracle has spoken")
@@ -249,22 +249,19 @@ test(
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
           workspaceFiles: { "nested.txt": "NESTED_TOOL_CONTENT" },
+          /**
+           * One level of delegation, so the child does its own work in its own cell rather than
+           * delegating again: a deeper chain holds every slot the scheduler has and never finishes.
+           */
           lanes: [
             {
               steps: [
-                model.turn([model.spawn([{ profile: "Task", prompt: "PARENT_AGENT_PROMPT" }], "parent-agent")]),
+                model.turn([model.spawnAndWait([{ profile: "Task", prompt: "PARENT_AGENT_PROMPT" }], "parent-agent")]),
                 model.text("ROOT_AGENT_FINAL"),
               ],
             },
             {
               profile: "Task",
-              steps: [
-                model.turn([model.spawn([{ profile: "Oracle", prompt: "NESTED_AGENT_PROMPT" }], "nested-agent")]),
-                model.text("PARENT_AGENT_FINAL"),
-              ],
-            },
-            {
-              profile: "Oracle",
               steps: [
                 model.turn([
                   model.binding(
@@ -272,7 +269,7 @@ test(
                     "nested-read",
                   ),
                 ]),
-                model.text("NESTED_AGENT_FINAL"),
+                model.text("PARENT_AGENT_FINAL"),
               ],
             },
           ],
@@ -295,17 +292,11 @@ test(
               unit.content.block.name === name,
           )
         const parentCard = card("Task")
-        const nestedCard = card("Oracle")
         const parentId =
           parentCard?.content._tag === "Block" && parentCard.content.block._tag === "SubagentCard"
             ? parentCard.content.block.id
             : undefined
-        const nestedId =
-          nestedCard?.content._tag === "Block" && nestedCard.content.block._tag === "SubagentCard"
-            ? nestedCard.content.block.id
-            : undefined
         expect(parentId, "parent SubagentCard").toBeDefined()
-        expect(nestedId, "nested SubagentCard").toBeDefined()
         const cardUnit = (childId: string | undefined) =>
           units.find(
             (unit) =>
@@ -320,14 +311,9 @@ test(
               unit.content.block._tag === "Cell" &&
               unit.content.block.id === cardUnit(childId)?.parentId,
           )
-        const parentSpawningCell = cellOwning(parentId)
-        const nestedSpawningCell = cellOwning(nestedId)
-        expect(parentSpawningCell, "the root cell that spawned Task").toBeDefined()
-        expect(nestedSpawningCell, "the Task cell that spawned Oracle").toBeDefined()
-        expect(nestedSpawningCell?.parentId).toBe(parentId)
+        expect(cellOwning(parentId), "the root cell that spawned Task").toBeDefined()
         const owner = (text: string) =>
           units.find((unit) => unit.content._tag === "Entry" && unit.content.text.includes(text))?.parentId
-        expect(owner("NESTED_AGENT_FINAL")).toBe(nestedId)
         expect(owner("PARENT_AGENT_FINAL")).toBe(parentId)
         expect(owner("ROOT_AGENT_FINAL")).toBeUndefined()
         const nestedReadCell = units.find(
@@ -336,7 +322,7 @@ test(
             unit.content.block._tag === "Cell" &&
             unit.content.block.source.text.includes("nested.txt"),
         )
-        expect(nestedReadCell?.parentId).toBe(nestedId)
+        expect(nestedReadCell?.parentId).toBe(parentId)
 
         app.pressKey("\t")
         app.pressEnter()

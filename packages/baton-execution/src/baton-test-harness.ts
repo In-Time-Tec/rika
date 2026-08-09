@@ -110,6 +110,24 @@ export const step = {
         : `await Promise.all([${children.map((child) => callSource(spawnCall(child))).join(", ")}])`,
       id,
     ),
+  /**
+   * Delegate and use the answer: admit the children, then wait for them in the SAME cell.
+   *
+   * A spawn is admission-only, so a cell that ends at admission leaves its children racing its own
+   * parent's next step. Waiting here is what makes the parent outlive the work it delegated, which
+   * is the sequencing a lane asserting on a child's result depends on.
+   *
+   * One level only. Every Run in a delegation chain holds a scheduler slot at once, so a lane whose
+   * child delegates again never sees that child's next turn, however long anything waits.
+   */
+  spawnAndWait: (children: ReadonlyArray<SpawnRequest>, id: string, waitMillis = 10_000): Part =>
+    step.cell(
+      [
+        `const admitted = await Promise.all([${children.map((child) => callSource(spawnCall(child))).join(", ")}])`,
+        `await rika.agents.inspectAll({ childRunIds: admitted.map((child) => child.childRunId), waitMillis: ${waitMillis} })`,
+      ].join("\n"),
+      id,
+    ),
   failure: (description: string, delayMillis?: number): Step =>
     TestModel.failure(
       AiError.make({

@@ -21,7 +21,12 @@ import { tuiToolRuntimeLayer } from "./tui-app-tool-runtime"
 import { backendLayer, kernelPoolFor } from "./tui-app-backend"
 import { laneExecutionRoute, makeLaneModels } from "./tui-app-model"
 
-const activityMarkers = ["Waiting", "Streaming", "Running 1 tool", "Thinking"] as const
+/**
+ * Settling means no work is still in flight, so a running subagent counts. `Running` covers every
+ * running-tools label the activity line produces — a cell, a subagent, or several of either — which
+ * an exact "Running 1 tool" misses the moment a turn delegates.
+ */
+const activityMarkers = ["Waiting", "Streaming", "Running", "Thinking"] as const
 const currentWallTime = () => performance.now()
 
 type SessionEvent = Parameters<Parameters<InteractiveSession.InteractiveSession["events"]>[0]>[0]

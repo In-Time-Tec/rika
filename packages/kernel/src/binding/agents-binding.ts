@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Clock, Effect, Schema } from "effect"
 import { ToolContext } from "@batonfx/core"
 import type { HostBindingRegistry } from "@batonfx/repl"
 import { AdmitReceipt, ChildInspection, DirectoryEntry, MailboxEntry, MessageReceipt } from "./agent-directory-contract"
@@ -109,17 +109,26 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<AgentPor
         const deadline = Math.min(input.waitMillis, maxWaitMillis)
         const settled = (children: ReadonlyArray<typeof ChildInspection.Type>) =>
           children.every((child) => terminalStatuses.has(child.status))
+        /**
+         * The bound is elapsed time, read from the clock, rather than a count of polls. Each pass
+         * reads durable state before it sleeps, so charging the budget only for the sleep would let
+         * the wait outlast the ceiling a caller asked for by however long those reads took.
+         */
         const poll = (
-          remaining: number,
+          expiresAt: number,
         ): Effect.Effect<ReadonlyArray<typeof ChildInspection.Type>, AgentDirectoryUnavailable> =>
           Effect.flatMap(inspectAll, (children) =>
-            settled(children) || remaining <= 0
+            settled(children)
               ? Effect.succeed(children)
-              : Effect.sleep(Math.min(pollIntervalMillis, remaining)).pipe(
-                  Effect.andThen(Effect.suspend(() => poll(remaining - pollIntervalMillis))),
+              : Effect.flatMap(Clock.currentTimeMillis, (now) =>
+                  now >= expiresAt
+                    ? Effect.succeed(children)
+                    : Effect.sleep(Math.min(pollIntervalMillis, expiresAt - now)).pipe(
+                        Effect.andThen(Effect.suspend(() => poll(expiresAt))),
+                      ),
                 ),
           )
-        return poll(deadline)
+        return Effect.flatMap(Clock.currentTimeMillis, (started) => poll(started + deadline))
       }),
   }),
   operation({
