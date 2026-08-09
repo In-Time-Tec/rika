@@ -615,8 +615,26 @@
       "publicExports": []
     },
     {
+      "id": "apps/rika/src/server/composition/server-kernel-harness.ts",
+      "path": "apps/rika/src/server/composition/server-kernel-harness.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "apps/rika/src/server/composition/server-kernel-layer.ts",
       "path": "apps/rika/src/server/composition/server-kernel-layer.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/server/composition/server-kernel-options.ts",
+      "path": "apps/rika/src/server/composition/server-kernel-options.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -9110,6 +9128,54 @@
       "production": true
     },
     {
+      "from": "apps/rika/src/server/composition/server-kernel-harness.ts",
+      "to": "apps/rika/src/server/composition/server-kernel-options.ts",
+      "specifier": "./server-kernel-options",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-kernel-harness.ts",
+      "to": "external:@batonfx/harness",
+      "specifier": "@batonfx/harness",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-kernel-harness.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-kernel-harness.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-kernel-harness.ts",
+      "to": "packages/kernel/src/harness/harness-scope-policy.ts",
+      "specifier": "@rika/kernel/harness-scope-policy",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-kernel-harness.ts",
+      "to": "packages/kernel/src/harness/harness-store-locations.ts",
+      "specifier": "@rika/kernel/harness-store-locations",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
       "to": "apps/rika/src/server/composition/server-agent-port.ts",
       "specifier": "./server-agent-port",
@@ -9119,16 +9185,24 @@
     },
     {
       "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "to": "external:@batonfx/core",
-      "specifier": "@batonfx/core",
+      "to": "apps/rika/src/server/composition/server-kernel-harness.ts",
+      "specifier": "./server-kernel-harness",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "to": "external:@batonfx/harness",
-      "specifier": "@batonfx/harness",
+      "to": "apps/rika/src/server/composition/server-kernel-options.ts",
+      "specifier": "./server-kernel-options",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -9247,22 +9321,6 @@
     },
     {
       "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "to": "packages/kernel/src/harness/harness-scope-policy.ts",
-      "specifier": "@rika/kernel/harness-scope-policy",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "to": "packages/kernel/src/harness/harness-store-locations.ts",
-      "specifier": "@rika/kernel/harness-store-locations",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
       "to": "packages/kernel/src/kernel-composition.ts",
       "specifier": "@rika/kernel/kernel-composition",
       "kind": "import",
@@ -9287,6 +9345,38 @@
     },
     {
       "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
+      "to": "packages/product/src/thread/repository/goal-repository.ts",
+      "specifier": "@rika/product/goal-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-kernel-options.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-kernel-options.ts",
+      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
+      "specifier": "@rika/coding-tools/coding-tool-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-kernel-options.ts",
+      "to": "packages/product/src/thread/query/thread-query-service.ts",
+      "specifier": "@rika/product/thread-query-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-kernel-options.ts",
       "to": "packages/product/src/thread/repository/goal-repository.ts",
       "specifier": "@rika/product/goal-repository",
       "kind": "import",
