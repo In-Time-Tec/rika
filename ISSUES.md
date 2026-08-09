@@ -22,11 +22,15 @@ Dispatching on the incoming prompt instead was considered and rejected: a model 
 
 The policy has no exemption for a composition boundary, which is the honest gap: either it grows one, or those two files are counted like any other and stay reported. Both are decisions about the rule rather than the code, so neither was made here.
 
-## A process a cell starts cannot be watched or stopped
+## A process that finishes quickly cannot be named again
 
-`processes.start` returns an id, and both `status` and `stop` reject it. Start reaches the registry the coding-tool runtime builds for itself; stop resolves `ShellProcessRegistry.Service` from the binding surface, and each build closes over its own counter and entry map. Verified against the packaged binary with a live cell: `start` succeeds and returns `processId` `"1"`, and a `status` call naming that id fails before producing a result.
+Polling a process reaps it: `shell-process-registry.ts:179` drops the entry as soon as a poll observes an exit, and starting a process polls once to return its first output. A command that finishes in that window is therefore gone before the id it returned can be used, and `status` or `stop` naming it reports an unknown process. Verified against the packaged binary: `echo hi` cannot be watched, while `sleep 3; echo done` can be started, watched to completion, and reports its output.
 
-So a cell can launch work and then neither watch it nor end it, which leaves waiting for the turn to finish as the only option. The two registries have to become one, and the change carries a lifetime question: the registry's finalizer terminates every process it tracks, so whichever scope owns it decides when a user's work is killed.
+Reaping on exit is what keeps the registry from growing without bound, so the fix is not simply to stop deleting. A finished process needs to stay nameable for long enough that the caller holding its id can ask about it once — a short grace, or an entry that survives until its output has been read.
+
+## A stopped process is a separate question
+
+`processes.stop` resolves `ShellProcessRegistry.Service` from the binding surface while start and status reach the registry the coding-tool runtime builds for itself, so the two may not be the same instance. That is worth confirming separately now that the reaping behaviour above explains what first looked like a missing process.
 
 ## Workspace search needs a tool the product does not ship
 
