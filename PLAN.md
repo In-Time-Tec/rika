@@ -419,3 +419,18 @@ Stop and report rather than paper over: host replies to executing cells cannot b
 - The TUI renders cells, output, errors, diffs, images, processes, messages, children, approvals, and recovery coherently live and reloaded.
 - The product states plainly that the kernel has the local user's authority and is not sandboxed.
 - QuickJS Code Mode and the many-tool production path are deleted; Baton and Rika gates, packaging, release smoke, and Pilotty/Agent TTY evidence pass.
+
+## Publishing Baton 0.20.0
+
+Rika pins eight `@batonfx` packages as packed tarballs under `vendor/batonfx/` because 0.20.0 is
+built and verified but not yet on npm. The paths are absolute: Bun resolves a relative `file:`
+tarball from the consuming package rather than the workspace root, so a relative path fails for
+every nested workspace package.
+
+Publishing replaces all of it. Tag Baton `v0.20.0` so the release workflow publishes with
+provenance, then in Rika replace the `overrides` block and the eight catalog entries with `0.20.0`,
+reinstall, and delete `vendor/batonfx/`. The `overrides` block exists only because the tarballs pin
+each other at a version the registry does not have yet, so it goes at the same time.
+
+The suite already runs against these exact artifacts, so a registry install of the same version
+should change nothing. If it does, the difference is real.
