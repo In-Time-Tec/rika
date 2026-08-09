@@ -120,6 +120,14 @@ const program = Effect.gen(function* () {
              * was built from, so the worker ships beside the binaries that spawn it.
              */
             yield* fileSystem.copyFile(defaultWorkerModule, path.join(bin, ".rika-kernel-worker.js"))
+            /**
+             * The worker is a script, so something has to run it. A compiled binary cannot execute
+             * another module, and a user who installed Rika has not necessarily installed Bun, so the
+             * runtime that spawns kernels ships with the product rather than being looked up on PATH.
+             */
+            const runtime = path.join(bin, ".rika-kernel-runtime")
+            yield* fileSystem.copyFile(process.execPath, runtime)
+            yield* fileSystem.chmod(runtime, 0o755)
             yield* fileSystem.writeFileString(
               path.join(stage, "INSTALL"),
               "Install bin/rika on PATH. Keep the private executables in bin beside it.\n",

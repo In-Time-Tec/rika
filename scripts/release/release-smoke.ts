@@ -80,7 +80,12 @@ const program = Effect.scoped(
           {
             type: "toolCall",
             name: "typescript",
-            params: { code: `await rika.workspace.search({"pattern":"release-smoke-needle"})` },
+            params: {
+              code: [
+                `const seeded = await rika.workspace.read({"path":"smoke.txt"})`,
+                `seeded.text.includes("release-smoke-needle") ? 6 * 7 : 0`,
+              ].join("\n"),
+            },
           },
         ],
       },
@@ -161,11 +166,12 @@ const program = Effect.scoped(
      * The seeded line proves the cell RAN: a model that answers without its kernel still reaches its
      * own final text, so the answer alone says nothing about whether any work happened.
      */
-    if (!executed.includes("release-smoke-needle"))
-      return yield* failure(
-        "packaged cell",
-        `Packaged run did not carry a cell result back: ${executed.slice(0, 2_000)}`,
-      )
+    /**
+     * The value is computed inside the cell from what it read, so it appears nowhere in the source
+     * the stream echoes back. A kernel that never starts cannot produce it.
+     */
+    if (!executed.includes(`"result":"42"`))
+      return yield* failure("packaged cell", `Packaged run did not execute a cell: ${executed.slice(0, 2_000)}`)
     if (!executed.includes("SMOKE_COMPLETE"))
       return yield* failure(
         "packaged run",
