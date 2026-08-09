@@ -10,7 +10,8 @@ const sideEffect = "cancellation-side-effect"
  * cancellation is proven by the absence of a side effect the same cell demonstrably does perform
  * when it is allowed to finish.
  */
-const cell = (seconds: number) => `await rika.processes.start({"command":"sleep ${seconds}; touch ${sideEffect}"})`
+const cell = (seconds: number) =>
+  `const p = await rika.processes.start({"command":"sleep ${seconds}; touch ${sideEffect}"})\nawait rika.processes.status({ processId: p.processId, waitMillis: 20000 })`
 
 const scriptFor = (seconds: number) =>
   Schema.encodeUnknownEffect(UnknownJson)([
@@ -29,8 +30,8 @@ test(
         const result = yield* interactivePty(
           [
             { after: "Welcome to Rika", write: "cancel this turn\r" },
-            { after: "Runn", write: "\u0003", timeoutMs: 30_000 },
-            { after: "(cancelled)", write: "\u0003", checkRunning: true, timeoutMs: 30_000 },
+            { after: "1 tool", write: "\u0003", visible: true, timeoutMs: 30_000 },
+            { after: "\u2298", write: "\u0003", checkRunning: true, timeoutMs: 30_000 },
           ],
           script,
         )
@@ -38,7 +39,7 @@ test(
         expect(result.actionsCompleted).toBe(3)
         expect(result.runningChecks).toEqual([true])
         expect(result.exitCode, result.output).toBe(0)
-        expect(result.output).toContain("(cancelled)")
+        expect(result.output, "a cancelled cell is marked cancelled").toContain("\u2298")
         expect(result.output).toContain(".#*+:")
         expect(result.workspaceFiles).not.toContain(sideEffect)
         expect(result.clientLogs).not.toContain('"message":"process.failed"')
@@ -63,7 +64,7 @@ test(
         )
         expect(result.timedOut, result.output).toBe(false)
         expect(result.exitCode, result.output).toBe(0)
-        expect(result.output).not.toContain("(cancelled)")
+        expect(result.output, "an uncancelled cell is never marked cancelled").not.toContain("\u2298")
         expect(result.workspaceFiles, "the cell really does create the file when it completes").toContain(sideEffect)
       }),
     ),
