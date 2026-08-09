@@ -64,4 +64,13 @@ describe("harness store locations", () => {
   it("refuses a scope it does not own rather than writing outside its roots", () => {
     expect(() => path("session:1")).toThrow()
   })
+
+  it("keeps two threads apart even when one is named like a workspace digest", () => {
+    // A cell chooses the scope name and never which thread, so the only way two threads could share
+    // a scope is if the strings collided. The prefix is what keeps them apart.
+    const one = ScopePolicy.scopeString("thread", { thread: "abc123", workspaceDigest: "w" })
+    const two = ScopePolicy.scopeString("thread", { thread: "def456", workspaceDigest: "w" })
+    expect(one).not.toBe(two)
+    expect(ScopePolicy.scopeString("workspace", { thread: "abc123", workspaceDigest: "abc123" })).not.toBe(one)
+  })
 })
