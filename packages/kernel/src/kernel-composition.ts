@@ -6,6 +6,23 @@ import { BunKernelPool, workerModule } from "@batonfx/repl/bun"
  * beside a compiled binary, and only the package that owns the worker can answer where it is.
  */
 export const defaultWorkerModule: string = workerModule
+
+/**
+ * Where a kernel's worker and the runtime that runs it live, given whether the module path this
+ * package resolves still names a file. It does not in a host compiled into one executable, and that
+ * host ships both beside itself, so the absence is what tells the two apart.
+ */
+export const kernelBinaries = (input: {
+  readonly resolvedWorkerExists: boolean
+  readonly executableDirectory: string
+  readonly join: (directory: string, name: string) => string
+}): { readonly workerModule?: string; readonly runtimeCommand?: string } =>
+  input.resolvedWorkerExists
+    ? {}
+    : {
+        workerModule: input.join(input.executableDirectory, ".rika-kernel-worker.js"),
+        runtimeCommand: input.join(input.executableDirectory, ".rika-kernel-runtime"),
+      }
 import { HostBindingRegistry } from "@batonfx/repl"
 import { Duration, Layer } from "effect"
 import type { FileSystem, Path } from "effect"

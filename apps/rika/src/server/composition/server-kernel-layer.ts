@@ -168,12 +168,14 @@ export const layer = (
       const workerPath = yield* Path.Path
       const shippedDirectory = workerPath.dirname(process.execPath)
       const packaged = !(yield* workerFileSystem.exists(KernelComposition.defaultWorkerModule).pipe(Effect.orDie))
-      const workerModule = packaged ? workerPath.join(shippedDirectory, ".rika-kernel-worker.js") : undefined
-      const runtimeCommand = packaged ? workerPath.join(shippedDirectory, ".rika-kernel-runtime") : undefined
+      const binaries = KernelComposition.kernelBinaries({
+        resolvedWorkerExists: !packaged,
+        executableDirectory: shippedDirectory,
+        join: (directory, name) => workerPath.join(directory, name),
+      })
       const kernelOptions = {
         trustMode,
-        ...(workerModule === undefined ? {} : { workerModule }),
-        ...(runtimeCommand === undefined ? {} : { runtimeCommand }),
+        ...binaries,
         workspace: options.workspace,
         workspaceDigest: digest,
         dataRoot: options.dataRoot,
