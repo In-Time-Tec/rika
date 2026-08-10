@@ -15,7 +15,13 @@ test(
       Effect.gen(function* () {
         const marker = "PRIOR_TURN_HISTORY_MARKER"
         const threadId = "tui-pageup-thread"
-        const toolCalls = Array.from({ length: 24 }, (_, index) =>
+        /**
+         * The point of this lane is a transcript larger than one screen, so paging is exercised
+         * rather than described. The entry count carries that; the viewport height and tool count
+         * only have to exceed a screen, and at their former sizes the lane needed more memory than
+         * a small runner has.
+         */
+        const toolCalls = Array.from({ length: 16 }, (_, index) =>
           model.binding(
             { module: "workspace", operation: "read", input: { path: "volume.txt" } },
             `volume-read-${index}`,
@@ -26,7 +32,7 @@ test(
         let reachedOldest = false
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
-          height: 600,
+          height: 300,
           historicalTranscriptFixture: { threadId, entryCount: 412, marker },
           workspaceFiles: { "volume.txt": "realistic tool output\n".repeat(30) },
           mapInteractiveEvent: (event) => {

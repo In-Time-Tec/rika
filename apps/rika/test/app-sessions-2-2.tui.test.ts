@@ -11,7 +11,12 @@ test(
   () =>
     TuiApp.run(
       Effect.gen(function* () {
-        const command = "printf EARLY_OUTPUT; sleep 1; printf FINAL_OUTPUT"
+        /**
+         * The immediate wait must observe a live process and the final wait must outlast it, so
+         * these two numbers move together. A second was short enough that a loaded machine saw the
+         * process already gone, and raising it alone pushed the finish past the final wait.
+         */
+        const command = "printf EARLY_OUTPUT; sleep 5; printf FINAL_OUTPUT"
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
           script: [
@@ -29,7 +34,7 @@ test(
             ]),
             model.turn([
               model.binding(
-                { module: "processes", operation: "status", input: { processId: "1", waitMillis: 10_000 } },
+                { module: "processes", operation: "status", input: { processId: "1", waitMillis: 25_000 } },
                 "wait-final",
               ),
             ]),
@@ -48,7 +53,7 @@ test(
         expect(cells?.map(({ source }) => source.text)).toEqual([
           `await rika.processes.start({"command":"${command}","timeoutMillis":0})`,
           'await rika.processes.status({"processId":"1","waitMillis":0})',
-          'await rika.processes.status({"processId":"1","waitMillis":10000})',
+          'await rika.processes.status({"processId":"1","waitMillis":25000})',
         ])
         expect(cells?.at(0)?.result, "the launching cell reports the registered process").toContain('processId: "1"')
         expect(cells?.at(0)?.result, "the launching cell leaves the process running").toContain("running: true")
@@ -66,7 +71,7 @@ test(
         expect(completed).not.toContain("Waiting for")
         // The one expanded cell shows its own source and its result, and the result of a started
         // process echoes the command back, so the command it launched appears in both.
-        expect(completed.match(/printf EARLY_OUTPUT; sleep 1; printf FINAL_OUTPUT/g) ?? []).toHaveLength(2)
+        expect(completed.split(command).length - 1).toBe(2)
         yield* app.quit
       }),
     ),
