@@ -87,3 +87,34 @@ of work.
 
 Do not raise the cell deadline without telling the model about it. The limit is not the problem; a
 limit nobody can see is.
+
+## Smaller failures, from the same transcript
+
+### A tag that decides a union was never shown (fixed here)
+
+`threads.read` needs `selection: { mode: "overview" | "recent" | "relevant" | "subtree" }`. The
+surface rendered it as `{ mode }` — four alternatives with nothing to choose between them. The agent
+guessed six different shapes for one call: `mode: "limit"`, a bare `threadId`, `{ ... }`, an empty
+query, `query: "*"`. Seven schema failures in one session came from two operations.
+
+The renderer read `literals`, and a discriminating tag carries `literal`. `rika.agents.spawn` renders
+its profile values correctly on the very same line, because that field is a literal list rather than
+a tag, which is why this looked like it worked.
+
+### Cells print instead of returning
+
+162 `console.log` calls, and 43% of cells returned `undefined`. A cell's value comes back cheaply;
+stdout costs a channel round-trip and gets truncated. The example in the instructions ends with a
+call rather than a value, so a model learns to print. Show a cell whose last expression is the
+answer.
+
+### `rika.goal.start` does not exist
+
+The operation is `create`. A model that guesses `start` gets `is not a function` with no hint. Where
+a name is guessable, either accept it or say what the real one is.
+
+### An inspect that reports nothing while work is running
+
+`agents.inspect` on a running child returns `status: "running"` and no partial output. A parent
+polling every thirty seconds learns nothing each time. Report what a child has produced so far, and
+the polling loop stops being pointless even where it remains necessary.

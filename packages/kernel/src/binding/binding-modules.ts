@@ -41,8 +41,20 @@ export const make = (options: Options): ReadonlyArray<HostBindingRegistry.Module
  * themselves, so a binding that is added, removed, or renamed cannot drift from what a model is told
  * it has — and a surface nothing describes is one a model will decline to use.
  */
-const shapeOf = (fields: Record<string, unknown> | undefined): string =>
-  fields === undefined ? "…" : `{ ${Object.keys(fields).join(", ")} }`
+const shapeOf = (fields: Record<string, unknown> | undefined): string => {
+  if (fields === undefined) return "…"
+  /**
+   * A union member is told apart by its tag, and a tag carries one `literal` rather than a list of
+   * them. Naming the fields alone leaves a model shown several alternatives with nothing to choose
+   * between them, which is how one call gets guessed six ways.
+   */
+  const named = Object.entries(fields).map(([name, value]) => {
+    const holder = value as { readonly literal?: unknown; readonly schema?: { readonly literal?: unknown } }
+    const literal = holder.literal ?? holder.schema?.literal
+    return literal === undefined ? name : `${name}: ${JSON.stringify(literal)}`
+  })
+  return `{ ${named.join(", ")} }`
+}
 
 export const surfaceOf = (modules: ReadonlyArray<HostBindingRegistry.Module<BindingRequirements>>): string =>
   modules
@@ -51,6 +63,7 @@ export const surfaceOf = (modules: ReadonlyArray<HostBindingRegistry.Module<Bind
         .map((operation) => {
           type Literal = {
             readonly literals?: ReadonlyArray<unknown>
+            readonly literal?: unknown
             readonly schema?: Literal
             readonly members?: ReadonlyArray<Literal>
             readonly fields?: Record<string, Literal>
@@ -67,7 +80,13 @@ export const surfaceOf = (modules: ReadonlyArray<HostBindingRegistry.Module<Bind
             // An optional field wraps the schema it makes optional, so the allowed values sit one
             // level in. Naming them matters more than naming the field: a model that invents one
             // spends a turn discovering the field would only ever have taken a few.
-            const literals = value.literals ?? value.schema?.literals
+            /**
+             * A discriminating tag carries one `literal`, not a `literals` list, and it is the only
+             * thing that tells one member of a union from another. Reading only the list left a
+             * model shown four alternatives with nothing to choose between them.
+             */
+            const tag = value.literal ?? value.schema?.literal
+            const literals = value.literals ?? value.schema?.literals ?? (tag === undefined ? undefined : [tag])
             // A literal is written the way a cell writes it, so a number stays a number rather than
             // arriving quoted and being sent as a string.
             if (literals !== undefined) return `${field}: ${literals.map((one) => JSON.stringify(one)).join("|")}`

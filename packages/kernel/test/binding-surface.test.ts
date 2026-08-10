@@ -61,3 +61,14 @@ describe("mounted surface", () => {
     expect(() => surfaceOf(odd)).toThrow("rika.odd.one has an input that is not a struct")
   })
 })
+
+it("names the tag that tells one shape of an argument from another", () => {
+  // A model shown several alternatives with nothing to choose between them guesses, and a tag
+  // carries one `literal` rather than a list, so reading only lists dropped the deciding value.
+  const surface = surfaceOf(make({ workspace: "/w", workspaceDigest: "", trustMode: "trusted-local", servers: [] }))
+  const threads = surface.split("\n").find((line) => line.includes("rika.threads")) ?? ""
+  expect(threads).toContain('mode: "overview"')
+  expect(threads).toContain('mode: "recent"')
+  expect(threads).toContain('mode: "relevant"')
+  expect(threads).toContain('mode: "subtree"')
+})
