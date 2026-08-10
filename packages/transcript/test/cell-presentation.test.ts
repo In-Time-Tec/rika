@@ -5,12 +5,9 @@ import {
   cellCollapsedLine,
   cellGlyph,
   cellOutputTruncated,
-  cellSourceLineCount,
-  cellSummary,
-  cellVisual,
   formatCellDuration,
-  meaningfulSourceLines,
 } from "../src/presentation/cell-presentation"
+import { cellSourceLineCount, cellSummary, cellVisual, meaningfulSourceLines } from "../src/presentation/cell-source"
 
 type Cell = Extract<Block, { readonly _tag: "Cell" }>
 

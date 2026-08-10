@@ -15,7 +15,8 @@
     "./plugin-registry": "./src/plugin/plugin-registry.ts",
     "./skill-prompt-listing": "./src/skill/skill-prompt-listing.ts",
     "./skill-file-system": "./src/skill/skill-file-system.ts",
-    "./skill-registry": "./src/skill/skill-registry.ts"
+    "./skill-registry": "./src/skill/skill-registry.ts",
+    "./skill-registry-model": "./src/skill/skill-registry-model.ts"
   },
   "dependencies": {
     "@batonfx/core": "catalog:",

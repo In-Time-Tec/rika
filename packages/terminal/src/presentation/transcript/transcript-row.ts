@@ -3,14 +3,8 @@ import { agentResponseState, isToolOutputDisplayed } from "./transcript-agent-re
 import type { Model } from "../../state/model/terminal-state"
 import type { TranscriptBlock, TranscriptItem } from "../../state/model/terminal-transcript-state"
 import { toolKind } from "./transcript-tool-detail"
-import type {
-  ToolGroupKind,
-  ToolKind,
-  AgentResponseState,
-  NestedTranscriptUnit,
-  TranscriptUnit,
-  TranscriptUnitId,
-} from "./transcript-tool-types"
+import type { NestedTranscriptUnit, TranscriptUnit, TranscriptUnitId } from "./transcript-tool-types"
+import type { ToolGroupKind, ToolKind, AgentResponseState } from "./transcript-tool-kinds"
 const groupOf = (kind: ToolKind): ToolGroupKind => (kind === "read" || kind === "search" ? "explore" : kind)
 
 export const orderedTranscriptItems = (model: Model): ReadonlyArray<TranscriptItem> =>

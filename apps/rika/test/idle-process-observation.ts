@@ -1,5 +1,5 @@
 import { Data, Effect, FileSystem, Path } from "effect"
-import { descendants, readProcessRows, type PsRow } from "../src/platform/performance-platform"
+import { descendants, readProcessRows, type PsRow } from "../src/platform/performance-process-table"
 
 export type IdleRole = "client" | "interactive" | "server"
 

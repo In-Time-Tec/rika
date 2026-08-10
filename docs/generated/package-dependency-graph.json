@@ -95,7 +95,8 @@
         "./plugin-registry",
         "./skill-file-system",
         "./skill-prompt-listing",
-        "./skill-registry"
+        "./skill-registry",
+        "./skill-registry-model"
       ]
     },
     {

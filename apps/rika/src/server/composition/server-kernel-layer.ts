@@ -1,18 +1,13 @@
+import { HostBindingRegistry, type KernelPool } from "@batonfx/repl"
 import type { Options } from "./server-kernel-options"
-import { harnessStoreLayer, workspaceDigest } from "./server-kernel-harness"
+import { discoverServers, discoverSkills, harnessStoreLayer, workspaceDigest } from "./server-kernel-harness"
 import { NestedOperation, Session, ToolContext } from "@batonfx/core"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as CellCallContext from "@rika/baton-execution/baton-cell-call-context"
 import * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry"
-import { globalPaths, workspacePaths } from "@rika/configuration/configuration-paths"
-import * as McpDiscovery from "@rika/extensions/mcp-discovery"
 import * as McpRuntime from "@rika/extensions/mcp-runtime"
-import type { KernelPool } from "@batonfx/repl"
-import * as SkillRegistry from "@rika/extensions/skill-registry"
 import * as SkillFileSystem from "@rika/extensions/skill-file-system"
 import * as ArtifactStore from "@rika/kernel/artifact-store"
-import * as ExecutionPins from "@rika/kernel/execution-pins"
-import { HostBindingRegistry } from "@batonfx/repl"
 import * as KernelComposition from "@rika/kernel/kernel-composition"
 import * as GoalService from "@rika/product/goal-service"
 import { Effect, FileSystem, Layer, Path } from "effect"
@@ -23,30 +18,6 @@ export { workspaceDigest, harnessStoreLayer, effectiveHarness } from "./server-k
 export type { Options } from "./server-kernel-options"
 
 /** Every executable skill the Execution pins its identity to. */
-export const discoverSkills = (options: Options) =>
-  SkillRegistry.discover({
-    globalRoot: globalPaths(options.home).skills,
-    workspaceRoot: workspacePaths(options.workspace).skills,
-  }).pipe(
-    Effect.map((discovered) =>
-      discovered.executable.map(
-        (entry): ExecutionPins.SkillPin => ({
-          name: entry.name,
-          digest: entry.digest,
-          importName: entry.importName,
-        }),
-      ),
-    ),
-    Effect.orElseSucceed((): ReadonlyArray<ExecutionPins.SkillPin> => []),
-  )
-
-/** Every MCP server the `mcp` binding can reach, read from the Workspace configuration. */
-export const discoverServers = (options: Options) =>
-  McpDiscovery.discover({ configPath: workspacePaths(options.workspace).mcpConfig }).pipe(
-    Effect.map((discovered) => discovered.servers),
-    Effect.orElseSucceed((): ReadonlyArray<McpDiscovery.ConfiguredServer> => []),
-  )
-
 /**
  * The services the mounted surface is closed over that are NOT per-call.
  *

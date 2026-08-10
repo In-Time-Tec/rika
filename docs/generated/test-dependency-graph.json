@@ -1285,6 +1285,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/baton-execution/test/baton-tree-projector-failures.test.ts",
+      "path": "packages/baton-execution/test/baton-tree-projector-failures.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/baton-execution/test/baton-tree-projector.test.ts",
       "path": "packages/baton-execution/test/baton-tree-projector.test.ts",
       "workspace": "@rika/baton-execution",
@@ -5910,6 +5920,14 @@
     },
     {
       "from": "packages/baton-execution/test/baton-tree-projector-attribution.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-tree-projector-failures.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",

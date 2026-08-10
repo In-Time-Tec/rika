@@ -471,6 +471,15 @@
       "publicExports": []
     },
     {
+      "id": "apps/rika/src/platform/performance-process-table.ts",
+      "path": "apps/rika/src/platform/performance-process-table.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "apps/rika/src/provider/openai/openai-auth-adapter.ts",
       "path": "apps/rika/src/provider/openai/openai-auth-adapter.ts",
       "workspace": "@rika/cli",
@@ -615,6 +624,15 @@
       "publicExports": []
     },
     {
+      "id": "apps/rika/src/server/composition/server-execution-route.ts",
+      "path": "apps/rika/src/server/composition/server-execution-route.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "apps/rika/src/server/composition/server-kernel-harness.ts",
       "path": "apps/rika/src/server/composition/server-kernel-harness.ts",
       "workspace": "@rika/cli",
@@ -642,8 +660,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/server/composition/server-product-config.ts",
-      "path": "apps/rika/src/server/composition/server-product-config.ts",
+      "id": "apps/rika/src/server/composition/server-pinned-capabilities.ts",
+      "path": "apps/rika/src/server/composition/server-pinned-capabilities.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -651,8 +669,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/server/composition/server-product-context.ts",
-      "path": "apps/rika/src/server/composition/server-product-context.ts",
+      "id": "apps/rika/src/server/composition/server-product-config.ts",
+      "path": "apps/rika/src/server/composition/server-product-config.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -2262,7 +2280,8 @@
         "./plugin-registry",
         "./skill-file-system",
         "./skill-prompt-listing",
-        "./skill-registry"
+        "./skill-registry",
+        "./skill-registry-model"
       ]
     },
     {
@@ -2452,6 +2471,15 @@
       "publicExports": ["./baton-cell-call-context"]
     },
     {
+      "id": "packages/baton-execution/src/baton-cell-outcome.ts",
+      "path": "packages/baton-execution/src/baton-cell-outcome.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/baton-execution/src/baton-cell-projection.ts",
       "path": "packages/baton-execution/src/baton-cell-projection.ts",
       "workspace": "@rika/baton-execution",
@@ -2490,15 +2518,6 @@
     {
       "id": "packages/baton-execution/src/baton-projector-decoding.ts",
       "path": "packages/baton-execution/src/baton-projector-decoding.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/baton-execution/src/baton-projector-identity.ts",
-      "path": "packages/baton-execution/src/baton-projector-identity.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -2562,6 +2581,15 @@
     {
       "id": "packages/baton-execution/src/baton-registration.ts",
       "path": "packages/baton-execution/src/baton-registration.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/baton-route-options.ts",
+      "path": "packages/baton-execution/src/baton-route-options.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -2801,6 +2829,16 @@
     {
       "id": "packages/baton-execution/test/baton-tree-projector-attribution.test.ts",
       "path": "packages/baton-execution/test/baton-tree-projector-attribution.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/baton-execution/test/baton-tree-projector-failures.test.ts",
+      "path": "packages/baton-execution/test/baton-tree-projector-failures.test.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -3776,6 +3814,15 @@
       "kind": "source",
       "production": true,
       "publicExports": ["./skill-prompt-listing"]
+    },
+    {
+      "id": "packages/extensions/src/skill/skill-registry-model.ts",
+      "path": "packages/extensions/src/skill/skill-registry-model.ts",
+      "workspace": "@rika/extensions",
+      "package": "@rika/extensions",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./skill-registry-model"]
     },
     {
       "id": "packages/extensions/src/skill/skill-registry.ts",
@@ -7673,6 +7720,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/terminal/src/presentation/transcript/transcript-tool-kinds.ts",
+      "path": "packages/terminal/src/presentation/transcript/transcript-tool-kinds.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/terminal/src/presentation/transcript/transcript-tool-types.ts",
       "path": "packages/terminal/src/presentation/transcript/transcript-tool-types.ts",
       "workspace": "@rika/terminal",
@@ -9607,6 +9663,15 @@
       "kind": "source",
       "production": true,
       "publicExports": ["./cell-presentation"]
+    },
+    {
+      "id": "packages/transcript/src/presentation/cell-source.ts",
+      "path": "packages/transcript/src/presentation/cell-source.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
     },
     {
       "id": "packages/transcript/src/presentation/partial-tool-input.ts",
@@ -12145,6 +12210,14 @@
     },
     {
       "from": "apps/rika/src/platform/application-performance-evaluation.ts",
+      "to": "apps/rika/src/platform/performance-process-table.ts",
+      "specifier": "./performance-process-table",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/platform/application-performance-evaluation.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -12160,7 +12233,15 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/platform/performance-platform.ts",
+      "from": "apps/rika/src/platform/performance-process-table.ts",
+      "to": "apps/rika/src/platform/performance-platform.ts",
+      "specifier": "./performance-platform",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/platform/performance-process-table.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -12792,6 +12873,70 @@
       "production": true
     },
     {
+      "from": "apps/rika/src/server/composition/server-execution-route.ts",
+      "to": "apps/rika/src/server/composition/server-auth-layer.ts",
+      "specifier": "./server-auth-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-execution-route.ts",
+      "to": "apps/rika/src/server/composition/server-configuration-adapter.ts",
+      "specifier": "./server-configuration-adapter",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-execution-route.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-execution-route.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-execution-route.ts",
+      "to": "packages/product/src/context/context-file-system.ts",
+      "specifier": "@rika/product/context-file-system",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-execution-route.ts",
+      "to": "packages/product/src/context/context-resolution-service.ts",
+      "specifier": "@rika/product/context-resolution-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-execution-route.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-execution-route.ts",
+      "to": "packages/product/src/execution/service/execution-route-resolution.ts",
+      "specifier": "@rika/product/execution-route-resolution",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "apps/rika/src/server/composition/server-kernel-harness.ts",
       "to": "apps/rika/src/server/composition/server-kernel-options.ts",
       "specifier": "./server-kernel-options",
@@ -12819,6 +12964,38 @@
       "from": "apps/rika/src/server/composition/server-kernel-harness.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-kernel-harness.ts",
+      "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
+      "specifier": "@rika/configuration/configuration-paths",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-kernel-harness.ts",
+      "to": "packages/extensions/src/mcp/mcp-discovery.ts",
+      "specifier": "@rika/extensions/mcp-discovery",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-kernel-harness.ts",
+      "to": "packages/extensions/src/skill/skill-registry.ts",
+      "specifier": "@rika/extensions/skill-registry",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-kernel-harness.ts",
+      "to": "packages/kernel/src/harness/execution-pins.ts",
+      "specifier": "@rika/kernel/execution-pins",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12921,22 +13098,6 @@
     },
     {
       "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
-      "specifier": "@rika/configuration/configuration-paths",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "to": "packages/extensions/src/mcp/mcp-discovery.ts",
-      "specifier": "@rika/extensions/mcp-discovery",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
       "to": "packages/extensions/src/mcp/mcp-runtime.ts",
       "specifier": "@rika/extensions/mcp-runtime",
       "kind": "import",
@@ -12953,24 +13114,8 @@
     },
     {
       "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "to": "packages/extensions/src/skill/skill-registry.ts",
-      "specifier": "@rika/extensions/skill-registry",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
       "to": "packages/kernel/src/binding/artifact-store.ts",
       "specifier": "@rika/kernel/artifact-store",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "to": "packages/kernel/src/harness/execution-pins.ts",
-      "specifier": "@rika/kernel/execution-pins",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -13024,6 +13169,46 @@
       "production": true
     },
     {
+      "from": "apps/rika/src/server/composition/server-pinned-capabilities.ts",
+      "to": "apps/rika/src/server/composition/server-kernel-harness.ts",
+      "specifier": "./server-kernel-harness",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-pinned-capabilities.ts",
+      "to": "apps/rika/src/server/composition/server-kernel-layer.ts",
+      "specifier": "./server-kernel-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-pinned-capabilities.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-pinned-capabilities.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-pinned-capabilities.ts",
+      "to": "packages/extensions/src/skill/skill-file-system.ts",
+      "specifier": "@rika/extensions/skill-file-system",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "apps/rika/src/server/composition/server-product-config.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -13043,46 +13228,6 @@
       "from": "apps/rika/src/server/composition/server-product-config.ts",
       "to": "packages/product/src/operation/contract/configuration-operation.ts",
       "specifier": "@rika/product/configuration-operation",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-product-context.ts",
-      "to": "apps/rika/src/server/composition/server-configuration-adapter.ts",
-      "specifier": "./server-configuration-adapter",
-      "kind": "dynamic-import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-product-context.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-product-context.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-product-context.ts",
-      "to": "packages/product/src/context/context-file-system.ts",
-      "specifier": "@rika/product/context-file-system",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-product-context.ts",
-      "to": "packages/product/src/context/context-resolution-service.ts",
-      "specifier": "@rika/product/context-resolution-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -13129,16 +13274,16 @@
     },
     {
       "from": "apps/rika/src/server/composition/server-product-layer.ts",
-      "to": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "specifier": "./server-kernel-layer",
+      "to": "apps/rika/src/server/composition/server-execution-route.ts",
+      "specifier": "./server-execution-route",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "apps/rika/src/server/composition/server-product-layer.ts",
-      "to": "apps/rika/src/server/composition/server-product-context.ts",
-      "specifier": "./server-product-context",
+      "to": "apps/rika/src/server/composition/server-pinned-capabilities.ts",
+      "specifier": "./server-pinned-capabilities",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -13179,30 +13324,6 @@
       "from": "apps/rika/src/server/composition/server-product-layer.ts",
       "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
       "specifier": "@rika/configuration/configuration-paths",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-product-layer.ts",
-      "to": "packages/extensions/src/skill/skill-file-system.ts",
-      "specifier": "@rika/extensions/skill-file-system",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-product-layer.ts",
-      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
-      "specifier": "@rika/product/execution-route-snapshot",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-product-layer.ts",
-      "to": "packages/product/src/execution/service/execution-route-resolution.ts",
-      "specifier": "@rika/product/execution-route-resolution",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -15769,8 +15890,8 @@
     },
     {
       "from": "apps/rika/test/idle-process-observation.ts",
-      "to": "apps/rika/src/platform/performance-platform.ts",
-      "specifier": "../src/platform/performance-platform",
+      "to": "apps/rika/src/platform/performance-process-table.ts",
+      "specifier": "../src/platform/performance-process-table",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -16329,8 +16450,8 @@
     },
     {
       "from": "apps/rika/test/performance-platform.proc.test.ts",
-      "to": "apps/rika/src/platform/performance-platform.ts",
-      "specifier": "../src/platform/performance-platform",
+      "to": "apps/rika/src/platform/performance-process-table.ts",
+      "specifier": "../src/platform/performance-process-table",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -18613,6 +18734,46 @@
       "production": true
     },
     {
+      "from": "packages/baton-execution/src/baton-cell-outcome.ts",
+      "to": "packages/baton-execution/src/baton-cell-projection.ts",
+      "specifier": "./baton-cell-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-cell-outcome.ts",
+      "to": "packages/baton-execution/src/baton-projector-values.ts",
+      "specifier": "./baton-projector-values",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-cell-outcome.ts",
+      "to": "packages/baton-execution/src/baton-recovery-projection.ts",
+      "specifier": "./baton-recovery-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-cell-outcome.ts",
+      "to": "packages/product/src/execution/contract/execution-transcript-contract.ts",
+      "specifier": "@rika/product/execution-transcript-contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-cell-projection.ts",
+      "to": "packages/baton-execution/src/baton-cell-outcome.ts",
+      "specifier": "./baton-cell-outcome",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/baton-execution/src/baton-cell-projection.ts",
       "to": "packages/baton-execution/src/baton-projector-model.ts",
       "specifier": "./baton-projector-model",
@@ -18728,6 +18889,14 @@
       "from": "packages/baton-execution/src/baton-execution.ts",
       "to": "packages/baton-execution/src/baton-cell-call-context.ts",
       "specifier": "./baton-cell-call-context",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-execution.ts",
+      "to": "packages/baton-execution/src/baton-route-options.ts",
+      "specifier": "./baton-route-options",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -19005,6 +19174,86 @@
       "production": true
     },
     {
+      "from": "packages/baton-execution/src/baton-route-options.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-route-options.ts",
+      "to": "external:@batonfx/harness",
+      "specifier": "@batonfx/harness",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-route-options.ts",
+      "to": "external:@batonfx/repl",
+      "specifier": "@batonfx/repl",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-route-options.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-route-options.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-route-options.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-route-options.ts",
+      "to": "packages/baton-execution/src/baton-cell-call-context.ts",
+      "specifier": "./baton-cell-call-context",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-route-options.ts",
+      "to": "packages/coding-tools/src/catalog/agent-role-toolkits.ts",
+      "specifier": "@rika/coding-tools/agent-role-toolkits",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-route-options.ts",
+      "to": "packages/kernel/src/harness/execution-pins.ts",
+      "specifier": "@rika/kernel/execution-pins",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-route-options.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/baton-execution/src/baton-route.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
@@ -19086,8 +19335,8 @@
     },
     {
       "from": "packages/baton-execution/src/baton-route.ts",
-      "to": "packages/coding-tools/src/catalog/agent-role-toolkits.ts",
-      "specifier": "@rika/coding-tools/agent-role-toolkits",
+      "to": "packages/baton-execution/src/baton-route-options.ts",
+      "specifier": "./baton-route-options",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -19368,14 +19617,6 @@
       "from": "packages/baton-execution/src/baton-tree-projector.ts",
       "to": "packages/baton-execution/src/baton-projector-decoding.ts",
       "specifier": "./baton-projector-decoding",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "packages/baton-execution/src/baton-projector-identity.ts",
-      "specifier": "./baton-projector-identity",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -20206,6 +20447,30 @@
     },
     {
       "from": "packages/baton-execution/test/baton-tree-projector-attribution.test.ts",
+      "to": "packages/baton-execution/test/baton-projector-event-fixtures.ts",
+      "specifier": "./baton-projector-event-fixtures",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-tree-projector-failures.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-tree-projector-failures.test.ts",
+      "to": "packages/baton-execution/src/baton-tree-projector.ts",
+      "specifier": "../src/baton-tree-projector",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-tree-projector-failures.test.ts",
       "to": "packages/baton-execution/test/baton-projector-event-fixtures.ts",
       "specifier": "./baton-projector-event-fixtures",
       "kind": "import",
@@ -23430,8 +23695,24 @@
     },
     {
       "from": "packages/extensions/src/skill/skill-prompt-listing.ts",
-      "to": "packages/extensions/src/skill/skill-registry.ts",
-      "specifier": "./skill-registry",
+      "to": "packages/extensions/src/skill/skill-registry-model.ts",
+      "specifier": "./skill-registry-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/extensions/src/skill/skill-registry-model.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/extensions/src/skill/skill-registry-model.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -23464,6 +23745,14 @@
       "from": "packages/extensions/src/skill/skill-registry.ts",
       "to": "packages/extensions/src/skill/skill-file-system.ts",
       "specifier": "./skill-file-system",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/extensions/src/skill/skill-registry.ts",
+      "to": "packages/extensions/src/skill/skill-registry-model.ts",
+      "specifier": "./skill-registry-model",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -23966,8 +24255,8 @@
     },
     {
       "from": "packages/extensions/test/contract/skill-prompt-listing.contract.test.ts",
-      "to": "packages/extensions/src/skill/skill-registry.ts",
-      "specifier": "@rika/extensions/skill-registry",
+      "to": "packages/extensions/src/skill/skill-registry-model.ts",
+      "specifier": "@rika/extensions/skill-registry-model",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -40070,8 +40359,8 @@
     },
     {
       "from": "packages/terminal/src/opentui/rendering/opentui-render-tool-detail.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-tool-types.ts",
-      "specifier": "../../presentation/transcript/transcript-tool-types",
+      "to": "packages/terminal/src/presentation/transcript/transcript-tool-kinds.ts",
+      "specifier": "../../presentation/transcript/transcript-tool-kinds",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -40112,6 +40401,14 @@
       "from": "packages/terminal/src/opentui/rendering/opentui-render-transcript-revision.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-tool-detail-types.ts",
       "specifier": "../../presentation/transcript/transcript-tool-detail-types",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/rendering/opentui-render-transcript-revision.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-tool-kinds.ts",
+      "specifier": "../../presentation/transcript/transcript-tool-kinds",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -43182,8 +43479,8 @@
     },
     {
       "from": "packages/terminal/src/presentation/transcript/transcript-agent-response.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-tool-types.ts",
-      "specifier": "./transcript-tool-types",
+      "to": "packages/terminal/src/presentation/transcript/transcript-tool-kinds.ts",
+      "specifier": "./transcript-tool-kinds",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -43294,6 +43591,14 @@
     },
     {
       "from": "packages/terminal/src/presentation/transcript/transcript-row.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-tool-kinds.ts",
+      "specifier": "./transcript-tool-kinds",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/transcript/transcript-row.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-tool-types.ts",
       "specifier": "./transcript-tool-types",
       "kind": "import",
@@ -43366,6 +43671,14 @@
     },
     {
       "from": "packages/terminal/src/presentation/transcript/transcript-tool-detail.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-tool-kinds.ts",
+      "specifier": "./transcript-tool-kinds",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/transcript/transcript-tool-detail.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-tool-types.ts",
       "specifier": "./transcript-tool-types",
       "kind": "import",
@@ -43392,6 +43705,14 @@
       "from": "packages/terminal/src/presentation/transcript/transcript-tool-detail.ts",
       "to": "packages/transcript/src/presentation/partial-tool-input.ts",
       "specifier": "@rika/transcript/partial-tool-input",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/transcript/transcript-tool-types.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-tool-kinds.ts",
+      "specifier": "./transcript-tool-kinds",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -50312,6 +50633,14 @@
       "from": "packages/transcript/test/cell-presentation.test.ts",
       "to": "packages/transcript/src/presentation/cell-presentation.ts",
       "specifier": "../src/presentation/cell-presentation",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/cell-presentation.test.ts",
+      "to": "packages/transcript/src/presentation/cell-source.ts",
+      "specifier": "../src/presentation/cell-source",
       "kind": "import",
       "relationship": "test",
       "production": false

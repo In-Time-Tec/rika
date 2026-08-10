@@ -1,8 +1,11 @@
 import { expect, it } from "vitest"
 import * as SkillPromptListing from "@rika/extensions/skill-prompt-listing"
-import type * as SkillRegistry from "@rika/extensions/skill-registry"
+import type * as SkillRegistryModel from "@rika/extensions/skill-registry-model"
 
-const executable = (name: string, overrides?: Partial<SkillRegistry.Executable>): SkillRegistry.Executable => ({
+const executable = (
+  name: string,
+  overrides?: Partial<SkillRegistryModel.Executable>,
+): SkillRegistryModel.Executable => ({
   name,
   importName: `@skills/${name}`,
   digest: "digest",

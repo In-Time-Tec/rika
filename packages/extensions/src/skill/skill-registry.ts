@@ -1,6 +1,14 @@
+import {
+  type Discovered,
+  type Executable,
+  type Options,
+  type Origin,
+  type Resource,
+  SkillRegistryError,
+} from "./skill-registry-model"
 import { SkillSource } from "@batonfx/core"
 import { SkillLoader } from "@batonfx/skills"
-import { Crypto, Effect, Encoding, FileSystem, Layer, Path, Schema } from "effect"
+import { Crypto, Effect, Encoding, FileSystem, Layer, Path } from "effect"
 import { SkillFileSystem } from "./skill-file-system"
 
 export const layer = Layer.effect(
@@ -16,52 +24,6 @@ export const layer = Layer.effect(
     })
   }),
 )
-
-export interface Options {
-  readonly globalRoot: string
-  readonly workspaceRoot: string
-  readonly descriptionCap?: number
-  readonly workspaceTrusted?: boolean
-}
-
-export type Origin = "global" | "workspace"
-
-export interface Executable {
-  readonly name: string
-  readonly importName: string
-  readonly digest: string
-  readonly origin: Origin
-  readonly importable: boolean
-}
-
-export interface Resource {
-  readonly path: string
-  readonly content: string
-}
-
-export interface Activation {
-  readonly body: string
-  readonly resources: ReadonlyArray<Resource>
-}
-
-export interface Discovered {
-  readonly source: SkillSource.Interface
-  readonly listings: ReadonlyArray<string>
-  readonly executable: ReadonlyArray<Executable>
-  readonly digest: string
-  readonly executableDigest: string
-  readonly activate: (name: string) => Effect.Effect<Activation, SkillRegistryError>
-}
-
-export class SkillRegistryError extends Schema.TaggedErrorClass<SkillRegistryError>()(
-  "@rika/extensions/SkillRegistryError",
-  {
-    operation: Schema.String,
-    path: Schema.String,
-    message: Schema.String,
-    cause: Schema.optionalKey(Schema.Defect()),
-  },
-) {}
 
 const failure = (operation: string, path: string, cause: unknown) =>
   SkillRegistryError.make({ operation, path, message: cause instanceof Error ? cause.message : String(cause), cause })

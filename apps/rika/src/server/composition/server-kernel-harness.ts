@@ -1,3 +1,7 @@
+import * as McpDiscovery from "@rika/extensions/mcp-discovery"
+import * as SkillRegistry from "@rika/extensions/skill-registry"
+import * as ExecutionPins from "@rika/kernel/execution-pins"
+import { globalPaths, workspacePaths } from "@rika/configuration/configuration-paths"
 import { HarnessMerge, HarnessStore } from "@batonfx/harness"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as HarnessStoreLocations from "@rika/kernel/harness-store-locations"
@@ -53,3 +57,27 @@ export const effectiveHarness: {
   (threadId: string | undefined): (options: Options) => ReturnType<typeof effectiveHarnessImpl>
   (options: Options, threadId: string | undefined): ReturnType<typeof effectiveHarnessImpl>
 } = Function.dual(2, effectiveHarnessImpl)
+
+export const discoverSkills = (options: Options) =>
+  SkillRegistry.discover({
+    globalRoot: globalPaths(options.home).skills,
+    workspaceRoot: workspacePaths(options.workspace).skills,
+  }).pipe(
+    Effect.map((discovered) =>
+      discovered.executable.map(
+        (entry): ExecutionPins.SkillPin => ({
+          name: entry.name,
+          digest: entry.digest,
+          importName: entry.importName,
+        }),
+      ),
+    ),
+    Effect.orElseSucceed((): ReadonlyArray<ExecutionPins.SkillPin> => []),
+  )
+
+/** Every MCP server the `mcp` binding can reach, read from the Workspace configuration. */
+export const discoverServers = (options: Options) =>
+  McpDiscovery.discover({ configPath: workspacePaths(options.workspace).mcpConfig }).pipe(
+    Effect.map((discovered) => discovered.servers),
+    Effect.orElseSucceed((): ReadonlyArray<McpDiscovery.ConfiguredServer> => []),
+  )

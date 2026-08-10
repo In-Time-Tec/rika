@@ -2,7 +2,7 @@ import { Function } from "effect"
 import type { Model } from "../../state/model/terminal-state"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
 import { inputValue, toolKind } from "../../presentation/transcript/transcript-tool-detail"
-import type { ToolKind } from "../../presentation/transcript/transcript-tool-types"
+import type { ToolKind } from "../../presentation/transcript/transcript-tool-kinds"
 
 export const toolInputValue = inputValue
 const inputStringImpl = (value: Record<string, unknown>, keys: ReadonlyArray<string>): string | undefined => {

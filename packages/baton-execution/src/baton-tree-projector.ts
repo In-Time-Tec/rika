@@ -1,5 +1,4 @@
-import { ChildAdmission } from "@batonfx/runtime"
-import type { RunEvent, RunTree } from "@batonfx/runtime"
+import { ChildAdmission, type RunEvent, type RunTree } from "@batonfx/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import * as UnitOrder from "@rika/product/execution-transcript-contract"
 import type { Unit } from "@rika/product/execution-transcript-contract"
@@ -21,18 +20,10 @@ import {
   type ProjectorCore,
 } from "./baton-projector-persistence"
 import { boundedInsert, subagentCardStatus } from "./baton-projector-nodes"
-import {
-  projectorNames,
-  bounded,
-  boundedHead,
-  record,
-  optionalString,
-  string,
-  textLimit,
-  toolTextLimit,
-} from "./baton-projector-values"
+import { bounded, boundedHead, optionalString, record, string } from "./baton-projector-values"
+import { projectorNames, textLimit, toolTextLimit } from "./baton-projector-values"
 
-import { scopedId } from "./baton-projector-identity"
+import { scopedId } from "./baton-projector-decoding"
 import { encoded, providerCostNanoUsd, token } from "./baton-projector-decoding"
 
 export type { Projector }

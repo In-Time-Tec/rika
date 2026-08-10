@@ -1,3 +1,4 @@
+import { type ConfigureOptions, type ConfiguredExecutable, type ResolverOptions } from "./baton-route-options"
 import {
   Agent,
   AgentManifest,
@@ -12,9 +13,8 @@ import {
 import { AmazonBedrock, Anthropic, Deterministic, ModelRoute, OpenAi, OpenRouter } from "@batonfx/providers"
 import { Errors, ExecutableRegistration, ExecutableResolver, Runtime } from "@batonfx/runtime"
 import type { HarnessState } from "@batonfx/harness"
-import { CellTool, KernelPool, type KernelProfile } from "@batonfx/repl"
+import { CellTool, KernelPool } from "@batonfx/repl"
 import * as CellCallContext from "./baton-cell-call-context"
-import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
 import * as BindingModules from "@rika/kernel/binding-modules"
 import * as HarnessPromptSections from "@rika/kernel/harness-prompt-sections"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
@@ -30,58 +30,12 @@ type CandidateSnapshot = ExecutionRoute.ExecutionRouteModelCandidateSnapshot
 type ModelSnapshot = ExecutionRoute.ExecutionRouteModelSnapshot
 type RouteSnapshot = ExecutionRoute.ExecutionRouteSnapshot
 
-export type AgentToolHandlers =
-  | Tool.HandlersFor<typeof RoleToolkits.root.tools>
-  | Tool.HandlersFor<typeof RoleToolkits.oracle.tools>
-  | Tool.HandlersFor<typeof RoleToolkits.librarian.tools>
-  | Tool.HandlersFor<typeof RoleToolkits.painter.tools>
-  | Tool.HandlersFor<typeof RoleToolkits.readThread.tools>
-  | Tool.HandlersFor<typeof RoleToolkits.surgeon.tools>
-  | Tool.HandlersFor<typeof RoleToolkits.task.tools>
-
 type ResolvedAgent = ExecutableResolver.StaticAgentExecutable["agent"]
 
 /**
  * The exact values the Session's kernel is built from. The admitted profile pin is derived from
  * these and from nothing else, so a pin can never describe a kernel the host did not run.
  */
-export interface KernelOptions {
-  readonly runtimeVersion: string
-  readonly dataRoot: string
-  readonly limits?: KernelProfile.Limits
-  readonly trustMode?: KernelProfile.TrustMode
-}
-
-export interface ConfigureOptions {
-  readonly executionRoute: RouteSnapshot
-  readonly workspace: string
-  readonly kernel: KernelOptions
-  readonly kernelPool?: Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>
-  readonly durableRuntime?: Effect.Effect<Option.Option<Runtime.Runtime["Service"]>>
-  readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
-  readonly harnessSnapshot?: HarnessState.HarnessState
-  readonly agentServices?: Layer.Layer<AgentToolHandlers>
-  readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
-}
-
-export interface ConfiguredExecutable {
-  readonly executable: ExecutableManifest.PinnedExecutable
-  readonly registrations: ReadonlyArray<ExecutableRegistration.ExecutableRegistration>
-  readonly resolverEntries: ReadonlyArray<ExecutableResolver.StaticAgentExecutable>
-  readonly profiles: Readonly<Record<string, AgentManifest.PinnedAgent>>
-  readonly kernelProfile: KernelProfile.KernelProfile
-}
-
-export interface ResolverOptions {
-  readonly kernel: KernelOptions
-  readonly kernelPool?: Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>
-  readonly durableRuntime?: Effect.Effect<Option.Option<Runtime.Runtime["Service"]>>
-  readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
-  readonly harnessSnapshot?: HarnessState.HarnessState
-  readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolHandlers>
-  readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
-}
-
 const instructions = {
   root: "Work directly on the user's request. Inspect relevant evidence, make necessary changes, and verify the result.",
   title: "Return a concise title for the supplied request and nothing else.",

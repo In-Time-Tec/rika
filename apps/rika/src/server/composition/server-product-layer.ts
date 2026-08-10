@@ -9,18 +9,15 @@ import { lazyBackendLayer } from "./lazy-execution-backend"
 import { workspacePaths } from "@rika/configuration/configuration-paths"
 import * as ServerConfiguration from "./server-configuration-adapter"
 import * as ServerExecution from "./server-execution-layer"
-import * as ServerKernel from "./server-kernel-layer"
+import { kernelPoolFor, pinnedCapabilities } from "./server-pinned-capabilities"
 import * as ServerAuth from "./server-auth-layer"
+import { resolvedContextLayer, workspaceExecutionRoute } from "./server-execution-route"
 import type { ServerProductOptions } from "./server-auth-layer"
 import * as ServerRepository from "./server-repository-layer"
-import * as ServerProductContext from "./server-product-context"
 import * as GoalService from "@rika/product/goal-service"
-import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
-import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ThreadQuery from "@rika/product/thread-query-service"
 import { makeAgentServices } from "./server-agent-services"
 import { defaultWorkspaceToolRuntimeLayer } from "./server-runtime-tools"
-import * as SkillFileSystem from "@rika/extensions/skill-file-system"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -56,7 +53,7 @@ const createOperationLayerImpl = (
     transcriptRepositoryLayer,
     goalRepositoryLayer,
   } = ServerRepository.makeServerRepositoryLayers(database)
-  const resolvedContextLayer = ServerProductContext.layer(workspaceGlob)
+  const contextLayer = resolvedContextLayer(workspaceGlob)
   return Layer.unwrap(
     Effect.gen(function* () {
       const globalSettings = yield* loadSettingsFile(globalConfig)
@@ -95,24 +92,12 @@ const createOperationLayerImpl = (
               ...(testModelScript === undefined ? {} : { script: testModelScript }),
               ...(testModelResponse === undefined ? {} : { response: testModelResponse }),
             }
+      const resolveRoute = workspaceExecutionRoute({ testModel, effectiveConfigForWorkspace })
       const resolveWorkspaceExecutionRoute = (
         mode: "low" | "medium" | "high" | "ultra",
         tuning: { readonly fastMode?: boolean } | undefined,
         workspace = workspaceRoot,
-      ) =>
-        testModel === undefined
-          ? effectiveConfigForWorkspace(workspace).pipe(
-              Effect.flatMap((configuration) =>
-                Effect.try({
-                  try: () => ExecutionRouteResolution.resolve(configuration.settings, mode, tuning),
-                  catch: (cause) =>
-                    ServerAuth.OperationProductError.make({
-                      message: `Could not resolve execution route: ${String(cause)}`,
-                    }),
-                }),
-              ),
-            )
-          : Effect.succeed(ExecutionRouteSnapshot.testExecutionRoute(mode))
+      ) => resolveRoute(mode, tuning, workspace)
       const repositories = Layer.succeedContext(
         yield* Layer.build(
           Layer.mergeAll(
@@ -144,18 +129,8 @@ const createOperationLayerImpl = (
        * that cell, so a pool owned by either would be released while later turns still needed it.
        * This scope is the Server's, which is the lifetime the pool actually has.
        */
-      const kernelPool = yield* Layer.build(ServerKernel.layer(kernelOptions).pipe(Layer.provide(BunServices.layer)))
-      /**
-       * The harness the NEXT Execution is pinned to, and the executable skills it may import. Both
-       * are read once per Server rather than per Turn: a refinement a cell makes lands in the
-       * following Execution, which is exactly the boundary the snapshot pin defines.
-       */
-      const harnessSnapshot = yield* ServerKernel.effectiveHarness(kernelOptions, undefined).pipe(
-        provideLayerScoped(Layer.merge(ServerKernel.harnessStoreLayer(kernelOptions), BunServices.layer)),
-      )
-      const skills = yield* ServerKernel.discoverSkills(kernelOptions).pipe(
-        provideLayerScoped(Layer.merge(SkillFileSystem.fileSystemLayer, BunServices.layer)),
-      )
+      const kernelPool = yield* kernelPoolFor(kernelOptions)
+      const { harnessSnapshot, skills } = yield* pinnedCapabilities(kernelOptions)
       const backendLayer = configuredBackendLayer({
         filename: options.batonDatabase,
         kernelPool,
@@ -176,7 +151,7 @@ const createOperationLayerImpl = (
         turnRepositoryLayer: repositories,
         threadSummaryRepositoryLayer: repositories,
         transcriptRepositoryLayer: repositories,
-        resolvedContextLayer,
+        resolvedContextLayer: contextLayer,
         backendLayer: lazyBackendLayer(backendLayer).pipe(
           Layer.catchCause((cause) =>
             Layer.effectContext(Effect.fail(ServerAuth.OperationProductError.make({ message: Cause.pretty(cause) }))),

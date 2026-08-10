@@ -10,7 +10,7 @@ import { ProviderCredentialStore, type ProviderCredentialStoreShape } from "@rik
 export type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 export type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
 import { Cause, Context, Deferred, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
-import type { AgentToolHandlers, KernelOptions } from "./baton-route"
+import type { AgentToolHandlers, KernelOptions } from "./baton-route-options"
 import { configure, makeResolver } from "./baton-route"
 import { TreeProjector, titleInvocationId } from "./baton-tree-projector"
 

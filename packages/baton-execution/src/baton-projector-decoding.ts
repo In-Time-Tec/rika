@@ -1,6 +1,7 @@
 import { Function } from "effect"
 import type { RunEvent } from "@batonfx/runtime"
-import { bounded, record, toolTextLimit } from "./baton-projector-values"
+import { bounded, record } from "./baton-projector-values"
+import { toolTextLimit } from "./baton-projector-values"
 
 export const encoded = (value: unknown): string => {
   if (typeof value === "string") return bounded(value, toolTextLimit)
@@ -55,3 +56,20 @@ export const add: {
   (arg0: Parameters<typeof addImpl>[0], arg1: Parameters<typeof addImpl>[1]): ReturnType<typeof addImpl>
   (arg1: Parameters<typeof addImpl>[1]): (arg0: Parameters<typeof addImpl>[0]) => ReturnType<typeof addImpl>
 } = Function.dual(2, addImpl)
+
+export const hash = (value: string): string => {
+  const seeds = [0x811c9dc5, 0x9e3779b1, 0x85ebca77, 0xc2b2ae3d]
+  return seeds
+    .map((seed) => {
+      let result = seed >>> 0
+      for (let index = 0; index < value.length; index += 1) {
+        result ^= value.charCodeAt(index)
+        result = Math.imul(result, 0x01000193) >>> 0
+      }
+      return result.toString(16).padStart(8, "0")
+    })
+    .join("")
+}
+
+export const scopedId = (family: string, ...parts: ReadonlyArray<string | number>): string =>
+  `${family}-${hash(parts.join("\u0000"))}`

@@ -2,7 +2,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { live } from "@effect/vitest"
 import { Effect, Layer, Scope } from "effect"
 import { expect } from "vitest"
-import { observeProcesses } from "../src/platform/performance-platform"
+import { observeProcesses } from "../src/platform/performance-process-table"
 
 const isRunning = (pid: number) => {
   try {

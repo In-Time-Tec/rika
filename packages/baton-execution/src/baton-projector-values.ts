@@ -8,8 +8,6 @@ export const projectorNames = {
 
 export const textLimit = 8_192
 export const toolTextLimit = 16_384
-export const cellTextLimit = 16_384
-export const cellSourceLimit = 65_536
 
 const boundedImpl = (value: string, limit: number): string =>
   value.length <= limit ? value : `…${value.slice(value.length - limit + 1)}`

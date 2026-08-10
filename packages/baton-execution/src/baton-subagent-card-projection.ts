@@ -3,7 +3,8 @@ import type { Block, Unit } from "@rika/product/execution-transcript-contract"
 import { childOrder, unitOrder } from "@rika/product/execution-transcript-contract"
 import { type Card, type Node } from "./baton-projector-model"
 import { type ProjectorCore } from "./baton-projector-persistence"
-import { projectorNames, bounded, record, optionalString, string, toolTextLimit } from "./baton-projector-values"
+import { bounded, record, optionalString, string } from "./baton-projector-values"
+import { projectorNames, toolTextLimit } from "./baton-projector-values"
 import { promptText } from "./baton-projector-decoding"
 
 export interface CellAttachment {

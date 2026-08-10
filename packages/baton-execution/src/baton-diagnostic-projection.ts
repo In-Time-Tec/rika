@@ -2,7 +2,8 @@ import type { Unit } from "@rika/product/execution-transcript-contract"
 import { modelFailurePresentation } from "@rika/product/failure-policy"
 import { classifyFailureMessage, executionFailureDetail, providerFailureMessage } from "@rika/product/failure-message"
 import { type Node } from "./baton-projector-model"
-import { bounded, toolTextLimit } from "./baton-projector-values"
+import { bounded } from "./baton-projector-values"
+import { toolTextLimit } from "./baton-projector-values"
 
 export interface DiagnosticProjection {
   readonly notice: (

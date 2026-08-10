@@ -3,7 +3,8 @@ import { Function, Option, Schema } from "effect"
 import { escapeControlCharacters } from "../terminal/terminal-format"
 import type { Model } from "../../state/model/terminal-state"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
-import type { TranscriptUnit, ToolKind } from "./transcript-tool-types"
+import type { TranscriptUnit } from "./transcript-tool-types"
+import type { ToolKind } from "./transcript-tool-kinds"
 import type { ToolDetail, ToolSummary } from "./transcript-tool-detail-types"
 
 const readToolNames = new Set(["read", "view_file", "get_diagnostics"])

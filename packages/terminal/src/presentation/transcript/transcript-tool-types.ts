@@ -1,11 +1,5 @@
-export type ToolGroupKind = "explore" | "edit" | "shell" | "other"
-export type ToolKind = "read" | "search" | "edit" | "shell" | "other"
-export type AgentOutcome =
-  | { readonly kind: "answer"; readonly entry: number }
-  | { readonly kind: "error"; readonly text: string; readonly tone: "failed" | "cancelled" | "info" }
-export type AgentResponseState =
-  | { readonly _tag: "Streaming"; readonly answer: number }
-  | { readonly _tag: "Settled"; readonly outcome: AgentOutcome }
+import type { AgentResponseState, ToolGroupKind } from "./transcript-tool-kinds"
+
 export type ToolTranscriptUnit = {
   readonly kind: "tool"
   readonly group: ToolGroupKind
@@ -34,3 +28,5 @@ export type TranscriptUnit =
   | CellTranscriptUnit
   | { readonly kind: "block"; readonly block: number }
 export type TranscriptUnitId = string
+
+export type { AgentOutcome, AgentResponseState } from "./transcript-tool-kinds"

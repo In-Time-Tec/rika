@@ -1,16 +1,12 @@
+export const cellTextLimit = 16_384
+export const cellSourceLimit = 65_536
+
 import type { Block, Unit } from "@rika/product/execution-transcript-contract"
 import { partialInputRecord } from "@rika/product/execution-transcript-contract"
 import { type CellState, type Node } from "./baton-projector-model"
-import {
-  bounded,
-  boundedHead,
-  cellSourceLimit,
-  cellTextLimit,
-  optionalString,
-  record,
-  string,
-} from "./baton-projector-values"
-import { eventNotice, failureOutcome, nestedOperationNotice, restartNotification } from "./baton-recovery-projection"
+import { bounded, boundedHead, optionalString, record, string } from "./baton-projector-values"
+import { eventNotice, nestedOperationNotice, restartNotification } from "./baton-recovery-projection"
+import { failureOutcome } from "./baton-cell-outcome"
 
 type Cell = Extract<Block, { readonly _tag: "Cell" }>
 type CellNotice = Cell["notices"][number]

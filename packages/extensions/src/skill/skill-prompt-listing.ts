@@ -1,5 +1,5 @@
 import { Function } from "effect"
-import type { Executable } from "./skill-registry"
+import type { Executable } from "./skill-registry-model"
 
 export interface Input {
   readonly listings: ReadonlyArray<string>

@@ -3,12 +3,11 @@ import { StyledText, type TextRenderable } from "@opentui/core"
 import type { Model } from "../../state/model/terminal-state"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
 import type {
-  AgentOutcome,
-  AgentResponseState,
   NestedTranscriptUnit,
   ToolTranscriptUnit,
   TranscriptUnit,
 } from "../../presentation/transcript/transcript-tool-types"
+import type { AgentOutcome, AgentResponseState } from "../../presentation/transcript/transcript-tool-kinds"
 import type { PathTarget } from "../../presentation/transcript/transcript-tool-detail-types"
 
 let transcriptIdentityCounter = 0
