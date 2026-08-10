@@ -413,6 +413,33 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
             )
             yield* emit({ type: "fragment-burst-completed", text: lengths.join(",") })
           }).pipe(Effect.catch((error) => emit({ type: "fragment-burst-failed", error: error.message })))
+        if (command === "critical-overflow")
+          return Effect.gen(function* () {
+            const completed = yield* Queue.unbounded<void>()
+            const exit = yield* Effect.exit(
+              connection.run(
+                { _tag: "Interactive", prompt: ["critical-overflow-events"], ephemeral: false, workspace },
+                {
+                  interactive: (_, session) =>
+                    Effect.gen(function* () {
+                      const feed = yield* Effect.forkChild(
+                        session.events((event) => {
+                          if (event._tag === "ThreadsListed") Queue.offerUnsafe(completed, undefined)
+                        }),
+                      )
+                      yield* Queue.take(completed)
+                      yield* session.readQueue("critical-overflow-thread")
+                      yield* Fiber.interrupt(feed)
+                    }),
+                },
+              ),
+            )
+            yield* emit({
+              type: "critical-overflow-completed",
+              outcome: exit._tag,
+              ...(exit._tag === "Failure" ? { error: String(exit.cause) } : {}),
+            })
+          })
         if (command === "overflow-interactive")
           return Effect.gen(function* () {
             const tags = new Array<string>()
@@ -426,7 +453,8 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
                           tags.push(event._tag)
-                          if (event._tag === "ResyncRequired") Queue.offerUnsafe(completed, undefined)
+                          if (event._tag === "ThreadViewPatch" && event.patch.revision >= 6)
+                            Queue.offerUnsafe(completed, undefined)
                         }),
                       )
                       yield* Queue.take(completed)
@@ -457,7 +485,8 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
                           tags.push(event._tag)
-                          if (event._tag === "ResyncRequired") Queue.offerUnsafe(completed, undefined)
+                          if (event._tag === "ThreadViewPatch" && event.patch.revision >= 6)
+                            Queue.offerUnsafe(completed, undefined)
                         }),
                       )
                       yield* Queue.take(completed)
@@ -486,7 +515,8 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
                           tags.push(event._tag)
-                          if (event._tag === "ResyncRequired") Queue.offerUnsafe(completed, undefined)
+                          if (event._tag === "ThreadViewPatch" && event.patch.revision >= 6)
+                            Queue.offerUnsafe(completed, undefined)
                         }),
                       )
                       yield* Queue.take(completed)
@@ -516,7 +546,7 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
                           tags.push(event._tag)
-                          if (event._tag === "ThreadsListed" && tags.includes("ResyncRequired"))
+                          if (event._tag === "ThreadsListed" && tags.includes("ThreadViewPatch"))
                             Queue.offerUnsafe(completed, undefined)
                         }),
                       )

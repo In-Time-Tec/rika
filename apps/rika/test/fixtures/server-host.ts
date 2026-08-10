@@ -282,6 +282,14 @@ const program = Effect.gen(function* () {
                     yield* Effect.sync(() => view.emit([view.entry("completed")]))
                     return yield* Effect.never
                   })
+                if (kind === "critical-overflow-events")
+                  return Effect.gen(function* () {
+                    for (let index = 0; index < 70; index += 1)
+                      dispatch({ _tag: "AssistantCompleted", text: String(index) })
+                    yield* Effect.sleep("50 millis")
+                    dispatch({ _tag: "ThreadsListed", threads: [] })
+                    return yield* Effect.never
+                  })
                 if (kind === "timed-tool-events")
                   return Effect.gen(function* () {
                     const threadId = Thread.ThreadId.make("timed-tool-thread")
