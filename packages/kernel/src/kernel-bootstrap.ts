@@ -1,4 +1,4 @@
-import { moduleNames } from "./binding/binding-modules"
+import { moduleNames } from "./binding/binding-module-catalog"
 
 /**
  * The bootstrap cell source.

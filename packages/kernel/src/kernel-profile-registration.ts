@@ -1,6 +1,6 @@
 import { Pins } from "@batonfx/core"
 import { KernelProfile } from "@batonfx/repl"
-import { bindingsDigest, type Environment } from "./binding/binding-modules"
+import { bindingsDigest, type Environment } from "./binding/binding-epoch"
 
 const runtimeName = "bun"
 
