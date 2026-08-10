@@ -15,8 +15,8 @@ test(
           lanes: [
             {
               steps: [
-                // The root waits for both children, because the assertions below read their TERMINAL
-                // labels: a root that only admits them reaches its own answer while they still run.
+                // Admission is non-blocking, so ROOT_DEDUPE_COMPLETE can precede both terminal labels.
+                // The frame predicate below waits for both exact child outcomes before checking dedupe.
                 model.turn([
                   model.spawn(
                     [
@@ -37,8 +37,11 @@ test(
 
         yield* Effect.promise(() => app.type("Run the deduplicated group."))
         app.pressEnter()
-        const settled = yield* app.waitFrame("ROOT_DEDUPE_COMPLETE")
-        yield* app.settled
+        yield* app.waitFrame("ROOT_DEDUPE_COMPLETE")
+        const settled = yield* app.waitFrameMatch(
+          (frame) => frame.includes("Oracle has spoken") && frame.includes("Surgeon closed up"),
+          25_000,
+        )
 
         expect(settled.match(/Oracle has spoken/g) ?? []).toHaveLength(1)
         expect(settled.match(/Surgeon closed up/g) ?? []).toHaveLength(1)

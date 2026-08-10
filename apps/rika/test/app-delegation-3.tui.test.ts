@@ -35,8 +35,11 @@ test(
         yield* Effect.promise(() => app.type("Delegate twice under one id."))
         app.pressEnter()
         yield* app.waitFrame("ROOT_SAME_DONE", 30_000)
-        yield* app.settled
-        expect((app.frame().match(/Subagent finished/g) ?? []).length).toBe(2)
+        const completed = yield* app.waitFrameMatch(
+          (frame) => (frame.match(/Subagent finished/g) ?? []).length === 2,
+          30_000,
+        )
+        expect(completed.match(/Subagent finished/g) ?? []).toHaveLength(2)
         yield* app.quit
       }),
     ),

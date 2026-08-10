@@ -46,8 +46,12 @@ test(
         yield* Effect.promise(() => app.type("Delegate deep work."))
         app.pressEnter()
         yield* app.waitFrame("ROOT_DEEP_DONE", 30_000)
-        yield* app.settled
-        const durable = yield* app.transcript(Turn.TurnId.make("tui-turn-0"))
+        const durable = yield* app.waitTranscript(
+          Turn.TurnId.make("tui-turn-0"),
+          (projection) =>
+            projection.units.some((unit) => unit.content._tag === "Entry" && unit.content.text === "GRANDCHILD_DONE"),
+          30_000,
+        )
         const texts = (durable?.units ?? []).flatMap((unit) =>
           unit.content._tag === "Entry" ? [unit.content.text] : [],
         )

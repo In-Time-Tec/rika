@@ -59,8 +59,7 @@ test(
         yield* Effect.promise(() => app.type("Delegate once."))
         app.pressEnter()
         yield* app.waitFrame("IDLE_ROOT_DONE", 25_000)
-        yield* app.settled
-        const settled = app.frame()
+        const settled = yield* app.waitFrame("Oracle has spoken", 25_000)
         expect(settled).toContain("Oracle has spoken")
         expect(settled).not.toContain("Running 1 subagent")
         yield* app.quit

@@ -14,9 +14,8 @@ test(
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
           /**
-           * One level of delegation: a chain deeper than this cannot finish, because every Run in it
-           * holds a scheduler slot at once and the middle agent's next turn waits on a slot its own
-           * parent is holding. The root waits for the child whose completion it then asserts.
+           * Child admission is non-blocking, so the root failure below does not prove that its child
+           * settled. The durable projection predicate below waits for the exact child result and card.
            */
           lanes: [
             {
@@ -34,7 +33,20 @@ test(
         const turnId = Turn.TurnId.make("tui-turn-0")
         // The root fails only after the child it waited for has answered.
         yield* app.waitFrame("Execution failed", 25_000)
-        yield* app.settled
+        yield* app.waitTranscript(
+          turnId,
+          (projection) =>
+            projection.units.some(
+              (unit) => unit.content._tag === "Entry" && unit.content.text === "TOP_LEVEL_RELOAD_COMPLETE",
+            ) &&
+            projection.units.some(
+              (unit) =>
+                unit.content._tag === "Block" &&
+                unit.content.block._tag === "SubagentCard" &&
+                unit.content.block.status === "complete",
+            ),
+          25_000,
+        )
 
         yield* app.reload
         const reloaded = yield* app.transcript(turnId)
