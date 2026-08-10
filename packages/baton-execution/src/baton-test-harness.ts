@@ -4,7 +4,7 @@ import { TestModel } from "@batonfx/test"
 import type * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Layer, Scope } from "effect"
-import { LanguageModel } from "effect/unstable/ai"
+import { LanguageModel, type Prompt } from "effect/unstable/ai"
 
 export type Profile =
   | "Root"
@@ -110,24 +110,6 @@ export const step = {
         : `await Promise.all([${children.map((child) => callSource(spawnCall(child))).join(", ")}])`,
       id,
     ),
-  /**
-   * Delegate and use the answer: admit the children, then wait for them in the SAME cell.
-   *
-   * A spawn is admission-only, so a cell that ends at admission leaves its children racing its own
-   * parent's next step. Waiting here is what makes the parent outlive the work it delegated, which
-   * is the sequencing a lane asserting on a child's result depends on.
-   *
-   * A waiting parent holds its scheduler slot for the length of the wait, so a lane is bounded by
-   * how many Runs wait at the same moment rather than by how deep its chain goes.
-   */
-  spawnAndWait: (children: ReadonlyArray<SpawnRequest>, id: string, waitMillis = 10_000): Part =>
-    step.cell(
-      [
-        `const admitted = await Promise.all([${children.map((child) => callSource(spawnCall(child))).join(", ")}])`,
-        `await rika.agents.inspectAll({ childRunIds: admitted.map((child) => child.childRunId), waitMillis: ${waitMillis} })`,
-      ].join("\n"),
-      id,
-    ),
   failure: (description: string, delayMillis?: number): Step =>
     TestModel.failure(
       AiError.make({
@@ -181,6 +163,7 @@ export interface LaneModels {
   readonly registryLayer: Layer.Layer<ModelRegistry.ModelRegistry>
   readonly requestCount: Effect.Effect<number>
   readonly requestCountFor: (profile: Profile) => Effect.Effect<number>
+  readonly promptsFor: (profile: Profile) => Effect.Effect<ReadonlyArray<Prompt.Prompt>>
 }
 
 export const makeLaneModels = Effect.fn("BatonTestHarness.makeLaneModels")(function* (
@@ -215,5 +198,6 @@ export const makeLaneModels = Effect.fn("BatonTestHarness.makeLaneModels")(funct
     ),
     requestCountFor: (profile) =>
       fixtures[profiles.indexOf(profile)]!.requests.pipe(Effect.map((requests) => requests.length)),
+    promptsFor: (profile) => fixtures[profiles.indexOf(profile)]!.prompts,
   } satisfies LaneModels
 })

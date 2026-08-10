@@ -24,17 +24,19 @@ export type { Options } from "./server-kernel-options"
  * ToolContext, NestedOperations, and Session are deliberately absent: they belong to one executing
  * cell and are supplied per request by `CellCallContext`, never captured here.
  */
-const staticBindingServices = (options: Options) =>
-  Layer.mergeAll(
+const staticBindingServices = (options: Options) => {
+  const artifacts = ArtifactStore.layer(options.dataRoot)
+  return Layer.mergeAll(
     options.toolRuntimeLayer,
     ShellProcessRegistry.layer,
     options.queryFactory,
     McpRuntime.layer,
     harnessStoreLayer(options),
     GoalService.layer.pipe(Layer.provide(options.goalRepositoryLayer)),
-    runtimeAgentPortLayer,
-    ArtifactStore.layer(options.dataRoot),
+    runtimeAgentPortLayer.pipe(Layer.provide(artifacts)),
+    artifacts,
   ).pipe(Layer.provide(SkillFileSystem.fileSystemLayer), Layer.provide(BunServices.layer))
+}
 
 /**
  * Placeholders for the three per-call services, present only so the surface can be MOUNTED.

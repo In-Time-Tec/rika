@@ -132,60 +132,51 @@ describe("agents binding", () => {
     }),
   )
 
-  it.live("inspectAll waits until every child is terminal, then reports them", () =>
+  it.effect("returns a typed bounded child settlement from the durable inbox", () =>
     Effect.gen(function* () {
-      let reads = 0
       const mounted = yield* registry(
         port({
-          inspect: (childRunId) => {
-            reads = reads + 1
-            // The child settles only after the first poll, so a returned "succeeded" proves waiting.
-            return Effect.succeed({ childRunId, status: reads > 2 ? ("succeeded" as const) : ("running" as const) })
-          },
+          inbox: () =>
+            Effect.succeed([
+              {
+                _tag: "ChildSettlement",
+                notificationId: "child-settled:child-a",
+                parentRunId: "parent-a",
+                childRunId: "child-a",
+                terminalEventId: "event-a",
+                status: "succeeded",
+                resultText: "bounded result",
+                resultBytes: 14,
+                resultTruncated: false,
+                sequence: 4,
+                admittedAtMillis: 12,
+              },
+            ]),
         }),
       )
       const response = yield* mounted.invoke({
         module: "agents",
-        operation: "inspectAll",
-        input: { childRunIds: ["a"], waitMillis: 5_000 },
+        operation: "inbox",
+        input: { afterSequence: 3, limit: 10 },
       })
-      expect(response).toEqual({ _tag: "Success", output: [{ childRunId: "a", status: "succeeded" }] })
-    }),
-  )
-
-  it.live("charges a wait's budget for the time its inspections take, not only for its sleeps", () =>
-    Effect.gen(function* () {
-      // Each pass reads durable state before it sleeps. Charging the budget only for the sleep lets
-      // the wait outlast its ceiling by however long those reads took, which grows with the budget.
-      const inspectCostMillis = 30
-      const pollIntervalMillis = 50
-      const waitMillis = 1_000
-      let reads = 0
-      const mounted = yield* registry(
-        port({
-          inspect: (childRunId) =>
-            Effect.sleep(`${inspectCostMillis} millis`).pipe(
-              Effect.andThen(
-                Effect.sync(() => {
-                  reads = reads + 1
-                  return { childRunId, status: "running" as const }
-                }),
-              ),
-            ),
-        }),
-      )
-      yield* mounted.invoke({
-        module: "agents",
-        operation: "inspectAll",
-        input: { childRunIds: ["a"], waitMillis },
+      expect(response).toEqual({
+        _tag: "Success",
+        output: [
+          {
+            _tag: "ChildSettlement",
+            notificationId: "child-settled:child-a",
+            parentRunId: "parent-a",
+            childRunId: "child-a",
+            terminalEventId: "event-a",
+            status: "succeeded",
+            resultText: "bounded result",
+            resultBytes: 14,
+            resultTruncated: false,
+            sequence: 4,
+            admittedAtMillis: 12,
+          },
+        ],
       })
-      // Counting inspections is the reading the fix changes: an elapsed-time budget admits about
-      // waitMillis / (inspect + interval) of them, where a sleep-only budget admits one per interval
-      // regardless of what each read cost.
-      const sleepOnlyBudget = Math.ceil(waitMillis / pollIntervalMillis)
-      const elapsedBudget = Math.ceil(waitMillis / (inspectCostMillis + pollIntervalMillis))
-      expect(reads).toBeLessThan(sleepOnlyBudget)
-      expect(reads).toBeLessThanOrEqual(elapsedBudget + 1)
     }),
   )
 
@@ -202,36 +193,6 @@ describe("agents binding", () => {
         _tag: "Success",
         output: childRunIds.map((childRunId) => ({ childRunId, status: "running" })),
       })
-    }),
-  )
-
-  it.effect("inspectAll reports a still-running child when the wait elapses rather than failing", () =>
-    Effect.gen(function* () {
-      const mounted = yield* registry()
-      const response = yield* mounted.invoke({
-        module: "agents",
-        operation: "inspectAll",
-        input: { childRunIds: ["a"], waitMillis: 0 },
-      })
-      // A child that is still working is an ordinary outcome, so the cell reads status rather than
-      // handling an error.
-      expect(response).toEqual({ _tag: "Success", output: [{ childRunId: "a", status: "running" }] })
-    }),
-  )
-
-  it.effect("clamps a wait longer than the host ceiling rather than refusing the call", () =>
-    Effect.gen(function* () {
-      // A parent waiting on work that runs for minutes asks for minutes. Refusing taught a model
-      // only that its call was malformed, so it fell back to polling; the ceiling still applies.
-      const mounted = yield* registry(
-        port({ inspect: (childRunId) => Effect.succeed({ childRunId, status: "succeeded" as const }) }),
-      )
-      const response = yield* mounted.invoke({
-        module: "agents",
-        operation: "inspectAll",
-        input: { childRunIds: ["a"], waitMillis: AgentsBinding.maxWaitMillis * 4 },
-      })
-      expect(response._tag).toBe("Success")
     }),
   )
 

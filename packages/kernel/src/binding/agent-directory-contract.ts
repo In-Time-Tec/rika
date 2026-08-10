@@ -18,6 +18,8 @@ export const ChildInspection = Schema.Struct({
   invocationId: Schema.optionalKey(Schema.String),
   origin: Schema.optionalKey(ChildOrigin),
   outcome: Schema.optionalKey(Schema.Unknown),
+  lastActivityAt: Schema.optionalKey(Schema.String),
+  latestStep: Schema.optionalKey(Schema.String),
 })
 
 export const AdmitReceipt = Schema.Struct({
@@ -32,7 +34,7 @@ export const MessageReceipt = Schema.Struct({
   duplicate: Schema.Boolean,
 })
 
-export const MailboxEntry = Schema.Struct({
+export const MessageInboxEntry = Schema.TaggedStruct("Message", {
   entryId: Schema.String,
   sequence: Schema.Int,
   from: Schema.String,
@@ -41,6 +43,22 @@ export const MailboxEntry = Schema.Struct({
   correlationId: Schema.optionalKey(Schema.String),
   inReplyTo: Schema.optionalKey(Schema.String),
 })
+
+export const ChildSettlementInboxEntry = Schema.TaggedStruct("ChildSettlement", {
+  notificationId: Schema.String,
+  parentRunId: Schema.String,
+  childRunId: Schema.String,
+  terminalEventId: Schema.String,
+  status: Schema.Literals(["succeeded", "failed", "cancelled"]),
+  resultText: Schema.String,
+  resultBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  resultTruncated: Schema.Boolean,
+  sequence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  admittedAtMillis: Schema.Finite,
+  resultArtifact: Schema.optionalKey(Schema.Struct({ id: Schema.String, bytes: Schema.Int })),
+})
+
+export const InboxEntry = Schema.Union([MessageInboxEntry, ChildSettlementInboxEntry])
 
 export const DirectoryEntry = Schema.Struct({
   address: Schema.String,

@@ -21,7 +21,7 @@ test(
           lanes: [
             {
               steps: [
-                model.turn([model.spawnAndWait([{ profile: "Task", prompt: "PARENT_AGENT_PROMPT" }], "parent-agent")]),
+                model.turn([model.spawn([{ profile: "Task", prompt: "PARENT_AGENT_PROMPT" }], "parent-agent")]),
                 model.text("ROOT_AGENT_FINAL"),
               ],
             },

@@ -161,22 +161,18 @@ export const bindingsDigest = (environment?: Environment): string =>
  */
 const bytes = (value: number): string => (value % 1_024 === 0 ? `${value / 1_024}KB` : `${value} bytes`)
 
-export const maxChildWaitMillis = AgentsBinding.maxWaitMillis
-
 export interface CellInstructionFacts {
   readonly modules: ReadonlyArray<HostBindingRegistry.Module<BindingRequirements>>
   readonly workspace: string
   readonly workspaceState?: "empty" | "not empty"
   readonly channelBytes: number
   readonly cellDeadlineMillis: number
-  readonly childWaitMillis: number
 }
 
 export const cellInstructions = (facts: CellInstructionFacts): string =>
   [
     "You have exactly one tool, named typescript. It runs a cell in a persistent Bun kernel.",
-    `A cell is stopped after ${facts.cellDeadlineMillis / 1_000}s, and a wait inside one is capped at ${facts.childWaitMillis / 1_000}s, so long`,
-    "work belongs in a subagent you inspect across turns rather than in one cell that sleeps.",
+    `A cell is stopped after ${facts.cellDeadlineMillis / 1_000}s. Long work belongs in a subagent, not a cell that sleeps.`,
     "`rika` and its modules are pre-mounted globals; never import them.",
     "Variables persist across all your cells; accumulate state instead of re-fetching it.",
     facts.workspaceState === undefined
@@ -184,7 +180,9 @@ export const cellInstructions = (facts: CellInstructionFacts): string =>
       : `Your workspace is ${JSON.stringify(facts.workspace)} and it is ${facts.workspaceState}.`,
     `Cell stdout and stderr are each capped at ${bytes(facts.channelBytes)}; page big results at 16KB per page.`,
     "Run shell commands with rika.processes.start; it is the supported shell path.",
-    "After spawning children, end your turn or keep working; inspect them in a later turn instead of polling.",
+    "After spawning children, end your turn or keep working; bounded settlements are delivered durably at a",
+    "model-turn boundary or the next same-Thread turn. rika.agents.inbox pages structured settlements by afterSequence.",
+    "Do not poll or sleep.",
     "The kernel exposes a `rika` object your cell code can await. It is not a tool; the only tool",
     "name that exists is typescript. Example cell body:",
     "",

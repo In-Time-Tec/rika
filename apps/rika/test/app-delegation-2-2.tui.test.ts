@@ -20,14 +20,14 @@ test(
           lanes: [
             {
               steps: [
-                model.turn([model.spawnAndWait([{ profile: "Task", prompt: "L1" }], "l1", 25_000)]),
+                model.turn([model.spawn([{ profile: "Task", prompt: "L1" }], "l1")]),
                 model.text("ROOT_DEEP_DONE"),
               ],
             },
             {
               profile: "Task",
               steps: [
-                model.turn([model.spawnAndWait([{ profile: "Oracle", prompt: "L2" }], "l2", 20_000)]),
+                model.turn([model.spawn([{ profile: "Oracle", prompt: "L2" }], "l2")]),
                 model.text("CHILD_DEEP_DONE"),
               ],
             },

@@ -47,7 +47,7 @@ test(
           lanes: [
             {
               steps: [
-                model.turn([model.spawnAndWait([{ profile: "Oracle", prompt: "IDLE_CHILD_PROMPT" }], "idle-agent")]),
+                model.turn([model.spawn([{ profile: "Oracle", prompt: "IDLE_CHILD_PROMPT" }], "idle-agent")]),
                 model.text("IDLE_ROOT_DONE"),
               ],
             },

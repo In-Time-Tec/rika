@@ -17,13 +17,12 @@ test(
             {
               steps: [
                 model.turn([
-                  model.spawnAndWait(
+                  model.spawn(
                     [
                       { profile: "Task", prompt: "FIRST_SAME" },
                       { profile: "Task", prompt: "SECOND_SAME" },
                     ],
                     "same-cell",
-                    20_000,
                   ),
                 ]),
                 model.text("ROOT_SAME_DONE"),

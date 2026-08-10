@@ -16,7 +16,6 @@ const instructionFacts = (modules = make(options)) => ({
   workspaceState: "not empty" as const,
   channelBytes: 16_384,
   cellDeadlineMillis: 120_000,
-  childWaitMillis: 30_000,
 })
 
 describe("mounted surface", () => {
@@ -109,6 +108,6 @@ it("states the kernel house rules from its mounted workspace and limits", () => 
   expect(text).toContain('Your workspace is "/actual/workspace" and it is empty.')
   expect(text).toContain("page big results at 16KB per page")
   expect(text).toContain("Run shell commands with rika.processes.start")
-  expect(text).toContain("inspect them in a later turn instead of polling")
-  expect(text).not.toContain("you'll be notified")
+  expect(text).toContain("bounded settlements are delivered durably")
+  expect(text).toContain("Do not poll or sleep")
 })

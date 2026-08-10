@@ -21,9 +21,7 @@ test(
           lanes: [
             {
               steps: [
-                model.turn([
-                  model.spawnAndWait([{ profile: "Oracle", prompt: "Read the nested fixture." }], "oracle-style"),
-                ]),
+                model.turn([model.spawn([{ profile: "Oracle", prompt: "Read the nested fixture." }], "oracle-style")]),
                 model.text("ROOT_STYLE_RESULT"),
               ],
             },

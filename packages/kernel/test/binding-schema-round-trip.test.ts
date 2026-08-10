@@ -100,7 +100,7 @@ describe("binding schema round trip", () => {
       "artifacts.get": { value: { any: "json" } },
       "agents.spawn": { childRunId: "c", key: "k", duplicate: false },
       "agents.cancel": {},
-      "agents.inbox": [{ entryId: "e", sequence: 1, from: "run:a", prompt: "p", messageId: "m" }],
+      "agents.inbox": [{ _tag: "Message", entryId: "e", sequence: 1, from: "run:a", prompt: "p", messageId: "m" }],
       "agents.directory": [{ address: "run:a", runId: "a", sessionId: "s", relationship: "parent" }],
       "context.current": { threadId: "t", workspace: "/repo", trustMode: "trusted-local" },
       "context.compactions": [{ id: "c", summary: "s" }],

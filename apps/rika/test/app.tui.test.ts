@@ -21,7 +21,7 @@ test(
           lanes: [
             {
               steps: [
-                model.turn([model.spawnAndWait([{ profile: "Task", prompt: "Run top-level work." }], "top-agent")]),
+                model.turn([model.spawn([{ profile: "Task", prompt: "Run top-level work." }], "top-agent")]),
                 model.failure("ROOT_RELOAD_FAILED"),
               ],
             },

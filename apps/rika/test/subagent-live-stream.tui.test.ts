@@ -18,7 +18,7 @@ test(
                 // Both children run inside the root's wait, which is the window this test observes
                 // them live in and what makes every card terminal by the time it reads them back.
                 model.turn([
-                  model.spawnAndWait(
+                  model.spawn(
                     [
                       { profile: "Oracle", prompt: "READER_CHILD_PROMPT" },
                       { profile: "Task", prompt: "WORKER_CHILD_PROMPT" },

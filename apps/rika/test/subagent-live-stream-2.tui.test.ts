@@ -18,7 +18,7 @@ test(
                 // The root waits for both children, because the assertions below read their TERMINAL
                 // labels: a root that only admits them reaches its own answer while they still run.
                 model.turn([
-                  model.spawnAndWait(
+                  model.spawn(
                     [
                       { profile: "Oracle", prompt: "FIRST_GROUP_PROMPT" },
                       { profile: "Surgeon", prompt: "SECOND_GROUP_PROMPT" },

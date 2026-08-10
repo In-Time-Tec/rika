@@ -1,6 +1,12 @@
 import { ToolContext } from "@batonfx/core"
-import { Address, ChildAdmission, Run, Runtime, RunTree } from "@batonfx/runtime"
-import { AgentDirectoryUnavailable, AgentPort } from "@rika/kernel/agent-port"
+import { Address, ChildAdmission, Run, Runtime, RunTree, type RunEvent } from "@batonfx/runtime"
+import {
+  AgentDirectoryUnavailable,
+  AgentPort,
+  ChildSettlementInboxEntry,
+  type InboxEntry,
+} from "@rika/kernel/agent-port"
+import { ArtifactStore } from "@rika/kernel/artifact-store"
 import { Effect, Layer } from "effect"
 import type { Prompt } from "effect/unstable/ai"
 
@@ -138,13 +144,50 @@ const ambientRuntime = Effect.flatMap(Effect.serviceOption(Runtime.Runtime), (ru
     : Effect.succeed(runtime.value),
 )
 
+type ChildSettlementReader = {
+  readonly childSettlements: (input: {
+    readonly parentRunId: string
+    readonly afterSequence?: number
+    readonly limit: number
+  }) => Effect.Effect<ReadonlyArray<typeof ChildSettlementInboxEntry.Type>, Runtime.DirectoryError>
+}
+
+const hasChildSettlementReader = (
+  runtime: Runtime.Runtime["Service"],
+): runtime is Runtime.Runtime["Service"] & ChildSettlementReader =>
+  "childSettlements" in runtime && typeof runtime.childSettlements === "function"
+
+const readChildSettlements = (
+  runtime: Runtime.Runtime["Service"],
+  input: { readonly parentRunId: string; readonly afterSequence?: number; readonly limit: number },
+) =>
+  hasChildSettlementReader(runtime)
+    ? runtime.childSettlements(input).pipe(Effect.mapError(failed))
+    : Effect.fail(
+        unavailable(
+          "unavailable",
+          "the installed @batonfx/runtime does not expose Runtime.childSettlements; use the Baton build containing d4a83b3",
+        ),
+      )
+
+const activityPreview = (event: RunEvent.RunEvent): string => {
+  if (event._tag === "ToolProgress" && event.message !== undefined) return event.message.slice(0, 512)
+  if (event._tag === "ToolExecutionStarted") return `${event.call.name} started`
+  if (event._tag === "ToolExecutionCompleted")
+    return `${event.call.name} ${event.result.isFailure ? "failed" : "completed"}`
+  if (event._tag === "ProgramLog") return event.message.slice(0, 512)
+  if ("turn" in event) return `${event._tag} in turn ${event.turn}`
+  return event._tag
+}
+
 /**
  * Every operation resolves the Runtime from the ambient execution context rather than closing over
  * it. The pool the cell route builds is Server-scoped and is composed BEFORE the Runtime it runs
  * under, so binding one here would invert that order; reading it per call also keeps the port
  * honest when a cell somehow reaches it outside an execution.
  */
-const make: Effect.Effect<AgentPort["Service"]> = Effect.sync(() => {
+const make: Effect.Effect<AgentPort["Service"], never, ArtifactStore> = Effect.gen(function* () {
+  const artifacts = yield* ArtifactStore
   /**
    * A Run's direct children, read from its TREE.
    *
@@ -215,7 +258,53 @@ const make: Effect.Effect<AgentPort["Service"]> = Effect.sync(() => {
       })
     })
   const ownedChild = (parentRunId: string, childRunId: string) =>
-    Effect.map(ownedChildren(parentRunId, [childRunId]), ([found]) => found!)
+    Effect.flatMap(ambientRuntime, (runtime) =>
+      Effect.flatMap(ownedChildren(parentRunId, [childRunId]), ([found]) => {
+        const child = found!
+        if (child.status !== "running") return Effect.succeed(child)
+        return runtime.inspect(childRunId).pipe(
+          Effect.mapError(failed),
+          Effect.flatMap((inspection) =>
+            runtime
+              .history({
+                runId: childRunId,
+                cursor: Math.max(-1, inspection.lastSequence - 16),
+                limit: 16,
+              })
+              .pipe(Effect.mapError(failed)),
+          ),
+          Effect.map((events) => {
+            const latest = events.at(-1)
+            return latest === undefined
+              ? child
+              : { ...child, lastActivityAt: latest.occurredAt, latestStep: activityPreview(latest) }
+          }),
+        )
+      }),
+    )
+  const materializeSettlement = (
+    runtime: Runtime.Runtime["Service"],
+    settlement: typeof ChildSettlementInboxEntry.Type,
+  ): Effect.Effect<typeof ChildSettlementInboxEntry.Type, AgentDirectoryUnavailable> => {
+    if (!settlement.resultTruncated) return Effect.succeed(settlement)
+    return runtime.snapshot(settlement.childRunId).pipe(
+      Effect.mapError(failed),
+      Effect.flatMap((snapshot) => {
+        if (snapshot.outcome?._tag !== "Succeeded")
+          return Effect.fail(unavailable("unavailable", `Child ${settlement.childRunId} has no recoverable result`))
+        const result = snapshot.outcome.result
+        const value = "text" in result ? result.text : result.value
+        return artifacts
+          .put({ value, mediaType: "application/json" })
+          .pipe(Effect.mapError((cause) => unavailable("bounded", cause.message)))
+      }),
+      Effect.map((stored) => ({
+        ...settlement,
+        resultText: `Full result stored as artifact ${stored.id}. Read it with rika.artifacts.get({ id: "${stored.id}" }), keep it in a variable, and return slices of at most 16KB.`,
+        resultArtifact: stored,
+      })),
+    )
+  }
   return AgentPort.of({
     spawn: (input) =>
       Effect.flatMap(identity, (self) =>
@@ -282,22 +371,46 @@ const make: Effect.Effect<AgentPort["Service"]> = Effect.sync(() => {
             ),
         ),
       ),
-    inbox: (limit) =>
+    inbox: (input) =>
       Effect.flatMap(identity, (self) =>
         Effect.flatMap(ambientRuntime, (runtime) =>
-          runtime.messages({ runId: self.runId, limit }).pipe(
-            Effect.map((entries) =>
-              entries.map((entry) => ({
-                entryId: entry.entryId,
-                sequence: entry.sequence,
-                from: String(entry.from),
-                prompt: promptText(entry.prompt),
-                messageId: entry.messageId,
-                ...(entry.correlationId === undefined ? {} : { correlationId: entry.correlationId }),
-                ...(entry.inReplyTo === undefined ? {} : { inReplyTo: entry.inReplyTo }),
-              })),
+          Effect.all([
+            runtime.messages({ runId: self.runId, limit: input.limit }).pipe(Effect.mapError(failed)),
+            readChildSettlements(runtime, {
+              parentRunId: self.runId,
+              afterSequence: input.afterSequence ?? -1,
+              limit: input.limit,
+            }),
+          ]).pipe(
+            Effect.flatMap(([messages, settlements]) =>
+              Effect.map(
+                Effect.forEach(settlements, (entry) => materializeSettlement(runtime, entry)),
+                (materialized) => [messages, materialized] as const,
+              ),
             ),
-            Effect.mapError(failed),
+            Effect.map(([messages, settlements]) => {
+              const settlementIds = new Set(settlements.map((entry) => entry.notificationId))
+              const afterSequence = input.afterSequence ?? -1
+              const messageEntries: ReadonlyArray<typeof InboxEntry.Type> = messages.flatMap((entry) =>
+                entry.sequence <= afterSequence || settlementIds.has(entry.entryId)
+                  ? []
+                  : [
+                      {
+                        _tag: "Message" as const,
+                        entryId: entry.entryId,
+                        sequence: entry.sequence,
+                        from: String(entry.from),
+                        prompt: promptText(entry.prompt),
+                        messageId: entry.messageId,
+                        ...(entry.correlationId === undefined ? {} : { correlationId: entry.correlationId }),
+                        ...(entry.inReplyTo === undefined ? {} : { inReplyTo: entry.inReplyTo }),
+                      },
+                    ],
+              )
+              return [...messageEntries, ...settlements]
+                .toSorted((left, right) => left.sequence - right.sequence)
+                .slice(0, input.limit)
+            }),
           ),
         ),
       ),
@@ -323,4 +436,4 @@ const make: Effect.Effect<AgentPort["Service"]> = Effect.sync(() => {
 })
 
 /** Rika's view of Baton's in-execution child and messaging operations, over the real Runtime. */
-export const runtimeAgentPortLayer: Layer.Layer<AgentPort> = Layer.effect(AgentPort, make)
+export const runtimeAgentPortLayer: Layer.Layer<AgentPort, never, ArtifactStore> = Layer.effect(AgentPort, make)

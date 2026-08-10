@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, Schema } from "effect"
-import { AdmitReceipt, ChildInspection, DirectoryEntry, MailboxEntry, MessageReceipt } from "./agent-directory-contract"
+import { AdmitReceipt, ChildInspection, DirectoryEntry, InboxEntry, MessageReceipt } from "./agent-directory-contract"
+export { ChildSettlementInboxEntry, InboxEntry, MessageInboxEntry } from "./agent-directory-contract"
 
 export class AgentDirectoryUnavailable extends Schema.TaggedErrorClass<AgentDirectoryUnavailable>()(
   "AgentDirectoryUnavailable",
@@ -43,7 +44,10 @@ export interface Interface {
     readonly idempotencyKey: string
     readonly inReplyTo?: string | undefined
   }) => Effect.Effect<typeof MessageReceipt.Type, AgentDirectoryUnavailable>
-  readonly inbox: (limit: number) => Effect.Effect<ReadonlyArray<typeof MailboxEntry.Type>, AgentDirectoryUnavailable>
+  readonly inbox: (input: {
+    readonly afterSequence?: number | undefined
+    readonly limit: number
+  }) => Effect.Effect<ReadonlyArray<typeof InboxEntry.Type>, AgentDirectoryUnavailable>
   readonly directory: Effect.Effect<ReadonlyArray<typeof DirectoryEntry.Type>, AgentDirectoryUnavailable>
 }
 

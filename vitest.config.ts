@@ -5,6 +5,9 @@ import { CompletionReporter } from "./test/support/vitest-run-completeness-repor
 
 export default defineConfig({
   resolve: {
+    alias: {
+      "@batonfx/runtime": resolve(import.meta.dirname, "../baton-repl-kernel/packages/runtime/src/index.ts"),
+    },
     dedupe: ["effect"],
   },
   plugins: [

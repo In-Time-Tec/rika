@@ -10,6 +10,7 @@ import * as ThreadQuery from "@rika/product/thread-query-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Config, Context, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Scope } from "effect"
 import { performance } from "node:perf_hooks"
+import type { Prompt } from "effect/unstable/ai"
 import { interactiveTui } from "../src/interactive/process/interactive-process-loop"
 import {
   makeTuiAppRepositoryLayers,
@@ -79,6 +80,7 @@ export interface TuiApp {
   readonly reload: Effect.Effect<void>
   readonly waitModelRequests: (count: number) => Effect.Effect<void>
   readonly modelRequestCount: Effect.Effect<number>
+  readonly modelPrompts: Effect.Effect<ReadonlyArray<Prompt.Prompt>>
   readonly close: () => void
   readonly done: Effect.Effect<void>
   readonly quit: Effect.Effect<void>
@@ -317,6 +319,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     }),
     waitModelRequests: awaitModelRequests,
     modelRequestCount: laneModels.requestCountFor("Root"),
+    modelPrompts: laneModels.promptsFor("Root"),
     close: () => setup.mockInput.pressCtrlC(),
     done: Fiber.join(operationFiber).pipe(Effect.asVoid, Effect.orDie),
     quit: Effect.gen(function* () {

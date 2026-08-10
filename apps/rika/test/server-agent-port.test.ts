@@ -1,7 +1,8 @@
 import { expect, it } from "@effect/vitest"
 import { ToolContext } from "@batonfx/core"
 import { AgentDirectory, Runtime } from "@batonfx/runtime"
-import { AgentPort, type Interface as AgentPortInterface } from "@rika/kernel/agent-port"
+import { AgentPort, ChildSettlementInboxEntry, type Interface as AgentPortInterface } from "@rika/kernel/agent-port"
+import * as ArtifactStore from "@rika/kernel/artifact-store"
 import { Context, Effect, Layer } from "effect"
 import { Prompt } from "effect/unstable/ai"
 import { runtimeAgentPortLayer } from "../src/server/composition/server-agent-port"
@@ -35,23 +36,36 @@ const directoryEntry = (runId: string, parentRunId?: string) => ({
   ...(parentRunId === undefined ? {} : { parentRunId }),
 })
 
-const runtimeOf = (overrides: Partial<Runtime.Interface>) => Runtime.Runtime.of(overrides as Runtime.Interface)
+type RuntimeOverrides = Partial<Runtime.Interface> & {
+  readonly childSettlements?: (input: {
+    readonly parentRunId: string
+    readonly afterSequence?: number
+    readonly limit: number
+  }) => Effect.Effect<ReadonlyArray<typeof ChildSettlementInboxEntry.Type>, never>
+}
+
+const runtimeOf = (overrides: RuntimeOverrides) => Runtime.Runtime.of(overrides as Runtime.Interface)
+
+const artifacts = ArtifactStore.layerTest({
+  put: (input) => Effect.succeed({ id: `artifact-${String(input.value).length}`, bytes: String(input.value).length }),
+  get: () => Effect.void,
+})
 
 /**
  * The port reads the executing cell's identity per call rather than at layer build, so the ambient
  * context is supplied around each use rather than merged into the layer that produced the port.
  */
 const withPort = <A, E>(
-  runtime: Partial<Runtime.Interface>,
+  runtime: RuntimeOverrides,
   use: (port: AgentPortInterface) => Effect.Effect<A, E>,
   runId = "run-self",
   toolCallId = "call-1",
 ) =>
   Effect.scoped(
-    Effect.flatMap(Layer.build(runtimeAgentPortLayer), (context) =>
+    Effect.flatMap(Layer.build(runtimeAgentPortLayer.pipe(Layer.provide(artifacts))), (context) =>
       use(Context.get(context, AgentPort)).pipe(
         Effect.provideService(ToolContext.ToolContext, cellContext(runId, toolCallId)),
-        Effect.provideService(Runtime.Runtime, runtimeOf(runtime)),
+        Effect.provideService(Runtime.Runtime, runtimeOf({ history: () => Effect.succeed([]), ...runtime })),
       ),
     ),
   )
@@ -114,6 +128,42 @@ it.effect("maps every Baton run status onto a status the cell contract names", (
     }
     // `queued` and `needs-resolution` both mean admitted-but-not-producing; nothing leaks unmapped.
     expect(seen).toEqual(["pending", "pending", "running", "waiting", "cancelling", "succeeded", "failed", "cancelled"])
+  }),
+)
+
+it.effect("adds the latest durable activity preview when inspecting a running child", () =>
+  Effect.gen(function* () {
+    const inspected = yield* withPort(
+      {
+        inspect: (runId) => Effect.succeed(runInspection(runId) as never),
+        inspectTree: () =>
+          Effect.succeed({
+            _tag: "Active",
+            rootRunId: "run-self",
+            cursor: "c" as never,
+            runs: [{ run: runInspection("child-1"), parentRunId: "run-self" }],
+            usage: [],
+            compactions: [],
+            activeRunIds: ["child-1"],
+          } as never),
+        history: () =>
+          Effect.succeed([
+            {
+              _tag: "ToolProgress",
+              occurredAt: "2026-08-10T20:35:48.000Z",
+              message: "reviewing the durable inbox adapter",
+            },
+          ] as never),
+      },
+      (value) => value.inspect("child-1"),
+    )
+
+    expect(inspected).toMatchObject({
+      childRunId: "child-1",
+      status: "running",
+      lastActivityAt: "2026-08-10T20:35:48.000Z",
+      latestStep: "reviewing the durable inbox adapter",
+    })
   }),
 )
 
@@ -204,11 +254,160 @@ it.effect("gives the cell the message text a sender wrote, not the serialized en
               metadata: {},
             },
           ] as never),
+        childSettlements: () => Effect.succeed([]),
       },
-      (value) => value.inbox(10),
+      (value) => value.inbox({ limit: 10 }),
     )
-    // JSON.stringify of a Prompt yields `{"content":[...]}`, which no cell can read as a message.
-    expect(entries[0]?.prompt).toBe("the answer is 42")
+    expect(entries[0]).toMatchObject({ _tag: "Message", prompt: "the answer is 42" })
+  }),
+)
+
+it.effect("reads durable bounded child settlements by cursor without duplicating their mailbox envelopes", () =>
+  Effect.gen(function* () {
+    const calls: Array<{ readonly parentRunId: string; readonly afterSequence?: number; readonly limit: number }> = []
+    const entries = yield* withPort(
+      {
+        messages: () =>
+          Effect.succeed([
+            {
+              entryId: "ordinary-message",
+              sequence: 5,
+              from: AgentDirectory.runAddress("run-b"),
+              prompt: Prompt.make("ordinary"),
+              messageId: "ordinary-message",
+            },
+            {
+              entryId: "child-settled:child-1",
+              sequence: 6,
+              from: AgentDirectory.runAddress("child-1"),
+              prompt: Prompt.make("duplicated envelope"),
+              messageId: "child-settled:child-1",
+            },
+          ] as never),
+        childSettlements: (input: {
+          readonly parentRunId: string
+          readonly afterSequence?: number
+          readonly limit: number
+        }) => {
+          calls.push(input)
+          return Effect.succeed([
+            {
+              _tag: "ChildSettlement" as const,
+              notificationId: "child-settled:child-1",
+              parentRunId: "run-self",
+              childRunId: "child-1",
+              terminalEventId: "terminal-1",
+              status: "succeeded" as const,
+              resultText: "bounded child result",
+              resultBytes: 20,
+              resultTruncated: false,
+              sequence: 6,
+              admittedAtMillis: 100,
+            },
+          ])
+        },
+      },
+      (value) => value.inbox({ afterSequence: 4, limit: 10 }),
+    )
+
+    expect(calls).toEqual([{ parentRunId: "run-self", afterSequence: 4, limit: 10 }])
+    expect(entries).toEqual([
+      {
+        _tag: "Message",
+        entryId: "ordinary-message",
+        sequence: 5,
+        from: "run:run-b",
+        prompt: "ordinary",
+        messageId: "ordinary-message",
+      },
+      {
+        _tag: "ChildSettlement",
+        notificationId: "child-settled:child-1",
+        parentRunId: "run-self",
+        childRunId: "child-1",
+        terminalEventId: "terminal-1",
+        status: "succeeded",
+        resultText: "bounded child result",
+        resultBytes: 20,
+        resultTruncated: false,
+        sequence: 6,
+        admittedAtMillis: 100,
+      },
+    ])
+  }),
+)
+
+it.effect("replaces Baton's internal large-result recovery marker with a Rika artifact handle", () =>
+  Effect.gen(function* () {
+    const entries = yield* withPort(
+      {
+        messages: () => Effect.succeed([]),
+        childSettlements: () =>
+          Effect.succeed([
+            {
+              _tag: "ChildSettlement" as const,
+              notificationId: "child-settled:child-1",
+              parentRunId: "run-self",
+              childRunId: "child-1",
+              terminalEventId: "terminal-1",
+              status: "succeeded" as const,
+              resultText: '[Result omitted. Recover it with Runtime.snapshot("child-1").]',
+              resultBytes: 345_000,
+              resultTruncated: true,
+              sequence: 3,
+              admittedAtMillis: 100,
+            },
+          ]),
+        snapshot: () =>
+          Effect.succeed({
+            outcome: { _tag: "Succeeded", result: { text: "x".repeat(345_000) } },
+          } as never),
+      },
+      (value) => value.inbox({ limit: 10 }),
+    )
+
+    expect(entries[0]).toMatchObject({
+      _tag: "ChildSettlement",
+      resultArtifact: { id: "artifact-345000", bytes: 345_000 },
+    })
+    if (entries[0]?._tag === "ChildSettlement") {
+      expect(entries[0].resultText).toContain('rika.artifacts.get({ id: "artifact-345000" })')
+      expect(entries[0].resultText).not.toContain("Runtime.snapshot")
+    }
+  }),
+)
+
+it.effect("keeps delivered settlements readable when the pending message inbox is empty", () =>
+  Effect.gen(function* () {
+    const entries = yield* withPort(
+      {
+        messages: () => Effect.succeed([]),
+        childSettlements: () =>
+          Effect.succeed([
+            {
+              _tag: "ChildSettlement" as const,
+              notificationId: "child-settled:child-1",
+              parentRunId: "run-self",
+              childRunId: "child-1",
+              terminalEventId: "terminal-1",
+              status: "failed" as const,
+              resultText: "AgentExecutionFailure: provider rejected the child request",
+              resultBytes: 58,
+              resultTruncated: false,
+              sequence: 3,
+              admittedAtMillis: 100,
+            },
+          ]),
+      },
+      (value) => value.inbox({ limit: 10 }),
+    )
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      _tag: "ChildSettlement",
+      status: "failed",
+      resultText: "AgentExecutionFailure: provider rejected the child request",
+    })
   }),
 )
 
