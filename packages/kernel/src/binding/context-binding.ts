@@ -56,7 +56,18 @@ const textOf = (entry: Session.Entry): string => {
     const content = entry.message.content
     return typeof content === "string"
       ? content
-      : content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
+      : content
+          .flatMap((part) => {
+            /**
+             * An assistant turn is mostly reasoning and tool calls, and keeping only `text` rendered
+             * a model's own history as a column of empty messages. What it thought and what it
+             * called is the part worth reading back.
+             */
+            if (part.type === "text" || part.type === "reasoning") return [part.text]
+            if (part.type === "tool-call") return [`${part.name}(${JSON.stringify(part.params)})`]
+            return []
+          })
+          .join("\n")
   }
   if (entry._tag === "ToolCall") return JSON.stringify(entry.part.params)
   if (entry._tag === "ToolResult") return JSON.stringify(entry.part.result)

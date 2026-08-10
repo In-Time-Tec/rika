@@ -168,4 +168,38 @@ describe("context binding", () => {
       if (response._tag === "Success") expect(response.output).toMatchObject({ unknownCursors: ["no-such-entry"] })
     }),
   )
+
+  it.effect("keeps what an assistant turn reasoned and called, not only what it said", () =>
+    Effect.gen(function* () {
+      // An assistant turn is mostly reasoning and tool calls. Reading back only `text` rendered a
+      // model's own history as a column of empty messages.
+      const mounted = yield* registry(
+        sessionStore([
+          {
+            _tag: "Message",
+            id: "e1",
+            parentId: null,
+            message: Prompt.makeMessage("assistant", {
+              content: [
+                Prompt.makePart("reasoning", { text: "weighing the options" }),
+                Prompt.makePart("tool-call", {
+                  id: "t1",
+                  name: "typescript",
+                  params: { code: "1" },
+                  providerExecuted: false,
+                }),
+              ],
+            }),
+          } as unknown as Session.Entry,
+        ]),
+      )
+      const response = yield* mounted.invoke({ module: "context", operation: "historyPage", input: { limit: 5 } })
+      expect(response._tag).toBe("Success")
+      if (response._tag === "Success") {
+        const first = (response.output as { readonly entries: ReadonlyArray<{ readonly text: string }> }).entries[0]!
+        expect(first.text).toContain("weighing the options")
+        expect(first.text).toContain("typescript")
+      }
+    }),
+  )
 })
