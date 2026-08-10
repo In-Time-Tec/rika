@@ -9,8 +9,11 @@ import {
   catalogBatonVersion,
   manifestWithLocalBatonTarballs,
   provisionProvenHostArchive,
+  verifyInstalledBatonPackages,
   type BatonReleaseEvidence,
+  type PackedBatonPackage,
 } from "../../scripts/release/local-baton-smoke"
+import { directoryDigest } from "../../scripts/upstream/upstream-content-digest"
 
 const version = "0.20.2"
 const evidence: BatonReleaseEvidence = {
@@ -88,6 +91,68 @@ it.layer(BunServices.layer)("local Baton release smoke", (test) => {
     expect(() => catalogBatonVersion({ ...catalog, "@batonfx/test": "^0.20.2" })).toThrow("one exact version")
     expect(() => catalogBatonVersion(Object.fromEntries(Object.entries(catalog).slice(1)))).toThrow("one exact version")
   })
+
+  test.effect("locates every exact package when harness and repl are only in the isolated store", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const isolatedRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-baton-install-fixture-" })
+        const packedRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-baton-packed-fixture-" })
+        const packedPackages = new Map<string, PackedBatonPackage>()
+        const installedDirectories = new Map<string, string>()
+
+        const writePackage = Effect.fn(function* (directory: string, manifest: string, source: string) {
+          yield* fileSystem.makeDirectory(path.join(directory, "dist"), { recursive: true })
+          yield* fileSystem.writeFileString(path.join(directory, "package.json"), manifest)
+          yield* fileSystem.writeFileString(path.join(directory, "dist", "index.js"), source)
+        })
+
+        for (const packageName of batonPackages) {
+          const name = `@batonfx/${packageName}`
+          const manifest = `${JSON.stringify({ name, version }, undefined, 2)}
+`
+          const source = `export const packageName = ${JSON.stringify(packageName)}
+`
+          const packedDirectory = path.join(packedRoot, packageName)
+          yield* writePackage(packedDirectory, manifest, source)
+          packedPackages.set(name, {
+            manifest: manifest.trim(),
+            directoryDigest: yield* directoryDigest(packedDirectory),
+          })
+          const installedDirectory =
+            packageName === "harness" || packageName === "repl"
+              ? path.join(
+                  isolatedRoot,
+                  "node_modules",
+                  ".bun",
+                  `${packageName}-exact`,
+                  "node_modules",
+                  "@batonfx",
+                  packageName,
+                )
+              : path.join(isolatedRoot, "node_modules", "@batonfx", packageName)
+          yield* writePackage(installedDirectory, manifest, source)
+          installedDirectories.set(name, installedDirectory)
+        }
+
+        const harnessManifest = `${JSON.stringify({ name: "@batonfx/harness", version }, undefined, 2)}
+`
+        yield* writePackage(
+          path.join(isolatedRoot, "node_modules", ".bun", "harness-tampered", "node_modules", "@batonfx", "harness"),
+          harnessManifest,
+          "tampered",
+        )
+
+        expect(yield* fileSystem.exists(path.join(isolatedRoot, "node_modules", "@batonfx", "harness"))).toBe(false)
+        expect(yield* fileSystem.exists(path.join(isolatedRoot, "node_modules", "@batonfx", "repl"))).toBe(false)
+        const installed = yield* verifyInstalledBatonPackages({ isolatedRoot, version, packedPackages })
+        expect(installed.map(({ name }) => name)).toEqual(batonPackages.map((name) => `@batonfx/${name}`))
+        for (const item of installed)
+          expect(item.directory).toBe(yield* fileSystem.realPath(installedDirectories.get(item.name)!))
+      }),
+    ),
+  )
 
   test.effect("provisions the exact proven host archive for install-local", () =>
     Effect.scoped(

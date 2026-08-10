@@ -5,6 +5,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Command, Flag } from "effect/unstable/cli"
 import { archiveName } from "../packaging/release-archive"
 import { isPackageTarget, type PackageTarget } from "../packaging/package-target-contract"
+import { directoryDigest } from "../upstream/upstream-content-digest"
 
 export const batonReleasePackages = [
   "a2a",
@@ -165,6 +166,77 @@ const run = Effect.fn("LocalBatonSmoke.run")(function* (
 
 const sha256 = (bytes: Uint8Array): string => new Bun.CryptoHasher("sha256").update(bytes).digest("hex")
 
+export type PackedBatonPackage = {
+  readonly manifest: string
+  readonly directoryDigest: string
+}
+
+export type InstalledBatonPackage = {
+  readonly name: string
+  readonly directory: string
+}
+
+export const verifyInstalledBatonPackages = Effect.fn("LocalBatonSmoke.verifyInstalledBatonPackages")(
+  function* (input: {
+    readonly isolatedRoot: string
+    readonly version: string
+    readonly packedPackages: ReadonlyMap<string, PackedBatonPackage>
+  }) {
+    const fileSystem = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const isolatedRealPath = yield* fileSystem.realPath(input.isolatedRoot)
+    const nodeModules = path.join(input.isolatedRoot, "node_modules")
+    const store = path.join(nodeModules, ".bun")
+    const storeEntries = (yield* fileSystem.exists(store))
+      ? yield* fileSystem.readDirectory(store, { recursive: true })
+      : []
+    const installed: Array<InstalledBatonPackage> = []
+
+    for (const packageName of batonPackages) {
+      const name = `@batonfx/${packageName}`
+      const rootDirectory = path.join(nodeModules, "@batonfx", packageName)
+      const manifestSuffix = `node_modules/@batonfx/${packageName}/package.json`
+      const candidates = (yield* fileSystem.exists(rootDirectory))
+        ? [rootDirectory]
+        : storeEntries
+            .filter((entry) => entry.replaceAll("\\", "/").endsWith(manifestSuffix))
+            .map((entry) => path.dirname(path.join(store, entry)))
+      const expected = input.packedPackages.get(name)
+      if (expected === undefined)
+        return yield* failure("verify isolated install", `Missing packed package evidence for ${name}`)
+      const matchingDirectories = new Set<string>()
+      for (const candidate of candidates) {
+        const installedRealPath = yield* fileSystem.realPath(candidate)
+        if (!installedRealPath.startsWith(`${isolatedRealPath}${path.sep}`))
+          return yield* failure(
+            "verify isolated install",
+            `${name} escaped the isolated consumer: ${installedRealPath}`,
+          )
+        const installedManifest = yield* fileSystem.readFileString(path.join(candidate, "package.json"))
+        const manifest = (yield* Schema.decodeUnknownEffect(UnknownJson)(installedManifest)) as {
+          readonly name?: string
+          readonly version?: string
+        }
+        if (
+          manifest.name === name &&
+          manifest.version === input.version &&
+          installedManifest.trim() === expected.manifest &&
+          (yield* directoryDigest(candidate)) === expected.directoryDigest
+        )
+          matchingDirectories.add(installedRealPath)
+      }
+      if (matchingDirectories.size !== 1)
+        return yield* failure(
+          "verify isolated install",
+          `Expected exactly one installed ${name}@${input.version} matching the packed package; found ${matchingDirectories.size}`,
+        )
+      installed.push({ name, directory: [...matchingDirectories][0]! })
+    }
+
+    return installed
+  },
+)
+
 export const provisionProvenHostArchive = Effect.fn("LocalBatonSmoke.provisionProvenHostArchive")(function* (input: {
   readonly sourceRoot: string
   readonly isolatedRoot: string
@@ -242,7 +314,8 @@ const program = (options: { readonly batonRelease: string; readonly target?: str
           )
       }
 
-      const packedManifests = new Map<string, string>()
+      const packedPackages = new Map<string, PackedBatonPackage>()
+      const packedPackageRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-local-baton-packages-" })
       for (const packageName of batonPackages) {
         const name = `@batonfx/${packageName}`
         const filename = batonTarballName(packageName, version)
@@ -265,11 +338,16 @@ const program = (options: { readonly batonRelease: string; readonly target?: str
             "validate Baton tarball",
             `${filename} has identity ${manifest.name}@${manifest.version}`,
           )
-        packedManifests.set(name, manifestText.trim())
+        const extractedRoot = path.join(packedPackageRoot, packageName)
+        yield* fileSystem.makeDirectory(extractedRoot, { recursive: true })
+        yield* run("tar", ["-xzf", tarball, "-C", extractedRoot], root)
+        packedPackages.set(name, {
+          manifest: manifestText.trim(),
+          directoryDigest: yield* directoryDigest(path.join(extractedRoot, "package")),
+        })
       }
 
       const temporary = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-local-baton-smoke-" })
-      const temporaryRealPath = yield* fileSystem.realPath(temporary)
       const files = (yield* run("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], root))
         .split("\0")
         .filter((file) => file.length > 0)
@@ -310,23 +388,19 @@ const program = (options: { readonly batonRelease: string; readonly target?: str
       if (localLock.includes("npmjs.org/@batonfx"))
         return yield* failure("verify isolated install", "Local consumer resolved a Baton package from npm")
       for (const packageName of batonPackages) {
-        const name = `@batonfx/${packageName}`
         const filename = batonTarballName(packageName, version)
         if (!localLock.includes(filename))
           return yield* failure("verify isolated install", `Local lock does not name ${filename}`)
-        const installedDirectory = path.join(temporary, "node_modules", "@batonfx", packageName)
-        const installedRealPath = yield* fileSystem.realPath(installedDirectory)
-        if (!installedRealPath.startsWith(`${temporaryRealPath}${path.sep}`))
-          return yield* failure(
-            "verify isolated install",
-            `${name} escaped the isolated consumer: ${installedRealPath}`,
-          )
-        const installedManifest = (yield* fileSystem.readFileString(
-          path.join(installedDirectory, "package.json"),
-        )).trim()
-        if (installedManifest !== packedManifests.get(name))
-          return yield* failure("verify isolated install", `${name} is not the exact manifest from ${filename}`)
-        yield* Effect.log(`Verified ${name}@${version} from ${filename} at ${installedRealPath}`)
+      }
+      const installedPackages = yield* verifyInstalledBatonPackages({
+        isolatedRoot: temporary,
+        version,
+        packedPackages,
+      })
+      for (const installed of installedPackages) {
+        const packageName = installed.name.slice("@batonfx/".length) as BatonPackage
+        const filename = batonTarballName(packageName, version)
+        yield* Effect.log(`Verified ${installed.name}@${version} from ${filename} at ${installed.directory}`)
       }
 
       for (const consumer of ["packages/baton-execution", "packages/extensions"])
