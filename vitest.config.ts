@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { defineConfig } from "vitest/config"
+import { CompletionReporter } from "./test/support/vitest-run-completeness-reporter"
 
 export default defineConfig({
   resolve: {
@@ -21,6 +22,7 @@ export default defineConfig({
     },
   ],
   test: {
+    reporters: ["default", new CompletionReporter()],
     projects: [
       {
         extends: true,
