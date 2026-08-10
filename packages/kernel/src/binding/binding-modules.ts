@@ -176,6 +176,7 @@ export const cellInstructions = (options: Options): string =>
     "The value of a cell's last expression comes back to you. Printing costs a separate channel and",
     "is truncated, so end a cell with what you want to read.",
     "",
+    "A page limit is bounded; a refused call names the bound and what it got, so read the message.",
     "A harness write takes baseSnapshot from (await rika.harness.snapshot({ scope })).snapshotId, read",
     "in the same cell. A stale one is refused, because it is what makes a concurrent write observable.",
     "",
