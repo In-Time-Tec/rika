@@ -79,7 +79,9 @@ export const layer = (
       const workerFileSystem = yield* FileSystem.FileSystem
       const workerPath = yield* Path.Path
       const shippedDirectory = workerPath.dirname(process.execPath)
-      const packaged = !(yield* workerFileSystem.exists(KernelComposition.defaultWorkerModule).pipe(Effect.orDie))
+      const packaged = !(yield* workerFileSystem
+        .exists(KernelComposition.defaultWorkerModules.worker)
+        .pipe(Effect.orDie))
       const binaries = KernelComposition.kernelBinaries({
         resolvedWorkerExists: !packaged,
         executableDirectory: shippedDirectory,

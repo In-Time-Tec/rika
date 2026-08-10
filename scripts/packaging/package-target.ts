@@ -1,4 +1,4 @@
-import { defaultWorkerModule, defaultWorkerSupportModules } from "@rika/kernel/kernel-composition"
+import { defaultWorkerModules } from "@rika/kernel/kernel-composition"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Data, Effect, FileSystem, Layer, Path, Schema } from "effect"
@@ -119,9 +119,9 @@ const program = Effect.gen(function* () {
              * A kernel is spawned as a file, and a compiled executable has no file for the module it
              * was built from, so the worker ships beside the binaries that spawn it.
              */
-            yield* fileSystem.copyFile(defaultWorkerModule, path.join(bin, ".rika-kernel-worker.js"))
+            yield* fileSystem.copyFile(defaultWorkerModules.worker, path.join(bin, ".rika-kernel-worker.js"))
             yield* Effect.forEach(
-              defaultWorkerSupportModules,
+              defaultWorkerModules.support,
               (module) => fileSystem.copyFile(module, path.join(bin, path.basename(module))),
               { concurrency: "unbounded", discard: true },
             )
