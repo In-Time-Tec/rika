@@ -72,3 +72,16 @@ it("names the tag that tells one shape of an argument from another", () => {
   expect(threads).toContain('mode: "relevant"')
   expect(threads).toContain('mode: "subtree"')
 })
+
+it("shows an example whose fields the surface actually has", () => {
+  // An example is the first thing a model copies, so a field it invents is a defect that costs a
+  // turn. `search` returns { text, truncated }, and an earlier draft of this example read `matches`.
+  const instructions = cellInstructions({
+    workspace: "/w",
+    workspaceDigest: "",
+    trustMode: "trusted-local",
+    servers: [],
+  } as never)
+  expect(instructions).toContain("found.text")
+  expect(instructions).not.toContain("found.matches")
+})
