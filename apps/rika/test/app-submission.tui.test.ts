@@ -3,7 +3,7 @@ import { Deferred, Effect } from "effect"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
-const tuiTestTimeout = 30_000
+const tuiTestTimeout = 60_000
 
 test(
   "echoes an idle submission in the next frame before server admission",

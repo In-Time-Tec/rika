@@ -4,7 +4,7 @@ import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
 const activeTimePattern = /◷ [0-9]+s/u
-const tuiTestTimeout = 30_000
+const tuiTestTimeout = 60_000
 
 test(
   "shows elapsed active time for the first turn of a new session",

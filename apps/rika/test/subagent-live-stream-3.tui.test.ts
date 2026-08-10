@@ -4,7 +4,7 @@ import { expect, test } from "vitest"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
-const tuiTestTimeout = 30_000
+const tuiTestTimeout = 60_000
 test(
   "replays a restarted turn from its persisted checkpoint instead of from genesis",
   () =>

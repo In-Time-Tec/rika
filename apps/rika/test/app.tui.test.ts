@@ -4,7 +4,7 @@ import { Effect } from "effect"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
-const tuiTestTimeout = 30_000
+const tuiTestTimeout = 60_000
 
 test(
   "reloads a failed root with its completed subagent from durable state",

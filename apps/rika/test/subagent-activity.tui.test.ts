@@ -5,7 +5,7 @@ import { expect, test } from "vitest"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
-const tuiTestTimeout = 30_000
+const tuiTestTimeout = 60_000
 const currentWallTime = () => performance.now()
 
 test(

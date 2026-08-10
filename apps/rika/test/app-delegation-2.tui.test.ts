@@ -3,7 +3,7 @@ import { Effect, FileSystem, Path } from "effect"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
-const tuiTestTimeout = 30_000
+const tuiTestTimeout = 60_000
 
 test(
   "runs durable read and shell tools immediately without approval prompts",

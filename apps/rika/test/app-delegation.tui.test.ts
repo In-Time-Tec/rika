@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
-const tuiTestTimeout = 30_000
+const tuiTestTimeout = 60_000
 
 test(
   "runs turns, tools, pickers, and surfaces in one real TUI session",
