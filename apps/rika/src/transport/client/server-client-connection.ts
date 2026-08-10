@@ -11,6 +11,7 @@ import * as Thread from "@rika/product/thread-record"
 import { Context, Crypto, Deferred, Effect, Exit, Layer, Queue, Ref, Schema, Scope, Semaphore } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 import { makeClientMessageWriter, makePhysicalFeed, traceInteractiveEvent } from "./server-client-feed"
+import { makeOutbound } from "./server-client-outbound"
 import type { ClientRequest, PhysicalFeed } from "./server-client-feed"
 import { makeInteractiveSession } from "./server-client-session"
 import { serverSocketFailure } from "./server-client-reconnect"
@@ -62,16 +63,16 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
     connectionScope,
   )
   const rawWriter = yield* Scope.provide(socket.writer, connectionScope)
-  const outbound = yield* Queue.bounded<string | Socket.CloseEvent>(defaultOutboundCapacity)
+  const outbound = yield* makeOutbound({ capacity: defaultOutboundCapacity, rawWriter })
   const closing = yield* Deferred.make<void>()
   const closed = yield* Deferred.make<void>()
-  const writer = (frame: string | Socket.CloseEvent) =>
+  const enqueue = (frame: string | Socket.CloseEvent, express: boolean) =>
     Deferred.isDone(closing).pipe(
       Effect.flatMap((isClosing) => {
         if (isClosing) return Effect.fail(transportError("Server connection is closing"))
         if (typeof frame === "string" && new TextEncoder().encode(frame).byteLength > maxFrameBytes)
           return Effect.fail(transportError("Server frame exceeds maximum size"))
-        return Queue.offer(outbound, frame).pipe(
+        return (express ? outbound.writeExpress(frame) : outbound.write(frame)).pipe(
           Effect.timeoutOrElse({
             duration: "1 second",
             orElse: () => Effect.fail(transportError("Server outbound queue is overloaded")),
@@ -80,7 +81,9 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
         )
       }),
     )
-  yield* Effect.forkIn(Effect.forever(Queue.take(outbound).pipe(Effect.flatMap(rawWriter))), connectionScope)
+  const writer = (frame: string | Socket.CloseEvent) => enqueue(frame, false)
+  const expressWriter = (frame: string | Socket.CloseEvent) => enqueue(frame, true)
+  yield* Effect.forkIn(outbound.run, connectionScope)
   const accepted = yield* Deferred.make<ServerHandshake.HandshakeAccepted>()
   let acceptedConnectionId: string | undefined
   const clientNonce = yield* crypto.randomUUIDv4
@@ -269,7 +272,7 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
                         const sequence = nextCommandSequence
                         nextCommandSequence += 1
                         request.commands.set(sequence, done)
-                        yield* Effect.forEach(frames, write, { discard: true }).pipe(
+                        yield* Effect.forEach(frames, expressWriter, { discard: true }).pipe(
                           Effect.mapError((error) => unavailable(error.message)),
                         )
                         return sequence
@@ -376,7 +379,10 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
   )
   const whileConnected = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.raceFirst(effect, disconnected)
   const sendBestEffort = (frame: string | Socket.CloseEvent) =>
-    writer(frame).pipe(Effect.timeoutOrElse({ duration: "250 millis", orElse: () => Effect.void }), Effect.ignore)
+    expressWriter(frame).pipe(
+      Effect.timeoutOrElse({ duration: "250 millis", orElse: () => Effect.void }),
+      Effect.ignore,
+    )
   const response = yield* Effect.raceFirst(Deferred.await(accepted), disconnected).pipe(
     Effect.timeoutOrElse({
       duration: "2 seconds",
