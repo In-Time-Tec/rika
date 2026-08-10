@@ -17,6 +17,7 @@ const Read = Schema.Struct({
 const Searched = Schema.Struct({
   text: Schema.String,
   matches: Schema.Array(CodingToolResult.WorkspaceSearchMatch),
+  matchesTruncation: Schema.optionalKey(CodingToolResult.WorkspaceSearchMatchesTruncation),
   truncated: Schema.Boolean,
 })
 
@@ -61,6 +62,7 @@ const read = (result: CodingToolResult.Result) => ({ text: result.text, truncate
 const searched = (result: CodingToolResult.Result) => ({
   text: result.text,
   matches: result.matches ?? [],
+  ...(result.matchesTruncation === undefined ? {} : { matchesTruncation: result.matchesTruncation }),
   truncated: result.truncated,
 })
 

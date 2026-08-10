@@ -127,7 +127,10 @@ const boundResult = (request: Request, result: Result): Result => {
   const recovery = outputRecovery(request)
   if (result.matches !== undefined) {
     const boundedText = RuntimeFilesystem.boundedText<Result>(result.text, Math.floor(limit / 2), recovery)
-    let remaining = Math.max(0, limit - RuntimeFilesystem.byteLength(boundedText.text))
+    const markerBudget = RuntimeFilesystem.byteLength(
+      `[structured matches truncated: kept ${result.matches.length} of ${result.matches.length} — ${recovery}]\n`,
+    )
+    let remaining = Math.max(0, limit - RuntimeFilesystem.byteLength(boundedText.text) - markerBudget)
     const matches: Array<CodingToolResult.WorkspaceSearchMatch> = []
     for (const match of result.matches) {
       const matchBytes = RuntimeFilesystem.byteLength(match.path) + RuntimeFilesystem.byteLength(match.text) + 16
@@ -135,7 +138,19 @@ const boundResult = (request: Request, result: Result): Result => {
       matches.push(match)
       remaining -= matchBytes
     }
-    return { ...result, text: boundedText.text, matches, truncated: true }
+    const matchesTruncation =
+      matches.length < result.matches.length ? { kept: matches.length, total: result.matches.length } : undefined
+    const marker =
+      matchesTruncation === undefined
+        ? ""
+        : `\n[structured matches truncated: kept ${matchesTruncation.kept} of ${matchesTruncation.total} — ${recovery}]`
+    return {
+      ...result,
+      text: `${boundedText.text}${marker}`,
+      matches,
+      ...(matchesTruncation === undefined ? {} : { matchesTruncation }),
+      truncated: true,
+    }
   }
   const longestMarker = `[truncated: kept first ${totalBytes} of ${totalBytes} bytes — ${recovery}]`
   let remaining = Math.max(0, limit - RuntimeFilesystem.byteLength(longestMarker) - 1)

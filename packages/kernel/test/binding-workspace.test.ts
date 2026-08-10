@@ -51,7 +51,8 @@ describe("workspace binding", () => {
           return Effect.succeed({
             text: "src/a.ts:4:matched",
             matches: [{ path: "src/a.ts", line: 4, text: "matched" }],
-            truncated: false,
+            matchesTruncation: { kept: 1, total: 4 },
+            truncated: true,
           })
         },
       })
@@ -74,7 +75,8 @@ describe("workspace binding", () => {
         output: {
           text: "src/a.ts:4:matched",
           matches: [{ path: "src/a.ts", line: 4, text: "matched" }],
-          truncated: false,
+          matchesTruncation: { kept: 1, total: 4 },
+          truncated: true,
         },
       })
     }),

@@ -378,7 +378,6 @@ describe("Runtime", () => {
         (_, index) => `src/file-${index}.ts:${index + 1}:HEAD-${"x".repeat(30)}-${index}`,
       ).join("\n")
       expect(result.truncated).toBe(true)
-      expect(bytesOf(result.text)).toBeLessThanOrEqual(8_192)
       expect(
         bytesOf(result.text) +
           result.matches!.reduce((total, match) => total + bytesOf(match.path) + bytesOf(match.text) + 16, 0),
@@ -390,6 +389,8 @@ describe("Runtime", () => {
       expect(result.text.match(/\[truncated:/g)).toHaveLength(1)
       expect(result.matches!.length).toBeGreaterThan(0)
       expect(result.matches!.length).toBeLessThan(800)
+      expect(result.matchesTruncation).toEqual({ kept: result.matches!.length, total: 800 })
+      expect(result.text).toContain(`structured matches truncated: kept ${result.matches!.length} of 800`)
       for (const [index, match] of result.matches!.entries())
         expect(match).toEqual({
           path: `src/file-${index}.ts`,

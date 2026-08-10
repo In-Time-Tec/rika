@@ -26,6 +26,11 @@ export const WorkspaceSearchMatch = Schema.Struct({
   text: Schema.String,
 })
 
+export const WorkspaceSearchMatchesTruncation = Schema.Struct({
+  kept: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+})
+
 export const WorkspaceListEntry: Schema.Codec<WorkspaceListEntry> = Schema.Union([
   Schema.Struct({ name: Schema.String, kind: Schema.Literal("file") }),
   Schema.Struct({
@@ -42,6 +47,7 @@ export const Result = Schema.Struct({
   truncated: Schema.Boolean,
   entries: Schema.optionalKey(Schema.Array(WorkspaceListEntry)),
   matches: Schema.optionalKey(Schema.Array(WorkspaceSearchMatch)),
+  matchesTruncation: Schema.optionalKey(WorkspaceSearchMatchesTruncation),
   running: Schema.optionalKey(Schema.Boolean),
   processId: Schema.optionalKey(Schema.String),
   exitCode: Schema.optionalKey(Schema.Finite),
