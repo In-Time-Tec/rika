@@ -1,4 +1,5 @@
 import {
+  Clock,
   Context,
   Data,
   Deferred,
@@ -10,6 +11,7 @@ import {
   PlatformError,
   Ref,
   Scope,
+  Semaphore,
   Stream,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -21,6 +23,7 @@ interface Output {
   readonly stderr: string
   readonly running: boolean
   readonly exitCode?: number
+  readonly elapsedMillis: number
   readonly truncated: boolean
 }
 
@@ -28,7 +31,11 @@ interface Entry {
   readonly process: ChildProcessSpawner.ChildProcessHandle
   readonly output: Ref.Ref<PendingOutput>
   readonly exit: Deferred.Deferred<number>
+  readonly startedAtNanos: bigint
+  readonly admission: Semaphore.Semaphore
 }
+
+type EntryState = { readonly _tag: "Active"; readonly entry: Entry } | { readonly _tag: "Consumed" }
 
 interface BoundedText {
   readonly text: string
@@ -83,13 +90,19 @@ export const collectBoundedText: {
 
 export class ProcessNotFound extends Data.TaggedError("ProcessNotFound")<{ readonly message: string }> {}
 
+export class ProcessOutputConsumed extends Data.TaggedError("ProcessOutputConsumed")<{ readonly message: string }> {}
+
 export interface Interface {
   readonly start: (
     command: string,
     args: ReadonlyArray<string>,
     cwd: string,
   ) => Effect.Effect<string, PlatformError.PlatformError>
-  readonly poll: (processId: string, waitMillis: number, outputLimit: number) => Effect.Effect<Output, ProcessNotFound>
+  readonly poll: (
+    processId: string,
+    waitMillis: number,
+    outputLimit: number,
+  ) => Effect.Effect<Output, ProcessNotFound | ProcessOutputConsumed>
   readonly cancel: (processId: string) => Effect.Effect<void, ProcessNotFound | PlatformError.PlatformError>
 }
 
@@ -102,14 +115,17 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const scope = yield* Scope.Scope
-    const entries = yield* Ref.make(new Map<string, Entry>())
+    const entries = yield* Ref.make(new Map<string, EntryState>())
     let nextId = 1
     yield* Effect.addFinalizer(() =>
       Ref.get(entries).pipe(
         Effect.flatMap((current) =>
           Effect.forEach(
             current.values(),
-            (entry) => entry.process.kill({ killSignal: "SIGTERM", forceKillAfter: "100 millis" }).pipe(Effect.ignore),
+            (state) =>
+              state._tag === "Active"
+                ? state.entry.process.kill({ killSignal: "SIGTERM", forceKillAfter: "100 millis" }).pipe(Effect.ignore)
+                : Effect.void,
             { concurrency: "unbounded", discard: true },
           ),
         ),
@@ -128,8 +144,11 @@ export const layer = Layer.effect(
           truncated: false,
         })
         const exit = yield* Deferred.make<number>()
+        const startedAtNanos = yield* Clock.currentTimeNanos
+        const admission = yield* Semaphore.make(1)
         const processId = String(nextId++)
-        yield* Ref.update(entries, (current) => new Map(current).set(processId, { process: handle, output, exit }))
+        const entry = { process: handle, output, exit, startedAtNanos, admission }
+        yield* Ref.update(entries, (current) => new Map(current).set(processId, { _tag: "Active", entry }))
         yield* Effect.forkIn(
           Effect.gen(function* () {
             const stdoutDecoder = new TextDecoder()
@@ -161,49 +180,67 @@ export const layer = Layer.effect(
         return processId
       }),
       poll: Effect.fn("ProcessRegistry.poll")(function* (processId, waitMillis, outputLimit) {
-        const entry = (yield* Ref.get(entries)).get(processId)
-        if (entry === undefined) return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
-        if (waitMillis > 0)
-          yield* Deferred.await(entry.exit).pipe(Effect.timeout(`${waitMillis} millis`), Effect.ignore)
-        const pendingExit = yield* Deferred.poll(entry.exit)
-        const exit = Option.isSome(pendingExit) ? Option.some(yield* pendingExit.value) : Option.none<number>()
-        const output = yield* Ref.getAndSet(entry.output, {
-          stdout: "",
-          stderr: "",
-          stdoutBytes: 0,
-          stderrBytes: 0,
-          truncated: false,
-        })
-        const combined = `${output.stdout}${output.stderr}`
-        const totalBytes = output.stdoutBytes + output.stderrBytes
-        const bounded = RuntimeFilesystem.boundedText<BoundedText>(
-          combined,
-          outputLimit,
-          "page or narrow the command",
-          totalBytes,
-        )
-        const capacityTruncated = bounded.truncated
-        const text = bounded.text
-        const result = {
-          processId,
-          stdout: capacityTruncated ? text : output.stdout,
-          stderr: capacityTruncated ? "" : output.stderr,
-          running: Option.isNone(exit),
-          ...(Option.isSome(exit) ? { exitCode: exit.value } : {}),
-          truncated: output.truncated || capacityTruncated,
-        }
-        if (Option.isSome(exit))
-          yield* Ref.update(entries, (current) => {
-            const next = new Map(current)
-            next.delete(processId)
-            return next
+        const initial = (yield* Ref.get(entries)).get(processId)
+        if (initial === undefined) return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
+        if (initial._tag === "Consumed")
+          return yield* new ProcessOutputConsumed({
+            message: `Process output already consumed for id: ${processId}`,
           })
-        return result
+        const entry = initial.entry
+        return yield* entry.admission.withPermits(1)(
+          Effect.gen(function* () {
+            const current = (yield* Ref.get(entries)).get(processId)
+            if (current === undefined)
+              return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
+            if (current._tag === "Consumed")
+              return yield* new ProcessOutputConsumed({
+                message: `Process output already consumed for id: ${processId}`,
+              })
+            if (waitMillis > 0)
+              yield* Deferred.await(entry.exit).pipe(Effect.timeout(`${waitMillis} millis`), Effect.ignore)
+            const pendingExit = yield* Deferred.poll(entry.exit)
+            const exit = Option.isSome(pendingExit) ? Option.some(yield* pendingExit.value) : Option.none<number>()
+            const output = yield* Ref.getAndSet(entry.output, {
+              stdout: "",
+              stderr: "",
+              stdoutBytes: 0,
+              stderrBytes: 0,
+              truncated: false,
+            })
+            const combined = `${output.stdout}${output.stderr}`
+            const totalBytes = output.stdoutBytes + output.stderrBytes
+            const bounded = RuntimeFilesystem.boundedText<BoundedText>(
+              combined,
+              outputLimit,
+              "page or narrow the command",
+              totalBytes,
+            )
+            const capacityTruncated = bounded.truncated
+            const elapsedMillis = Math.max(
+              0,
+              Number(((yield* Clock.currentTimeNanos) - entry.startedAtNanos) / 1_000_000n),
+            )
+            const result = {
+              processId,
+              stdout: capacityTruncated ? bounded.text : output.stdout,
+              stderr: capacityTruncated ? "" : output.stderr,
+              running: Option.isNone(exit),
+              ...(Option.isSome(exit) ? { exitCode: exit.value } : {}),
+              elapsedMillis,
+              truncated: output.truncated || capacityTruncated,
+            }
+            if (Option.isSome(exit))
+              yield* Ref.update(entries, (states) => new Map(states).set(processId, { _tag: "Consumed" }))
+            return result
+          }),
+        )
       }),
       cancel: Effect.fn("ProcessRegistry.cancel")(function* (processId) {
-        const entry = (yield* Ref.get(entries)).get(processId)
-        if (entry === undefined) return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
-        yield* entry.process.kill({ killSignal: "SIGTERM", forceKillAfter: "100 millis" })
+        const state = (yield* Ref.get(entries)).get(processId)
+        if (state === undefined) return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
+        if (state._tag === "Consumed")
+          return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
+        yield* state.entry.process.kill({ killSignal: "SIGTERM", forceKillAfter: "100 millis" })
         yield* Ref.update(entries, (current) => {
           const next = new Map(current)
           next.delete(processId)

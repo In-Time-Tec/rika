@@ -4,6 +4,8 @@ import * as LocalSafetyPolicy from "../policy/local-safety-policy"
 import * as WebSearchService from "../web-research/web-search-service"
 import * as ReadWebPageService from "../web-research/read-web-page-service"
 import * as ProcessRegistry from "../process/shell-process-registry"
+import * as Bash from "../process/bash-tool"
+import * as ShellStatus from "../process/shell-command-status-tool"
 import * as MediaView from "../media/media-view-service"
 import { RuntimeFilesystem } from "./coding-tool-runtime-filesystem"
 import * as WorkspaceIndex from "../workspace/workspace-file-search"
@@ -324,7 +326,7 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
                 const output = yield* processes
                   .poll(
                     processId,
-                    Math.min(Math.max(0, request.timeoutMillis ?? 10_000), 60_000),
+                    Math.min(Math.max(0, request.timeoutMillis ?? 10_000), Bash.initialWaitMaximumMillis),
                     contract(request).outputLimit,
                   )
                   .pipe(
@@ -355,7 +357,7 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
               case "ShellCommandStatus": {
                 const output = yield* processes.poll(
                   request.processId,
-                  Math.min(Math.max(0, request.waitMillis ?? 0), 10_000),
+                  Math.min(Math.max(0, request.waitMillis ?? 0), ShellStatus.statusWaitMaximumMillis),
                   contract(request).outputLimit,
                 )
                 const { stderr, stdout, ...status } = output

@@ -83,8 +83,43 @@ describe("ProcessRegistry", () => {
         expect(first).toMatchObject({ stdout: "first", stderr: "", running: true, truncated: false })
         expect(drained).toMatchObject({ stdout: "", stderr: "", running: true, truncated: false })
         expect(completed).toMatchObject({ stdout: "", stderr: "second", running: false, exitCode: 7 })
-        expect(retired).toMatchObject({ _tag: "Failure", failure: { _tag: "ProcessNotFound" } })
+        expect(retired).toMatchObject({
+          _tag: "Failure",
+          failure: {
+            _tag: "ProcessOutputConsumed",
+            message: `Process output already consumed for id: ${processId}`,
+          },
+        })
         expect(unknown).toMatchObject({ _tag: "Failure", failure: { _tag: "ProcessNotFound" } })
+      }).pipe(provide(ProcessRegistry.layer.pipe(Layer.provide(spawner.layer)))),
+    )
+  })
+
+  it.effect("keeps fast completion output readable once before reporting it consumed", () => {
+    const spawner = controlledSpawner([])
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* ProcessRegistry.Service
+        const processId = yield* registry.start("fast", [], "/workspace")
+        const process = spawner.spawned[0]!
+        yield* Queue.offer(process.stdout, bytes("completed immediately"))
+        yield* Effect.yieldNow
+        yield* finish(process)
+        yield* Effect.yieldNow
+
+        const completed = yield* registry.poll(processId, 0, 100)
+        const consumed = yield* Effect.result(registry.poll(processId, 0, 100))
+
+        expect(completed).toMatchObject({
+          processId,
+          stdout: "completed immediately",
+          running: false,
+          exitCode: 0,
+        })
+        expect(consumed).toMatchObject({
+          _tag: "Failure",
+          failure: { _tag: "ProcessOutputConsumed" },
+        })
       }).pipe(provide(ProcessRegistry.layer.pipe(Layer.provide(spawner.layer)))),
     )
   })
@@ -115,6 +150,8 @@ describe("ProcessRegistry", () => {
       Effect.gen(function* () {
         const registry = yield* ProcessRegistry.Service
         const processId = yield* registry.start("slow", [], "/workspace")
+        yield* Queue.offer(spawner.spawned[0]!.stdout, bytes("still working"))
+        yield* Effect.yieldNow
         const completed = yield* Deferred.make<void>()
         const fiber = yield* Effect.forkChild(
           registry.poll(processId, 500, 100).pipe(Effect.tap(() => Deferred.succeed(completed, undefined))),
@@ -122,7 +159,12 @@ describe("ProcessRegistry", () => {
         yield* TestClock.adjust("499 millis")
         expect((yield* Deferred.poll(completed))._tag).toBe("None")
         yield* TestClock.adjust("1 millis")
-        expect(yield* Fiber.join(fiber)).toMatchObject({ processId, running: true })
+        expect(yield* Fiber.join(fiber)).toMatchObject({
+          processId,
+          stdout: "still working",
+          running: true,
+          elapsedMillis: 500,
+        })
       }).pipe(provide(ProcessRegistry.layer.pipe(Layer.provide(spawner.layer)))),
     )
   })

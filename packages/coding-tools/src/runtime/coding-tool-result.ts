@@ -32,6 +32,7 @@ export const Result = Schema.Struct({
   running: Schema.optionalKey(Schema.Boolean),
   processId: Schema.optionalKey(Schema.String),
   exitCode: Schema.optionalKey(Schema.Finite),
+  elapsedMillis: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
   stdout: Schema.optionalKey(Schema.String),
   stderr: Schema.optionalKey(Schema.String),
   diff: Schema.optionalKey(Schema.String),

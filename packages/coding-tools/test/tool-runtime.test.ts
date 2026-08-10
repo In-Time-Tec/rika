@@ -493,7 +493,13 @@ describe("Runtime", () => {
       expect(multibyte.text.match(/\[truncated:/g)).toHaveLength(1)
       expect(multibyte.truncated).toBe(true)
       expect(running.running).toBe(true)
-      expect(completed).toMatchObject({ _tag: "ToolError", tool: "shell_command_status" })
+      expect(completed).toMatchObject({
+        _tag: "ToolError",
+        tool: "shell_command_status",
+        category: "conflict",
+        recovery: "never",
+      })
+      expect(completed.message).toContain("Process output already consumed")
       expect(failedStream).toMatchObject({ running: false, exitCode: 0, truncated: true })
       expect(bytesOf(unicodeBoundary.text)).toBe(16_384)
       expect(unicodeBoundary.text).toContain("of 40003 bytes")
