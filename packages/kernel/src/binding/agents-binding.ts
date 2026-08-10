@@ -33,9 +33,12 @@ const terminalStatuses: ReadonlySet<typeof ChildInspection.Type.status> = new Se
 
 const JoinInput = Schema.Struct({
   childRunIds: Schema.Array(Schema.String.check(Schema.isNonEmpty())).check(Schema.isMaxLength(64)),
-  waitMillis: Schema.optionalKey(
-    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(maxWaitMillis)),
-  ),
+  /**
+   * How long the caller is willing to look, clamped rather than refused. A parent waiting on work
+   * that runs for minutes asks for minutes, and rejecting that taught a model only that its call was
+   * malformed — the clamp below already made a larger number safe.
+   */
+  waitMillis: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 })
 const CancelInput = Schema.Struct({
   childRunId: Schema.String.check(Schema.isNonEmpty()),

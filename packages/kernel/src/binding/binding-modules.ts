@@ -1,6 +1,7 @@
 import { KernelProfile, type HostBindingRegistry } from "@batonfx/repl"
 import type { BindingRequirements, Options } from "./binding-requirements"
 import * as AgentsBinding from "./agents-binding"
+import * as KernelProfileRegistration from "../kernel-profile-registration"
 import * as ArtifactsBinding from "./artifacts-binding"
 import * as ContextBinding from "./context-binding"
 import * as EditsBinding from "./edits-binding"
@@ -164,6 +165,8 @@ const surface = (options: Options): string => surfaceOf(make(options))
 export const cellInstructions = (options: Options): string =>
   [
     "You have exactly one tool, named typescript. It runs a cell in a persistent Bun kernel.",
+    `A cell is stopped after ${KernelProfileRegistration.defaultLimits.cellDeadlineMillis / 1_000}s, and a wait inside one is capped at ${AgentsBinding.maxWaitMillis / 1_000}s, so long`,
+    "work belongs in a subagent you inspect across turns rather than in one cell that sleeps.",
     "The kernel exposes a `rika` object your cell code can await. It is not a tool; the only tool",
     "name that exists is typescript. Example cell body:",
     "",

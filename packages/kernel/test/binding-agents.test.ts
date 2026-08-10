@@ -198,23 +198,19 @@ describe("agents binding", () => {
     }),
   )
 
-  it.effect("refuses a wait longer than the host ceiling instead of silently clamping it", () =>
+  it.effect("clamps a wait longer than the host ceiling rather than refusing the call", () =>
     Effect.gen(function* () {
-      const mounted = yield* registry()
-      // A bound the schema rejects never reaches the handler, so it fails the call rather than
-      // returning an outcome: a cell that asks for more than the host allows is told so.
-      const refused = yield* Effect.flip(
-        mounted.invoke({
-          module: "agents",
-          operation: "inspectAll",
-          input: { childRunIds: ["a"], waitMillis: AgentsBinding.maxWaitMillis + 1 },
-        }),
+      // A parent waiting on work that runs for minutes asks for minutes. Refusing taught a model
+      // only that its call was malformed, so it fell back to polling; the ceiling still applies.
+      const mounted = yield* registry(
+        port({ inspect: (childRunId) => Effect.succeed({ childRunId, status: "succeeded" as const }) }),
       )
-      expect(refused._tag).toBe("@batonfx/repl/HostBindingSchemaFailure")
-      if (refused._tag === "@batonfx/repl/HostBindingSchemaFailure") {
-        expect(refused.stage).toBe("decode-input")
-        expect(refused.message).toContain(String(AgentsBinding.maxWaitMillis))
-      }
+      const response = yield* mounted.invoke({
+        module: "agents",
+        operation: "inspectAll",
+        input: { childRunIds: ["a"], waitMillis: AgentsBinding.maxWaitMillis * 4 },
+      })
+      expect(response._tag).toBe("Success")
     }),
   )
 
