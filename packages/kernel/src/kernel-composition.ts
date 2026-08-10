@@ -1,11 +1,14 @@
 import { KernelPool, KernelStateStore } from "@batonfx/repl"
-import { BunKernelPool, workerModule } from "@batonfx/repl/bun"
+import { BunKernelPool, workerModule, workerSupportModules } from "@batonfx/repl/bun"
 
 /**
  * Where the kernel worker lives in an ordinary install. A packaging step needs it to ship the worker
  * beside a compiled binary, and only the package that owns the worker can answer where it is.
  */
 export const defaultWorkerModule: string = workerModule
+
+/** Modules imported by the worker and required when packaging it away from `@batonfx/repl`. */
+export const defaultWorkerSupportModules: ReadonlyArray<string> = workerSupportModules
 
 /**
  * Where a kernel's worker and the runtime that runs it live, given whether the module path this

@@ -1,4 +1,4 @@
-import { defaultWorkerModule } from "@rika/kernel/kernel-composition"
+import { defaultWorkerModule, defaultWorkerSupportModules } from "@rika/kernel/kernel-composition"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Data, Effect, FileSystem, Layer, Path, Schema } from "effect"
@@ -120,6 +120,11 @@ const program = Effect.gen(function* () {
              * was built from, so the worker ships beside the binaries that spawn it.
              */
             yield* fileSystem.copyFile(defaultWorkerModule, path.join(bin, ".rika-kernel-worker.js"))
+            yield* Effect.forEach(
+              defaultWorkerSupportModules,
+              (module) => fileSystem.copyFile(module, path.join(bin, path.basename(module))),
+              { concurrency: "unbounded", discard: true },
+            )
             /**
              * The worker is a script, so something has to run it. A compiled binary cannot execute
              * another module, and a user who installed Rika has not necessarily installed Bun, so the
