@@ -6997,6 +6997,14 @@
       "kind": "source",
       "production": true,
       "publicExports": []
+    },
+    {
+      "id": "vitest.config.ts",
+      "path": "vitest.config.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
     }
   ],
   "edges": [
@@ -32721,9 +32729,39 @@
       "kind": "import",
       "relationship": "runtime",
       "production": true
+    },
+    {
+      "from": "vitest.config.ts",
+      "to": "external:fs/promises",
+      "specifier": "fs/promises",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "vitest.config.ts",
+      "to": "external:path",
+      "specifier": "path",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "vitest.config.ts",
+      "to": "external:vitest/config",
+      "specifier": "vitest/config",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "vitest.config.ts",
+      "to": "test/support/vitest-run-completeness-reporter.ts",
+      "specifier": "./test/support/vitest-run-completeness-reporter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
     }
   ],
-  "violations": [
-    "test/fixtures/vitest-worker-death/vitest.config.ts: unresolved internal or asset import ../../../vitest.config"
-  ]
+  "violations": []
 }

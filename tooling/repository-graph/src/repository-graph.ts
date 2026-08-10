@@ -89,10 +89,13 @@ const discoverFiles = Effect.fn("RepositoryGraph.discoverFiles")(function* (root
   const fileSystem = yield* FileSystem
   const path = yield* Path
   const paths = yield* Effect.all(
-    sourceRoots.flatMap((entry) => [
-      fileSystem.glob(`${entry}/**/*.{ts,tsx,prompt.txt}`, { root, exclude: ["**/node_modules/**"] }),
-      fileSystem.glob(`${entry}/**/fixtures/**/*.json`, { root, exclude: ["**/node_modules/**"] }),
-    ]),
+    [
+      fileSystem.glob(`*.{ts,tsx}`, { root, exclude: ["**/node_modules/**"] }),
+      ...sourceRoots.flatMap((entry) => [
+        fileSystem.glob(`${entry}/**/*.{ts,tsx,prompt.txt}`, { root, exclude: ["**/node_modules/**"] }),
+        fileSystem.glob(`${entry}/**/fixtures/**/*.json`, { root, exclude: ["**/node_modules/**"] }),
+      ]),
+    ],
     { concurrency: "unbounded" },
   )
   return paths

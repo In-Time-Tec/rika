@@ -11845,7 +11845,5 @@
       "production": false
     }
   ],
-  "violations": [
-    "test/fixtures/vitest-worker-death/vitest.config.ts: unresolved internal or asset import ../../../vitest.config"
-  ]
+  "violations": []
 }
