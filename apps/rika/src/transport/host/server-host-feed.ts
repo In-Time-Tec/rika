@@ -94,6 +94,7 @@ export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter
       }
       outstandingDetails += 1
     }
+    let sentBytes = 0
     const sendNew = (event: InteractiveEvent.InteractiveEvent, detail: boolean) =>
       Effect.gen(function* () {
         yield* Queue.take(sendPermits)
@@ -130,6 +131,7 @@ export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter
               "rika.server.feed.fragments": frames.length,
             }),
           )
+        sentBytes += frames.reduce((total, frame) => total + frame.length, 0)
         yield* route.sendFrames(frames)
       })
     const sender = Effect.gen(function* () {
@@ -142,6 +144,7 @@ export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter
             yield* Effect.logInfo("server.feed.detail_sent").pipe(
               Effect.annotateLogs({
                 "rika.server.feed.sent": sentDetails,
+                "rika.server.feed.bytes": sentBytes,
                 "rika.server.feed.queued": yield* Queue.size(feed),
                 "rika.server.feed.overflowed": overflow !== undefined,
               }),
