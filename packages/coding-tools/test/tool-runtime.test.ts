@@ -93,6 +93,7 @@ const testEnvironment = (
   ])
   const commands: Array<ChildProcess.StandardCommand> = []
   const killed: Array<string> = []
+  const grepCalls: Array<{ query: string; options: Parameters<WorkspaceIndex.Interface["grep"]>[1] }> = []
   const fileSystem = FileSystem.layerNoop({
     realPath: (path) => Effect.succeed(realPaths.get(path) ?? path),
     readDirectory: (path) => Effect.succeed(directories.get(path) ?? []),
@@ -165,6 +166,17 @@ const testEnvironment = (
     },
     glob: () => Effect.succeed({ items: [], scores: [], totalMatched: 0, totalFiles: files.size }),
     grep: (query, options) => {
+      grepCalls.push({ query, options })
+      if (query === "slow")
+        return Effect.succeed({
+          items: [{ relativePath: "a.txt", lineNumber: 2, lineContent: "needle" }],
+          totalMatched: 1,
+          totalFilesSearched: 1,
+          totalFiles: files.size,
+          filteredFileCount: 1,
+          nextCursor: null,
+          deadlineReached: true,
+        })
       if (options?.mode === "regex") {
         try {
           RegExp(query)
@@ -197,7 +209,7 @@ const testEnvironment = (
     Layer.provide(Layer.merge(WebSearch.testLayer(search), ReadWebPage.testLayer(read))),
     Layer.provide(analyzerTestLayer(() => Effect.succeed("analysis"))),
   )
-  return { files, directories, commands, killed, runtime }
+  return { files, directories, commands, killed, grepCalls, runtime }
 }
 
 describe("Runtime", () => {
@@ -273,6 +285,30 @@ describe("Runtime", () => {
       const failure = yield* Effect.flip(runtime.run({ _tag: "Read", path: "src" }))
       expect(failure).toMatchObject({ _tag: "ToolError", tool: "read", category: "invalid_input" })
       expect(failure.message).toContain("src is a directory")
+    }).pipe(provide(environment.runtime))
+  })
+
+  it.effect("returns partial grep matches with a deadline marker instead of an all-or-nothing timeout", () => {
+    const environment = testEnvironment()
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const partial = yield* runtime.run({ _tag: "Grep", pattern: "slow", regex: false })
+      expect(partial.text).toContain("a.txt:2:needle")
+      expect(partial.text).toContain("search stopped at 9s: 1 matches found before the deadline")
+      expect(partial.text).toContain("narrow the pattern or scope with path")
+      expect(partial.truncated).toBe(true)
+    }).pipe(provide(environment.runtime))
+  })
+
+  it.effect("passes the grep path filter and deadline to the workspace index", () => {
+    const environment = testEnvironment()
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      yield* runtime.run({ _tag: "Grep", pattern: "needle", regex: false, path: "packages/x/**" })
+      expect(environment.grepCalls.at(-1)).toMatchObject({
+        query: "needle",
+        options: { include: "packages/x/**", deadlineMillis: 9_000 },
+      })
     }).pipe(provide(environment.runtime))
   })
 

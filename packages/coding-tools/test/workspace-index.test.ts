@@ -25,6 +25,7 @@ test("searches workspace files with ripgrep without escaping the workspace", () 
           const fuzzy = yield* index.fileSearch("src/exampl.ts", { pageSize: 10 })
           const globbed = yield* index.glob("**/*.ts", { pageSize: 10 })
           const plain = yield* index.grep("needle", { mode: "plain", pageSize: 10 })
+          const scoped = yield* index.grep("alpha", { mode: "plain", pageSize: 10, include: "src/second.ts" })
           const regex = yield* index.grep("B.ta\\svalue", { mode: "regex", pageSize: 10 })
           const firstPage = yield* index.glob("src/*.ts", { pageIndex: 0, pageSize: 2 })
           const secondPage = yield* index.glob("src/*.ts", { pageIndex: 1, pageSize: 2 })
@@ -45,6 +46,9 @@ test("searches workspace files with ripgrep without escaping the workspace", () 
           ])
           expect(regex.items).toEqual([
             expect.objectContaining({ relativePath: "src/example.ts", lineNumber: 2, lineContent: "Beta value" }),
+          ])
+          expect(scoped.items).toEqual([
+            expect.objectContaining({ relativePath: "src/second.ts", lineNumber: 1, lineContent: "alpha other" }),
           ])
           expect(firstPage).toMatchObject({ totalMatched: 3, totalFiles: 3 })
           expect(firstPage.items).toHaveLength(2)

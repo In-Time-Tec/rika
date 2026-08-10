@@ -1,4 +1,4 @@
-import { Context, Effect, FileSystem, Layer, Path, Schema, Stream } from "effect"
+import { Context, Effect, FileSystem, Layer, Option, Path, Schema, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { containedRelativePath } from "../policy/workspace-boundary-policy"
@@ -58,7 +58,7 @@ const indexError = (operation: Operation, cause: unknown) => {
   })
 }
 
-const ignoreGlobs = ["!**/node_modules/**", "!**/.git/**", "!**/dist/**", "!**/.rika/**"] as const
+const ignoreGlobs = ["!**/node_modules/**", "!**/.git/**", "!**/dist/**", "!**/.rika/**", "!**/.worktrees/**"] as const
 
 const ignoreArgs = ignoreGlobs.flatMap((pattern) => ["--glob", pattern])
 
@@ -125,28 +125,44 @@ const runRg = (
   operation: Operation,
   cwd: string,
   args: ReadonlyArray<string>,
-): Effect.Effect<{ readonly stdout: string; readonly stderr: string; readonly code: number }, WorkspaceIndexError> =>
+  deadlineMillis?: number,
+): Effect.Effect<
+  { readonly stdout: string; readonly stderr: string; readonly code: number; readonly deadlineReached: boolean },
+  WorkspaceIndexError
+> =>
   Effect.gen(function* () {
     const command = ChildProcess.make("rg", args, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
-    const boundedText = <E, R>(stream: Stream.Stream<Uint8Array, E, R>) =>
-      Stream.runFold(
-        stream,
-        () => "",
-        (text, bytes) => {
-          const chunk = new TextDecoder().decode(bytes)
-          const remaining = 40_000 - text.length
-          return remaining <= 0 ? text : text + chunk.slice(0, remaining)
-        },
-      )
-    const result = yield* Effect.scoped(
+    const collected = { stdout: "", stderr: "" }
+    const collect =
+      (key: "stdout" | "stderr") =>
+      <E>(stream: Stream.Stream<Uint8Array, E>) =>
+        Stream.runForEach(stream, (bytes) =>
+          Effect.sync(() => {
+            const chunk = new TextDecoder().decode(bytes)
+            const remaining = 40_000 - collected[key].length
+            if (remaining > 0) collected[key] += chunk.slice(0, remaining)
+          }),
+        )
+    const awaitExit = Effect.scoped(
       Effect.gen(function* () {
         const handle = yield* spawner.spawn(command)
-        return yield* Effect.all([boundedText(handle.stdout), boundedText(handle.stderr), handle.exitCode], {
-          concurrency: 3,
-        })
+        const [, , code] = yield* Effect.all(
+          [collect("stdout")(handle.stdout), collect("stderr")(handle.stderr), handle.exitCode],
+          {
+            concurrency: 3,
+          },
+        )
+        return code
       }),
     ).pipe(Effect.mapError((cause) => indexError(operation, cause)))
-    return { stdout: result[0], stderr: result[1], code: result[2] }
+    if (deadlineMillis === undefined) {
+      const code = yield* awaitExit
+      return { stdout: collected.stdout, stderr: collected.stderr, code, deadlineReached: false }
+    }
+    const outcome = yield* Effect.timeoutOption(awaitExit, `${deadlineMillis} millis`)
+    return Option.isNone(outcome)
+      ? { stdout: collected.stdout, stderr: collected.stderr, code: 0, deadlineReached: true }
+      : { stdout: collected.stdout, stderr: collected.stderr, code: outcome.value, deadlineReached: false }
   })
 
 const listFiles = (
@@ -251,9 +267,10 @@ const makeService = (workspace: string) =>
             String(maxMatchesPerFile),
             ...ignoreArgs,
           ]
+          if (options?.include !== undefined && options.include.length > 0) args.push("--glob", options.include)
           if (mode === "plain") args.push("--fixed-strings")
           args.push("--", query)
-          const result = yield* runRg(spawner, "grep", root, args)
+          const result = yield* runRg(spawner, "grep", root, args, options?.deadlineMillis)
           if (result.code === 2) {
             const message = result.stderr.trim()
             if (mode === "regex" && /regex parse error|error parsing regex|invalid regex/i.test(message))
@@ -263,7 +280,9 @@ const makeService = (workspace: string) =>
           if (result.code > 2)
             return yield* indexError("grep", result.stderr.trim() || `rg exited with code ${result.code}`)
           const parsed: Array<GrepMatch> = []
-          for (const line of result.stdout.split("\n")) {
+          const lines = result.stdout.split("\n")
+          if (result.deadlineReached && !result.stdout.endsWith("\n")) lines.pop()
+          for (const line of lines) {
             if (line.length === 0) continue
             const first = line.indexOf(":")
             const second = first < 0 ? -1 : line.indexOf(":", first + 1)
@@ -294,6 +313,7 @@ const makeService = (workspace: string) =>
             totalFiles: items.length,
             filteredFileCount: items.length,
             nextCursor: null,
+            ...(result.deadlineReached ? { deadlineReached: true } : {}),
           }
         }),
     }

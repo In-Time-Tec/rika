@@ -19,7 +19,11 @@ const Edited = Schema.Struct({
   diff: Schema.optionalKey(Schema.String),
 })
 
-const SearchInput = Schema.Struct({ pattern: Schema.String, regex: Schema.optionalKey(Schema.Boolean) })
+const SearchInput = Schema.Struct({
+  pattern: Schema.String,
+  regex: Schema.optionalKey(Schema.Boolean),
+  path: Schema.optionalKey(Schema.String),
+})
 const ReadInput = Schema.Struct({
   path: Schema.String,
   range: Schema.optionalKey(Schema.Array(Schema.Int).check(Schema.isLengthBetween(2, 2))),
@@ -49,7 +53,16 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingTo
     input: SearchInput,
     output: Read,
     failure: Failure,
-    handle: (input) => Effect.map(run({ _tag: "Grep", pattern: input.pattern, regex: input.regex ?? false }), read),
+    handle: (input) =>
+      Effect.map(
+        run({
+          _tag: "Grep",
+          pattern: input.pattern,
+          regex: input.regex ?? false,
+          ...(input.path === undefined ? {} : { path: input.path }),
+        }),
+        read,
+      ),
   }),
   operation({
     name: "read",

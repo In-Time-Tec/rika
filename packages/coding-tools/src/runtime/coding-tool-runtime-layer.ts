@@ -157,10 +157,13 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
           const operation = Effect.gen(function* () {
             switch (request._tag) {
               case "Grep": {
+                const deadlineMillis = Math.max(1_000, contract(request).timeoutMillis - 1_000)
                 const page = yield* workspaceIndex.grep(request.pattern, {
                   mode: request.regex ? "regex" : "plain",
                   maxMatchesPerFile: 1_000,
                   pageSize: 1_000,
+                  deadlineMillis,
+                  ...(request.path === undefined ? {} : { include: request.path }),
                 })
                 if (page.regexFallbackError !== undefined)
                   return yield* runtimeError({
@@ -170,11 +173,14 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
                     recovery: "after_change",
                     nextAction: "Correct the regular expression or set regex to false",
                   })
-                return bounded(
-                  page.items
-                    .map((match) => `${match.relativePath}:${match.lineNumber}:${match.lineContent}`)
-                    .join("\n"),
-                )
+                const matches = page.items
+                  .map((match) => `${match.relativePath}:${match.lineNumber}:${match.lineContent}`)
+                  .join("\n")
+                if (page.deadlineReached === true) {
+                  const marker = `search stopped at ${Math.round(deadlineMillis / 1_000)}s: ${page.items.length} matches found before the deadline; narrow the pattern or scope with path`
+                  return { ...bounded(matches.length === 0 ? marker : `${matches}\n${marker}`), truncated: true }
+                }
+                return bounded(matches)
               }
               case "Read": {
                 const start = request.readRange?.[0] ?? 1

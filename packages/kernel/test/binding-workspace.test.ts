@@ -54,7 +54,15 @@ describe("workspace binding", () => {
         operation: "search",
         input: { pattern: "needle" },
       })
-      expect(seen).toEqual([{ _tag: "Grep", pattern: "needle", regex: false }])
+      yield* mounted.invoke({
+        module: "workspace",
+        operation: "search",
+        input: { pattern: "needle", path: "packages/x/**" },
+      })
+      expect(seen).toEqual([
+        { _tag: "Grep", pattern: "needle", regex: false },
+        { _tag: "Grep", pattern: "needle", regex: false, path: "packages/x/**" },
+      ])
       expect(response).toEqual({ _tag: "Success", output: { text: "matched", truncated: false } })
     }),
   )

@@ -24,7 +24,8 @@ export const handlerLayer = RuntimeTools.toolkit.toLayer(
   Effect.gen(function* () {
     const runtime = yield* RuntimeTools.Service
     return {
-      grep: ({ pattern, regex }) => runtime.run({ _tag: "Grep", pattern, regex }),
+      grep: ({ pattern, regex, path }) =>
+        runtime.run({ _tag: "Grep", pattern, regex, ...(path === undefined ? {} : { path }) }),
       read: ({ path, read_range }) =>
         runtime.run({ _tag: "Read", path, ...(read_range === undefined ? {} : { readRange: read_range }) }),
       write: ({ path, content }) => runtime.run({ _tag: "Write", path, content }),
