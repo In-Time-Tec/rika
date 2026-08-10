@@ -1,7 +1,6 @@
 import { KernelProfile, type HostBindingRegistry } from "@batonfx/repl"
 import type { BindingRequirements, Options } from "./binding-requirements"
 import * as AgentsBinding from "./agents-binding"
-import * as KernelProfileRegistration from "../kernel-profile-registration"
 import * as ArtifactsBinding from "./artifacts-binding"
 import * as ContextBinding from "./context-binding"
 import * as EditsBinding from "./edits-binding"
@@ -160,13 +159,32 @@ export const bindingsDigest = (environment?: Environment): string =>
  * rather than a catalogue, because a model shown a bare list of module names answers with one of
  * them as a tool name — and the only tool that exists is the cell.
  */
-const surface = (options: Options): string => surfaceOf(make(options))
+const bytes = (value: number): string => (value % 1_024 === 0 ? `${value / 1_024}KB` : `${value} bytes`)
 
-export const cellInstructions = (options: Options): string =>
+export const maxChildWaitMillis = AgentsBinding.maxWaitMillis
+
+export interface CellInstructionFacts {
+  readonly modules: ReadonlyArray<HostBindingRegistry.Module<BindingRequirements>>
+  readonly workspace: string
+  readonly workspaceState?: "empty" | "not empty"
+  readonly channelBytes: number
+  readonly cellDeadlineMillis: number
+  readonly childWaitMillis: number
+}
+
+export const cellInstructions = (facts: CellInstructionFacts): string =>
   [
     "You have exactly one tool, named typescript. It runs a cell in a persistent Bun kernel.",
-    `A cell is stopped after ${KernelProfileRegistration.defaultLimits.cellDeadlineMillis / 1_000}s, and a wait inside one is capped at ${AgentsBinding.maxWaitMillis / 1_000}s, so long`,
+    `A cell is stopped after ${facts.cellDeadlineMillis / 1_000}s, and a wait inside one is capped at ${facts.childWaitMillis / 1_000}s, so long`,
     "work belongs in a subagent you inspect across turns rather than in one cell that sleeps.",
+    "`rika` and its modules are pre-mounted globals; never import them.",
+    "Variables persist across all your cells; accumulate state instead of re-fetching it.",
+    facts.workspaceState === undefined
+      ? `Your workspace is ${JSON.stringify(facts.workspace)}.`
+      : `Your workspace is ${JSON.stringify(facts.workspace)} and it is ${facts.workspaceState}.`,
+    `Cell stdout and stderr are each capped at ${bytes(facts.channelBytes)}; page big results at 16KB per page.`,
+    "Run shell commands with rika.processes.start; it is the supported shell path.",
+    "After spawning children, end your turn or keep working; inspect them in a later turn instead of polling.",
     "The kernel exposes a `rika` object your cell code can await. It is not a tool; the only tool",
     "name that exists is typescript. Example cell body:",
     "",
@@ -176,10 +194,13 @@ export const cellInstructions = (options: Options): string =>
     "The value of a cell's last expression comes back to you. Printing costs a separate channel and",
     "is truncated, so end a cell with what you want to read.",
     "",
+    "Workspace results have exact shapes: (await rika.workspace.read({ path })).text is file content;",
+    "(await rika.workspace.search({ pattern })).text is content-grep matches; rika.workspace.list({ path?, depth? })",
+    "returns { text, entries, truncated } for file and directory names. Use search for contents and list for names.",
     "A page limit is bounded; a refused call names the bound and what it got, so read the message.",
     "A harness write takes baseSnapshot from (await rika.harness.snapshot({ scope })).snapshotId, read",
     "in the same cell. A stale one is refused, because it is what makes a concurrent write observable.",
     "",
     "// available on rika:",
-    surface(options),
+    surfaceOf(facts.modules),
   ].join("\n")

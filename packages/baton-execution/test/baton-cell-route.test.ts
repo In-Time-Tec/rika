@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { ToolContext, ToolExecutor } from "@batonfx/core"
-import { CellTool, KernelProfile, TestKernel } from "@batonfx/repl"
+import { Cell, CellTool, KernelProfile, TestKernel } from "@batonfx/repl"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Layer } from "effect"
 import { Response } from "effect/unstable/ai"
@@ -184,5 +184,62 @@ it.effect("refuses any tool name other than the one advertised cell tool", () =>
     )
     expect(failure._tag).toBe("@batonfx/core/FrameworkFailure")
     if (failure._tag === "@batonfx/core/FrameworkFailure") expect(failure.tool).toBe("bash")
+  }).pipe(Effect.scoped),
+)
+
+it.effect("names an async deadline and keeps the next cell healthy", () =>
+  Effect.gen(function* () {
+    let invocation = 0
+    const deadlineMillis = 120_000
+    const pool = TestKernel.layerTestPool({
+      profile,
+      script: (input) => {
+        invocation += 1
+        return invocation === 1
+          ? {
+              _tag: "Failure",
+              failure: Cell.CellExecutionFailed.make({
+                cellId: input.cellId,
+                epoch: 0,
+                sequence: 0,
+                name: "Cellaborted",
+                message: "the cell was aborted by its host",
+                stdout: "",
+                stderr: "",
+                durationMillis: deadlineMillis,
+                truncation: [],
+              }),
+            }
+          : { _tag: "Value", value: "2" }
+      },
+    })
+    const configured = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      kernel: { ...kernel, limits: { ...profile.limits, cellDeadlineMillis: deadlineMillis } },
+      kernelPool: yield* Layer.build(Layer.merge(pool, CellCallContext.layer)),
+    })
+    const context = yield* Layer.build(executorFor(configured, "rika-root"))
+    const executor = Context.get(context, ToolExecutor.ToolExecutor)
+    const run = (code: string) =>
+      executor
+        .execute(request(code, "session-deadline"))
+        .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-deadline")))
+    const failed = yield* run("await new Promise(() => {})")
+    expect(failed).toMatchObject({
+      _tag: "DomainFailure",
+      failure: {
+        _tag: "@batonfx/repl/CellExecutionFailed",
+        name: "CellDeadlineExceeded",
+      },
+    })
+    if (failed._tag === "DomainFailure") {
+      const failure = failed.failure as Cell.CellFailure
+      if (failure._tag === "@batonfx/repl/CellExecutionFailed") {
+        expect(failure.message).toContain("cell exceeded the 120s deadline")
+        expect(failure.message).toContain("rika.processes.start")
+      }
+    }
+    expect(yield* run("1 + 1")).toMatchObject({ _tag: "Success" })
   }).pipe(Effect.scoped),
 )

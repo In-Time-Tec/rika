@@ -28,7 +28,7 @@ interface Recorder {
  * this source assembles `rika` from them. The host stubs answer with Promises because that is what a
  * mounted binding looks like inside the kernel, which is ordinary TypeScript rather than Effect.
  */
-const evaluate = (recorder: Recorder): Effect.Effect<Sandbox> =>
+const evaluate = (recorder: Recorder, stale = false): Effect.Effect<Sandbox> =>
   Effect.promise(() => {
     const scope: Record<string, unknown> = {}
     for (const name of moduleNames) scope[name] = {}
@@ -45,6 +45,11 @@ const evaluate = (recorder: Recorder): Effect.Effect<Sandbox> =>
     }
     scope.context = {
       current: () => Promise.resolve({ threadId: "thread", workspace: "/repo", trustMode: "trusted-local" }),
+    }
+    scope.kernel = { ...scope }
+    if (stale) {
+      scope.rika = "/stale/path"
+      scope.workspace = { stale: true }
     }
     const body = `return (async () => { ${source().replaceAll("globalThis", "host")} ; return { rika: host.rika, context: host.context } })()`
     const run = new Function("host", body) as (host: Record<string, unknown>) => Promise<Sandbox>
@@ -68,6 +73,15 @@ describe("kernel bootstrap", () => {
   it.effect("binds context from the live host rather than a snapshot", () =>
     Effect.gen(function* () {
       const sandbox = yield* evaluate(recorder())
+      expect(sandbox.context).toEqual({ threadId: "thread", workspace: "/repo", trustMode: "trusted-local" })
+    }),
+  )
+
+  it.effect("re-mounts live globals after a snapshot restores stale user values", () =>
+    Effect.gen(function* () {
+      const sandbox = yield* evaluate(recorder(), true)
+      expect(typeof sandbox.rika).toBe("object")
+      expect(sandbox.rika.workspace).toEqual({})
       expect(sandbox.context).toEqual({ threadId: "thread", workspace: "/repo", trustMode: "trusted-local" })
     }),
   )

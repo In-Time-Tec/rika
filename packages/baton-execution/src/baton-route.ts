@@ -13,7 +13,7 @@ import {
 import { AmazonBedrock, Anthropic, Deterministic, ModelRoute, OpenAi, OpenRouter } from "@batonfx/providers"
 import { Errors, ExecutableRegistration, ExecutableResolver, Runtime } from "@batonfx/runtime"
 import type { HarnessState } from "@batonfx/harness"
-import { CellTool, KernelPool } from "@batonfx/repl"
+import { Cell, CellTool, KernelPool } from "@batonfx/repl"
 import * as CellCallContext from "./baton-cell-call-context"
 import * as BindingModules from "@rika/kernel/binding-modules"
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
@@ -22,7 +22,7 @@ import * as ExecutionPins from "@rika/kernel/execution-pins"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
-import { Config, Context, Effect, Function, Layer, Option, Redacted, Schema } from "effect"
+import { Config, Context, Effect, Function, Layer, Option, Redacted, Schema, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import { providerHttpClientLayer } from "./baton-provider-http"
 import * as Registration from "./baton-registration"
@@ -348,6 +348,38 @@ const missingKernel = (tool: string) =>
     message: "the typescript cell requires a kernel pool",
   })
 
+const workspaceState = (workspace: string): Effect.Effect<"empty" | "not empty"> =>
+  Effect.promise(() =>
+    Array.fromAsync(new Bun.Glob("*").scan({ cwd: workspace, dot: true, onlyFiles: false })).then(
+      (entries) => (entries.length === 0 ? "empty" : "not empty"),
+      () => "empty",
+    ),
+  )
+
+const deadlineFailure = (failure: Cell.CellFailure, deadlineMillis: number): Cell.CellFailure => {
+  if (failure._tag !== "@batonfx/repl/CellExecutionFailed") return failure
+  const exceeded =
+    failure.name === "Celltimed-out" || (failure.name === "Cellaborted" && failure.durationMillis >= deadlineMillis)
+  if (!exceeded) return failure
+  return Cell.CellExecutionFailed.make({
+    ...failure,
+    name: "CellDeadlineExceeded",
+    message: `cell exceeded the ${deadlineMillis / 1_000}s deadline; split long work across cells or start it with rika.processes.start`,
+  })
+}
+
+const deadlinePool = (pool: KernelPool.Interface, deadlineMillis: number): KernelPool.Interface => ({
+  ...pool,
+  execute: (request) =>
+    pool.execute(request).pipe(
+      Effect.mapError((failure) => deadlineFailure(failure, deadlineMillis)),
+      Effect.map((execution) => ({
+        events: execution.events.pipe(Stream.mapError((failure) => deadlineFailure(failure, deadlineMillis))),
+        result: execution.result.pipe(Effect.mapError((failure) => deadlineFailure(failure, deadlineMillis))),
+      })),
+    ),
+})
+
 /**
  * The pool arrives already built, owned by the composition root's own scope, because it outlives
  * every cell that uses it. Building it here instead would give it whichever cell forced it first,
@@ -361,6 +393,7 @@ const missingKernel = (tool: string) =>
 const cellExecutor = (
   pool: Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>,
   runtime: Effect.Effect<Option.Option<Runtime.Runtime["Service"]>> | undefined,
+  deadlineMillis: number,
 ): Layer.Layer<ToolExecutor.ToolExecutor> =>
   Layer.succeed(
     ToolExecutor.ToolExecutor,
@@ -376,7 +409,14 @@ const cellExecutor = (
                     Effect.andThen(
                       CellTool.route
                         .execute(request)
-                        .pipe(Effect.provideService(KernelPool.KernelPool, Context.get(pool, KernelPool.KernelPool))),
+                        .pipe(
+                          Effect.provideService(
+                            KernelPool.KernelPool,
+                            KernelPool.KernelPool.of(
+                              deadlinePool(Context.get(pool, KernelPool.KernelPool), deadlineMillis),
+                            ),
+                          ),
+                        ),
                     ),
                   ),
               ),
@@ -463,19 +503,35 @@ export const configure = (
     const cellLayer =
       options.kernelPool === undefined
         ? unavailableKernelExecutor
-        : cellExecutor(options.kernelPool, options.durableRuntime)
+        : cellExecutor(
+            options.kernelPool,
+            options.durableRuntime,
+            options.kernel.limits?.cellDeadlineMillis ?? KernelProfileRegistration.defaultLimits.cellDeadlineMillis,
+          )
     const environment = (name: keyof typeof routes): AgentEnvironment => {
       const model = routed[name].layer
       if (name === "Title" || name === "Compaction") return Layer.orDie(model)
       return Layer.orDie(Layer.mergeAll(model, compactionLayer, cellLayer))
     }
     const supplemental = harnessSupplement(options.harnessSnapshot, options.skills ?? [])
+    const mountedModules =
+      options.kernelPool === undefined
+        ? []
+        : BindingModules.make({
+            workspace: options.workspace,
+            workspaceDigest: "",
+            trustMode: options.kernel.trustMode ?? "trusted-local",
+            servers: [],
+          })
+    const limits = options.kernel.limits ?? KernelProfileRegistration.defaultLimits
     const cellSurface = BindingModules.cellInstructions({
+      modules: mountedModules,
       workspace: options.workspace,
-      workspaceDigest: "",
-      trustMode: options.kernel.trustMode ?? "trusted-local",
-      servers: [],
-    } as never)
+      workspaceState: yield* workspaceState(options.workspace),
+      channelBytes: limits.channelBytes,
+      cellDeadlineMillis: limits.cellDeadlineMillis,
+      childWaitMillis: BindingModules.maxChildWaitMillis,
+    })
     const withSurface = (own: string) =>
       supplemental === ""
         ? agentInstructionsWith(cellSurface, own)

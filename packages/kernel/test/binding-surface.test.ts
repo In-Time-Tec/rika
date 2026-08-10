@@ -1,14 +1,23 @@
 import { describe, expect, it } from "vitest"
 import * as McpDiscovery from "@rika/extensions/mcp-discovery"
 import { Schema } from "effect"
-import { cellInstructions, make, surfaceOf } from "../src/binding/binding-modules"
+import { cellInstructions, make, surfaceOf, type Options } from "../src/binding/binding-modules"
 
-const options = {
+const options: Options = {
   workspace: "/workspace",
   workspaceDigest: "digest",
   trustMode: "trusted-local",
   servers: [] as ReadonlyArray<McpDiscovery.ConfiguredServer>,
-} as never
+}
+
+const instructionFacts = (modules = make(options)) => ({
+  modules,
+  workspace: options.workspace,
+  workspaceState: "not empty" as const,
+  channelBytes: 16_384,
+  cellDeadlineMillis: 120_000,
+  childWaitMillis: 30_000,
+})
 
 describe("mounted surface", () => {
   it("names each field, its allowed values, and the shapes a union accepts", () => {
@@ -37,11 +46,11 @@ describe("mounted surface", () => {
   it("names the one tool that exists and shows the bindings as code", () => {
     // A model answered with "rika.workspace" as a tool name when the bindings read as a list, and
     // guessed a string argument when only their names were shown. Both cost a live turn.
-    const text = cellInstructions(options)
+    const text = cellInstructions(instructionFacts())
     expect(text).toContain("exactly one tool, named typescript")
     expect(text).toContain("It is not a tool")
     expect(text).toContain('await rika.workspace.search({ pattern: "secret" })')
-    expect(text).toContain("search({ pattern, regex })")
+    expect(text).toContain("search({ pattern, regex, path })")
   })
 
   it("names the values a field will accept when it accepts only a few", () => {
@@ -76,12 +85,31 @@ it("names the tag that tells one shape of an argument from another", () => {
 it("shows an example whose fields the surface actually has", () => {
   // An example is the first thing a model copies, so a field it invents is a defect that costs a
   // turn. `search` returns { text, truncated }, and an earlier draft of this example read `matches`.
-  const instructions = cellInstructions({
-    workspace: "/w",
-    workspaceDigest: "",
-    trustMode: "trusted-local",
-    servers: [],
-  } as never)
+  const instructions = cellInstructions(
+    instructionFacts(make({ workspace: "/w", workspaceDigest: "", trustMode: "trusted-local", servers: [] })),
+  )
   expect(instructions).toContain("found.text")
   expect(instructions).not.toContain("found.matches")
+})
+
+it("describes only the modules mounted on the live surface", () => {
+  const text = cellInstructions(instructionFacts(make(options).filter((module) => module.name === "workspace")))
+  expect(text).toContain("rika.workspace")
+  expect(text).not.toContain("rika.context")
+  expect(text).not.toContain("rika.goal")
+})
+
+it("states the kernel house rules from its mounted workspace and limits", () => {
+  const text = cellInstructions({
+    ...instructionFacts(),
+    workspace: "/actual/workspace",
+    workspaceState: "empty",
+  })
+  expect(text).toContain("pre-mounted globals; never import")
+  expect(text).toContain("Variables persist across all your cells; accumulate state")
+  expect(text).toContain('Your workspace is "/actual/workspace" and it is empty.')
+  expect(text).toContain("page big results at 16KB per page")
+  expect(text).toContain("Run shell commands with rika.processes.start")
+  expect(text).toContain("inspect them in a later turn instead of polling")
+  expect(text).not.toContain("you'll be notified")
 })

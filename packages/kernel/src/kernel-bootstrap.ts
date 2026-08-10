@@ -19,6 +19,7 @@ import { moduleNames } from "./binding/binding-modules"
  * cell is. It is filled on the first cell that asks for it instead of failing the worker's start.
  */
 export const source = (names: ReadonlyArray<string> = moduleNames): string => `
+${names.map((name) => `globalThis[${JSON.stringify(name)}] = globalThis.kernel[${JSON.stringify(name)}]`).join("\n")}
 globalThis.rika = { ${names.map((name) => `${name}: globalThis[${JSON.stringify(name)}]`).join(", ")} }
 globalThis.rika.mcp = (() => {
   const flat = globalThis.rika.mcp
