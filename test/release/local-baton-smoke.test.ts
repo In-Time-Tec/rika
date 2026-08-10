@@ -3,15 +3,17 @@ import { expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Path } from "effect"
 import {
   batonPackages,
+  verifyInstalledBatonPackages,
+  type PackedBatonPackage,
+} from "../../scripts/release/local-baton-package-verification"
+import {
   batonReleaseInventoryError,
   batonReleasePackages,
   batonTarballName,
   catalogBatonVersion,
   manifestWithLocalBatonTarballs,
   provisionProvenHostArchive,
-  verifyInstalledBatonPackages,
   type BatonReleaseEvidence,
-  type PackedBatonPackage,
 } from "../../scripts/release/local-baton-smoke"
 import { directoryDigest } from "../../scripts/upstream/upstream-content-digest"
 
