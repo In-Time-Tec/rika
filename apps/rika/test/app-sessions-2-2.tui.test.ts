@@ -55,7 +55,7 @@ test(
           'await rika.processes.status({"processId":"1","waitMillis":0})',
           'await rika.processes.status({"processId":"1","waitMillis":25000})',
         ])
-        expect(cells?.at(0)?.result, "the launching cell reports the registered process").toContain('processId: "1"')
+        expect(cells?.at(0)?.result, "the launching cell reports the registered process").toContain("processId: '1'")
         expect(cells?.at(0)?.result, "the launching cell leaves the process running").toContain("running: true")
         expect(cells?.at(1)?.result).toContain("EARLY_OUTPUT")
         expect(cells?.at(1)?.result, "the immediate wait observes a live process").toContain("running: true")
