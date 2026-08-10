@@ -1,5 +1,6 @@
 import { Data, Effect, FileSystem, Path } from "effect"
 import { descendants, readProcessRows, type PsRow } from "../src/platform/performance-process-table"
+import { parsePhysicalFootprintMebibytes } from "./idle-physical-footprint"
 
 export type IdleRole = "client" | "interactive" | "server"
 
@@ -8,6 +9,7 @@ export interface IdleSeries {
   readonly pid: number
   readonly cpuPercent: ReadonlyArray<number>
   readonly rssMebibytes: ReadonlyArray<number>
+  readonly physicalFootprintMebibytes: ReadonlyArray<number>
 }
 
 export class IdleFixtureError extends Data.TaggedError("IdleFixtureError")<{
@@ -80,11 +82,33 @@ const ptyLauncher = (repositoryRoot: string, home: string, path: Path.Path) =>
     },
   )
 
+export interface IdleTurnSeries {
+  readonly role: IdleRole
+  readonly rssMebibytes: ReadonlyArray<number>
+  readonly physicalFootprintMebibytes: ReadonlyArray<number>
+}
+
 export interface IdleObservation {
   readonly series: ReadonlyArray<IdleSeries>
+  readonly perTurn: ReadonlyArray<IdleTurnSeries>
   readonly ownedPids: ReadonlyArray<number>
   readonly survivingPids: ReadonlyArray<number>
 }
+
+const readPhysicalFootprint = (pid: number) =>
+  Effect.sync(() => Bun.spawnSync(["footprint", "-p", String(pid), "--noCategories", "-f", "bytes"])).pipe(
+    Effect.flatMap((result) => {
+      const output = result.stdout.toString()
+      const physicalFootprint = parsePhysicalFootprintMebibytes(output)
+      return result.exitCode === 0 && physicalFootprint !== undefined
+        ? Effect.succeed(physicalFootprint)
+        : Effect.fail(
+            new IdleFixtureError({
+              message: `footprint could not measure process ${pid}: ${result.stderr.toString()}`,
+            }),
+          )
+    }),
+  )
 
 export const observeIdleProcessTree = Effect.fn("IdleGate.observe")(function* (input: {
   readonly repositoryRoot: string
@@ -119,21 +143,24 @@ export const observeIdleProcessTree = Effect.fn("IdleGate.observe")(function* (i
           return yield* new IdleFixtureError({
             message: `The isolated launcher exposed ${roles.size} of 3 roles before the readiness ceiling.`,
           })
-        /**
-         * A Server warms up over its first turns and then holds. Sampling only after the last turn
-         * cannot tell a plateau from a climb, so each turn's resting size is recorded as it happens.
-         */
-        const perTurnServerRss: Array<number> = []
+        const perTurn = new Map<IdleRole, { rss: Array<number>; physicalFootprint: Array<number> }>()
         for (const turn of input.turns) {
           yield* Effect.sync(() => launcher.stdin.write(`${turn}\r`))
           yield* Effect.sync(() => launcher.stdin.flush())
           yield* Effect.sleep(input.turnSettleMillis)
-          const server = (yield* track).get("server")
-          if (server !== undefined) perTurnServerRss.push(server.rss / 1_024)
+          for (const [role, row] of yield* track) {
+            const entry = perTurn.get(role) ?? { rss: [], physicalFootprint: [] }
+            entry.rss.push(row.rss / 1_024)
+            entry.physicalFootprint.push(yield* readPhysicalFootprint(row.pid))
+            perTurn.set(role, entry)
+          }
         }
         yield* Effect.sleep(input.settleMillis)
 
-        const series = new Map<IdleRole, { pid: number; cpu: Array<number>; rss: Array<number> }>()
+        const series = new Map<
+          IdleRole,
+          { pid: number; cpu: Array<number>; rss: Array<number>; physicalFootprint: Array<number> }
+        >()
         let previous = yield* track
         for (let sample = 0; sample < input.samples; sample += 1) {
           const startedAt = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
@@ -146,9 +173,10 @@ export const observeIdleProcessTree = Effect.fn("IdleGate.observe")(function* (i
               series.delete(role)
               continue
             }
-            const entry = series.get(role) ?? { pid: row.pid, cpu: [], rss: [] }
+            const entry = series.get(role) ?? { pid: row.pid, cpu: [], rss: [], physicalFootprint: [] }
             entry.cpu.push(Math.max(0, ((row.cpuSeconds - before.cpuSeconds) / elapsedSeconds) * 100))
             entry.rss.push(row.rss / 1_024)
+            entry.physicalFootprint.push(yield* readPhysicalFootprint(row.pid))
             series.set(role, entry)
           }
           previous = current
@@ -159,8 +187,13 @@ export const observeIdleProcessTree = Effect.fn("IdleGate.observe")(function* (i
             pid: entry.pid,
             cpuPercent: entry.cpu,
             rssMebibytes: entry.rss,
+            physicalFootprintMebibytes: entry.physicalFootprint,
           })),
-          perTurnServerRss,
+          perTurn: [...perTurn].map(([role, entry]) => ({
+            role,
+            rssMebibytes: entry.rss,
+            physicalFootprintMebibytes: entry.physicalFootprint,
+          })),
           ownedPids: [...owned],
         }
       }),
