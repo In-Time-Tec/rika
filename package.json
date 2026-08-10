@@ -70,6 +70,7 @@
     "format-check": "prettier --check .",
     "install-local": "bun run scripts/installation/install-local.ts",
     "lint": "bun node_modules/oxlint/dist/cli.js apps packages scripts tooling",
+    "local-baton-smoke": "bun run scripts/release/local-baton-smoke.ts",
     "package": "bun run scripts/packaging/package-target.ts",
     "npm-package": "bun run scripts/packaging/npm-package.ts",
     "release-smoke": "bun run scripts/release/release-smoke.ts",

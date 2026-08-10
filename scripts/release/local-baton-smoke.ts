@@ -3,10 +3,28 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { Data, Effect, FileSystem, Function, Layer, Option, Path, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Command, Flag } from "effect/unstable/cli"
-import { isPackageTarget } from "../packaging/package-target-contract"
+import { archiveName } from "../packaging/release-archive"
+import { isPackageTarget, type PackageTarget } from "../packaging/package-target-contract"
 
-export const batonPackages = ["core", "mcp", "providers", "runtime", "skills", "test"] as const
+export const batonReleasePackages = [
+  "a2a",
+  "ag-ui",
+  "core",
+  "foldkit",
+  "harness",
+  "mcp",
+  "memory",
+  "providers",
+  "repl",
+  "runtime",
+  "skills",
+  "test",
+  "transport",
+] as const
 
+export const batonPackages = ["core", "mcp", "providers", "runtime", "skills", "harness", "repl", "test"] as const
+
+type BatonReleasePackage = (typeof batonReleasePackages)[number]
 type BatonPackage = (typeof batonPackages)[number]
 
 type RootManifest = {
@@ -18,7 +36,7 @@ type RootManifest = {
   readonly [key: string]: unknown
 }
 
-type BatonReleaseEvidence = {
+export type BatonReleaseEvidence = {
   readonly schemaVersion: number
   readonly packages: ReadonlyArray<{
     readonly name: string
@@ -45,6 +63,40 @@ export const batonTarballName: {
   (arg0: BatonPackage, arg1: string): string
   (arg1: string): (arg0: BatonPackage) => string
 } = Function.dual(2, batonTarballNameImpl)
+
+const batonReleaseTarballName = (packageName: BatonReleasePackage, version: string): string =>
+  `batonfx-${packageName}-${version}.tgz`
+
+const batonReleaseInventoryErrorImpl = (
+  evidence: BatonReleaseEvidence,
+  version: string,
+  checksumNames: ReadonlyArray<string>,
+): string | undefined => {
+  if (evidence.schemaVersion !== 1)
+    return `Expected Baton evidence schema version 1; received ${evidence.schemaVersion}`
+  const expectedPackages = batonReleasePackages
+    .map((packageName) => ({
+      name: `@batonfx/${packageName}`,
+      version,
+      filename: batonReleaseTarballName(packageName, version),
+    }))
+    .toSorted((left, right) => left.name.localeCompare(right.name))
+  const actualPackages = evidence.packages
+    .map(({ name, version: packageVersion, filename }) => ({ name, version: packageVersion, filename }))
+    .toSorted((left, right) => left.name.localeCompare(right.name))
+  if (JSON.stringify(actualPackages) !== JSON.stringify(expectedPackages))
+    return "Baton evidence does not contain the exact current public package release train"
+
+  const expectedChecksums = [...expectedPackages.map(({ filename }) => filename), "release-evidence.json"].toSorted()
+  if (JSON.stringify(checksumNames.toSorted()) !== JSON.stringify(expectedChecksums))
+    return "Baton checksums do not contain exactly every package tarball and release-evidence.json"
+  return undefined
+}
+
+export const batonReleaseInventoryError: {
+  (arg0: BatonReleaseEvidence, arg1: string, arg2: ReadonlyArray<string>): string | undefined
+  (arg1: string, arg2: ReadonlyArray<string>): (arg0: BatonReleaseEvidence) => string | undefined
+} = Function.dual(3, batonReleaseInventoryErrorImpl)
 
 export const catalogBatonVersion = (catalog: Readonly<Record<string, string>>): string => {
   const versions = new Set(batonPackages.map((packageName) => catalog[`@batonfx/${packageName}`]))
@@ -112,7 +164,26 @@ const run = Effect.fn("LocalBatonSmoke.run")(function* (
 })
 
 const sha256 = (bytes: Uint8Array): string => new Bun.CryptoHasher("sha256").update(bytes).digest("hex")
-const sha512 = (bytes: Uint8Array): string => new Bun.CryptoHasher("sha512").update(bytes).digest("base64")
+
+export const provisionProvenHostArchive = Effect.fn("LocalBatonSmoke.provisionProvenHostArchive")(function* (input: {
+  readonly sourceRoot: string
+  readonly isolatedRoot: string
+  readonly version: string
+  readonly target: PackageTarget
+}) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const filename = archiveName(input.version, input.target)
+  const provenArchive = yield* fileSystem.readFile(path.join(input.isolatedRoot, "artifacts", filename))
+  const sourceArtifacts = path.join(input.sourceRoot, "artifacts")
+  const destination = path.join(sourceArtifacts, filename)
+  yield* fileSystem.makeDirectory(sourceArtifacts, { recursive: true })
+  yield* fileSystem.writeFile(destination, provenArchive)
+  const provisionedArchive = yield* fileSystem.readFile(destination)
+  if (sha256(provisionedArchive) !== sha256(provenArchive))
+    return yield* failure("provision proven host archive", `Digest does not match the proven archive: ${filename}`)
+  return destination
+})
 
 const program = (options: { readonly batonRelease: string; readonly target?: string | undefined }) =>
   Effect.scoped(
@@ -133,7 +204,6 @@ const program = (options: { readonly batonRelease: string; readonly target?: str
         )
 
       const sourceManifestText = yield* fileSystem.readFileString(path.join(root, "package.json"))
-      const sourceLock = yield* fileSystem.readFileString(path.join(root, "bun.lock"))
       const sourceManifest = (yield* Schema.decodeUnknownEffect(UnknownJson)(sourceManifestText)) as RootManifest
       const version = yield* Effect.try({
         try: () => catalogBatonVersion(sourceManifest.workspaces.catalog),
@@ -144,23 +214,32 @@ const program = (options: { readonly batonRelease: string; readonly target?: str
       const evidence = (yield* Schema.decodeUnknownEffect(UnknownJson)(
         yield* fileSystem.readFileString(evidencePath),
       )) as BatonReleaseEvidence
-      if (evidence.schemaVersion !== 1 || evidence.packages.length !== 11)
-        return yield* failure("validate Baton evidence", "Expected schema version 1 and exactly eleven Baton packages")
-      const checksums = new Map(
-        (yield* fileSystem.readFileString(checksumPath))
-          .trim()
-          .split("\n")
-          .map((line) => {
-            const match = /^([a-f0-9]{64})  ([^/]+)$/.exec(line)
-            if (match === null) throw new Error(`Invalid checksum line: ${line}`)
-            return [match[2]!, match[1]!] as const
-          }),
+      const checksumEntries = (yield* fileSystem.readFileString(checksumPath))
+        .trim()
+        .split("\n")
+        .map((line) => {
+          const match = /^([a-f0-9]{64})  ([^/]+)$/.exec(line)
+          if (match === null) throw new Error(`Invalid checksum line: ${line}`)
+          return [match[2]!, match[1]!] as const
+        })
+      const inventoryError = batonReleaseInventoryError(
+        evidence,
+        version,
+        checksumEntries.map(([filename]) => filename),
       )
-      if (checksums.size !== 12) return yield* failure("validate Baton checksums", "Expected twelve checksum entries")
+      if (inventoryError !== undefined) return yield* failure("validate Baton release inventory", inventoryError)
+      const checksums = new Map(checksumEntries)
       for (const [filename, digest] of checksums) {
         const bytes = yield* fileSystem.readFile(path.join(releaseDirectory, filename))
         if (sha256(bytes) !== digest)
           return yield* failure("validate Baton checksums", `Digest mismatch for ${filename}`)
+      }
+      for (const item of evidence.packages) {
+        if (checksums.get(item.filename) !== item.sha256)
+          return yield* failure(
+            "validate Baton evidence",
+            `Evidence digest does not match SHA256SUMS for ${item.filename}`,
+          )
       }
 
       const packedManifests = new Map<string, string>()
@@ -176,10 +255,6 @@ const program = (options: { readonly batonRelease: string; readonly target?: str
         )
           return yield* failure("validate Baton evidence", `${name} does not match ${filename} at ${version}`)
         const tarball = path.join(releaseDirectory, filename)
-        const tarballBytes = yield* fileSystem.readFile(tarball)
-        const integrity = `sha512-${sha512(tarballBytes)}`
-        if (!sourceLock.includes(`"${name}@${version}"`) || !sourceLock.includes(integrity))
-          return yield* failure("validate Rika lock", `${name}@${version} is not locked to the local tarball integrity`)
         const manifestText = yield* run("tar", ["-xOzf", tarball, "package/package.json"], root)
         const manifest = (yield* Schema.decodeUnknownEffect(UnknownJson)(manifestText)) as {
           readonly name?: string
@@ -258,12 +333,22 @@ const program = (options: { readonly batonRelease: string; readonly target?: str
         yield* run("bun", ["run", "typecheck"], path.join(temporary, consumer), environment)
       yield* run("bun", ["run", "package", "--", "--target", target], temporary, environment)
       yield* run("bun", ["run", "release-smoke", "--", "--target", target], temporary, environment)
+      const rikaManifest = (yield* Schema.decodeUnknownEffect(UnknownJson)(
+        yield* fileSystem.readFileString(path.join(temporary, "apps", "rika", "package.json")),
+      )) as { readonly version: string }
+      const provisionedArchive = yield* provisionProvenHostArchive({
+        sourceRoot: root,
+        isolatedRoot: temporary,
+        version: rikaManifest.version,
+        target,
+      })
+      yield* Effect.log(`Provisioned proven host archive at ${provisionedArchive}`)
       yield* Effect.log(`Local Baton tarball release smoke passed for Rika ${target} with Baton ${version}`)
     }),
   )
 
 const command = Command.make(
-  "release-local",
+  "local-baton-smoke",
   {
     batonRelease: Flag.directory("baton-release", { mustExist: true }),
     target: Flag.string("target").pipe(Flag.optional),
