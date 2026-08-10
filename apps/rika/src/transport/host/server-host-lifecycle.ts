@@ -77,7 +77,13 @@ export const host = Effect.fn("ServerTransport.host")(function* (options: {
   const scheduleAbandonment = (
     generation: number,
     requireActiveWork = false,
-    sleepMilliseconds = Math.min(options.abandonMilliseconds, options.graceMilliseconds),
+    /**
+     * How long running work survives a client that has gone. Taking the smaller of this and the idle
+     * grace collapsed it to half a second, so a client that reconnected mid-turn — which a long turn
+     * makes likely — lost everything in flight, and a cell that cannot be replayed left its run
+     * parked forever.
+     */
+    sleepMilliseconds = options.abandonMilliseconds,
   ) =>
     Effect.gen(function* () {
       const fiber = yield* Effect.forkIn(
