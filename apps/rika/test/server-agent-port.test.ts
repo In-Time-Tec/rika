@@ -247,8 +247,7 @@ it.effect("tells the cell what refused a spawn instead of an empty line", () =>
     const failure = yield* Effect.flip(
       withPort(
         {
-          spawn: () =>
-            Effect.fail({ _tag: "@batonfx/runtime/HandoffUnavailable", message: "Task cannot spawn Task" } as never),
+          spawn: () => Effect.fail({ _tag: "@batonfx/runtime/ChildSelectionMissing", selection: "Task" } as never),
           inspect: () => Effect.succeed(runInspection("run-self") as never),
           inspectTree: () =>
             Effect.succeed({
@@ -264,6 +263,7 @@ it.effect("tells the cell what refused a spawn instead of an empty line", () =>
         (value) => value.spawn({ profile: "Task", prompt: "p", key: "k" }),
       ),
     )
-    expect(failure.message).toContain("Task cannot spawn Task")
+    expect(failure.message).toContain("ChildSelectionMissing")
+    expect(failure.message).toContain("selection=Task")
   }),
 )

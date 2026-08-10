@@ -10,7 +10,14 @@ const messageOf = (cause: unknown): string => {
     const own = "message" in cause ? cause.message : undefined
     if (typeof own === "string" && own.length > 0) return own
     const tag = "_tag" in cause ? String(cause._tag) : ""
-    if (tag.length > 0) return tag
+    /**
+     * A typed failure carries the fields that explain it even when it carries no prose. Reporting
+     * the tag alone told a cell which rule it broke but not what it named.
+     */
+    const detail = Object.entries(cause)
+      .filter(([field, value]) => field !== "_tag" && (typeof value === "string" || typeof value === "number"))
+      .map(([field, value]) => `${field}=${String(value)}`)
+    if (tag.length > 0) return detail.length === 0 ? tag : `${tag} (${detail.join(", ")})`
   }
   const text = String(cause)
   return text.length > 0 && text !== "[object Object]" ? text : "the agent directory refused the request"
