@@ -613,6 +613,16 @@
       "testKind": "tui-test"
     },
     {
+      "id": "apps/rika/test/subagent-activity-volume.tui.test.ts",
+      "path": "apps/rika/test/subagent-activity-volume.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
       "id": "apps/rika/test/subagent-activity.tui.test.ts",
       "path": "apps/rika/test/subagent-activity.tui.test.ts",
       "workspace": "@rika/cli",
@@ -5737,7 +5747,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/subagent-activity.tui.test.ts",
+      "from": "apps/rika/test/subagent-activity-volume.tui.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5745,9 +5755,25 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/subagent-activity.tui.test.ts",
+      "from": "apps/rika/test/subagent-activity-volume.tui.test.ts",
       "to": "external:perf_hooks",
       "specifier": "perf_hooks",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-activity-volume.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-activity.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "test",
       "production": false
