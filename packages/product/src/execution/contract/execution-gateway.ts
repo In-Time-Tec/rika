@@ -17,7 +17,7 @@ export * from "./execution-gateway-request"
 
 export interface Interface {
   readonly startTurn: (input: StartTurn) => Effect.Effect<ExecutionLink, StartTurnFailure>
-  readonly cancelTurn: (link: ExecutionLink, reason?: string) => Effect.Effect<void, CancelTurnFailure>
+  readonly cancelTurn: (link: ExecutionLink, reason: string) => Effect.Effect<void, CancelTurnFailure>
   readonly steerTurn: (
     link: ExecutionLink,
     input: { readonly text: string; readonly idempotencyKey: string },

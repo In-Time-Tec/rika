@@ -74,6 +74,70 @@ describe("Operation", () => {
     }),
   )
 
+  it.effect("attributes an active interrupt to the user and shutdown cancellation to the server", () =>
+    Effect.gen(function* () {
+      const thread: Thread.Thread = {
+        id: Thread.ThreadId.make("interrupt-attribution"),
+        lineage: threadLineage,
+        workspace: "/work",
+        title: "Interrupt attribution",
+        labels: [],
+        pinned: false,
+        archived: false,
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      const turns = yield* TurnRepository.makeMemory([
+        {
+          id: Turn.TurnId.make("active-interrupt"),
+          ...turnProvenance,
+          threadId: thread.id,
+          prompt: "active",
+          executionRoute: executionRoute(),
+          executionLink: {
+            runId: "active-interrupt-run",
+            turnId: "active-interrupt",
+            threadId: String(thread.id),
+          },
+          status: "running",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const cancellationReasons = yield* Ref.make<ReadonlyArray<string>>([])
+      const interruptBackend = ExecutionGateway.Service.of({
+        ...backend,
+        inspectTurn: inspectTurnFromTurns(turns),
+        watchTurn: () => Stream.never,
+        cancelTurn: (_link, reason) => Ref.update(cancellationReasons, (reasons) => [...reasons, reason]),
+      })
+      yield* Effect.gen(function* () {
+        const session = yield* openInteractiveSession(sessions, {
+          _tag: "Interactive",
+          prompt: [],
+          ephemeral: false,
+        })
+        yield* session.selectThread(thread.id)
+        yield* session.interruptAndSend("replacement")
+        yield* session.quit
+      }).pipe(
+        provideLayer(
+          productLayer({
+            repositoryLayer: ThreadRepository.memoryLayer([thread]),
+            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+            backendLayer: Layer.succeed(ExecutionGateway.Service, interruptBackend),
+            defaultWorkspace: "/work",
+            makeThreadId: Effect.die("unused"),
+            makeTurnId: Effect.succeed(Turn.TurnId.make("replacement-turn")),
+            interactive: holdSession(sessions),
+          }),
+        ),
+      )
+      expect(yield* Ref.get(cancellationReasons)).toEqual(["Cancelled by user", "Cancelled: server shutdown"])
+    }),
+  )
+
   it.effect("admits 100 queued turns with constant-size FIFO deltas while the server observes active work", () =>
     Effect.gen(function* () {
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
@@ -202,6 +266,7 @@ describe("Operation", () => {
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
       const activeCancelled = yield* Deferred.make<void>()
+      const cancellationReasons = yield* Ref.make<ReadonlyArray<string>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const dispatch = (event: InteractiveEvent) => runSync(Ref.update(events, (current) => [...current, event]))
       const controlBackend = ExecutionGateway.Service.of({
@@ -216,7 +281,10 @@ describe("Operation", () => {
                 ),
               )
             : backend.watchTurn(link, cursor),
-        cancelTurn: () => Deferred.succeed(activeCancelled, undefined),
+        cancelTurn: (_link, reason) =>
+          Ref.update(cancellationReasons, (reasons) => [...reasons, reason]).pipe(
+            Effect.andThen(Deferred.succeed(activeCancelled, undefined)),
+          ),
       })
       yield* Effect.gen(function* () {
         const session = yield* openInteractiveSession(sessions, {
@@ -255,6 +323,7 @@ describe("Operation", () => {
           .filter((event) => event._tag === "ExecutionControlled")
           .map((event) => (event._tag === "ExecutionControlled" ? event.action : undefined)),
       ).toEqual(["steered", "cancelled"])
+      expect(yield* Ref.get(cancellationReasons)).toEqual(["Cancelled by user"])
       expect(yield* turns.get(Turn.TurnId.make("active-control"))).toMatchObject({
         status: "cancelled",
       })

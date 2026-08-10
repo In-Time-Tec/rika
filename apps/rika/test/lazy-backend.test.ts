@@ -34,7 +34,7 @@ it.effect("delegates the five execution operations through the deferred backend"
           executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
         }),
       ).toEqual(link)
-      yield* backend.cancelTurn(link)
+      yield* backend.cancelTurn(link, "Cancelled by user")
       yield* backend.steerTurn(link, { text: "continue", idempotencyKey: "steer-1" })
       const authorization = {
         authorizationId: "authorization",

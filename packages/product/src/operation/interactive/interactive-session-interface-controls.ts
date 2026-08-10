@@ -8,6 +8,8 @@ import type { InteractiveSession } from "./interactive-session"
 import { OperationUnavailable } from "../contract/product-operation"
 import type { InteractiveSessionControlsInput } from "./interactive-session-interface"
 
+const userCancellationReason = "Cancelled by user"
+
 export const makeInteractiveSessionControls = (
   input: InteractiveSessionControlsInput,
 ): Pick<InteractiveSession, "steer" | "interruptAndSend" | "cancel" | "quit"> => {
@@ -68,7 +70,7 @@ export const makeInteractiveSessionControls = (
         } else {
           if (turn.executionLink === undefined)
             return yield* operationError(`Turn ${turn.id} has no persisted execution link`)
-          yield* backend.cancelTurn(turn.executionLink)
+          yield* backend.cancelTurn(turn.executionLink, userCancellationReason)
         }
         yield* drainQueued(thread, sessionDispatch)
       }),
@@ -90,7 +92,7 @@ export const makeInteractiveSessionControls = (
       if (!beforeStart) {
         if (turn.executionLink === undefined)
           cancellation = operationError(`Turn ${turn.id} has no persisted execution link`)
-        else cancellation = backend.cancelTurn(turn.executionLink)
+        else cancellation = backend.cancelTurn(turn.executionLink, userCancellationReason)
       }
       const outcome = yield* Effect.exit(cancellation)
       if (outcome._tag === "Failure")

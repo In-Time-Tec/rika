@@ -54,7 +54,7 @@ it.effect("passes one opaque execution link through all gateway operations", () 
     }
     yield* gateway.approveTurn(started, authorization)
     yield* gateway.denyTurn(started, authorization)
-    yield* gateway.cancelTurn(started)
+    yield* gateway.cancelTurn(started, "Cancelled by user")
     yield* gateway.inspectTurn(started)
     expect(observed).toEqual([
       ["start", "turn-1"],

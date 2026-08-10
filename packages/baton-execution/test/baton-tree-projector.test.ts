@@ -650,7 +650,7 @@ describe("Baton tree projector", () => {
     const projector = TreeProjector.make("turn-resolution", "cancel me")
     projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }))
     projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    projector.apply(treeEvent("raw-root-run", { _tag: "RunCancellationRequested", reason: "Cancelled by Rika" }))
+    projector.apply(treeEvent("raw-root-run", { _tag: "RunCancellationRequested", reason: "Cancelled by user" }))
     expect(projector.snapshot().state.status).toBe("cancelling")
 
     // A replayPolicy:"never" tool interrupted mid-flight parks the Run in needs-resolution.
@@ -666,12 +666,12 @@ describe("Baton tree projector", () => {
     const projector = TreeProjector.make("turn-resolution-terminal", "cancel me")
     projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }))
     projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    projector.apply(treeEvent("raw-root-run", { _tag: "RunCancellationRequested", reason: "Cancelled by Rika" }))
+    projector.apply(treeEvent("raw-root-run", { _tag: "RunCancellationRequested", reason: "Cancelled by user" }))
     projector.apply(treeEvent("raw-root-run", { _tag: "OperationUnknown", operationId: "op-1" }))
     expect(projector.snapshot().state.status).toBe("waiting")
 
     // Resolving the parked operation lets the run reach its real terminal state.
-    projector.apply(treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "Cancelled by Rika" }))
+    projector.apply(treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "Cancelled by user" }))
     expect(projector.snapshot().state.status).toBe("cancelled")
   })
 

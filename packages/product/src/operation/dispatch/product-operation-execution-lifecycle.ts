@@ -34,7 +34,7 @@ export const makeExecutionLifecycle = (input: {
         (turn) => turn.status !== "queued" && turn.executionLink !== undefined,
       )
       for (const turn of running) {
-        const outcome = yield* Effect.result(backend.cancelTurn(turn.executionLink!))
+        const outcome = yield* Effect.result(backend.cancelTurn(turn.executionLink!, "Cancelled: server shutdown"))
         if (outcome._tag === "Failure") {
           yield* Effect.logWarning("execution.cancel.failed").pipe(
             Effect.annotateLogs({

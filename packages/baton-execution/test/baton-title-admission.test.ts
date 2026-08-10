@@ -177,9 +177,10 @@ it.live(
             }),
           )
           const rootRequests = yield* rootFixture.requests
-          yield* gateway.cancelTurn(receipt, "Cancelled by Rika")
+          yield* gateway.cancelTurn(receipt, "Cancelled by user")
           const inspected = yield* gateway.inspectTurn(receipt)
-          return { rootRequests, inspected }
+          const changes = [...(yield* gateway.watchTurn(receipt).pipe(Stream.runCollect))]
+          return { rootRequests, inspected, changes }
         }),
       )
       // The defect: titling gated the root, so at cancel time the root had issued no model call
@@ -187,6 +188,18 @@ it.live(
       expect(outcome.rootRequests.length).toBe(1)
       expect(promptText(outcome.rootRequests[0]?.prompt)).toContain("the user prompt that must not be dropped")
       expect(["cancelling", "cancelled"]).toContain(outcome.inspected.status)
+      const cancellation = outcome.changes
+        .flatMap((change) => (change._tag === "ProjectionSnapshot" ? change.units : change.upsert))
+        .find(
+          (unit) =>
+            unit.content._tag === "Block" &&
+            unit.content.block._tag === "Notification" &&
+            unit.content.block.title === "Cancellation requested",
+        )
+      expect(cancellation?.content).toEqual({
+        _tag: "Block",
+        block: { _tag: "Notification", title: "Cancellation requested", detail: "Cancelled by user" },
+      })
     }),
   20_000,
 )

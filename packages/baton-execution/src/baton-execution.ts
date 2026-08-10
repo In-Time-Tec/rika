@@ -121,7 +121,7 @@ const make = (
     // side-effecting operation on its own, so the product settles it as Failed and lets the Run
     // reach its terminal state. Idempotent and restart-safe: resolving an already-resolved
     // operation is a no-op, and the operation id is recovered from durable history.
-    const resolveParkedOperations = (runId: string) =>
+    const resolveParkedOperations = (runId: string, reason: string) =>
       Effect.gen(function* () {
         const inspection = yield* RunTree.inspect(runId).pipe(Effect.provideService(Runtime.Runtime, runtime))
         const parked = inspection.runs.filter(({ run }) => run.status === "needs-resolution")
@@ -143,7 +143,7 @@ const make = (
                       idempotencyKey: `${operationId}:cancelled`,
                       resolution: {
                         _tag: "Failed",
-                        error: { _tag: "OperationInterrupted", message: "Cancelled by Rika" },
+                        error: { _tag: "OperationInterrupted", message: reason },
                       },
                     }),
                   { discard: true },
@@ -156,8 +156,8 @@ const make = (
 
     // Cancellation is only complete once the Run is terminal. A parked Run is resolved and then
     // re-checked, because the park may be recorded after `cancel` returns.
-    const awaitSettledCancellation = (runId: string) =>
-      resolveParkedOperations(runId).pipe(
+    const awaitSettledCancellation = (runId: string, reason: string) =>
+      resolveParkedOperations(runId, reason).pipe(
         Effect.andThen(RunTree.inspect(runId).pipe(Effect.provideService(Runtime.Runtime, runtime))),
         Effect.map((inspection) =>
           inspection.runs.some(({ run }) => run.status === "needs-resolution" || run.status === "cancelling"),
@@ -253,12 +253,12 @@ const make = (
           return { runId: receipt.runId, turnId: input.turnId, threadId: input.threadId }
         }).pipe(Effect.mapError((cause) => ExecutionGateway.StartTurnFailure.make({ message: message(cause) }))),
       cancelTurn: (link, reason) =>
-        runtime.cancel({ runId: link.runId, reason: reason ?? "Cancelled by Rika" }).pipe(
+        runtime.cancel({ runId: link.runId, reason }).pipe(
           // Interrupting a replayPolicy:"never" operation parks the Run in `needs-resolution`,
           // where it can make no further progress on its own. Resolve it so the Run reaches its
           // terminal state instead of stranding the turn. Retried until the Run settles because
           // the park is recorded asynchronously by the worker that owned the interrupted operation.
-          Effect.andThen(awaitSettledCancellation(link.runId)),
+          Effect.andThen(awaitSettledCancellation(link.runId, reason)),
           Effect.mapError((cause) => ExecutionGateway.CancelTurnFailure.make({ message: message(cause) })),
         ),
       steerTurn: (link, input) =>
