@@ -56,7 +56,7 @@ export const profileInstructions = {
   Surgeon: "Implement the bounded code change, preserve unrelated work, and verify the result.",
   Task:
     "Complete the bounded task autonomously and return the result with verification evidence. " +
-    "You may spawn Oracle, Librarian, Painter, ReadThread, or Surgeon, but not another Task. " +
+    "You may spawn Oracle, Librarian, Painter, ReadThread, Surgeon, or another Task; recursive Task delegation is guarded by Baton's depth budget. " +
     `${RoleToolkits.delegationCapabilityGuidance} ${childGroupGuidance}`,
 } as const
 
@@ -321,7 +321,7 @@ const agentDefinition = (
 }
 
 const rootChildNames = ["Title", "Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
-const taskChildNames = ["Oracle", "Librarian", "Painter", "ReadThread", "Surgeon"] as const
+const taskSpecialistNames = ["Oracle", "Librarian", "Painter", "ReadThread", "Surgeon"] as const
 
 type RoleName = "Root" | "Title" | "Oracle" | "Librarian" | "Painter" | "ReadThread" | "Review" | "Surgeon" | "Task"
 
@@ -530,7 +530,6 @@ export const configure = (
       workspaceState: yield* workspaceState(options.workspace),
       channelBytes: limits.channelBytes,
       cellDeadlineMillis: limits.cellDeadlineMillis,
-      childWaitMillis: BindingModules.maxChildWaitMillis,
     })
     const withSurface = (own: string) =>
       supplemental === ""
@@ -570,20 +569,31 @@ export const configure = (
       Review: leaf("Review"),
       Surgeon: leaf("Surgeon"),
     }
-    const task = agentDefinition(
-      routes.Task,
-      routed.Task,
-      "Task",
-      withSurface(profileInstructions.Task),
-      roleTools.Task,
-      environment("Task"),
-      taskChildNames.map((selection) => ({ selection, agent: leafProfiles[selection].pinned.pin })),
-      contextPin,
-      compactionIdentity,
-      route.tokenBudget,
-      kernelProfilePin,
-      pinnedCapabilities,
+    const taskProfiles = Array.from({ length: agentBudget.depth }).reduce<ReadonlyArray<AgentDefinition>>(
+      (deeperProfiles) => {
+        const deeperTask = deeperProfiles[0]
+        const task = agentDefinition(
+          routes.Task,
+          routed.Task,
+          "Task",
+          withSurface(profileInstructions.Task),
+          roleTools.Task,
+          environment("Task"),
+          [
+            ...taskSpecialistNames.map((selection) => ({ selection, agent: leafProfiles[selection].pinned.pin })),
+            ...(deeperTask === undefined ? [] : [{ selection: "Task", agent: deeperTask.pinned.pin }]),
+          ],
+          contextPin,
+          compactionIdentity,
+          route.tokenBudget,
+          kernelProfilePin,
+          pinnedCapabilities,
+        )
+        return [task, ...deeperProfiles]
+      },
+      [],
     )
+    const task = taskProfiles[0]!
     const profiles: Readonly<Record<keyof typeof roleInstructions, AgentDefinition>> = {
       ...leafProfiles,
       Task: task,
@@ -605,7 +615,8 @@ export const configure = (
       pinnedCapabilities,
     )
     const childEntries = rootChildNames.map((name) => agentEntry(profiles[name].pinned))
-    const entries = [agentEntry(root.pinned), ...childEntries]
+    const nestedTaskEntries = taskProfiles.slice(1).map((profile) => agentEntry(profile.pinned))
+    const entries = [agentEntry(root.pinned), ...childEntries, ...nestedTaskEntries]
     const executable = ExecutableManifest.make({ root: root.pinned.pin, entries })
     const registrationMap = new Map<string, ExecutableRegistration.ExecutableRegistration>()
     for (const model of [
@@ -682,24 +693,26 @@ export const configure = (
             },
           },
         },
-        ...profileNames.map((name) => {
-          const definition = profiles[name]
-          const resolved = {
-            executable: nestedNames.has(name)
-              ? ExecutableManifest.make({ root: root.pinned.pin, active: definition.pinned.pin, entries })
-              : ExecutableManifest.make({ root: definition.pinned.pin, entries: [agentEntry(definition.pinned)] }),
-            agent: definition.agent,
-          }
-          return name === "Title"
-            ? resolved
-            : Object.assign(resolved, {
-                runOptions: {
-                  compaction: {
-                    contextWindow: route.main.compaction.contextWindow,
-                    reserveTokens: route.main.compaction.reserveTokens,
+        ...profileNames.flatMap((name) => {
+          const definitions = name === "Task" ? taskProfiles : [profiles[name]]
+          return definitions.map((definition) => {
+            const resolved = {
+              executable: nestedNames.has(name)
+                ? ExecutableManifest.make({ root: root.pinned.pin, active: definition.pinned.pin, entries })
+                : ExecutableManifest.make({ root: definition.pinned.pin, entries: [agentEntry(definition.pinned)] }),
+              agent: definition.agent,
+            }
+            return name === "Title"
+              ? resolved
+              : Object.assign(resolved, {
+                  runOptions: {
+                    compaction: {
+                      contextWindow: route.main.compaction.contextWindow,
+                      reserveTokens: route.main.compaction.reserveTokens,
+                    },
                   },
-                },
-              })
+                })
+          })
         }),
       ],
       profiles: Object.fromEntries(Object.entries(profiles).map(([name, definition]) => [name, definition.pinned])),
