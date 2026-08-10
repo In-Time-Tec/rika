@@ -46,6 +46,11 @@ const indexError = (operation: Operation, cause: unknown) => {
       : ""
   const fromObject = described.length > 0 ? described : String(cause)
   const message = cause instanceof Error ? cause.message : fromObject
+  const reason = typeof cause === "object" && cause !== null && "reason" in cause ? cause.reason : undefined
+  const reasonTag =
+    typeof reason === "object" && reason !== null && "_tag" in reason && typeof reason._tag === "string"
+      ? reason._tag
+      : reason
   return WorkspaceIndexError.make({
     operation,
     /**
@@ -53,15 +58,98 @@ const indexError = (operation: Operation, cause: unknown) => {
      * pattern that misses them left a cell told only that a search failed. Naming the program is
      * what lets a reader install it.
      */
-    message: /ENOENT|not found|No such file|failed to spawn|exited/i.test(message)
-      ? `ripgrep (rg) is not installed or not on PATH: ${message}`
-      : message,
+    message:
+      reasonTag === "NotFound" || /ENOENT|not found|No such file/i.test(message)
+        ? `ripgrep (rg) is not installed or not on PATH: ${message}`
+        : message,
   })
 }
 
-const ignoreGlobs = ["!**/node_modules/**", "!**/.git/**", "!**/dist/**", "!**/.rika/**", "!**/.worktrees/**"] as const
-
+const ignoredNames = new Set(["node_modules", ".git", "dist", ".rika", ".worktrees"])
+const ignoreGlobs = Array.from(ignoredNames, (name) => `!**/${name}/**`)
 const ignoreArgs = ignoreGlobs.flatMap((pattern) => ["--glob", pattern])
+const missingRipgrep = (error: WorkspaceIndexError): boolean =>
+  error.message.startsWith("ripgrep (rg) is not installed or not on PATH:")
+
+const globExpression = (pattern: string): RegExp => {
+  let expression = "^"
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index]!
+    if (character === "*") {
+      if (pattern[index + 1] !== "*") {
+        expression += "[^/]*"
+        continue
+      }
+      index += 1
+      if (pattern[index + 1] === "/") {
+        index += 1
+        expression += "(?:.*/)?"
+      } else expression += ".*"
+      continue
+    }
+    if (character === "?") {
+      expression += "[^/]"
+      continue
+    }
+    if (character === "[") {
+      const closing = pattern.indexOf("]", index + 1)
+      if (closing >= 0) {
+        const content = pattern.slice(index + 1, closing)
+        expression += `[${content.startsWith("!") ? `^${content.slice(1)}` : content}]`
+        index = closing
+        continue
+      }
+    }
+    expression += /[\^$.*+?()[\]{}|]/.test(character) ? `\\${character}` : character
+  }
+  return new RegExp(`${expression}$`)
+}
+
+const fallbackFiles = (
+  operation: Operation,
+  root: string,
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
+  pattern?: string,
+): Effect.Effect<ReadonlyArray<string>, WorkspaceIndexError> =>
+  Effect.gen(function* () {
+    const files: Array<string> = []
+    const visited = new Set([root])
+    const matches =
+      pattern === undefined || pattern.length === 0 || pattern === "**/*" || pattern === "**"
+        ? undefined
+        : globExpression(pattern)
+    const contained = (candidate: string) => {
+      const relative = path.relative(root, candidate)
+      return candidate === root || (relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative))
+    }
+    const walk = (directory: string): Effect.Effect<void, WorkspaceIndexError> =>
+      Effect.gen(function* () {
+        const names = (yield* fileSystem
+          .readDirectory(directory)
+          .pipe(Effect.mapError((cause) => indexError(operation, cause))))
+          .filter((name) => !name.startsWith(".") && !ignoredNames.has(name))
+          .toSorted((left, right) => left.localeCompare(right))
+        for (const name of names) {
+          const child = path.join(directory, name)
+          const info = yield* fileSystem.stat(child).pipe(Effect.mapError((cause) => indexError(operation, cause)))
+          if (info.type === "Directory") {
+            const canonical = yield* fileSystem
+              .realPath(child)
+              .pipe(Effect.mapError((cause) => indexError(operation, cause)))
+            if (!contained(canonical) || visited.has(canonical)) continue
+            visited.add(canonical)
+            yield* walk(child)
+            continue
+          }
+          if (info.type !== "File") continue
+          const relative = path.relative(root, child).replaceAll("\\", "/")
+          if (matches === undefined || matches.test(relative)) files.push(relative)
+        }
+      })
+    yield* walk(root)
+    return files
+  })
 
 const pathItem = (relativePath: string): PathItem => ({
   relativePath,
@@ -187,13 +275,20 @@ const listFiles = (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
   operation: Operation,
   root: string,
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
   pattern?: string,
 ): Effect.Effect<ReadonlyArray<string>, WorkspaceIndexError> =>
   Effect.gen(function* () {
     const args = ["--files", "--color", "never", ...ignoreArgs]
     if (pattern !== undefined && pattern.length > 0 && pattern !== "**/*" && pattern !== "**")
       args.push("--glob", pattern)
-    const result = yield* runRg(spawner, operation, root, args)
+    const attempted = yield* Effect.result(runRg(spawner, operation, root, args))
+    if (attempted._tag === "Failure") {
+      if (missingRipgrep(attempted.failure)) return yield* fallbackFiles(operation, root, fileSystem, path, pattern)
+      return yield* attempted.failure
+    }
+    const result = attempted.success
     if (result.code > 1)
       return yield* indexError(operation, result.stderr.trim() || `rg --files exited with code ${result.code}`)
     return result.stdout
@@ -222,6 +317,86 @@ const filterContained = (
     return kept
   })
 
+const fallbackGrep = (
+  root: string,
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
+  query: string,
+  options?: GrepOptions,
+): Effect.Effect<GrepResult, WorkspaceIndexError> =>
+  Effect.gen(function* () {
+    const mode = options?.mode ?? "plain"
+    let regularExpression: RegExp | undefined
+    if (mode === "regex") {
+      const compiled = yield* Effect.result(
+        Effect.try({
+          try: () => new RegExp(query),
+          catch: (cause) => String(cause),
+        }),
+      )
+      if (compiled._tag === "Failure") return emptyGrep(0, compiled.failure)
+      regularExpression = compiled.success
+    }
+    const pageSize = Math.max(1, options?.pageSize ?? 1_000)
+    const maxMatchesPerFile = Math.max(1, options?.maxMatchesPerFile ?? 1_000)
+    const listed = yield* fallbackFiles("grep", root, fileSystem, path)
+    const contained = yield* filterContained("grep", root, path, fileSystem, listed)
+    const included =
+      options?.include === undefined || options.include.length === 0
+        ? contained
+        : contained.filter((relativePath) => globExpression(options.include!).test(relativePath))
+    const items: Array<GrepMatch> = []
+    let filesSearched = 0
+    let totalMatched = 0
+    let outputBytes = 0
+    let keptBytes = 0
+    const search = Effect.gen(function* () {
+      for (const relativePath of included) {
+        const content = yield* fileSystem
+          .readFileString(path.join(root, relativePath))
+          .pipe(Effect.mapError((cause) => indexError("grep", cause)))
+        filesSearched += 1
+        if (content.includes("\0")) continue
+        let matchesInFile = 0
+        const lines = content.split("\n")
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+          const lineContent = lines[lineIndex]!.replace(/\r$/, "")
+          const matched =
+            regularExpression === undefined ? lineContent.includes(query) : regularExpression.test(lineContent)
+          if (!matched) continue
+          matchesInFile += 1
+          totalMatched += 1
+          const match = { relativePath, lineNumber: lineIndex + 1, lineContent }
+          const renderedBytes = RuntimeFilesystem.byteLength(
+            `${match.relativePath}:${match.lineNumber}:${match.lineContent}\n`,
+          )
+          outputBytes += renderedBytes
+          if (items.length < pageSize && keptBytes + renderedBytes <= 40_000) {
+            items.push(match)
+            keptBytes += renderedBytes
+          }
+          if (matchesInFile >= maxMatchesPerFile) break
+        }
+      }
+    })
+    let deadlineReached = false
+    if (options?.deadlineMillis === undefined) yield* search
+    else {
+      const completed = yield* Effect.timeoutOption(search, `${options.deadlineMillis} millis`)
+      deadlineReached = Option.isNone(completed)
+    }
+    return {
+      items,
+      totalMatched,
+      totalFilesSearched: filesSearched,
+      totalFiles: contained.length,
+      filteredFileCount: included.length,
+      nextCursor: null,
+      ...(deadlineReached ? { deadlineReached: true } : {}),
+      ...(outputBytes > keptBytes ? { outputTruncation: { keptBytes, totalBytes: outputBytes } } : {}),
+    }
+  })
+
 const paginatePaths = (relativePaths: ReadonlyArray<string>, options?: GlobOptions | SearchOptions): SearchResult => {
   const pageSize = Math.max(1, options?.pageSize ?? 50)
   const pageIndex = options !== undefined && "pageIndex" in options ? Math.max(0, options.pageIndex ?? 0) : 0
@@ -246,7 +421,7 @@ const makeService = (workspace: string) =>
     const interface_: Interface = {
       fileSearch: (query, options) =>
         Effect.gen(function* () {
-          const listed = yield* listFiles(spawner, "fileSearch", root)
+          const listed = yield* listFiles(spawner, "fileSearch", root, fileSystem, path)
           const relativePaths = yield* filterContained("fileSearch", root, path, fileSystem, listed)
           const ranked = relativePaths
             .map((relativePath) => ({ relativePath, score: fuzzyScore(query, relativePath) }))
@@ -264,7 +439,7 @@ const makeService = (workspace: string) =>
         }),
       glob: (pattern, options) =>
         Effect.gen(function* () {
-          const listed = yield* listFiles(spawner, "glob", root, pattern)
+          const listed = yield* listFiles(spawner, "glob", root, fileSystem, path, pattern)
           const relativePaths = (yield* filterContained("glob", root, path, fileSystem, listed)).toSorted(
             (left, right) => left.localeCompare(right),
           )
@@ -288,7 +463,12 @@ const makeService = (workspace: string) =>
           if (options?.include !== undefined && options.include.length > 0) args.push("--glob", options.include)
           if (mode === "plain") args.push("--fixed-strings")
           args.push("--", query)
-          const result = yield* runRg(spawner, "grep", root, args, options?.deadlineMillis)
+          const attempted = yield* Effect.result(runRg(spawner, "grep", root, args, options?.deadlineMillis))
+          if (attempted._tag === "Failure") {
+            if (missingRipgrep(attempted.failure)) return yield* fallbackGrep(root, fileSystem, path, query, options)
+            return yield* attempted.failure
+          }
+          const result = attempted.success
           if (result.code === 2) {
             const message = result.stderr.trim()
             if (mode === "regex" && /regex parse error|error parsing regex|invalid regex/i.test(message))

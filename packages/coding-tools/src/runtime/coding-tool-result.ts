@@ -14,6 +14,18 @@ export interface WorkspaceListDirectory {
 
 export type WorkspaceListEntry = WorkspaceListFile | WorkspaceListDirectory
 
+export interface WorkspaceSearchMatch {
+  readonly path: string
+  readonly line: number
+  readonly text: string
+}
+
+export const WorkspaceSearchMatch = Schema.Struct({
+  path: Schema.String,
+  line: Schema.Int.check(Schema.isGreaterThan(0)),
+  text: Schema.String,
+})
+
 export const WorkspaceListEntry: Schema.Codec<WorkspaceListEntry> = Schema.Union([
   Schema.Struct({ name: Schema.String, kind: Schema.Literal("file") }),
   Schema.Struct({
@@ -29,6 +41,7 @@ export const Result = Schema.Struct({
   text: Schema.String,
   truncated: Schema.Boolean,
   entries: Schema.optionalKey(Schema.Array(WorkspaceListEntry)),
+  matches: Schema.optionalKey(Schema.Array(WorkspaceSearchMatch)),
   running: Schema.optionalKey(Schema.Boolean),
   processId: Schema.optionalKey(Schema.String),
   exitCode: Schema.optionalKey(Schema.Finite),

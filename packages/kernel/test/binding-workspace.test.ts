@@ -48,7 +48,11 @@ describe("workspace binding", () => {
       const mounted = yield* registry({
         run: (request) => {
           seen.push(request)
-          return result("matched")
+          return Effect.succeed({
+            text: "src/a.ts:4:matched",
+            matches: [{ path: "src/a.ts", line: 4, text: "matched" }],
+            truncated: false,
+          })
         },
       })
       const response = yield* mounted.invoke({
@@ -65,7 +69,14 @@ describe("workspace binding", () => {
         { _tag: "Grep", pattern: "needle", regex: false },
         { _tag: "Grep", pattern: "needle", regex: false, path: "packages/x/**" },
       ])
-      expect(response).toEqual({ _tag: "Success", output: { text: "matched", truncated: false } })
+      expect(response).toEqual({
+        _tag: "Success",
+        output: {
+          text: "src/a.ts:4:matched",
+          matches: [{ path: "src/a.ts", line: 4, text: "matched" }],
+          truncated: false,
+        },
+      })
     }),
   )
 

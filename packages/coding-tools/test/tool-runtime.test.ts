@@ -172,6 +172,7 @@ const testEnvironment = (
     glob: () => Effect.succeed({ items: [], scores: [], totalMatched: 0, totalFiles: files.size }),
     grep: (query, options) => {
       grepCalls.push({ query, options })
+      if (query === "never") return Effect.never
       if (query === "missing-rg")
         return WorkspaceIndex.WorkspaceIndexError.make({
           operation: "grep",
@@ -344,9 +345,26 @@ describe("Runtime", () => {
       const runtime = yield* Runtime.Service
       const partial = yield* runtime.run({ _tag: "Grep", pattern: "slow", regex: false })
       expect(partial.text).toContain("a.txt:2:needle")
-      expect(partial.text).toContain("search stopped at 9s: 1 matches found before the deadline")
-      expect(partial.text).toContain("narrow the pattern or scope with path")
+      expect(partial.matches).toEqual([{ path: "a.txt", line: 2, text: "needle" }])
+      expect(partial.text).toContain("stopped before the 10s tool timeout: 1 match found")
+      expect(partial.text).not.toContain("9s")
+      expect(partial.text).toContain("search greps file CONTENTS repo-wide")
+      expect(partial.text).toContain("scope with path or use workspace.list")
       expect(partial.truncated).toBe(true)
+    }).pipe(provide(environment.runtime))
+  })
+
+  it.effect("explains the repo-wide content search recovery after the outer timeout", () => {
+    const environment = testEnvironment()
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const call = yield* Effect.forkChild(runtime.run({ _tag: "Grep", pattern: "never", regex: false }))
+      yield* Effect.yieldNow
+      yield* TestClock.adjust("10 seconds")
+      const failure = yield* Effect.flip(Fiber.join(call))
+      expect(failure).toMatchObject({ tool: "grep", category: "timeout", outcome: "known" })
+      expect(failure.nextAction).toContain("greps file CONTENTS repo-wide")
+      expect(failure.nextAction).toContain("scope with path or use workspace.list")
     }).pipe(provide(environment.runtime))
   })
 
@@ -360,12 +378,24 @@ describe("Runtime", () => {
         (_, index) => `src/file-${index}.ts:${index + 1}:HEAD-${"x".repeat(30)}-${index}`,
       ).join("\n")
       expect(result.truncated).toBe(true)
-      expect(bytesOf(result.text)).toBe(16_384)
+      expect(bytesOf(result.text)).toBeLessThanOrEqual(8_192)
+      expect(
+        bytesOf(result.text) +
+          result.matches!.reduce((total, match) => total + bytesOf(match.path) + bytesOf(match.text) + 16, 0),
+      ).toBeLessThanOrEqual(16_384)
       expect(result.text.startsWith("src/file-0.ts:1:HEAD-")).toBe(true)
       expect(result.text).not.toContain("src/file-799.ts")
       expect(result.text).toContain(`of ${bytesOf(full)} bytes`)
       expect(result.text).toContain("narrow the pattern or scope with path")
       expect(result.text.match(/\[truncated:/g)).toHaveLength(1)
+      expect(result.matches!.length).toBeGreaterThan(0)
+      expect(result.matches!.length).toBeLessThan(800)
+      for (const [index, match] of result.matches!.entries())
+        expect(match).toEqual({
+          path: `src/file-${index}.ts`,
+          line: index + 1,
+          text: `HEAD-${"x".repeat(30)}-${index}`,
+        })
     }).pipe(provide(environment.runtime))
   })
 

@@ -14,6 +14,12 @@ const Read = Schema.Struct({
   truncated: Schema.Boolean,
 })
 
+const Searched = Schema.Struct({
+  text: Schema.String,
+  matches: Schema.Array(CodingToolResult.WorkspaceSearchMatch),
+  truncated: Schema.Boolean,
+})
+
 const Listed = Schema.Struct({
   text: Schema.String,
   entries: Schema.Array(CodingToolResult.WorkspaceListEntry),
@@ -52,6 +58,12 @@ const run = (request: typeof CodingToolRuntime.Request.Type) =>
 
 const read = (result: CodingToolResult.Result) => ({ text: result.text, truncated: result.truncated })
 
+const searched = (result: CodingToolResult.Result) => ({
+  text: result.text,
+  matches: result.matches ?? [],
+  truncated: result.truncated,
+})
+
 const listed = (result: CodingToolResult.Result) => ({
   text: result.text,
   entries: result.entries ?? [],
@@ -68,7 +80,7 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingTo
   operation({
     name: "search",
     input: SearchInput,
-    output: Read,
+    output: Searched,
     failure: Failure,
     handle: (input) =>
       Effect.map(
@@ -78,7 +90,7 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingTo
           regex: input.regex ?? false,
           ...(input.path === undefined ? {} : { path: input.path }),
         }),
-        read,
+        searched,
       ),
   }),
   operation({

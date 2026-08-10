@@ -80,7 +80,7 @@ describe("binding schema round trip", () => {
 
   it("encodes and decodes every operation's declared output back to an equal value", () => {
     const samples: Record<string, unknown> = {
-      "workspace.search": { text: "t", truncated: false },
+      "workspace.search": { text: "a.ts:1:t", matches: [{ path: "a.ts", line: 1, text: "t" }], truncated: false },
       "workspace.read": { text: "t", truncated: false },
       "workspace.write": { text: "t", truncated: false, diff: "d" },
       "workspace.replace": { text: "t", truncated: true, diff: "d" },

@@ -183,27 +183,37 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
                     recovery: "after_change",
                     nextAction: "Correct the regular expression or set regex to false",
                   })
-                const matches = page.items
-                  .map((match) => `${match.relativePath}:${match.lineNumber}:${match.lineContent}`)
-                  .join("\n")
+                const structuredMatches = page.items.map((match) => ({
+                  path: match.relativePath,
+                  line: match.lineNumber,
+                  text: match.lineContent,
+                }))
+                const matches = structuredMatches.map((match) => `${match.path}:${match.line}:${match.text}`).join("\n")
                 const deadline =
                   page.deadlineReached === true
-                    ? `search stopped at ${Math.round(deadlineMillis / 1_000)}s: ${page.items.length} matches found before the deadline`
+                    ? `search greps file CONTENTS repo-wide and stopped before the ${Math.round(contract(request).timeoutMillis / 1_000)}s tool timeout: ${page.items.length} ${page.items.length === 1 ? "match" : "matches"} found; scope with path or use workspace.list`
                     : undefined
                 if (page.outputTruncation !== undefined) {
                   const recovery = `${deadline === undefined ? "rg output reached its capacity" : deadline}; narrow the pattern or scope with path`
-                  return RuntimeFilesystem.boundedText(
-                    matches,
-                    contract(request).outputLimit,
-                    recovery,
-                    page.outputTruncation.totalBytes,
-                  )
+                  return {
+                    ...RuntimeFilesystem.boundedText(
+                      matches,
+                      contract(request).outputLimit,
+                      recovery,
+                      page.outputTruncation.totalBytes,
+                    ),
+                    matches: structuredMatches,
+                  }
                 }
                 if (deadline !== undefined) {
-                  const marker = `${deadline}; narrow the pattern or scope with path`
-                  return { ...bounded(matches.length === 0 ? marker : `${matches}\n${marker}`), truncated: true }
+                  const marker = deadline
+                  return {
+                    ...bounded(matches.length === 0 ? marker : `${matches}\n${marker}`),
+                    matches: structuredMatches,
+                    truncated: true,
+                  }
                 }
-                return bounded(matches)
+                return { ...bounded(matches), matches: structuredMatches }
               }
               case "List": {
                 const displayPath = request.path ?? "."

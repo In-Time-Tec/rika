@@ -118,12 +118,25 @@ const boundResult = (request: Request, result: Result): Result => {
     result.diff,
     result.artifact?.path,
     result.artifact?.mimeType,
+    ...(result.matches ?? []).flatMap((match) => [match.path, match.text]),
   ].filter((value): value is string => value !== undefined)
   const limit = contract(request).outputLimit
   const totalBytes = values.reduce((total, value) => total + RuntimeFilesystem.byteLength(value), 0)
   if (totalBytes <= limit) return result
 
   const recovery = outputRecovery(request)
+  if (result.matches !== undefined) {
+    const boundedText = RuntimeFilesystem.boundedText<Result>(result.text, Math.floor(limit / 2), recovery)
+    let remaining = Math.max(0, limit - RuntimeFilesystem.byteLength(boundedText.text))
+    const matches: Array<CodingToolResult.WorkspaceSearchMatch> = []
+    for (const match of result.matches) {
+      const matchBytes = RuntimeFilesystem.byteLength(match.path) + RuntimeFilesystem.byteLength(match.text) + 16
+      if (remaining < matchBytes) break
+      matches.push(match)
+      remaining -= matchBytes
+    }
+    return { ...result, text: boundedText.text, matches, truncated: true }
+  }
   const longestMarker = `[truncated: kept first ${totalBytes} of ${totalBytes} bytes — ${recovery}]`
   let remaining = Math.max(0, limit - RuntimeFilesystem.byteLength(longestMarker) - 1)
   let keptBytes = 0
@@ -326,7 +339,10 @@ const toolError = (request: Request, cause: unknown, kind: "operation" | "timeou
       message: `${toolName(request)} timed out after ${contract(request).timeoutMillis}ms without producing a result`,
       outcome: "known",
       recovery: "later",
-      nextAction: "Retry once later with a narrower request or use an alternative tool",
+      nextAction:
+        request._tag === "Grep"
+          ? "Search greps file CONTENTS repo-wide; scope with path or use workspace.list"
+          : "Retry once later with a narrower request or use an alternative tool",
     }
   const finalDetails =
     unsafe && kind === "operation" && !(cause instanceof RuntimeOperationError)

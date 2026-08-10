@@ -83,13 +83,12 @@ it("names the tag that tells one shape of an argument from another", () => {
 })
 
 it("shows an example whose fields the surface actually has", () => {
-  // An example is the first thing a model copies, so a field it invents is a defect that costs a
-  // turn. `search` returns { text, truncated }, and an earlier draft of this example read `matches`.
+  // An example is the first thing a model copies, so a field it invents is a defect that costs a turn.
   const instructions = cellInstructions(
     instructionFacts(make({ workspace: "/w", workspaceDigest: "", trustMode: "trusted-local", servers: [] })),
   )
   expect(instructions).toContain("found.text")
-  expect(instructions).not.toContain("found.matches")
+  expect(instructions).toContain("matches: [{ path, line, text }]")
 })
 
 it("describes only the modules mounted on the live surface", () => {
