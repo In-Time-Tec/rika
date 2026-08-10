@@ -912,8 +912,88 @@
       "publicExports": []
     },
     {
+      "id": "apps/rika/test/app-2.tui.test.ts",
+      "path": "apps/rika/test/app-2.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
+      "id": "apps/rika/test/app-delegation-2-2.tui.test.ts",
+      "path": "apps/rika/test/app-delegation-2-2.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
+      "id": "apps/rika/test/app-delegation-2.tui.test.ts",
+      "path": "apps/rika/test/app-delegation-2.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
+      "id": "apps/rika/test/app-delegation-3.tui.test.ts",
+      "path": "apps/rika/test/app-delegation-3.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
+      "id": "apps/rika/test/app-delegation.tui.test.ts",
+      "path": "apps/rika/test/app-delegation.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
       "id": "apps/rika/test/app-failure-restoration.tui.test.ts",
       "path": "apps/rika/test/app-failure-restoration.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
+      "id": "apps/rika/test/app-sessions-2-2.tui.test.ts",
+      "path": "apps/rika/test/app-sessions-2-2.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
+      "id": "apps/rika/test/app-sessions-2.tui.test.ts",
+      "path": "apps/rika/test/app-sessions-2.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
+      "id": "apps/rika/test/app-sessions.tui.test.ts",
+      "path": "apps/rika/test/app-sessions.tui.test.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -1529,6 +1609,56 @@
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/subagent-activity-2.tui.test.ts",
+      "path": "apps/rika/test/subagent-activity-2.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
+      "id": "apps/rika/test/subagent-activity.tui.test.ts",
+      "path": "apps/rika/test/subagent-activity.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
+      "id": "apps/rika/test/subagent-live-stream-2.tui.test.ts",
+      "path": "apps/rika/test/subagent-live-stream-2.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
+      "id": "apps/rika/test/subagent-live-stream-3.tui.test.ts",
+      "path": "apps/rika/test/subagent-live-stream-3.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
+      "id": "apps/rika/test/subagent-live-stream-4.tui.test.ts",
+      "path": "apps/rika/test/subagent-live-stream-4.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
     },
     {
       "id": "apps/rika/test/subagent-live-stream.tui.test.ts",
@@ -14833,6 +14963,174 @@
       "production": true
     },
     {
+      "from": "apps/rika/test/app-2.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-2.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-2.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-2.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation-2-2.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation-2-2.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation-2-2.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation-2-2.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation-2-2.tui.test.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation-2.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation-2.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation-2.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation-2.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation-3.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation-3.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation-3.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation-3.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-delegation.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "apps/rika/test/app-failure-restoration.tui.test.ts",
       "to": "apps/rika/test/tui-app-model.ts",
       "specifier": "./tui-app-model",
@@ -14860,6 +15158,118 @@
       "from": "apps/rika/test/app-failure-restoration.tui.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-sessions-2-2.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-sessions-2-2.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-sessions-2-2.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-sessions-2-2.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-sessions-2-2.tui.test.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-sessions-2.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-sessions-2.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-sessions-2.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-sessions-2.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-sessions.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-sessions.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-sessions.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-sessions.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-sessions.tui.test.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -17881,6 +18291,198 @@
       "production": false
     },
     {
+      "from": "apps/rika/test/subagent-activity-2.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-activity-2.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-activity-2.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-activity-2.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-activity.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-activity.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-activity.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-activity.tui.test.ts",
+      "to": "external:perf_hooks",
+      "specifier": "perf_hooks",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-activity.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-activity.tui.test.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-live-stream-2.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-live-stream-2.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-live-stream-2.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-live-stream-2.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-live-stream-2.tui.test.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-live-stream-3.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-live-stream-3.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-live-stream-3.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-live-stream-3.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-live-stream-3.tui.test.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-live-stream-4.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-live-stream-4.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-live-stream-4.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-live-stream-4.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "apps/rika/test/subagent-live-stream.tui.test.ts",
       "to": "apps/rika/test/tui-app-model.ts",
       "specifier": "./tui-app-model",
@@ -17900,14 +18502,6 @@
       "from": "apps/rika/test/subagent-live-stream.tui.test.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/subagent-live-stream.tui.test.ts",
-      "to": "external:perf_hooks",
-      "specifier": "perf_hooks",
       "kind": "import",
       "relationship": "test",
       "production": false
