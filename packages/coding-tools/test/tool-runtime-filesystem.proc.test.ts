@@ -233,7 +233,9 @@ test("bounds grep results to one thousand matches", () =>
             ),
           ),
         )
-        expect(result.text.split("\n")).toHaveLength(1_000)
+        expect(result.text.split("\n").length).toBeLessThanOrEqual(1_000)
+        expect(result.text).toContain("[truncated: kept first")
+        expect(result.truncated).toBe(true)
       }).pipe(provide(BunServices.layer)),
     ),
   ))

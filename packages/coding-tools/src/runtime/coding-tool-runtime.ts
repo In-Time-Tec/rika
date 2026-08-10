@@ -78,20 +78,63 @@ export const toolkit = Toolkit.make(
   Inputs.Inputs.Media.tool,
 )
 
-const maxOutput = 40_000
-const bounded = (text: string, limit = maxOutput): Result => RuntimeFilesystem.boundedText<Result>(text, limit)
+const bounded = (text: string): Result => ({ text, truncated: false })
 const policyForName = (name: string) => registrations.find((registration) => registration.tool.name === name)?.policy
 const toolName = (request: Request) => request._tag.replaceAll(/([a-z])([A-Z])/g, "$1_$2").toLowerCase()
 const contract = (request: Request) => policyForName(request._tag === "Shell" ? "bash" : toolName(request))!
 
+const outputRecovery = (request: Request): string => {
+  switch (request._tag) {
+    case "Grep":
+      return "narrow the pattern or scope with path"
+    case "Read":
+      return "request a smaller read_range"
+    case "Bash":
+    case "Shell":
+    case "ShellCommandStatus":
+      return "page or narrow the command"
+    case "WebSearch":
+      return "narrow the search"
+    case "ReadWebPage":
+      return "request focused excerpts or disable full_content"
+    case "ViewMedia":
+      return "request a narrower analysis"
+    case "Write":
+    case "Edit":
+      return "read a narrower file range to inspect the remaining diff"
+  }
+}
+
 const boundResult = (request: Request, result: Result): Result => {
+  const values = [
+    result.text,
+    result.stdout,
+    result.stderr,
+    result.diff,
+    result.artifact?.path,
+    result.artifact?.mimeType,
+  ].filter((value): value is string => value !== undefined)
   const limit = contract(request).outputLimit
-  let remaining = limit
+  const totalBytes = values.reduce((total, value) => total + RuntimeFilesystem.byteLength(value), 0)
+  if (totalBytes <= limit) return result
+
+  const recovery = outputRecovery(request)
+  const longestMarker = `[truncated: kept first ${totalBytes} of ${totalBytes} bytes — ${recovery}]`
+  let remaining = Math.max(0, limit - RuntimeFilesystem.byteLength(longestMarker) - 1)
+  let keptBytes = 0
+  let marked = false
   const trim = (value: string | undefined) => {
     if (value === undefined) return undefined
-    const trimmed = RuntimeFilesystem.boundedPrefix(value, remaining)
-    remaining -= trimmed.length
-    return trimmed
+    if (marked) return ""
+    const kept = RuntimeFilesystem.boundedPrefix(value, remaining)
+    const acceptedBytes = RuntimeFilesystem.byteLength(kept)
+    remaining -= acceptedBytes
+    keptBytes += acceptedBytes
+    if (kept === value) return kept
+    marked = true
+    const marker = `[truncated: kept first ${keptBytes} of ${totalBytes} bytes — ${recovery}]`
+    const separator = kept.length === 0 || kept.endsWith("\n") ? "" : "\n"
+    return `${kept}${separator}${marker}`
   }
   const text = trim(result.text)!
   const stdout = trim(result.stdout)
@@ -112,15 +155,7 @@ const boundResult = (request: Request, result: Result): Result => {
     ...(stderr === undefined ? {} : { stderr }),
     ...(diff === undefined ? {} : { diff }),
     ...(artifact === undefined ? {} : { artifact }),
-    truncated:
-      result.truncated ||
-      text.length < result.text.length ||
-      (stdout !== undefined && stdout.length < result.stdout!.length) ||
-      (stderr !== undefined && stderr.length < result.stderr!.length) ||
-      (diff !== undefined && diff.length < result.diff!.length) ||
-      (artifact !== undefined &&
-        (artifact.path.length < result.artifact!.path.length ||
-          artifact.mimeType.length < result.artifact!.mimeType.length)),
+    truncated: true,
   }
 }
 

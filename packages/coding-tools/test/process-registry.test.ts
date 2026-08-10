@@ -101,7 +101,8 @@ describe("ProcessRegistry", () => {
 
         const bounded = yield* registry.poll(processId, 0, 40_000)
         const drained = yield* registry.poll(processId, 0, 40_000)
-        expect(bounded.stdout).toHaveLength(40_000)
+        expect(new TextEncoder().encode(bounded.stdout).byteLength).toBeLessThanOrEqual(40_000)
+        expect(bounded.stdout).toContain("[truncated: kept first")
         expect(bounded.truncated).toBe(true)
         expect(drained).toMatchObject({ stdout: "", stderr: "", running: true, truncated: false })
       }).pipe(provide(ProcessRegistry.layer.pipe(Layer.provide(spawner.layer)))),

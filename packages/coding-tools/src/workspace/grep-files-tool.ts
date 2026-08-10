@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
 import * as Policy from "../policy/coding-tool-policy"
-import { Result, ToolFailure } from "../runtime/coding-tool-result"
+import { maxOutputBytes, Result, ToolFailure } from "../runtime/coding-tool-result"
 export const Request = Schema.Struct({
   _tag: Schema.tag("Grep"),
   pattern: Schema.String,
@@ -22,7 +22,7 @@ export const tool = Tool.make("grep", {
 })
 export const registration = Policy.register(
   tool,
-  Policy.allow("safe", 10_000, 40_000, {
+  Policy.allow("safe", 10_000, maxOutputBytes, {
     family: "explore",
     action: "grep",
     activeLabel: "Exploring",

@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
 import * as Policy from "../policy/coding-tool-policy"
-import { Result, ToolFailure } from "../runtime/coding-tool-result"
+import { maxOutputBytes, Result, ToolFailure } from "../runtime/coding-tool-result"
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 export const Request = Schema.Struct({
   _tag: Schema.tag("Bash"),
@@ -22,7 +22,7 @@ export const tool = Tool.make("bash", {
 })
 export const registration = Policy.register(
   tool,
-  Policy.allow("unsafe", 120_000, 40_000, {
+  Policy.allow("unsafe", 120_000, maxOutputBytes, {
     family: "shell",
     action: "command",
     activeLabel: "Running",

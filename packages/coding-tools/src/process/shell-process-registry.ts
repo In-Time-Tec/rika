@@ -13,6 +13,7 @@ import {
   Stream,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { RuntimeFilesystem } from "../runtime/coding-tool-runtime-filesystem"
 
 interface Output {
   readonly processId: string
@@ -29,32 +30,30 @@ interface Entry {
   readonly exit: Deferred.Deferred<number>
 }
 
-interface PendingOutput {
-  readonly stdout: string
-  readonly stderr: string
-  readonly truncated: boolean
-}
-
 interface BoundedText {
   readonly text: string
   readonly truncated: boolean
 }
 
-export const pendingOutputLimit = 64 * 1024
-
-const boundedPrefix = (text: string, limit: number): string => {
-  const prefix = text.slice(0, Math.max(0, limit))
-  const final = prefix.charCodeAt(prefix.length - 1)
-  return final >= 0xd800 && final <= 0xdbff ? prefix.slice(0, -1) : prefix
+interface PendingOutput {
+  readonly stdout: string
+  readonly stderr: string
+  readonly stdoutBytes: number
+  readonly stderrBytes: number
+  readonly truncated: boolean
 }
 
+export const pendingOutputLimit = 64 * 1024
+
 const appendOutput = (pending: PendingOutput, channel: "stdout" | "stderr", text: string): PendingOutput => {
-  const retained = pending.stdout.length + pending.stderr.length
-  const accepted = boundedPrefix(text, pendingOutputLimit - retained)
+  const retainedBytes = RuntimeFilesystem.byteLength(pending.stdout) + RuntimeFilesystem.byteLength(pending.stderr)
+  const accepted = RuntimeFilesystem.boundedPrefix(text, pendingOutputLimit - retainedBytes)
+  const bytesKey = channel === "stdout" ? "stdoutBytes" : "stderrBytes"
   return {
     ...pending,
     [channel]: pending[channel] + accepted,
-    truncated: pending.truncated || accepted.length < text.length,
+    [bytesKey]: pending[bytesKey] + RuntimeFilesystem.byteLength(text),
+    truncated: pending.truncated || accepted !== text,
   }
 }
 
@@ -69,15 +68,15 @@ export const collectBoundedText: {
       () => ({ text: "", truncated: false }),
       (state, bytes) => {
         const decoded = decoder.decode(bytes, { stream: true })
-        const accepted = boundedPrefix(decoded, limit - state.text.length)
-        return { text: state.text + accepted, truncated: state.truncated || accepted.length < decoded.length }
+        const accepted = RuntimeFilesystem.boundedPrefix(decoded, limit - RuntimeFilesystem.byteLength(state.text))
+        return { text: state.text + accepted, truncated: state.truncated || accepted !== decoded }
       },
     )
     const final = decoder.decode()
-    const accepted = boundedPrefix(final, limit - collected.text.length)
+    const accepted = RuntimeFilesystem.boundedPrefix(final, limit - RuntimeFilesystem.byteLength(collected.text))
     return {
       text: collected.text + accepted,
-      truncated: collected.truncated || accepted.length < final.length,
+      truncated: collected.truncated || accepted !== final,
     }
   }),
 )
@@ -121,7 +120,13 @@ export const layer = Layer.effect(
         const handle = yield* spawner
           .spawn(ChildProcess.make(command, args, { cwd }))
           .pipe(Effect.provideService(Scope.Scope, scope))
-        const output = yield* Ref.make<PendingOutput>({ stdout: "", stderr: "", truncated: false })
+        const output = yield* Ref.make<PendingOutput>({
+          stdout: "",
+          stderr: "",
+          stdoutBytes: 0,
+          stderrBytes: 0,
+          truncated: false,
+        })
         const exit = yield* Deferred.make<number>()
         const processId = String(nextId++)
         yield* Ref.update(entries, (current) => new Map(current).set(processId, { process: handle, output, exit }))
@@ -162,19 +167,30 @@ export const layer = Layer.effect(
           yield* Deferred.await(entry.exit).pipe(Effect.timeout(`${waitMillis} millis`), Effect.ignore)
         const pendingExit = yield* Deferred.poll(entry.exit)
         const exit = Option.isSome(pendingExit) ? Option.some(yield* pendingExit.value) : Option.none<number>()
-        const output = yield* Ref.getAndSet(entry.output, { stdout: "", stderr: "", truncated: false })
-        const stdout = output.stdout
-        const stderr = output.stderr
-        const combinedLength = stdout.length + stderr.length
-        const stdoutBounded = boundedPrefix(stdout, outputLimit)
-        const stderrBounded = boundedPrefix(stderr, outputLimit - stdoutBounded.length)
+        const output = yield* Ref.getAndSet(entry.output, {
+          stdout: "",
+          stderr: "",
+          stdoutBytes: 0,
+          stderrBytes: 0,
+          truncated: false,
+        })
+        const combined = `${output.stdout}${output.stderr}`
+        const totalBytes = output.stdoutBytes + output.stderrBytes
+        const bounded = RuntimeFilesystem.boundedText<BoundedText>(
+          combined,
+          outputLimit,
+          "page or narrow the command",
+          totalBytes,
+        )
+        const capacityTruncated = bounded.truncated
+        const text = bounded.text
         const result = {
           processId,
-          stdout: stdoutBounded,
-          stderr: stderrBounded,
+          stdout: capacityTruncated ? text : output.stdout,
+          stderr: capacityTruncated ? "" : output.stderr,
           running: Option.isNone(exit),
           ...(Option.isSome(exit) ? { exitCode: exit.value } : {}),
-          truncated: output.truncated || combinedLength > outputLimit,
+          truncated: output.truncated || capacityTruncated,
         }
         if (Option.isSome(exit))
           yield* Ref.update(entries, (current) => {

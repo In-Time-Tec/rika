@@ -14,8 +14,6 @@ import { Request as RequestSchema, Service, ToolError } from "./coding-tool-runt
 type Request = typeof RequestSchema.Type
 type Result = CodingToolResult.Result
 
-const maxOutput = 40_000
-
 export interface FailureDetails {
   readonly category: CodingToolResult.FailureCategory
   readonly message: string
@@ -176,8 +174,21 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
                 const matches = page.items
                   .map((match) => `${match.relativePath}:${match.lineNumber}:${match.lineContent}`)
                   .join("\n")
-                if (page.deadlineReached === true) {
-                  const marker = `search stopped at ${Math.round(deadlineMillis / 1_000)}s: ${page.items.length} matches found before the deadline; narrow the pattern or scope with path`
+                const deadline =
+                  page.deadlineReached === true
+                    ? `search stopped at ${Math.round(deadlineMillis / 1_000)}s: ${page.items.length} matches found before the deadline`
+                    : undefined
+                if (page.outputTruncation !== undefined) {
+                  const recovery = `${deadline === undefined ? "rg output reached its capacity" : deadline}; narrow the pattern or scope with path`
+                  return RuntimeFilesystem.boundedText(
+                    matches,
+                    contract(request).outputLimit,
+                    recovery,
+                    page.outputTruncation.totalBytes,
+                  )
+                }
+                if (deadline !== undefined) {
+                  const marker = `${deadline}; narrow the pattern or scope with path`
                   return { ...bounded(matches.length === 0 ? marker : `${matches}\n${marker}`), truncated: true }
                 }
                 return bounded(matches)
@@ -281,20 +292,29 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
                 const cwd = yield* resolveExisting(request.workdir ?? ".")
                 const processId = yield* startChecked("/bin/bash", ["-lc", request.command], cwd)
                 const output = yield* processes
-                  .poll(processId, Math.min(Math.max(0, request.timeoutMillis ?? 10_000), 60_000), maxOutput)
+                  .poll(
+                    processId,
+                    Math.min(Math.max(0, request.timeoutMillis ?? 10_000), 60_000),
+                    contract(request).outputLimit,
+                  )
                   .pipe(
                     Effect.onInterrupt(() => Effect.uninterruptible(processes.cancel(processId).pipe(Effect.ignore))),
                   )
+                const { stderr, stdout, ...status } = output
                 return {
-                  ...output,
-                  text: `${output.stdout}${output.stderr}${output.exitCode === undefined || output.exitCode === 0 ? "" : `\nexit ${output.exitCode}`}`.trim(),
+                  ...status,
+                  text: `${stdout}${stderr}${output.exitCode === undefined || output.exitCode === 0 ? "" : `\nexit ${output.exitCode}`}`.trim(),
                 }
               }
               case "Shell": {
                 const cwd = yield* resolveExisting(request.cwd ?? ".")
                 const processId = yield* startChecked(request.command, request.args, cwd)
                 const output = yield* processes
-                  .poll(processId, Math.min(Math.max(0, request.waitMillis ?? 10_000), 120_000), maxOutput)
+                  .poll(
+                    processId,
+                    Math.min(Math.max(0, request.waitMillis ?? 10_000), 120_000),
+                    contract(request).outputLimit,
+                  )
                   .pipe(Effect.onInterrupt(() => processes.cancel(processId).pipe(Effect.ignore)))
                 const { stderr, stdout, ...status } = output
                 return {
@@ -306,9 +326,10 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
                 const output = yield* processes.poll(
                   request.processId,
                   Math.min(Math.max(0, request.waitMillis ?? 0), 10_000),
-                  maxOutput,
+                  contract(request).outputLimit,
                 )
-                return { ...output, text: `${output.stdout}${output.stderr}` }
+                const { stderr, stdout, ...status } = output
+                return { ...status, text: `${stdout}${stderr}` }
               }
               case "WebSearch": {
                 const results = yield* webSearch.search({

@@ -2,6 +2,7 @@ import { Context, Effect, FileSystem, Layer, Option, Path, Schema, Stream } from
 import { ChildProcess } from "effect/unstable/process"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { containedRelativePath } from "../policy/workspace-boundary-policy"
+import { RuntimeFilesystem } from "../runtime/coding-tool-runtime-filesystem"
 
 import type { GlobOptions, SearchOptions, GrepOptions, PathItem, SearchResult } from "./workspace-search-options"
 import type { GrepMatch, GrepResult } from "./workspace-search-results"
@@ -127,42 +128,59 @@ const runRg = (
   args: ReadonlyArray<string>,
   deadlineMillis?: number,
 ): Effect.Effect<
-  { readonly stdout: string; readonly stderr: string; readonly code: number; readonly deadlineReached: boolean },
+  {
+    readonly stdout: string
+    readonly stderr: string
+    readonly stdoutBytes: number
+    readonly stderrBytes: number
+    readonly code: number
+    readonly deadlineReached: boolean
+  },
   WorkspaceIndexError
 > =>
   Effect.gen(function* () {
     const command = ChildProcess.make("rg", args, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
-    const collected = { stdout: "", stderr: "" }
+    const collected = {
+      stdout: { text: "", totalBytes: 0 },
+      stderr: { text: "", totalBytes: 0 },
+    }
     const collect =
       (key: "stdout" | "stderr") =>
-      <E>(stream: Stream.Stream<Uint8Array, E>) =>
-        Stream.runForEach(stream, (bytes) =>
+      <E>(stream: Stream.Stream<Uint8Array, E>) => {
+        const decoder = new TextDecoder()
+        const append = (text: string) => {
+          const current = collected[key]
+          const accepted = RuntimeFilesystem.boundedPrefix(text, 40_000 - RuntimeFilesystem.byteLength(current.text))
+          current.text += accepted
+        }
+        return Stream.runForEach(stream, (bytes) =>
           Effect.sync(() => {
-            const chunk = new TextDecoder().decode(bytes)
-            const remaining = 40_000 - collected[key].length
-            if (remaining > 0) collected[key] += chunk.slice(0, remaining)
+            collected[key].totalBytes += bytes.byteLength
+            append(decoder.decode(bytes, { stream: true }))
           }),
-        )
+        ).pipe(Effect.ensuring(Effect.sync(() => append(decoder.decode()))))
+      }
     const awaitExit = Effect.scoped(
       Effect.gen(function* () {
         const handle = yield* spawner.spawn(command)
         const [, , code] = yield* Effect.all(
           [collect("stdout")(handle.stdout), collect("stderr")(handle.stderr), handle.exitCode],
-          {
-            concurrency: 3,
-          },
+          { concurrency: 3 },
         )
         return code
       }),
     ).pipe(Effect.mapError((cause) => indexError(operation, cause)))
-    if (deadlineMillis === undefined) {
-      const code = yield* awaitExit
-      return { stdout: collected.stdout, stderr: collected.stderr, code, deadlineReached: false }
-    }
+    const result = (code: number, deadlineReached: boolean) => ({
+      stdout: collected.stdout.text,
+      stderr: collected.stderr.text,
+      stdoutBytes: collected.stdout.totalBytes,
+      stderrBytes: collected.stderr.totalBytes,
+      code,
+      deadlineReached,
+    })
+    if (deadlineMillis === undefined) return result(yield* awaitExit, false)
     const outcome = yield* Effect.timeoutOption(awaitExit, `${deadlineMillis} millis`)
-    return Option.isNone(outcome)
-      ? { stdout: collected.stdout, stderr: collected.stderr, code: 0, deadlineReached: true }
-      : { stdout: collected.stdout, stderr: collected.stderr, code: outcome.value, deadlineReached: false }
+    return Option.isNone(outcome) ? result(0, true) : result(outcome.value, false)
   })
 
 const listFiles = (
@@ -281,7 +299,8 @@ const makeService = (workspace: string) =>
             return yield* indexError("grep", result.stderr.trim() || `rg exited with code ${result.code}`)
           const parsed: Array<GrepMatch> = []
           const lines = result.stdout.split("\n")
-          if (result.deadlineReached && !result.stdout.endsWith("\n")) lines.pop()
+          const outputTruncated = result.stdoutBytes > RuntimeFilesystem.byteLength(result.stdout)
+          if ((result.deadlineReached || outputTruncated) && !result.stdout.endsWith("\n")) lines.pop()
           for (const line of lines) {
             if (line.length === 0) continue
             const first = line.indexOf(":")
@@ -314,6 +333,14 @@ const makeService = (workspace: string) =>
             filteredFileCount: items.length,
             nextCursor: null,
             ...(result.deadlineReached ? { deadlineReached: true } : {}),
+            ...(outputTruncated
+              ? {
+                  outputTruncation: {
+                    keptBytes: RuntimeFilesystem.byteLength(result.stdout),
+                    totalBytes: result.stdoutBytes,
+                  },
+                }
+              : {}),
           }
         }),
     }

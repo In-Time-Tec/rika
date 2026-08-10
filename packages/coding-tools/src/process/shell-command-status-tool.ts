@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
 import * as Policy from "../policy/coding-tool-policy"
-import { Result, ToolFailure } from "../runtime/coding-tool-result"
+import { maxOutputBytes, Result, ToolFailure } from "../runtime/coding-tool-result"
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 export const Request = Schema.Struct({
   _tag: Schema.tag("ShellCommandStatus"),
@@ -20,7 +20,7 @@ export const tool = Tool.make("shell_command_status", {
 })
 export const registration = Policy.register(
   tool,
-  Policy.allow("safe", 10_000, 40_000, {
+  Policy.allow("safe", 10_000, maxOutputBytes, {
     family: "direct",
     action: "status",
     activeLabel: "Waiting for",

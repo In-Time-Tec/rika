@@ -14,6 +14,7 @@ import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
 import { provide } from "./test-layer"
 
 const workspace = "/workspace"
+const bytesOf = (text: string): number => new TextEncoder().encode(text).byteLength
 
 const platformError = (method: string, path: string) =>
   PlatformError.systemError({
@@ -122,6 +123,10 @@ const testEnvironment = (
       if (executed === "fail-spawn") return Effect.fail(platformError("spawn", executed))
       if (executed === "large")
         return Effect.succeed(processHandle({ stdout: "x".repeat(40_001), stderr: "", exitCode: 0 }))
+      if (executed === "exact-limit")
+        return Effect.succeed(processHandle({ stdout: "x".repeat(16_384), stderr: "", exitCode: 0 }))
+      if (executed === "multibyte-limit")
+        return Effect.succeed(processHandle({ stdout: `${"日".repeat(6_000)}TAIL`, stderr: "", exitCode: 0 }))
       if (executed === "unicode-boundary")
         return Effect.succeed(processHandle({ stdout: `${"x".repeat(39_999)}🙂`, stderr: "", exitCode: 0 }))
       if (executed === "running") {
@@ -167,6 +172,21 @@ const testEnvironment = (
     glob: () => Effect.succeed({ items: [], scores: [], totalMatched: 0, totalFiles: files.size }),
     grep: (query, options) => {
       grepCalls.push({ query, options })
+      if (query === "large-grep") {
+        const items = Array.from({ length: 800 }, (_, itemIndex) => ({
+          relativePath: `src/file-${itemIndex}.ts`,
+          lineNumber: itemIndex + 1,
+          lineContent: `HEAD-${"x".repeat(30)}-${itemIndex}`,
+        }))
+        return Effect.succeed({
+          items,
+          totalMatched: items.length,
+          totalFilesSearched: items.length,
+          totalFiles: files.size,
+          filteredFileCount: items.length,
+          nextCursor: null,
+        })
+      }
       if (query === "slow")
         return Effect.succeed({
           items: [{ relativePath: "a.txt", lineNumber: 2, lineContent: "needle" }],
@@ -300,6 +320,25 @@ describe("Runtime", () => {
     }).pipe(provide(environment.runtime))
   })
 
+  it.effect("marks capacity-truncated grep output with its kept and total bytes", () => {
+    const environment = testEnvironment()
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const result = yield* runtime.run({ _tag: "Grep", pattern: "large-grep", regex: false })
+      const full = Array.from(
+        { length: 800 },
+        (_, index) => `src/file-${index}.ts:${index + 1}:HEAD-${"x".repeat(30)}-${index}`,
+      ).join("\n")
+      expect(result.truncated).toBe(true)
+      expect(bytesOf(result.text)).toBe(16_384)
+      expect(result.text.startsWith("src/file-0.ts:1:HEAD-")).toBe(true)
+      expect(result.text).not.toContain("src/file-799.ts")
+      expect(result.text).toContain(`of ${bytesOf(full)} bytes`)
+      expect(result.text).toContain("narrow the pattern or scope with path")
+      expect(result.text.match(/\[truncated:/g)).toHaveLength(1)
+    }).pipe(provide(environment.runtime))
+  })
+
   it.effect("passes the grep path filter and deadline to the workspace index", () => {
     const environment = testEnvironment()
     return Effect.gen(function* () {
@@ -362,7 +401,9 @@ describe("Runtime", () => {
     return Effect.gen(function* () {
       const runtime = yield* Runtime.Service
       const result = yield* runtime.run({ _tag: "Write", path: "large.txt", content: "x".repeat(110_000) })
-      expect(result.text.length + (result.diff?.length ?? 0)).toBe(4_000)
+      expect(bytesOf(result.text) + bytesOf(result.diff ?? "")).toBeLessThanOrEqual(4_000)
+      expect(result.diff).toContain("[truncated: kept first")
+      expect(result.diff).toContain("read a narrower file range")
       expect(result.truncated).toBe(true)
     }).pipe(provide(environment.runtime))
   })
@@ -375,6 +416,8 @@ describe("Runtime", () => {
       const bad = yield* runtime.run({ _tag: "Bash", command: "bad" })
       const git = yield* runtime.run({ _tag: "Bash", command: "git --no-optional-locks status --short --branch" })
       const large = yield* runtime.run({ _tag: "Bash", command: "large" })
+      const exact = yield* runtime.run({ _tag: "Bash", command: "exact-limit" })
+      const multibyte = yield* runtime.run({ _tag: "Bash", command: "multibyte-limit" })
       const running = yield* runtime.run({ _tag: "Bash", command: "running", timeoutMillis: 0 })
       const completed = yield* Effect.flip(
         runtime.run({ _tag: "ShellCommandStatus", processId: ok.processId ?? "", waitMillis: 0 }),
@@ -385,17 +428,39 @@ describe("Runtime", () => {
       expect(ok).toMatchObject({ text: "outerr", truncated: false, running: false, exitCode: 0 })
       expect(bad.text).toBe("outerr\nexit 7")
       expect(git.text).toBe("## main")
-      expect(large.text).toHaveLength(40_000)
+      expect(bytesOf(large.text)).toBe(16_384)
+      expect(large.text).toContain("[truncated: kept first 16308 of 40001 bytes — page or narrow the command]")
+      expect(large.text.startsWith("x".repeat(100))).toBe(true)
+      expect(large.text.match(/\[truncated:/g)).toHaveLength(1)
       expect(large.truncated).toBe(true)
+      expect(exact.text).toBe("x".repeat(16_384))
+      expect(exact.truncated).toBe(false)
+      expect(exact.text).not.toContain("[truncated:")
+      expect(bytesOf(multibyte.text)).toBeLessThanOrEqual(16_384)
+      expect(multibyte.text).toContain("of 18004 bytes")
+      expect(multibyte.text).not.toContain("TAIL")
+      expect(new TextDecoder("utf-8", { fatal: true }).decode(new TextEncoder().encode(multibyte.text))).toBe(
+        multibyte.text,
+      )
+      expect(multibyte.text.match(/\[truncated:/g)).toHaveLength(1)
+      expect(multibyte.truncated).toBe(true)
       expect(running.running).toBe(true)
       expect(completed).toMatchObject({ _tag: "ToolError", tool: "shell_command_status" })
       expect(failedStream).toMatchObject({ running: false, exitCode: 0, truncated: true })
-      expect(unicodeBoundary).toMatchObject({ text: "x".repeat(39_999), truncated: true })
+      expect(bytesOf(unicodeBoundary.text)).toBe(16_384)
+      expect(unicodeBoundary.text).toContain("of 40003 bytes")
+      expect(new TextDecoder("utf-8", { fatal: true }).decode(new TextEncoder().encode(unicodeBoundary.text))).toBe(
+        unicodeBoundary.text,
+      )
+      expect(unicodeBoundary.text.match(/\[truncated:/g)).toHaveLength(1)
+      expect(unicodeBoundary.truncated).toBe(true)
       expect(environment.commands.map(({ command, args, options }) => ({ command, args, cwd: options.cwd }))).toEqual([
         { command: "/bin/bash", args: ["-lc", "ok"], cwd: workspace },
         { command: "/bin/bash", args: ["-lc", "bad"], cwd: workspace },
         { command: "/bin/bash", args: ["-lc", "git --no-optional-locks status --short --branch"], cwd: workspace },
         { command: "/bin/bash", args: ["-lc", "large"], cwd: workspace },
+        { command: "/bin/bash", args: ["-lc", "exact-limit"], cwd: workspace },
+        { command: "/bin/bash", args: ["-lc", "multibyte-limit"], cwd: workspace },
         { command: "/bin/bash", args: ["-lc", "running"], cwd: workspace },
         { command: "/bin/bash", args: ["-lc", "stream-failure"], cwd: workspace },
         { command: "/bin/bash", args: ["-lc", "unicode-boundary"], cwd: workspace },
@@ -413,7 +478,8 @@ describe("Runtime", () => {
       expect(failed).toMatchObject({ text: "outerr", truncated: false, running: false, exitCode: 7 })
       expect(failed).not.toHaveProperty("stdout")
       expect(failed).not.toHaveProperty("stderr")
-      expect(large.text).toBe("x".repeat(40_000))
+      expect(bytesOf(large.text)).toBe(16_384)
+      expect(large.text).toContain("kept first 16308 of 40001 bytes")
       expect(large.truncated).toBe(true)
     }).pipe(provide(environment.runtime))
   })
@@ -584,8 +650,13 @@ describe("Runtime", () => {
       })
       const page = yield* runtime.run({ _tag: "ReadWebPage", url: "https://example.com" })
       expect(search).toMatchObject({ truncated: true })
-      expect(search.text).toHaveLength(40_000)
-      expect(page).toEqual({ text: "p".repeat(40_000), truncated: true })
+      expect(bytesOf(search.text)).toBe(16_384)
+      expect(search.text).toContain("[truncated: kept first")
+      expect(bytesOf(page.text)).toBe(16_384)
+      expect(page.text).toContain("[truncated: kept first")
+      expect(page.text).toContain("request focused excerpts")
+      expect(page.text.match(/\[truncated:/g)).toHaveLength(1)
+      expect(page.truncated).toBe(true)
     }).pipe(provide(environment.runtime))
   })
 
