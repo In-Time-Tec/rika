@@ -204,13 +204,18 @@ const make: Effect.Effect<AgentPort["Service"]> = Effect.sync(() => {
       )
       return { operationKey: self.toolCallId, ordinal: ordinals.length }
     })
-  const ownedChild = (parentRunId: string, childRunId: string) =>
+  const ownedChildren = (parentRunId: string, childRunIds: ReadonlyArray<string>) =>
     Effect.flatMap(children(parentRunId), (all) => {
-      const found = all.find((child) => child.childRunId === childRunId)
-      return found === undefined
-        ? Effect.fail(unavailable("parentage", `Run ${childRunId} is not a child of this execution`))
-        : Effect.succeed(found)
+      const byRunId = new Map(all.map((child) => [child.childRunId, child]))
+      return Effect.forEach(childRunIds, (childRunId) => {
+        const found = byRunId.get(childRunId)
+        return found === undefined
+          ? Effect.fail(unavailable("parentage", `Run ${childRunId} is not a child of this execution`))
+          : Effect.succeed(found)
+      })
     })
+  const ownedChild = (parentRunId: string, childRunId: string) =>
+    Effect.map(ownedChildren(parentRunId, [childRunId]), ([found]) => found!)
   return AgentPort.of({
     spawn: (input) =>
       Effect.flatMap(identity, (self) =>
@@ -243,6 +248,7 @@ const make: Effect.Effect<AgentPort["Service"]> = Effect.sync(() => {
       ),
     list: Effect.flatMap(identity, (self) => children(self.runId)),
     inspect: (childRunId) => Effect.flatMap(identity, (self) => ownedChild(self.runId, childRunId)),
+    inspectAll: (childRunIds) => Effect.flatMap(identity, (self) => ownedChildren(self.runId, childRunIds)),
     cancel: (input) =>
       Effect.flatMap(identity, (self) =>
         ownedChild(self.runId, input.childRunId).pipe(

@@ -4,16 +4,21 @@ import * as AgentsBinding from "@rika/kernel/agents-binding"
 import { AgentDirectoryUnavailable, AgentPort, type Interface } from "@rika/kernel/agent-port"
 import { journal, mountModules } from "./binding-support"
 
-const port = (overrides: Partial<Interface> = {}): Interface => ({
-  spawn: (input) => Effect.succeed({ childRunId: `child-${input.key}`, key: input.key, duplicate: false }),
-  list: Effect.succeed([]),
-  inspect: (childRunId) => Effect.succeed({ childRunId, status: "running" as const }),
-  cancel: () => Effect.void,
-  send: () => Effect.succeed({ messageId: "message", duplicate: false }),
-  inbox: () => Effect.succeed([]),
-  directory: Effect.succeed([]),
-  ...overrides,
-})
+const port = (overrides: Partial<Interface> = {}): Interface => {
+  const inspect =
+    overrides.inspect ?? ((childRunId: string) => Effect.succeed({ childRunId, status: "running" as const }))
+  return {
+    spawn: (input) => Effect.succeed({ childRunId: `child-${input.key}`, key: input.key, duplicate: false }),
+    list: Effect.succeed([]),
+    inspect,
+    inspectAll: overrides.inspectAll ?? ((childRunIds) => Effect.forEach(childRunIds, inspect)),
+    cancel: () => Effect.void,
+    send: () => Effect.succeed({ messageId: "message", duplicate: false }),
+    inbox: () => Effect.succeed([]),
+    directory: Effect.succeed([]),
+    ...overrides,
+  }
+}
 
 const registry = (implementation: Interface = port(), nested = { run: (_r: never, e: never) => e } as never) =>
   mountModules({
@@ -181,6 +186,22 @@ describe("agents binding", () => {
       const elapsedBudget = Math.ceil(waitMillis / (inspectCostMillis + pollIntervalMillis))
       expect(reads).toBeLessThan(sleepOnlyBudget)
       expect(reads).toBeLessThanOrEqual(elapsedBudget + 1)
+    }),
+  )
+
+  it.effect("inspectAll accepts more than one fan-out page without an arbitrary child-count cap", () =>
+    Effect.gen(function* () {
+      const childRunIds = Array.from({ length: 96 }, (_, index) => `child-${index}`)
+      const mounted = yield* registry()
+      const response = yield* mounted.invoke({
+        module: "agents",
+        operation: "inspectAll",
+        input: { childRunIds },
+      })
+      expect(response).toEqual({
+        _tag: "Success",
+        output: childRunIds.map((childRunId) => ({ childRunId, status: "running" })),
+      })
     }),
   )
 

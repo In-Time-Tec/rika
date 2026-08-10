@@ -117,6 +117,33 @@ it.effect("maps every Baton run status onto a status the cell contract names", (
   }),
 )
 
+it.effect("inspects any number of direct children with one durable tree read", () =>
+  Effect.gen(function* () {
+    const childRunIds = Array.from({ length: 96 }, (_, index) => `child-${index}`)
+    let treeReads = 0
+    const children = yield* withPort(
+      {
+        inspect: () => Effect.succeed(runInspection("run-self") as never),
+        inspectTree: () => {
+          treeReads = treeReads + 1
+          return Effect.succeed({
+            _tag: "Active",
+            rootRunId: "run-self",
+            cursor: "c" as never,
+            runs: childRunIds.map((runId) => ({ run: runInspection(runId), parentRunId: "run-self" })),
+            usage: [],
+            compactions: [],
+            activeRunIds: childRunIds,
+          } as never)
+        },
+      },
+      (value) => value.inspectAll(childRunIds),
+    )
+    expect(treeReads).toBe(1)
+    expect(children.map(({ childRunId }) => childRunId)).toEqual(childRunIds)
+  }),
+)
+
 it.effect("sends to the address the cell named instead of forcing every address to a session", () =>
   Effect.gen(function* () {
     const addresses: Array<string> = []

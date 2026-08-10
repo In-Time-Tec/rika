@@ -30,6 +30,9 @@ export interface Interface {
   }) => Effect.Effect<typeof AdmitReceipt.Type, AgentDirectoryUnavailable>
   readonly list: Effect.Effect<ReadonlyArray<typeof ChildInspection.Type>, AgentDirectoryUnavailable>
   readonly inspect: (childRunId: string) => Effect.Effect<typeof ChildInspection.Type, AgentDirectoryUnavailable>
+  readonly inspectAll: (
+    childRunIds: ReadonlyArray<string>,
+  ) => Effect.Effect<ReadonlyArray<typeof ChildInspection.Type>, AgentDirectoryUnavailable>
   readonly cancel: (input: {
     readonly childRunId: string
     readonly reason?: string | undefined

@@ -32,7 +32,7 @@ const pollIntervalMillis = 50
 const terminalStatuses: ReadonlySet<typeof ChildInspection.Type.status> = new Set(["succeeded", "failed", "cancelled"])
 
 const JoinInput = Schema.Struct({
-  childRunIds: Schema.Array(Schema.String.check(Schema.isNonEmpty())).check(Schema.isMaxLength(64)),
+  childRunIds: Schema.Array(Schema.String.check(Schema.isNonEmpty())),
   /**
    * How long the caller is willing to look, clamped rather than refused. A parent waiting on work
    * that runs for minutes asks for minutes, and rejecting that taught a model only that its call was
@@ -105,7 +105,7 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<AgentPor
     failure: Failure,
     handle: (input) =>
       Effect.flatMap(AgentPort, (port) => {
-        const inspectAll = Effect.forEach(input.childRunIds, (childRunId) => port.inspect(childRunId))
+        const inspectAll = port.inspectAll(input.childRunIds)
         if (input.waitMillis === undefined) return inspectAll
         const deadline = Math.min(input.waitMillis, maxWaitMillis)
         const settled = (children: ReadonlyArray<typeof ChildInspection.Type>) =>
