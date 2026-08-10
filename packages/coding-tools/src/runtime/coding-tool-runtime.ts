@@ -126,7 +126,12 @@ const boundResult = (request: Request, result: Result): Result => {
 
 const runtimeError = (details: FailureDetails) => new RuntimeOperationError(details)
 
-const missingRipgrep = (message: string): boolean => message.startsWith("ripgrep (rg) is not installed")
+/**
+ * A missing program is reported differently by every layer it passes through, so matching one exact
+ * sentence left a reader told that a search "could not complete" and nothing about what to install.
+ */
+const missingRipgrep = (message: string): boolean =>
+  /ripgrep|(^|\W)rg(\W|$)|ENOENT|No such file|failed to spawn/i.test(message)
 
 const searchMessage = (operation: string, message: string): string => {
   if (operation === "initialize") return "The workspace search tools are unavailable"
@@ -161,7 +166,18 @@ const operationError = (cause: unknown): RuntimeOperationError => {
         })
       : runtimeError({
           category: "dependency_unavailable",
-          message: "Every selected web search provider failed before returning results",
+          /**
+           * Each provider already reported why it failed, and summarising them away left a reader
+           * unable to tell an expired key from an outage. The reasons are what decide what to do
+           * next.
+           */
+          message: `Every selected web search provider failed before returning results${
+            cause.outcomes.length === 0
+              ? ""
+              : `: ${cause.outcomes
+                  .map((outcome) => `${outcome.provider}: ${outcome.error?.kind ?? "unknown"}`)
+                  .join(", ")}`
+          }`,
           outcome: "known",
           recovery: "later",
           nextAction: "Retry later or use a different configured provider",

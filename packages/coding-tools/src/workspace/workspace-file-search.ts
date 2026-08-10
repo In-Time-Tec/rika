@@ -28,10 +28,33 @@ export class Service extends Context.Service<Service, Interface>()(
  * reader is told what is missing instead of that a search went wrong.
  */
 const indexError = (operation: Operation, cause: unknown) => {
-  const message = cause instanceof Error ? cause.message : String(cause)
+  /**
+   * A spawn failure is a typed object whose own fields carry the account, so stringifying it gave
+   * `[object Object]` and the pattern below never matched. Reading the tag and message first is what
+   * lets a reader learn the program is missing rather than that a search went wrong.
+   */
+  const described =
+    typeof cause === "object" && cause !== null
+      ? [
+          "_tag" in cause ? String(cause._tag) : "",
+          "message" in cause && typeof cause.message === "string" ? cause.message : "",
+          "reason" in cause && typeof cause.reason === "string" ? cause.reason : "",
+        ]
+          .filter((part) => part.length > 0)
+          .join(": ")
+      : ""
+  const fromObject = described.length > 0 ? described : String(cause)
+  const message = cause instanceof Error ? cause.message : fromObject
   return WorkspaceIndexError.make({
     operation,
-    message: /ENOENT|not found|No such file/i.test(message) ? `ripgrep (rg) is not installed: ${message}` : message,
+    /**
+     * A spawn that cannot find the program reports it in whatever words its platform uses, and a
+     * pattern that misses them left a cell told only that a search failed. Naming the program is
+     * what lets a reader install it.
+     */
+    message: /ENOENT|not found|No such file|failed to spawn|exited/i.test(message)
+      ? `ripgrep (rg) is not installed or not on PATH: ${message}`
+      : message,
   })
 }
 
