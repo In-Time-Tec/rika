@@ -15353,6 +15353,14 @@
       "production": true
     },
     {
+      "from": "packages/kernel/src/binding/binding-modules.ts",
+      "to": "packages/kernel/src/kernel-profile-registration.ts",
+      "specifier": "../kernel-profile-registration",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/kernel/src/binding/binding-requirements.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
