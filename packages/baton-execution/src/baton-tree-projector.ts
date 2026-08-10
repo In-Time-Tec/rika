@@ -65,6 +65,7 @@ const make = (
   const authorizations = new Map<string, AuthorizationState>()
   let changed = new Map<string, Unit>()
   let removed = new Set<string>()
+  let batchKeys = new Set<string>()
 
   const projectionState = (): Projection.ProjectionState => ({
     status: core.rootStatus,
@@ -88,7 +89,7 @@ const make = (
   const remove = (key: string) => {
     if (!units.delete(key)) return
     changed.delete(key)
-    removed.add(key)
+    if (batchKeys.has(key)) removed.add(key)
   }
 
   const parentUnit = (node: Node): Unit | undefined =>
@@ -587,6 +588,46 @@ const make = (
     }
   } else restore(resume)
 
+  const applyAll = (inputs: ReadonlyArray<RunTree.TreeEvent>): Projection.Patch => {
+    const first = inputs[0]
+    const last = inputs.at(-1)
+    if (first === undefined || last === undefined) throw new RangeError("A projector batch must contain an event")
+    if (nodes.size === 0)
+      nodes.set(first.rootRunId, {
+        rawRunId: first.rootRunId,
+        publicId: "root",
+        hidden: false,
+        tools: new Map(),
+        cells: new Map(),
+        phase: -1,
+        status: "running",
+        lifecycle: "unknown",
+        started: false,
+      })
+    changed = new Map()
+    removed = new Set()
+    batchKeys = new Set(units.keys())
+    const baseRevision = core.revision
+    for (const input of inputs) {
+      core.revision += 1
+      applyRunEvent(input)
+    }
+    core.checkpoint = {
+      version: Projection.projectionVersion,
+      cursor: String(last.cursor),
+      state: serialize(),
+    }
+    return {
+      _tag: "ProjectionPatch",
+      baseRevision,
+      revision: core.revision,
+      checkpoint: core.checkpoint,
+      upsert: [...changed.values()],
+      remove: [...removed],
+      state: projectionState(),
+    }
+  }
+
   return {
     snapshot: () => {
       const materialized = [...units.values()].toSorted((left, right) =>
@@ -601,42 +642,10 @@ const make = (
         state: projectionState(),
       }
     },
-    apply: (input) => {
-      if (nodes.size === 0)
-        nodes.set(input.rootRunId, {
-          rawRunId: input.rootRunId,
-          publicId: "root",
-          hidden: false,
-          tools: new Map(),
-          cells: new Map(),
-          phase: -1,
-          status: "running",
-          lifecycle: "unknown",
-          started: false,
-        })
-      changed = new Map()
-      removed = new Set()
-      const baseRevision = core.revision
-      core.revision += 1
-      applyRunEvent(input)
-      core.checkpoint = {
-        version: Projection.projectionVersion,
-        cursor: String(input.cursor),
-        state: serialize(),
-      }
-      return {
-        _tag: "ProjectionPatch",
-        baseRevision,
-        revision: core.revision,
-        checkpoint: core.checkpoint,
-        upsert: [...changed.values()],
-        remove: [...removed],
-        state: projectionState(),
-      }
-    },
+    apply: (input) => applyAll([input]),
+    applyAll: (inputs) => applyAll(inputs),
   }
 }
-
 export interface AuthorizationTarget {
   readonly runId: string
   readonly approvalId: string

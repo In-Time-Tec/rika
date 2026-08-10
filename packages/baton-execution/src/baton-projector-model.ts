@@ -46,4 +46,5 @@ export interface Card {
 export interface Projector {
   readonly snapshot: () => Projection.Snapshot
   readonly apply: (input: RunTree.TreeEvent) => Projection.Patch
+  readonly applyAll: (inputs: ReadonlyArray<RunTree.TreeEvent>) => Projection.Patch
 }
