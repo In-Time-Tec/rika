@@ -15235,6 +15235,14 @@
       "production": false
     },
     {
+      "from": "apps/rika/test/app-sessions-2.tui.test.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "apps/rika/test/app-sessions.tui.test.ts",
       "to": "apps/rika/test/tui-app-model.ts",
       "specifier": "./tui-app-model",
@@ -15262,14 +15270,6 @@
       "from": "apps/rika/test/app-sessions.tui.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/app-sessions.tui.test.ts",
-      "to": "packages/product/src/thread/model/turn-record.ts",
-      "specifier": "@rika/product/turn-record",
       "kind": "import",
       "relationship": "test",
       "production": false
