@@ -293,6 +293,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "apps/rika/test/idle-physical-footprint.test.ts",
+      "path": "apps/rika/test/idle-physical-footprint.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "apps/rika/test/idle-resource-ceilings.proc.test.ts",
       "path": "apps/rika/test/idle-resource-ceilings.proc.test.ts",
       "workspace": "@rika/cli",
@@ -301,6 +311,16 @@
       "production": false,
       "publicExports": [],
       "testKind": "process-test"
+    },
+    {
+      "id": "apps/rika/test/idle-retained-growth.test.ts",
+      "path": "apps/rika/test/idle-retained-growth.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
     },
     {
       "id": "apps/rika/test/interactive-controller-page-order.test.ts",
@@ -461,6 +481,26 @@
       "production": false,
       "publicExports": [],
       "testKind": "process-test"
+    },
+    {
+      "id": "apps/rika/test/server-client-feed-gap.test.ts",
+      "path": "apps/rika/test/server-client-feed-gap.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/server-client-outbound.test.ts",
+      "path": "apps/rika/test/server-client-outbound.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
     },
     {
       "id": "apps/rika/test/server-client-transport.test.ts",
@@ -1275,6 +1315,22 @@
       "package": "vitest"
     },
     {
+      "id": "external:vitest/config",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "vitest"
+    },
+    {
+      "id": "external:vitest/node",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "vitest"
+    },
+    {
       "id": "packages/baton-execution/test/agent-instructions.test.ts",
       "path": "packages/baton-execution/test/agent-instructions.test.ts",
       "workspace": "@rika/baton-execution",
@@ -1327,6 +1383,16 @@
     {
       "id": "packages/baton-execution/test/baton-model-effort.test.ts",
       "path": "packages/baton-execution/test/baton-model-effort.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/baton-execution/test/baton-projection-batching.test.ts",
+      "path": "packages/baton-execution/test/baton-projection-batching.test.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1535,6 +1601,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/coding-tools/test/process-tool-contract.test.ts",
+      "path": "packages/coding-tools/test/process-tool-contract.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/coding-tools/test/read-web-page.test.ts",
       "path": "packages/coding-tools/test/read-web-page.test.ts",
       "workspace": "@rika/coding-tools",
@@ -1565,6 +1641,26 @@
       "testKind": "process-test"
     },
     {
+      "id": "packages/coding-tools/test/tool-runtime-process.test.ts",
+      "path": "packages/coding-tools/test/tool-runtime-process.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/coding-tools/test/tool-runtime-web.test.ts",
+      "path": "packages/coding-tools/test/tool-runtime-web.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/coding-tools/test/tool-runtime.test.ts",
       "path": "packages/coding-tools/test/tool-runtime.test.ts",
       "workspace": "@rika/coding-tools",
@@ -1587,6 +1683,16 @@
     {
       "id": "packages/coding-tools/test/workspace-boundary.test.ts",
       "path": "packages/coding-tools/test/workspace-boundary.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/coding-tools/test/workspace-directory-listing.test.ts",
+      "path": "packages/coding-tools/test/workspace-directory-listing.test.ts",
       "workspace": "@rika/coding-tools",
       "package": "@rika/coding-tools",
       "kind": "source",
@@ -1837,6 +1943,16 @@
     {
       "id": "packages/kernel/test/binding-mcp.test.ts",
       "path": "packages/kernel/test/binding-mcp.test.ts",
+      "workspace": "@rika/kernel",
+      "package": "@rika/kernel",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/kernel/test/binding-schema-failure-details.test.ts",
+      "path": "packages/kernel/test/binding-schema-failure-details.test.ts",
       "workspace": "@rika/kernel",
       "package": "@rika/kernel",
       "kind": "source",
@@ -3715,6 +3831,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/terminal/test/integration/opentui-transcript-row-virtualization.test.ts",
+      "path": "packages/terminal/test/integration/opentui-transcript-row-virtualization.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/terminal/test/mode-toggle.test.ts",
       "path": "packages/terminal/test/mode-toggle.test.ts",
       "workspace": "@rika/terminal",
@@ -4073,6 +4199,33 @@
       "testKind": "unit-test"
     },
     {
+      "id": "test/fixtures/vitest-worker-death/a-killed-test-worker.ts",
+      "path": "test/fixtures/vitest-worker-death/a-killed-test-worker.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "test/fixtures/vitest-worker-death/b-completed-test-worker.ts",
+      "path": "test/fixtures/vitest-worker-death/b-completed-test-worker.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "test/fixtures/vitest-worker-death/vitest.config.ts",
+      "path": "test/fixtures/vitest-worker-death/vitest.config.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
       "id": "test/process/install-upgrade.proc.test.ts",
       "path": "test/process/install-upgrade.proc.test.ts",
       "workspace": "root",
@@ -4093,6 +4246,15 @@
     {
       "id": "test/process/upstream-link.proc.test.ts",
       "path": "test/process/upstream-link.proc.test.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "process-test"
+    },
+    {
+      "id": "test/process/vitest-worker-death.proc.test.ts",
+      "path": "test/process/vitest-worker-death.proc.test.ts",
       "workspace": "root",
       "kind": "source",
       "production": false,
@@ -4422,6 +4584,14 @@
       "from": "apps/rika/test/cell-wait-for-child.proc.test.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/cell-wait-for-child.proc.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -4867,6 +5037,14 @@
       "production": false
     },
     {
+      "from": "apps/rika/test/idle-physical-footprint.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "apps/rika/test/idle-resource-ceilings.proc.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
@@ -4892,6 +5070,14 @@
     },
     {
       "from": "apps/rika/test/idle-resource-ceilings.proc.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/idle-retained-growth.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5342,6 +5528,30 @@
       "from": "apps/rika/test/server-cancel-on-quit.proc.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/server-client-feed-gap.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/server-client-outbound.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/server-client-outbound.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -5995,6 +6205,30 @@
       "production": false
     },
     {
+      "from": "packages/baton-execution/test/baton-projection-batching.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-projection-batching.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-projection-batching.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/baton-execution/test/baton-projector-usage.test.ts",
       "to": "external:@batonfx/runtime",
       "specifier": "@batonfx/runtime",
@@ -6579,6 +6813,22 @@
       "production": false
     },
     {
+      "from": "packages/coding-tools/test/process-tool-contract.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/process-tool-contract.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/coding-tools/test/read-web-page.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -6651,6 +6901,54 @@
       "production": false
     },
     {
+      "from": "packages/coding-tools/test/tool-runtime-process.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/tool-runtime-process.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/tool-runtime-process.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/tool-runtime-web.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/tool-runtime-web.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/tool-runtime-web.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/coding-tools/test/tool-runtime.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -6670,14 +6968,6 @@
       "from": "packages/coding-tools/test/tool-runtime.test.ts",
       "to": "external:effect/testing",
       "specifier": "effect/testing",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/coding-tools/test/tool-runtime.test.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -6723,6 +7013,30 @@
       "production": false
     },
     {
+      "from": "packages/coding-tools/test/workspace-directory-listing.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/workspace-directory-listing.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/workspace-directory-listing.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/coding-tools/test/workspace-index.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
@@ -6734,6 +7048,14 @@
       "from": "packages/coding-tools/test/workspace-index.test.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/workspace-index.test.ts",
+      "to": "external:effect/unstable/process/ChildProcessSpawner",
+      "specifier": "effect/unstable/process/ChildProcessSpawner",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -7260,6 +7582,30 @@
     },
     {
       "from": "packages/kernel/test/binding-mcp.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/kernel/test/binding-schema-failure-details.test.ts",
+      "to": "external:@batonfx/repl",
+      "specifier": "@batonfx/repl",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/kernel/test/binding-schema-failure-details.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/kernel/test/binding-schema-failure-details.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -10771,6 +11117,30 @@
       "production": false
     },
     {
+      "from": "packages/terminal/test/integration/opentui-transcript-row-virtualization.test.ts",
+      "to": "external:@opentui/core/testing",
+      "specifier": "@opentui/core/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-row-virtualization.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-row-virtualization.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/terminal/test/mode-toggle.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
@@ -11131,6 +11501,30 @@
       "production": false
     },
     {
+      "from": "test/fixtures/vitest-worker-death/a-killed-test-worker.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/fixtures/vitest-worker-death/b-completed-test-worker.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/fixtures/vitest-worker-death/vitest.config.ts",
+      "to": "external:vitest/config",
+      "specifier": "vitest/config",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "test/process/install-upgrade.proc.test.ts",
       "to": "external:fs/promises",
       "specifier": "fs/promises",
@@ -11259,6 +11653,22 @@
       "production": false
     },
     {
+      "from": "test/process/vitest-worker-death.proc.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/process/vitest-worker-death.proc.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "test/release/archive-contract.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
@@ -11276,8 +11686,24 @@
     },
     {
       "from": "test/release/local-baton-smoke.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/release/local-baton-smoke.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/release/local-baton-smoke.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -11419,5 +11845,7 @@
       "production": false
     }
   ],
-  "violations": []
+  "violations": [
+    "test/fixtures/vitest-worker-death/vitest.config.ts: unresolved internal or asset import ../../../vitest.config"
+  ]
 }

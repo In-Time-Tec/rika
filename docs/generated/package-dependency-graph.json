@@ -39,6 +39,7 @@
         "./coding-tool-runtime",
         "./edit-file-tool",
         "./grep-files-tool",
+        "./list-files-tool",
         "./local-path",
         "./local-safety-policy",
         "./media-view-contract",
@@ -56,6 +57,7 @@
         "./web-search-provider",
         "./web-search-service",
         "./web-search-tool",
+        "./workspace-directory-listing",
         "./workspace-file-search",
         "./write-file-tool"
       ]
@@ -603,5 +605,7 @@
       "dependencySection": "dependencies"
     }
   ],
-  "violations": []
+  "violations": [
+    "test/fixtures/vitest-worker-death/vitest.config.ts: unresolved internal or asset import ../../../vitest.config"
+  ]
 }
