@@ -161,7 +161,7 @@ describe("LocalPath", () => {
       expect(resolved.endsWith("/fresh/nested/file.ts")).toBe(true)
     }),
   )
-  it.effect("keeps exact workspace paths inside the canonical root", () =>
+  it.effect("resolves exact workspace paths without casing correction or symlink escape", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem
@@ -180,9 +180,11 @@ describe("LocalPath", () => {
         const options = { path, base: workspace }
 
         const exact = yield* LocalPath.resolveExactWorkspacePath(found, "src", options)
+        const wrongCase = yield* Effect.flip(LocalPath.resolveExactWorkspacePath(found, "SRC", options))
         const escaped = yield* Effect.flip(LocalPath.resolveExactWorkspacePath(found, "escape", options))
 
         expect(exact).toBe(`${workspace}/src`)
+        expect(wrongCase).toMatchObject({ _tag: "LocalPathError", reason: "not_found" })
         expect(escaped).toMatchObject({ _tag: "LocalPathError", reason: "outside_workspace" })
       }),
     ).pipe(provide(BunServices.layer)),

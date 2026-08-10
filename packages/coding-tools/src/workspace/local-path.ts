@@ -124,15 +124,23 @@ export const resolveExactWorkspacePath: {
   ): Effect.Effect<string, LocalPathError | PlatformError.PlatformError>
 } = Function.dual(3, (lookup: ExactLookup, input: string, options: Options) =>
   Effect.gen(function* () {
-    const root = yield* lookup.realPath(options.base)
+    const lexicalRoot = options.path.resolve(options.base)
+    const root = yield* lookup.realPath(lexicalRoot)
     const absolute = options.path.resolve(options.base, input)
-    if (!contained(options.path.resolve(options.base), absolute, options.path))
+    if (!contained(lexicalRoot, absolute, options.path))
       return yield* LocalPathError.make({ path: input, reason: "outside_workspace", candidates: [] })
-    if (!(yield* lookup.exists(absolute)))
-      return yield* LocalPathError.make({ path: input, reason: "not_found", candidates: [] })
-    const canonical = yield* lookup.realPath(absolute)
+    const relative = options.path.relative(lexicalRoot, absolute)
+    const segments = relative.split(options.path.sep).filter((segment) => segment.length > 0)
+    let current = lexicalRoot
+    for (const segment of segments) {
+      const names = yield* lookup.readDirectory(current)
+      if (!names.includes(segment))
+        return yield* LocalPathError.make({ path: input, reason: "not_found", candidates: [] })
+      current = options.path.join(current, segment)
+    }
+    const canonical = yield* lookup.realPath(current)
     if (!contained(root, canonical, options.path))
       return yield* LocalPathError.make({ path: input, reason: "outside_workspace", candidates: [] })
-    return absolute
+    return current
   }),
 )
