@@ -28,7 +28,11 @@ interface Recorder {
  * this source assembles `rika` from them. The host stubs answer with Promises because that is what a
  * mounted binding looks like inside the kernel, which is ordinary TypeScript rather than Effect.
  */
-const evaluate = (recorder: Recorder, stale = false): Effect.Effect<Sandbox> =>
+const evaluate = (
+  recorder: Recorder,
+  stale = false,
+  availableTools: Array<(typeof discovered)[number]> = discovered,
+): Effect.Effect<Sandbox> =>
   Effect.promise(() => {
     const scope: Record<string, unknown> = {}
     for (const name of moduleNames) scope[name] = {}
@@ -36,7 +40,7 @@ const evaluate = (recorder: Recorder, stale = false): Effect.Effect<Sandbox> =>
       servers: () => Promise.resolve([{ name: "files", kind: "local", enabled: true }]),
       tools: (input: unknown) => {
         recorder.toolCalls.push(input)
-        return Promise.resolve(discovered)
+        return Promise.resolve(availableTools)
       },
       call: (input: unknown) => {
         recorder.calls.push(input)
@@ -119,6 +123,28 @@ describe("kernel bootstrap", () => {
       const sandbox = yield* evaluate(recorder())
       const response = yield* Effect.promise(() => server(sandbox, "files").ghost!({}))
       expect(response).toMatchObject({ _tag: "McpBindingNotFound", module: "files", operation: "ghost" })
+    }),
+  )
+
+  it.effect("explains that a tool added after discovery becomes visible in the next cell", () =>
+    Effect.gen(function* () {
+      const recording = recorder()
+      const availableTools = [discovered[0]!]
+      const sandbox = yield* evaluate(recording, false, availableTools)
+      yield* Effect.promise(() => server(sandbox, "files").read!({}))
+      availableTools.push(discovered[1]!)
+
+      const response = yield* Effect.promise(() => server(sandbox, "files").write!({}))
+
+      expect(recording.toolCalls).toEqual([{ server: "files" }])
+      expect(recording.calls).toEqual([{ server: "files", tool: "read", input: {} }])
+      expect(response).toMatchObject({
+        _tag: "McpBindingNotFound",
+        module: "files",
+        operation: "write",
+        message:
+          "Server files exposes no tool named write. If write was newly added during this cell, it will be visible in the next cell.",
+      })
     }),
   )
 

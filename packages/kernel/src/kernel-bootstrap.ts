@@ -27,7 +27,8 @@ globalThis.rika.mcp = (() => {
   const notFound = (module, operation) => {
     const failure = { _tag: "McpBindingNotFound", module, message: operation === undefined
       ? "No MCP server named " + module + " is configured"
-      : "Server " + module + " exposes no tool named " + operation }
+      : "Server " + module + " exposes no tool named " + operation +
+        ". If " + operation + " was newly added during this cell, it will be visible in the next cell." }
     if (operation !== undefined) failure.operation = operation
     return failure
   }
