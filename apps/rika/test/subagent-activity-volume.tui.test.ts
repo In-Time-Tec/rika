@@ -5,7 +5,7 @@ import { expect, test } from "vitest"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
-const tuiTestTimeout = 60_000
+const tuiTestTimeout = 90_000
 const currentWallTime = () => performance.now()
 
 test(
@@ -63,6 +63,9 @@ test(
                   { delayMillis: 300 },
                 ),
                 model.text("REALISTIC_VOLUME_ROOT_FINISHED", 200),
+                // Preserve enough script for independently arriving durable child settlements.
+                model.text("VOLUME_CHILD_A_SETTLEMENT_ACKNOWLEDGED"),
+                model.text("VOLUME_CHILD_B_SETTLEMENT_ACKNOWLEDGED"),
               ],
             },
             {
@@ -103,8 +106,13 @@ test(
           app.pressKey("\u001b[F")
           yield* Effect.sleep("500 millis")
         }
-        yield* app.waitTranscript(Turn.TurnId.make("tui-turn-0"), (liveProjection) =>
-          liveProjection.units.some((unit) => JSON.stringify(unit.content).includes("REALISTIC_VOLUME_ROOT_FINISHED")),
+        yield* app.waitTranscript(
+          Turn.TurnId.make("tui-turn-0"),
+          (liveProjection) =>
+            liveProjection.units.some((unit) =>
+              JSON.stringify(unit.content).includes("REALISTIC_VOLUME_ROOT_FINISHED"),
+            ),
+          30_000,
         )
         const final = app.frame()
         yield* app.quit

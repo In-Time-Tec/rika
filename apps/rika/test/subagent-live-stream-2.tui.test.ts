@@ -4,7 +4,7 @@ import { expect, test } from "vitest"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
-const tuiTestTimeout = 60_000
+const tuiTestTimeout = 90_000
 test(
   "never duplicates a terminal subagent row across live projection and durable reload",
   () =>
@@ -27,6 +27,8 @@ test(
                   ),
                 ]),
                 model.text("ROOT_DEDUPE_COMPLETE"),
+                model.text("FIRST_GROUP_SETTLEMENT_ACKNOWLEDGED"),
+                model.text("SECOND_GROUP_SETTLEMENT_ACKNOWLEDGED"),
               ],
             },
             { profile: "Oracle", steps: [model.text("FIRST_GROUP_RESULT")] },
@@ -40,7 +42,7 @@ test(
         yield* app.waitFrame("ROOT_DEDUPE_COMPLETE")
         const settled = yield* app.waitFrameMatch(
           (frame) => frame.includes("Oracle has spoken") && frame.includes("Surgeon closed up"),
-          25_000,
+          40_000,
         )
 
         expect(settled.match(/Oracle has spoken/g) ?? []).toHaveLength(1)

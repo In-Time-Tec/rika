@@ -22,6 +22,7 @@ test(
               steps: [
                 model.turn([model.spawn([{ profile: "Task", prompt: "L1" }], "l1")]),
                 model.text("ROOT_DEEP_DONE"),
+                model.text("ROOT_DEEP_SETTLEMENT_ACKNOWLEDGED"),
               ],
             },
             {
@@ -29,6 +30,7 @@ test(
               steps: [
                 model.turn([model.spawn([{ profile: "Oracle", prompt: "L2" }], "l2")]),
                 model.text("CHILD_DEEP_DONE"),
+                model.text("CHILD_DEEP_SETTLEMENT_ACKNOWLEDGED"),
               ],
             },
             {

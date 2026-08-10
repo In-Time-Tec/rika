@@ -49,6 +49,8 @@ test(
               steps: [
                 model.turn([model.spawn([{ profile: "Oracle", prompt: "IDLE_CHILD_PROMPT" }], "idle-agent")]),
                 model.text("IDLE_ROOT_DONE"),
+                // A child that settles after the root answer resumes this same Run once more.
+                model.text("IDLE_SETTLEMENT_ACKNOWLEDGED"),
               ],
             },
             { profile: "Oracle", steps: [model.text("IDLE_CHILD_DONE")] },

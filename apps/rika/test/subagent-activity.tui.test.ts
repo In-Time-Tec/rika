@@ -19,6 +19,7 @@ test(
               steps: [
                 model.turn([model.spawn([{ profile: "Task", prompt: "HELD_CHILD_PROMPT" }], "held-child")]),
                 model.text("ROOT_SETTLED_AFTER_HOLD"),
+                model.text("HELD_CHILD_SETTLEMENT_ACKNOWLEDGED"),
               ],
             },
             { profile: "Task", steps: [model.text("CHILD_STREAMED_AFTER_HOLD")] },

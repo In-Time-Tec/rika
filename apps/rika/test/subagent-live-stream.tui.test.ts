@@ -15,8 +15,8 @@ test(
           lanes: [
             {
               steps: [
-                // Both children run inside the root's wait, which is the window this test observes
-                // them live in and what makes every card terminal by the time it reads them back.
+                // Admission is non-blocking. The test observes both children live, then waits on the
+                // durable cards rather than treating the root answer as proof that they settled.
                 model.turn([
                   model.spawn(
                     [
@@ -27,6 +27,8 @@ test(
                   ),
                 ]),
                 model.text("ROOT_FINISHED_AFTER_CHILD_STREAM"),
+                model.text("READER_CHILD_SETTLEMENT_ACKNOWLEDGED"),
+                model.text("WORKER_CHILD_SETTLEMENT_ACKNOWLEDGED"),
               ],
             },
             // Each child answers in ONE turn. A child that called a tool first would need a second
@@ -47,7 +49,7 @@ test(
         expect(live).toContain("Running 2 subagents")
         expect(live).not.toContain("Execution failed")
 
-        // The root answers only after the children it waited for, so the ceiling covers that wait.
+        // The root answer and child settlement race; neither is used as a proxy for the other.
         const projected = yield* app.waitFrame("ROOT_FINISHED_AFTER_CHILD_STREAM", 25_000)
         expect(projected).not.toContain("Execution failed")
         yield* app.settled

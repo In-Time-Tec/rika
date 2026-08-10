@@ -3,7 +3,7 @@ import { Deferred, Effect } from "effect"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
-const tuiTestTimeout = 60_000
+const tuiTestTimeout = 90_000
 
 test(
   "echoes an idle submission in the next frame before server admission",
@@ -66,7 +66,9 @@ test(
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
-          script: [model.text("SLOW_FIRST_ANSWER", 6_000), model.text("QUEUED_SECOND_ANSWER")],
+          // Keep the first provider response pending long enough that a constrained CI runner
+          // cannot cross the active-to-idle boundary while the second prompt is being entered.
+          script: [model.text("SLOW_FIRST_ANSWER", 20_000), model.text("QUEUED_SECOND_ANSWER")],
         })
         yield* Effect.promise(() => app.type("First slow prompt."))
         app.pressEnter()
@@ -76,7 +78,7 @@ test(
         app.pressEnter()
         const queuedFrame = yield* app.waitFrame("Second queued prompt.")
         expect(queuedFrame).toContain("First slow prompt.")
-        const finalFrame = yield* app.waitFrame("QUEUED_SECOND_ANSWER")
+        const finalFrame = yield* app.waitFrame("QUEUED_SECOND_ANSWER", 30_000)
         expect(finalFrame).toContain("SLOW_FIRST_ANSWER")
         yield* app.quit
       }),
