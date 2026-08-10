@@ -1,6 +1,6 @@
 import { Effect, Function, Path, PlatformError, Schema } from "effect"
 
-export const LocalPathReason = Schema.Literals(["not_found", "ambiguous_case"])
+export const LocalPathReason = Schema.Literals(["not_found", "ambiguous_case", "outside_workspace"])
 export type LocalPathReason = typeof LocalPathReason.Type
 
 export class LocalPathError extends Schema.TaggedErrorClass<LocalPathError>()("LocalPathError", {
@@ -12,6 +12,10 @@ export class LocalPathError extends Schema.TaggedErrorClass<LocalPathError>()("L
 export interface Lookup {
   readonly exists: (path: string) => Effect.Effect<boolean, PlatformError.PlatformError>
   readonly readDirectory: (path: string) => Effect.Effect<ReadonlyArray<string>, PlatformError.PlatformError>
+}
+
+export interface ExactLookup extends Lookup {
+  readonly realPath: (path: string) => Effect.Effect<string, PlatformError.PlatformError>
 }
 
 export interface Options {
@@ -101,3 +105,34 @@ export const resolveWriteTarget: {
   ): (lookup: Lookup) => Effect.Effect<string, LocalPathError | PlatformError.PlatformError>
   (lookup: Lookup, input: string, options: Options): Effect.Effect<string, LocalPathError | PlatformError.PlatformError>
 } = Function.dual(3, (lookup: Lookup, input: string, options: Options) => resolveWith(lookup, input, options, true))
+
+const contained = (root: string, candidate: string, path: Path.Path) => {
+  if (root === candidate) return true
+  const relative = path.relative(root, candidate)
+  return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative)
+}
+
+export const resolveExactWorkspacePath: {
+  (
+    input: string,
+    options: Options,
+  ): (lookup: ExactLookup) => Effect.Effect<string, LocalPathError | PlatformError.PlatformError>
+  (
+    lookup: ExactLookup,
+    input: string,
+    options: Options,
+  ): Effect.Effect<string, LocalPathError | PlatformError.PlatformError>
+} = Function.dual(3, (lookup: ExactLookup, input: string, options: Options) =>
+  Effect.gen(function* () {
+    const root = yield* lookup.realPath(options.base)
+    const absolute = options.path.resolve(options.base, input)
+    if (!contained(options.path.resolve(options.base), absolute, options.path))
+      return yield* LocalPathError.make({ path: input, reason: "outside_workspace", candidates: [] })
+    if (!(yield* lookup.exists(absolute)))
+      return yield* LocalPathError.make({ path: input, reason: "not_found", candidates: [] })
+    const canonical = yield* lookup.realPath(absolute)
+    if (!contained(root, canonical, options.path))
+      return yield* LocalPathError.make({ path: input, reason: "outside_workspace", candidates: [] })
+    return absolute
+  }),
+)

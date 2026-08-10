@@ -8,6 +8,12 @@ export const handlerLayer = RuntimeTools.toolkit.toLayer(
     return {
       grep: ({ pattern, regex, path }) =>
         runtime.run({ _tag: "Grep", pattern, regex, ...(path === undefined ? {} : { path }) }),
+      list: ({ path, depth }) =>
+        runtime.run({
+          _tag: "List",
+          ...(path === undefined ? {} : { path }),
+          ...(depth === undefined ? {} : { depth }),
+        }),
       read: ({ path, read_range }) =>
         runtime.run({ _tag: "Read", path, ...(read_range === undefined ? {} : { readRange: read_range }) }),
       write: ({ path, content }) => runtime.run({ _tag: "Write", path, content }),

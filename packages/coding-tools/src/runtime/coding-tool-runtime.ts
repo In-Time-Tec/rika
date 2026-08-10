@@ -25,6 +25,7 @@ const Shell = Schema.Struct({
 })
 export const Request = Schema.Union([
   Inputs.Inputs.Grep.Request,
+  Inputs.Inputs.List.Request,
   Inputs.Inputs.Read.Request,
   Inputs.Inputs.Write.Request,
   Inputs.Inputs.Edit.Request,
@@ -57,6 +58,7 @@ export class Service extends Context.Service<Service, Interface>()(
 
 const registrations: ReadonlyArray<ToolPolicy.Registration> = [
   Inputs.Inputs.Grep.registration,
+  Inputs.Inputs.List.registration,
   Inputs.Inputs.Read.registration,
   Inputs.Inputs.Write.registration,
   Inputs.Inputs.Edit.registration,
@@ -68,6 +70,7 @@ const registrations: ReadonlyArray<ToolPolicy.Registration> = [
 ]
 export const toolkit = Toolkit.make(
   Inputs.Inputs.Grep.tool,
+  Inputs.Inputs.List.tool,
   Inputs.Inputs.Read.tool,
   Inputs.Inputs.Write.tool,
   Inputs.Inputs.Edit.tool,
@@ -87,6 +90,8 @@ const outputRecovery = (request: Request): string => {
   switch (request._tag) {
     case "Grep":
       return "narrow the pattern or scope with path"
+    case "List":
+      return "list a narrower path or depth"
     case "Read":
       return "request a smaller read_range"
     case "Bash":

@@ -172,6 +172,11 @@ const testEnvironment = (
     glob: () => Effect.succeed({ items: [], scores: [], totalMatched: 0, totalFiles: files.size }),
     grep: (query, options) => {
       grepCalls.push({ query, options })
+      if (query === "missing-rg")
+        return WorkspaceIndex.WorkspaceIndexError.make({
+          operation: "grep",
+          message: "ripgrep (rg) is not installed or not on PATH: ENOENT",
+        })
       if (query === "large-grep") {
         const items = Array.from({ length: 800 }, (_, itemIndex) => ({
           relativePath: `src/file-${itemIndex}.ts`,
@@ -308,6 +313,31 @@ describe("Runtime", () => {
     }).pipe(provide(environment.runtime))
   })
 
+  it.effect("lists an exact workspace directory and rejects files, casing guesses, and escapes", () => {
+    const environment = testEnvironment()
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const listed = yield* runtime.run({ _tag: "List", path: "src", depth: 2 })
+      const file = yield* Effect.flip(runtime.run({ _tag: "List", path: "a.txt" }))
+      const wrongCase = yield* Effect.flip(runtime.run({ _tag: "List", path: "SRC" }))
+      const escaped = yield* Effect.flip(runtime.run({ _tag: "List", path: ".." }))
+
+      expect(listed).toMatchObject({
+        entries: [
+          { name: "deep", kind: "directory", entries: [{ name: "b.ts", kind: "file" }] },
+          { name: "unreadable.ts", kind: "file" },
+          { name: "z.ts", kind: "file" },
+        ],
+        truncated: false,
+      })
+      expect(listed.text).toContain("src/")
+      expect(file).toMatchObject({ tool: "list", category: "invalid_input" })
+      expect(file.message).toContain("Not a directory: a.txt")
+      expect(wrongCase).toMatchObject({ tool: "list", category: "not_found" })
+      expect(escaped).toMatchObject({ tool: "list", category: "access_denied" })
+    }).pipe(provide(environment.runtime))
+  })
+
   it.effect("returns partial grep matches with a deadline marker instead of an all-or-nothing timeout", () => {
     const environment = testEnvironment()
     return Effect.gen(function* () {
@@ -351,12 +381,30 @@ describe("Runtime", () => {
     }).pipe(provide(environment.runtime))
   })
 
+  it.effect("names ripgrep when workspace search cannot spawn it", () => {
+    const environment = testEnvironment()
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const error = yield* Effect.flip(runtime.run({ _tag: "Grep", pattern: "missing-rg", regex: false }))
+      expect(error).toMatchObject({
+        _tag: "ToolError",
+        tool: "grep",
+        category: "operation",
+        outcome: "known",
+      })
+      expect(error.message).toContain("ripgrep (rg) is not installed or not on PATH: ENOENT")
+      expect(error.nextAction).toContain("ripgrep (rg) is installed")
+    }).pipe(provide(environment.runtime))
+  })
+
   it.effect("rejects invalid regular expressions", () => {
     const environment = testEnvironment()
     return Effect.gen(function* () {
       const runtime = yield* Runtime.Service
       const error = yield* Effect.flip(runtime.run({ _tag: "Grep", pattern: "[", regex: true }))
       expect(error).toMatchObject({ _tag: "ToolError", tool: "grep" })
+      expect(error.message).toContain('The grep pattern "[" is not a valid regular expression')
+      expect(error.message).toContain("SyntaxError")
     }).pipe(provide(environment.runtime))
   })
 

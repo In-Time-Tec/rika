@@ -7,6 +7,7 @@ import * as ProcessRegistry from "../process/shell-process-registry"
 import * as MediaView from "../media/media-view-service"
 import { RuntimeFilesystem } from "./coding-tool-runtime-filesystem"
 import * as WorkspaceIndex from "../workspace/workspace-file-search"
+import * as WorkspaceDirectoryListing from "../workspace/workspace-directory-listing"
 import { unifiedDiff } from "../workspace/unified-diff"
 import * as ToolPolicy from "../policy/coding-tool-policy"
 import * as CodingToolResult from "./coding-tool-result"
@@ -50,9 +51,10 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
         Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv()),
         Effect.orDie,
       )
-      const lookup: LocalPath.Lookup = {
+      const lookup: LocalPath.ExactLookup = {
         exists: (target) => fileSystem.exists(target),
         readDirectory: (target) => fileSystem.readDirectory(target),
+        realPath: (target) => fileSystem.realPath(target),
       }
       const resolveOptions = {
         path,
@@ -61,6 +63,14 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
       }
       const localPathError = (value: string, cause: unknown) => {
         if (!Schema.is(LocalPath.LocalPathError)(cause)) return operationError(cause)
+        if (cause.reason === "outside_workspace")
+          return runtimeError({
+            category: "access_denied",
+            message: `Path is outside the workspace: ${value}`,
+            outcome: "known",
+            recovery: "after_change",
+            nextAction: "Call the tool with a path inside the workspace",
+          })
         if (cause.reason === "ambiguous_case")
           return runtimeError({
             category: "conflict",
@@ -166,7 +176,7 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
                 if (page.regexFallbackError !== undefined)
                   return yield* runtimeError({
                     category: "invalid_input",
-                    message: "The grep pattern is not a valid regular expression",
+                    message: `The grep pattern "${request.pattern}" is not a valid regular expression: ${page.regexFallbackError}`,
                     outcome: "known",
                     recovery: "after_change",
                     nextAction: "Correct the regular expression or set regex to false",
@@ -192,6 +202,26 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
                   return { ...bounded(matches.length === 0 ? marker : `${matches}\n${marker}`), truncated: true }
                 }
                 return bounded(matches)
+              }
+              case "List": {
+                const displayPath = request.path ?? "."
+                const target = yield* LocalPath.resolveExactWorkspacePath(lookup, displayPath, resolveOptions).pipe(
+                  Effect.mapError((cause) => localPathError(displayPath, cause)),
+                )
+                const targetInfo = yield* fileSystem.stat(target).pipe(Effect.mapError(operationError))
+                if (targetInfo.type !== "Directory")
+                  return yield* runtimeError({
+                    category: "invalid_input",
+                    message: `Not a directory: ${displayPath}`,
+                    outcome: "known",
+                    recovery: "after_change",
+                    nextAction: "Call list with a directory path",
+                  })
+                return yield* WorkspaceDirectoryListing.list(target, displayPath, { depth: request.depth ?? 2 }).pipe(
+                  Effect.provideService(FileSystem.FileSystem, fileSystem),
+                  Effect.provideService(Path.Path, path),
+                  Effect.mapError(operationError),
+                )
               }
               case "Read": {
                 const start = request.readRange?.[0] ?? 1

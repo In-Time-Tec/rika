@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect"
 import type { HostBindingRegistry } from "@batonfx/repl"
 import * as CodingToolResult from "@rika/coding-tools/coding-tool-result"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
+import { maximumDepth } from "@rika/coding-tools/list-files-tool"
 import { nested, NestedOperationFailed, operation, type Requirements } from "./nested-operation-envelope"
 
 export const name = "workspace"
@@ -10,6 +11,12 @@ const Failure = Schema.Union([CodingToolResult.ToolFailure, NestedOperationFaile
 
 const Read = Schema.Struct({
   text: Schema.String,
+  truncated: Schema.Boolean,
+})
+
+const Listed = Schema.Struct({
+  text: Schema.String,
+  entries: Schema.Array(CodingToolResult.WorkspaceListEntry),
   truncated: Schema.Boolean,
 })
 
@@ -23,6 +30,10 @@ const SearchInput = Schema.Struct({
   pattern: Schema.String,
   regex: Schema.optionalKey(Schema.Boolean),
   path: Schema.optionalKey(Schema.String),
+})
+const ListInput = Schema.Struct({
+  path: Schema.optionalKey(Schema.String),
+  depth: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(maximumDepth))),
 })
 const ReadInput = Schema.Struct({
   path: Schema.String,
@@ -40,6 +51,12 @@ const run = (request: typeof CodingToolRuntime.Request.Type) =>
   Effect.flatMap(CodingToolRuntime.Service, (runtime) => runtime.run(request))
 
 const read = (result: CodingToolResult.Result) => ({ text: result.text, truncated: result.truncated })
+
+const listed = (result: CodingToolResult.Result) => ({
+  text: result.text,
+  entries: result.entries ?? [],
+  truncated: result.truncated,
+})
 
 const edited = (result: CodingToolResult.Result) => ({
   text: result.text,
@@ -62,6 +79,21 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingTo
           ...(input.path === undefined ? {} : { path: input.path }),
         }),
         read,
+      ),
+  }),
+  operation({
+    name: "list",
+    input: ListInput,
+    output: Listed,
+    failure: Failure,
+    handle: (input) =>
+      Effect.map(
+        run({
+          _tag: "List",
+          ...(input.path === undefined ? {} : { path: input.path }),
+          ...(input.depth === undefined ? {} : { depth: input.depth }),
+        }),
+        listed,
       ),
   }),
   operation({

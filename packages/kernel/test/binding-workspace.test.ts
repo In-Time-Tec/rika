@@ -36,7 +36,9 @@ describe("workspace binding", () => {
   it.effect("mounts exactly the model-facing operation names", () =>
     Effect.gen(function* () {
       const mounted = yield* registry({ run: () => result("") })
-      expect(mounted.descriptors).toEqual([{ module: "workspace", operations: ["search", "read", "write", "replace"] }])
+      expect(mounted.descriptors).toEqual([
+        { module: "workspace", operations: ["search", "list", "read", "write", "replace"] },
+      ])
     }),
   )
 
@@ -64,6 +66,38 @@ describe("workspace binding", () => {
         { _tag: "Grep", pattern: "needle", regex: false, path: "packages/x/**" },
       ])
       expect(response).toEqual({ _tag: "Success", output: { text: "matched", truncated: false } })
+    }),
+  )
+
+  it.effect("maps list options and returns the structured bounded listing", () =>
+    Effect.gen(function* () {
+      const seen: Array<unknown> = []
+      const mounted = yield* registry({
+        run: (request) => {
+          seen.push(request)
+          return Effect.succeed({
+            text: "src/\n└── a.ts",
+            entries: [{ name: "a.ts", kind: "file" }],
+            truncated: false,
+          })
+        },
+      })
+      const defaults = yield* mounted.invoke({ module: "workspace", operation: "list", input: {} })
+      const scoped = yield* mounted.invoke({
+        module: "workspace",
+        operation: "list",
+        input: { path: "src", depth: 3 },
+      })
+      expect(seen).toEqual([{ _tag: "List" }, { _tag: "List", path: "src", depth: 3 }])
+      expect(defaults).toEqual({
+        _tag: "Success",
+        output: {
+          text: "src/\n└── a.ts",
+          entries: [{ name: "a.ts", kind: "file" }],
+          truncated: false,
+        },
+      })
+      expect(scoped._tag).toBe("Success")
     }),
   )
 

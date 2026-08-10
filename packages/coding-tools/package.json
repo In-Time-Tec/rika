@@ -31,7 +31,9 @@
     "./read-file-tool": "./src/workspace/read-file-tool.ts",
     "./unified-diff": "./src/workspace/unified-diff.ts",
     "./workspace-file-search": "./src/workspace/workspace-file-search.ts",
-    "./write-file-tool": "./src/workspace/write-file-tool.ts"
+    "./write-file-tool": "./src/workspace/write-file-tool.ts",
+    "./list-files-tool": "./src/workspace/list-files-tool.ts",
+    "./workspace-directory-listing": "./src/workspace/workspace-directory-listing.ts"
   },
   "dependencies": {
     "@rika/configuration": "workspace:*",
