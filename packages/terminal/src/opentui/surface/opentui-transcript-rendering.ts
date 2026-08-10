@@ -1,6 +1,7 @@
 import { TextRenderable, StyledText, fg, type MouseEvent, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
 import { colors } from "../../presentation/terminal/terminal-theme"
+import { transcriptRenderableBandRows } from "../../presentation/transcript/terminal-transcript-window"
 import { escapePathTarget } from "../../presentation/transcript/transcript-tool-detail"
 import { transcriptUnitBuilder } from "../rendering/opentui-render-unit"
 import type { TranscriptUnit } from "../../presentation/transcript/transcript-tool-types"
@@ -24,6 +25,14 @@ export abstract class SurfaceTranscriptRendering extends SurfaceState {
     this.transcriptUnitCache.clear()
     this.transcriptRenderInput = undefined
     this.transcriptRowTotal = 0
+    this.transcriptBandEnd = Number.POSITIVE_INFINITY
+    this.transcriptBandTotal = 0
+    this.transcriptMountedBandStart = 0
+    this.transcriptMountedRows = 0
+    this.transcriptBandRowsBefore = 0
+    this.transcriptBandRowsAfter = 0
+    this.transcriptWindowExactRows = 0
+    this.transcriptBandRowPrefix = [0]
   }
   protected buildTranscriptUnitBundles(
     builder: ReturnType<typeof transcriptUnitBuilder>,
@@ -34,57 +43,66 @@ export abstract class SurfaceTranscriptRendering extends SurfaceState {
     const built = builder.renderUnit(unit)
     const styledLines = splitStyledLines(new StyledText([...built.chunks]))
     const bundles: Array<TranscriptRangeBundle> = []
-    const ranges = [built.root, ...built.nested]
-    for (const [rangeIndex, range] of ranges.entries()) {
-      const descriptors: Array<TranscriptRenderableDescriptor> = []
-      const headerEnd = range.headerEnd ?? range.start
-      const header: Array<TextChunk> = []
-      const headerLines = styledLines.slice(range.start, headerEnd + 1)
-      for (const [index, current] of headerLines.entries()) {
-        header.push(...current)
-        if (index < headerLines.length - 1) header.push(fg(colors.text)("\n"))
+    const bandContent = (lines: ReadonlyArray<ReadonlyArray<TextChunk>>): StyledText => {
+      const chunks: Array<TextChunk> = []
+      for (const [index, line] of lines.entries()) {
+        chunks.push(...line)
+        if (index < lines.length - 1) chunks.push(fg(colors.text)("\n"))
       }
-      const headerContent = new StyledText(header)
-      const spinnerChunk =
-        range.animated === true ? headerContent.chunks.findIndex((chunk) => chunk.text === toolSpinnerGlyph) : -1
-      descriptors.push({
-        key: `${range.unit}:header`,
-        revision: `${revision}#${rangeIndex}h`,
-        content: headerContent,
-        selectable: !range.expandable,
-        ...(range.targets === undefined ? {} : { targets: range.targets }),
-        ...(spinnerChunk < 0 ? {} : { spinnerChunk }),
-        ...(range.expandable
-          ? {
-              onMouseDown: (event: MouseEvent) => {
-                if (event.button !== 0) return
-                event.stopPropagation()
-                this.handlers.clickToggle?.(range.unit)
-              },
-            }
-          : {}),
-      })
-      const body: Array<TextChunk> = []
-      const bodyLines = styledLines.slice(headerEnd + 1, range.end + 1)
-      for (const [index, line] of bodyLines.entries()) {
-        body.push(...line)
-        if (index < bodyLines.length - 1) body.push(fg(colors.text)("\n"))
-      }
-      if (body.length > 0)
-        descriptors.push({
-          key: `${range.unit}:body`,
-          revision: `${revision}#${rangeIndex}b`,
-          content: new StyledText(body),
+      return new StyledText(chunks)
+    }
+    const appendBands = (
+      range: (typeof built)["root"],
+      rangeIndex: number,
+      section: "header" | "body",
+      lines: ReadonlyArray<ReadonlyArray<TextChunk>>,
+      lineOffset: number,
+    ) => {
+      for (let start = 0; start < lines.length; start += transcriptRenderableBandRows) {
+        const band = lines.slice(start, start + transcriptRenderableBandRows)
+        const content = bandContent(band)
+        const key = start === 0 ? `${range.unit}:${section}` : `${range.unit}:${section}:${lineOffset + start}`
+        const spinnerChunk =
+          range.animated === true ? content.chunks.findIndex((chunk) => chunk.text === toolSpinnerGlyph) : -1
+        const descriptor: TranscriptRenderableDescriptor = {
+          key,
+          revision: `${revision}#${rangeIndex}${section === "header" ? "h" : "b"}:${lineOffset + start}`,
+          content,
+          ...(section === "header" ? { selectable: !range.expandable } : {}),
           ...(range.targets === undefined ? {} : { targets: range.targets }),
-        })
-      bundles.push({ key: range.unit, descriptors })
+          ...(spinnerChunk < 0 ? {} : { spinnerChunk }),
+          ...(section === "header" && range.expandable
+            ? {
+                onMouseDown: (event: MouseEvent) => {
+                  if (event.button !== 0) return
+                  event.stopPropagation()
+                  this.handlers.clickToggle?.(range.unit)
+                },
+              }
+            : {}),
+        }
+        bundles.push({ key, rows: band.length, descriptors: [descriptor] })
+      }
+    }
+    for (const [rangeIndex, range] of [built.root, ...built.nested].entries()) {
+      const headerEnd = range.headerEnd ?? range.start
+      appendBands(range, rangeIndex, "header", styledLines.slice(range.start, headerEnd + 1), range.start)
+      appendBands(range, rangeIndex, "body", styledLines.slice(headerEnd + 1, range.end + 1), headerEnd + 1)
     }
     return { revision, bundles }
   }
   protected setWelcomeChild(child: TextRenderable): void {
     this.clearTranscriptChildren()
+    this.transcriptTopSpacer.height = 0
+    this.transcriptTopSpacer.visible = false
+    this.transcriptBottomSpacer.height = 0
+    this.transcriptBottomSpacer.visible = false
+    if (this.transcriptTopSpacer.parent === this.transcriptScroll.content)
+      this.transcriptScroll.content.remove(this.transcriptTopSpacer)
+    if (this.transcriptBottomSpacer.parent === this.transcriptScroll.content)
+      this.transcriptScroll.content.remove(this.transcriptBottomSpacer)
     this.transcriptChildren = [child]
-    this.transcriptScroll.content.add(child)
+    this.transcriptScroll.content.add(child, 0)
   }
   protected reconcileTranscript(descriptors: ReadonlyArray<TranscriptRenderableDescriptor>): void {
     if (this.welcomeController.child !== undefined) this.clearTranscriptChildren()
@@ -159,14 +177,27 @@ export abstract class SurfaceTranscriptRendering extends SurfaceState {
     const previousOrder = new Map(this.transcriptChildren.map((child, index) => [child, index]))
     const records = mergePinnedRecords(desired, pinned, previousOrder)
     const children = records.map((record) => record.renderable)
+    if (!this.transcriptTopSpacer.visible && this.transcriptTopSpacer.parent === this.transcriptScroll.content)
+      this.transcriptScroll.content.remove(this.transcriptTopSpacer)
+    if (!this.transcriptBottomSpacer.visible && this.transcriptBottomSpacer.parent === this.transcriptScroll.content)
+      this.transcriptScroll.content.remove(this.transcriptBottomSpacer)
+    if (this.transcriptTopSpacer.visible && this.transcriptScroll.content.getChildren()[0] !== this.transcriptTopSpacer)
+      this.transcriptScroll.content.add(this.transcriptTopSpacer, 0)
+    const leading = this.transcriptTopSpacer.visible ? 1 : 0
     const current = [...this.transcriptScroll.content.getChildren()]
     children.forEach((child, index) => {
-      if (current[index] === child) return
+      const target = index + leading
+      if (current[target] === child) return
       const previous = current.indexOf(child)
       if (previous >= 0) current.splice(previous, 1)
-      current.splice(index, 0, child)
-      this.transcriptScroll.content.add(child, index)
+      current.splice(target, 0, child)
+      this.transcriptScroll.content.add(child, target)
     })
+    if (this.transcriptBottomSpacer.visible) {
+      const target = leading + children.length
+      if (this.transcriptScroll.content.getChildren()[target] !== this.transcriptBottomSpacer)
+        this.transcriptScroll.content.add(this.transcriptBottomSpacer, target)
+    }
     this.transcriptChildren = children
   }
   protected transcriptChanged(input: {

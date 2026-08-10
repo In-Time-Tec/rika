@@ -1,5 +1,8 @@
 import { CliRenderEvents, type MouseEvent } from "@opentui/core"
-import { transcriptOverscanRows } from "../../presentation/transcript/terminal-transcript-window"
+import {
+  mountedTranscriptRowBudget,
+  transcriptOverscanRows,
+} from "../../presentation/transcript/terminal-transcript-window"
 import { itemPositionAtVirtualRow } from "../../presentation/transcript/transcript-virtual-index"
 import { clampScrollTop, isFollowing } from "../../presentation/transcript/transcript-viewport"
 import {
@@ -31,9 +34,33 @@ export abstract class SurfaceTranscriptScroll extends SurfaceTranscriptRendering
   protected transcriptOverscan(): number {
     return Math.max(transcriptOverscanRows, this.transcriptScroll.viewport.height)
   }
+  protected transcriptBandAfterRow(row: number): number {
+    let low = 0
+    let high = this.transcriptBandRowPrefix.length - 1
+    while (low < high) {
+      const middle = (low + high) >> 1
+      if (this.transcriptBandRowPrefix[middle]! < row) low = middle + 1
+      else high = middle
+    }
+    return Math.max(1, Math.min(this.transcriptBandTotal, low))
+  }
+  protected firstTranscriptBandWindowEnd(): number {
+    const viewportRows =
+      this.transcriptScroll.viewport.height > 0 ? this.transcriptScroll.viewport.height : (this.model?.height ?? 1)
+    const budget = mountedTranscriptRowBudget(viewportRows)
+    let low = 0
+    let high = this.transcriptBandRowPrefix.length
+    while (low < high) {
+      const middle = (low + high) >> 1
+      if ((this.transcriptBandRowPrefix[middle] ?? Number.POSITIVE_INFINITY) <= budget) low = middle + 1
+      else high = middle
+    }
+    return Math.max(1, Math.min(this.transcriptBandTotal, low - 1))
+  }
   protected readonly atTranscriptBottom = (near = false): boolean =>
     atBottomWithin(this.transcriptMetrics(), near ? 1 : 0) &&
-    this.transcriptWindowEnd >= (this.model?.items.length ?? 0)
+    this.transcriptWindowEnd >= (this.model?.items.length ?? 0) &&
+    this.transcriptBandEnd >= this.transcriptBandTotal
   protected dispatchTranscriptViewport(event: ViewportEvent): void {
     const previousMode = this.transcriptViewport.mode
     const decision = reduceViewport(this.transcriptViewport, event)
@@ -45,6 +72,12 @@ export abstract class SurfaceTranscriptScroll extends SurfaceTranscriptRendering
           this.transcriptScroll.stickyScroll = isFollowing(this.transcriptViewport.mode)
           break
         case "RequestFollowPosition":
+          if (event._tag === "FollowCommanded" && this.model !== undefined) {
+            this.transcriptWindowEnd = this.model.items.length
+            this.transcriptBandEnd = Number.POSITIVE_INFINITY
+            this.transcriptRenderInput = undefined
+            this.update(this.model)
+          }
           this.scheduleTranscriptPosition({ _tag: "Follow", threadId: this.model?.currentThreadId })
           break
         case "NotifyDetached":
@@ -81,8 +114,42 @@ export abstract class SurfaceTranscriptScroll extends SurfaceTranscriptRendering
   protected clampTranscriptScrollTop(scrollTop: number): number {
     return clampScrollTop(scrollTop, { ...this.transcriptMetrics(), scrollTop })
   }
+  protected ensureTranscriptBandsAt(scrollTop: number): void {
+    const model = this.model
+    if (model === undefined || this.transcriptBandTotal === 0) return
+    const viewportRows = Math.max(1, this.transcriptScroll.viewport.height)
+    const desiredTop = Math.max(0, scrollTop - transcriptOverscanRows)
+    const desiredBottom = Math.min(this.transcriptWindowExactRows, scrollTop + viewportRows + transcriptOverscanRows)
+    const mountedTop = this.transcriptBandRowPrefix[this.transcriptMountedBandStart] ?? 0
+    const mountedBottom = this.transcriptBandRowPrefix[this.transcriptBandEnd] ?? this.transcriptWindowExactRows
+    if (desiredTop >= mountedTop && desiredBottom <= mountedBottom) return
+    let low = 0
+    let high = this.transcriptBandRowPrefix.length - 1
+    while (low < high) {
+      const middle = (low + high) >> 1
+      if (this.transcriptBandRowPrefix[middle]! < desiredBottom) low = middle + 1
+      else high = middle
+    }
+    const bandEnd = Math.max(1, Math.min(this.transcriptBandTotal, low))
+    const previousTop = this.transcriptScroll.scrollTop
+    this.transcriptBandRefreshing = true
+    try {
+      this.transcriptBandEnd = bandEnd
+      this.transcriptBandTargetTop = desiredTop
+      this.transcriptRenderInput = undefined
+      this.update(model, false)
+      this.scrollProgrammatic = true
+      this.transcriptScroll.scrollTop = this.clampTranscriptScrollTop(previousTop)
+    } finally {
+      this.scrollProgrammatic = false
+      this.transcriptBandTargetTop = undefined
+      this.transcriptBandRefreshing = false
+    }
+  }
   protected applyTranscriptPosition(scrollTop: number): void {
-    const target = this.clampTranscriptScrollTop(scrollTop)
+    let target = this.clampTranscriptScrollTop(scrollTop)
+    this.ensureTranscriptBandsAt(target)
+    target = this.clampTranscriptScrollTop(target)
     if (target === this.transcriptScroll.scrollTop) return
     this.scrollProgrammatic = true
     this.transcriptScroll.scrollTop = target
@@ -106,6 +173,7 @@ export abstract class SurfaceTranscriptScroll extends SurfaceTranscriptRendering
     )
   }
   protected handleTranscriptScroll(): void {
+    this.ensureTranscriptBandsAt(this.transcriptScroll.scrollTop)
     if (this.transcriptScroll.scrollTop <= this.transcriptOverscan() && this.shiftTranscriptWindow(-100, true)) return
     this.reportTranscriptScroll()
   }
@@ -136,6 +204,7 @@ export abstract class SurfaceTranscriptScroll extends SurfaceTranscriptRendering
     const windowEnd = Math.min(model.items.length, Math.max(minimumEnd, this.transcriptWindowEnd + delta))
     if (windowEnd === this.transcriptWindowEnd) return false
     this.transcriptWindowEnd = windowEnd
+    this.transcriptBandEnd = Number.POSITIVE_INFINITY
     this.transcriptRenderInput = undefined
     this.transcriptAnchorScrollBy = scrollBy
     this.transcriptAnchorNearBottom = nearBottom

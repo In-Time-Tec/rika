@@ -1,5 +1,5 @@
 import { StyledText, fg, TextRenderable } from "@opentui/core"
-import { maxMountedTranscriptRows } from "../../presentation/transcript/terminal-transcript-window"
+import { mountedTranscriptRowBudget } from "../../presentation/transcript/terminal-transcript-window"
 import { boundedTranscriptModel } from "../rendering/opentui-render-transcript-window"
 import type { Model } from "../../state/model/terminal-state"
 import type { TranscriptRenderableDescriptor } from "./opentui-surface-transcript-types"
@@ -101,7 +101,11 @@ export abstract class SurfaceTranscriptMount extends SurfaceModeLabel {
         const builder = transcriptUnitBuilder(boundedModel, toolSpinnerGlyph)
         const expandedSet = new Set(boundedModel.expandedRowKeys)
         const nextCache = new Map<string, TranscriptUnitCacheEntry>()
-        const orderedBundles: Array<{ readonly gapBefore: boolean; readonly bundle: TranscriptRangeBundle }> = []
+        const orderedBundles: Array<{
+          readonly gapBefore: boolean
+          readonly rows: number
+          readonly bundle: TranscriptRangeBundle
+        }> = []
         let renderedUnits = 0
         for (const unit of transcriptUnits(boundedModel)) {
           if (!builder.isUnitVisible(unit)) continue
@@ -116,11 +120,74 @@ export abstract class SurfaceTranscriptMount extends SurfaceModeLabel {
               : this.buildTranscriptUnitBundles(builder, unit, revision, toolSpinnerGlyph)
           nextCache.set(unitKey, entry)
           for (const [index, bundle] of entry.bundles.entries())
-            orderedBundles.push({ gapBefore: index === 0 && gapBefore, bundle })
+            orderedBundles.push({
+              gapBefore: index === 0 && gapBefore,
+              rows: bundle.rows + (index === 0 && gapBefore ? 1 : 0),
+              bundle,
+            })
         }
         this.transcriptUnitCache = nextCache
-        const totalRows = orderedBundles.length
-        const mounted = orderedBundles.slice(-maxMountedTranscriptRows)
+        const prefix: Array<number> = [0]
+        for (const current of orderedBundles) prefix.push(prefix.at(-1)! + current.rows)
+        const totalRows = prefix.at(-1) ?? 0
+        let bandEnd = Math.min(
+          orderedBundles.length,
+          Number.isFinite(this.transcriptBandEnd)
+            ? Math.max(0, Math.floor(this.transcriptBandEnd))
+            : orderedBundles.length,
+        )
+        const budget = mountedTranscriptRowBudget(
+          this.transcriptScroll.viewport.height > 0 ? this.transcriptScroll.viewport.height : model.height,
+        )
+        if (totalRows <= budget) bandEnd = orderedBundles.length
+        if (totalRows > budget && this.transcriptMountAnchorKey !== undefined) {
+          const anchorBand = orderedBundles.findIndex((current) =>
+            current.bundle.descriptors.some((descriptor) => descriptor.key === this.transcriptMountAnchorKey),
+          )
+          if (anchorBand >= 0) bandEnd = anchorBand + 1
+        }
+        let bandStart = bandEnd
+        if (this.transcriptBandTargetTop !== undefined) {
+          let low = 0
+          let high = bandEnd
+          while (low < high) {
+            const middle = (low + high) >> 1
+            if (prefix[middle + 1]! <= this.transcriptBandTargetTop) low = middle + 1
+            else high = middle
+          }
+          bandStart = Math.min(low, Math.max(0, bandEnd - 1))
+        } else
+          while (bandStart > 0 && (bandStart === bandEnd || prefix[bandEnd]! - prefix[bandStart]! < budget))
+            bandStart -= 1
+        const selection = this.renderer.getSelection()
+        const selected = new Set(selection?.touchedRenderables ?? [])
+        if (selected.size > 0) {
+          const bandByKey = new Map<string, number>()
+          for (const [index, current] of orderedBundles.entries())
+            for (const descriptor of current.bundle.descriptors) bandByKey.set(descriptor.key, index)
+          for (const record of this.transcriptRecords.values()) {
+            if (!selected.has(record.renderable)) continue
+            const index = bandByKey.get(record.key)
+            if (index === undefined) continue
+            bandStart = Math.min(bandStart, index)
+            bandEnd = Math.max(bandEnd, index + 1)
+          }
+        }
+        const mounted = orderedBundles.slice(bandStart, bandEnd)
+        const topSpacerRows = prefix[bandStart] ?? 0
+        const bottomSpacerRows = Math.max(0, totalRows - (prefix[bandEnd] ?? totalRows))
+        this.transcriptTopSpacer.height = topSpacerRows
+        this.transcriptTopSpacer.visible = topSpacerRows > 0
+        this.transcriptBottomSpacer.height = bottomSpacerRows
+        this.transcriptBottomSpacer.visible = bottomSpacerRows > 0
+        this.transcriptBandEnd = bandEnd
+        this.transcriptBandTotal = orderedBundles.length
+        this.transcriptMountedBandStart = bandStart
+        this.transcriptBandRowsBefore = prefix[bandStart] ?? 0
+        this.transcriptBandRowsAfter = Math.max(0, totalRows - (prefix[bandEnd] ?? totalRows))
+        this.transcriptMountedRows = (prefix[bandEnd] ?? 0) - this.transcriptBandRowsBefore
+        this.transcriptWindowExactRows = totalRows
+        this.transcriptBandRowPrefix = prefix
         this.transcriptRowTotal = totalRows
         const descriptors: Array<TranscriptRenderableDescriptor> = []
         for (const { gapBefore, bundle } of mounted) {

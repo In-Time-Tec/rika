@@ -69,6 +69,8 @@ export class SurfaceState {
   public contentColumn!: BoxRenderable
   public transcriptRow!: BoxRenderable
   public transcriptScroll!: ScrollBoxRenderable
+  public transcriptTopSpacer!: BoxRenderable
+  public transcriptBottomSpacer!: BoxRenderable
   public transcriptScrollbar!: ScrollBarRenderable
   public input!: TextRenderable
   public composerEditor!: EditBufferRenderable & { sync(text: string, cursor: number): void }
@@ -136,6 +138,17 @@ export class SurfaceState {
   protected renderedTranscriptScrollTop = 0
   protected transcriptWindowEnd = 0
   protected transcriptRowTotal = 0
+  protected transcriptBandEnd = Number.POSITIVE_INFINITY
+  protected transcriptBandTotal = 0
+  protected transcriptMountedBandStart = 0
+  protected transcriptMountedRows = 0
+  protected transcriptBandRowsBefore = 0
+  protected transcriptBandRowsAfter = 0
+  protected transcriptWindowExactRows = 0
+  protected transcriptBandRowPrefix: ReadonlyArray<number> = [0]
+  protected transcriptMountAnchorKey: string | undefined
+  protected transcriptBandRefreshing = false
+  protected transcriptBandTargetTop: number | undefined
   protected transcriptVirtualKey: unknown
   protected transcriptVirtualWidth = 0
   protected transcriptVirtualIndex: TranscriptVirtualIndex | undefined
@@ -182,6 +195,9 @@ export class SurfaceState {
     readonly keys: ReadonlyArray<string>
     readonly windowEnd: number
     readonly rowTotal: number
+    readonly mountedPhysicalRows: number
+    readonly spacerRowsBefore: number
+    readonly spacerRowsAfter: number
     readonly following: boolean
     readonly virtualScrollTop: number
     readonly virtualScrollHeight: number
@@ -192,6 +208,9 @@ export class SurfaceState {
       keys: [...this.transcriptRecords.keys()],
       windowEnd: this.transcriptWindowEnd,
       rowTotal: this.transcriptRowTotal,
+      mountedPhysicalRows: this.transcriptMountedRows,
+      spacerRowsBefore: this.transcriptBandRowsBefore,
+      spacerRowsAfter: this.transcriptBandRowsAfter,
       following: this.transcriptViewport.mode._tag === "Following",
       virtualScrollTop: virtual.rowsAbove + this.transcriptScroll.scrollTop,
       virtualScrollHeight: virtual.scrollHeight,
@@ -214,13 +233,21 @@ export class SurfaceState {
   } {
     const model = this.model
     if (model === undefined) return { scrollHeight: 0, rowsAbove: 0 }
-    if (model.items.length <= maxMountedTranscriptEntries)
+    if (
+      model.items.length === 0 ||
+      (model.items.length <= maxMountedTranscriptEntries &&
+        this.transcriptBandRowsBefore === 0 &&
+        this.transcriptBandRowsAfter === 0)
+    )
       return { scrollHeight: this.transcriptScroll.scrollHeight, rowsAbove: 0 }
     const index = this.virtualIndex(model)
     const windowStartItem = Math.max(0, this.transcriptWindowEnd - maxMountedTranscriptEntries)
+    const estimatedStart = virtualRowOfItemPosition(index, windowStartItem)
+    const estimatedEnd = virtualRowOfItemPosition(index, this.transcriptWindowEnd)
+    const estimatedWindowRows = Math.max(0, estimatedEnd - estimatedStart)
     return {
-      scrollHeight: index.totalRows,
-      rowsAbove: virtualRowOfItemPosition(index, windowStartItem),
+      scrollHeight: Math.max(0, index.totalRows - estimatedWindowRows + this.transcriptWindowExactRows),
+      rowsAbove: estimatedStart,
     }
   }
 }

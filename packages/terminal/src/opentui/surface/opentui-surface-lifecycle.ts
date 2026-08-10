@@ -36,6 +36,7 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
       this.transcriptViewport.wheel._tag === "Idle"
     const preserveTranscriptPosition = preserveTranscriptAnchor || transcriptDetachedSameThread
     const transcriptAnchor = preserveTranscriptPosition ? this.captureTranscriptAnchor() : undefined
+    this.transcriptMountAnchorKey = transcriptAnchor?.key
     if (this.transcriptWindowThread !== model.currentThreadId) {
       if (this.transcriptPositionFrame !== undefined)
         this.renderer.off(CliRenderEvents.FRAME, this.transcriptPositionFrame)
@@ -45,20 +46,23 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
       this.transcriptAnchorNearBottom = false
       this.transcriptWindowThread = model.currentThreadId
       this.transcriptWindowEnd = model.items.length
+      this.transcriptBandEnd = Number.POSITIVE_INFINITY
       this.transcriptRowTotal = 0
     } else if (preserveTranscriptAnchor)
       this.transcriptWindowEnd = Math.min(
         model.items.length,
         this.transcriptWindowEnd + prependedTranscriptItems(previousModel?.items ?? [], model.items),
       )
-    else if (scrollFollow || this.transcriptWindowEnd === 0) {
+    else if ((scrollFollow && !this.transcriptBandRefreshing) || this.transcriptWindowEnd === 0) {
       this.transcriptWindowEnd = model.items.length
+      this.transcriptBandEnd = Number.POSITIVE_INFINITY
     } else
       this.transcriptWindowEnd =
         model.items.length <= maxMountedTranscriptEntries
           ? model.items.length
           : Math.min(this.transcriptWindowEnd, model.items.length)
     const transcriptLayout = this.renderTranscript(model)
+    this.transcriptMountAnchorKey = undefined
     this.renderLayout(
       model,
       previousModel,

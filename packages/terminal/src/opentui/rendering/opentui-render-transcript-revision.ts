@@ -117,6 +117,7 @@ export interface TranscriptRenderableDescriptor {
 }
 export interface TranscriptRangeBundle {
   readonly key: string
+  readonly rows: number
   readonly descriptors: ReadonlyArray<TranscriptRenderableDescriptor>
 }
 

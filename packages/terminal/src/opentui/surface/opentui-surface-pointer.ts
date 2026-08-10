@@ -71,6 +71,13 @@ export abstract class SurfacePointer extends SurfaceTranscriptScroll {
         const minimumEnd = Math.min(maxMountedTranscriptEntries, model.items.length)
         if (this.transcriptWindowEnd !== minimumEnd) {
           this.transcriptWindowEnd = minimumEnd
+          this.transcriptBandEnd = Number.POSITIVE_INFINITY
+          this.transcriptRenderInput = undefined
+          this.update(model, false)
+        }
+        const firstBandEnd = this.firstTranscriptBandWindowEnd()
+        if (this.transcriptBandEnd !== firstBandEnd || this.transcriptMountedBandStart > 0) {
+          this.transcriptBandEnd = firstBandEnd
           this.transcriptRenderInput = undefined
           this.update(model, false)
           this.pendingTranscriptPosition = undefined

@@ -23,6 +23,14 @@ import { HoverController } from "./opentui-hover-controller"
 import type { Handlers, SurfaceOptions } from "./opentui-surface-state"
 import { ProjectedEditorRenderable, cutoutBackground } from "./opentui-surface-renderables"
 
+class TranscriptScrollBoxRenderable extends ScrollBoxRenderable {
+  onPositionChanged: (() => void) | undefined
+  override scrollTo(position: number | { readonly x: number; readonly y: number }): void {
+    super.scrollTo(position)
+    this.onPositionChanged?.()
+  }
+}
+
 class SidebarScrollBoxRenderable extends ScrollBoxRenderable {
   onWindowChanged: (() => void) | undefined
   private virtualHeight = 0
@@ -65,6 +73,7 @@ class SidebarScrollBoxRenderable extends ScrollBoxRenderable {
 const typingCursorStyle = { style: "block", blinking: true } as const
 
 export class Surface extends SurfaceLifecycle {
+  declare public transcriptScroll: TranscriptScrollBoxRenderable
   constructor(renderer: CliRenderer, handlers: Handlers, options: SurfaceOptions = {}) {
     super()
     this.renderer = renderer
@@ -83,7 +92,7 @@ export class Surface extends SurfaceLifecycle {
     this.contentColumn = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "column" })
     this.transcriptRow = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "row" })
     const transcriptBackground = cutoutBackground(renderer)
-    this.transcriptScroll = new ScrollBoxRenderable(renderer, {
+    this.transcriptScroll = new TranscriptScrollBoxRenderable(renderer, {
       flexGrow: 1,
       scrollY: true,
       stickyScroll: true,
@@ -105,6 +114,13 @@ export class Surface extends SurfaceLifecycle {
       onMouseScroll: (event) => this.handleTranscriptWheel(event),
     })
     this.transcriptScroll.verticalScrollBar.visible = false
+    this.transcriptScroll.onPositionChanged = () => {
+      if (this.transcriptBandRefreshing) return
+      this.ensureTranscriptBandsAt(this.transcriptScroll.scrollTop)
+      this.renderer.requestRender()
+    }
+    this.transcriptTopSpacer = new BoxRenderable(renderer, { height: 0, flexShrink: 0, visible: false })
+    this.transcriptBottomSpacer = new BoxRenderable(renderer, { height: 0, flexShrink: 0, visible: false })
     this.transcriptScrollbar = new ScrollBarRenderable(renderer, {
       orientation: "vertical",
       showArrows: false,
