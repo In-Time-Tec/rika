@@ -15,7 +15,7 @@ const promptText = (prompt: Prompt.Prompt): string =>
     .join("\n")
 
 test(
-  "a slow child settles durably after its parent turn ends without inspect polling",
+  "a slow child settles durably into its parent's next same-Run model turn without inspect polling",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -27,7 +27,8 @@ test(
               steps: [
                 model.turn([model.spawn([{ profile: "Oracle", prompt: "SETTLEMENT_CHILD" }], "spawn-without-wait")]),
                 model.text("FIRST_PARENT_TURN_ENDED"),
-                model.text("SECOND_PARENT_TURN_RECEIVED_SETTLEMENT"),
+                model.text("SECOND_PARENT_TURN_STARTED"),
+                model.text("PARENT_RECEIVED_DURABLE_SETTLEMENT"),
               ],
             },
             { profile: "Oracle", steps: [model.text(largeResult, 750)] },
@@ -52,17 +53,19 @@ test(
         expect(sources.join("\n")).toContain("rika.agents.spawn")
         expect(sources.join("\n")).not.toContain("inspectAll")
 
-        yield* Effect.sleep("1 second")
+        yield* app.waitFrame("Oracle has spoken", 20_000)
         yield* Effect.promise(() => app.type("Continue after the child settlement."))
         app.pressEnter()
-        yield* app.waitFrame("SECOND_PARENT_TURN_RECEIVED_SETTLEMENT", 20_000)
-        yield* app.waitModelRequests(3)
+        yield* app.waitFrame("SECOND_PARENT_TURN_STARTED", 20_000)
+        const completed = yield* app.waitFrame("PARENT_RECEIVED_DURABLE_SETTLEMENT", 20_000)
+        yield* app.waitModelRequests(4)
+        expect(completed).not.toContain("Execution failed")
 
         const prompts = yield* app.modelPrompts
-        const secondTurnPrompt = promptText(prompts.at(-1)!)
-        expect(secondTurnPrompt).toContain("settled with status succeeded")
-        expect(secondTurnPrompt).toContain("20019 UTF-8 bytes exceeds the 16384-byte notification limit")
-        expect(secondTurnPrompt).not.toContain("x".repeat(1_000))
+        const settlementTurnPrompt = promptText(prompts.at(-1)!)
+        expect(settlementTurnPrompt).toContain("settled with status succeeded")
+        expect(settlementTurnPrompt).toContain("20019 UTF-8 bytes exceeds the 16384-byte notification limit")
+        expect(settlementTurnPrompt).not.toContain("x".repeat(1_000))
         yield* app.quit
       }),
     ),
