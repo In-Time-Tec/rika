@@ -16,6 +16,7 @@ test(
                 model.turn([model.spawn([{ profile: "Task", prompt: "RESPONSIVE_CHILD_PROMPT" }], "responsive-child")]),
                 model.text("RESPONSIVE_ROOT_COMPLETE"),
                 model.text("RESPONSIVE_CHILD_SETTLEMENT_ACKNOWLEDGED"),
+                model.text("RESPONSIVE_CHILD_SETTLEMENT_RETRY_ACKNOWLEDGED"),
               ],
             },
             { profile: "Task", steps: [model.text("RESPONSIVE_CHILD_RESULT", 5_000)] },

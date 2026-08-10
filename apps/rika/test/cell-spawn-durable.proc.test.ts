@@ -28,6 +28,7 @@ test(
                 model.turn([model.spawn([{ profile: "Oracle", prompt: "PROBE_CHILD_PROMPT" }], "probe-spawn")]),
                 model.text("PROBE_ROOT_COMPLETE"),
                 model.text("PROBE_CHILD_SETTLEMENT_ACKNOWLEDGED"),
+                model.text("PROBE_CHILD_SETTLEMENT_RETRY_ACKNOWLEDGED"),
               ],
             },
             { profile: "Oracle", steps: [model.text("PROBE_CHILD_RESULT")] },

@@ -66,6 +66,8 @@ test(
                 // Preserve enough script for independently arriving durable child settlements.
                 model.text("VOLUME_CHILD_A_SETTLEMENT_ACKNOWLEDGED"),
                 model.text("VOLUME_CHILD_B_SETTLEMENT_ACKNOWLEDGED"),
+                model.text("VOLUME_CHILD_A_SETTLEMENT_RETRY_ACKNOWLEDGED"),
+                model.text("VOLUME_CHILD_B_SETTLEMENT_RETRY_ACKNOWLEDGED"),
               ],
             },
             {

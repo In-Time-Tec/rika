@@ -29,6 +29,8 @@ test(
                 model.text("ROOT_DEDUPE_COMPLETE"),
                 model.text("FIRST_GROUP_SETTLEMENT_ACKNOWLEDGED"),
                 model.text("SECOND_GROUP_SETTLEMENT_ACKNOWLEDGED"),
+                model.text("FIRST_GROUP_SETTLEMENT_RETRY_ACKNOWLEDGED"),
+                model.text("SECOND_GROUP_SETTLEMENT_RETRY_ACKNOWLEDGED"),
               ],
             },
             { profile: "Oracle", steps: [model.text("FIRST_GROUP_RESULT")] },

@@ -29,6 +29,8 @@ test(
                 model.text("ROOT_FINISHED_AFTER_CHILD_STREAM"),
                 model.text("READER_CHILD_SETTLEMENT_ACKNOWLEDGED"),
                 model.text("WORKER_CHILD_SETTLEMENT_ACKNOWLEDGED"),
+                model.text("READER_CHILD_SETTLEMENT_RETRY_ACKNOWLEDGED"),
+                model.text("WORKER_CHILD_SETTLEMENT_RETRY_ACKNOWLEDGED"),
               ],
             },
             // Each child answers in ONE turn. A child that called a tool first would need a second

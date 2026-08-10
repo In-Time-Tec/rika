@@ -51,6 +51,7 @@ test(
                 model.text("IDLE_ROOT_DONE"),
                 // A child that settles after the root answer resumes this same Run once more.
                 model.text("IDLE_SETTLEMENT_ACKNOWLEDGED"),
+                model.text("IDLE_SETTLEMENT_RETRY_ACKNOWLEDGED"),
               ],
             },
             { profile: "Oracle", steps: [model.text("IDLE_CHILD_DONE")] },
@@ -60,8 +61,17 @@ test(
 
         yield* Effect.promise(() => app.type("Delegate once."))
         app.pressEnter()
-        yield* app.waitFrame("IDLE_ROOT_DONE", 25_000)
-        const settled = yield* app.waitFrame("Oracle has spoken", 25_000)
+        const root = yield* app.waitFrameMatch(
+          (frame) => frame.includes("IDLE_ROOT_DONE") || frame.includes("Execution failed"),
+          25_000,
+        )
+        expect(root, `Root model requests: ${yield* app.modelRequestCount}`).not.toContain("Execution failed")
+        expect(root).toContain("IDLE_ROOT_DONE")
+        const settled = yield* app.waitFrameMatch(
+          (frame) => frame.includes("Oracle has spoken") || frame.includes("Execution failed"),
+          25_000,
+        )
+        expect(settled, `Root model requests: ${yield* app.modelRequestCount}`).not.toContain("Execution failed")
         expect(settled).toContain("Oracle has spoken")
         expect(settled).not.toContain("Running 1 subagent")
         yield* app.quit

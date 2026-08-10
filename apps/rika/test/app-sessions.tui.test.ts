@@ -24,6 +24,7 @@ test(
                 model.turn([model.spawn([{ profile: "Oracle", prompt: "Read the nested fixture." }], "oracle-style")]),
                 model.text("ROOT_STYLE_RESULT"),
                 model.text("ROOT_STYLE_SETTLEMENT_ACKNOWLEDGED"),
+                model.text("ROOT_STYLE_SETTLEMENT_RETRY_ACKNOWLEDGED"),
               ],
             },
             {

@@ -24,6 +24,7 @@ test(
                 model.turn([model.spawn([{ profile: "Task", prompt: "PARENT_AGENT_PROMPT" }], "parent-agent")]),
                 model.text("ROOT_AGENT_FINAL"),
                 model.text("PARENT_AGENT_SETTLEMENT_ACKNOWLEDGED"),
+                model.text("PARENT_AGENT_SETTLEMENT_RETRY_ACKNOWLEDGED"),
               ],
             },
             {

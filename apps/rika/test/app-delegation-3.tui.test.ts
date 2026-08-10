@@ -29,6 +29,8 @@ test(
                 // Either child can settle after the root answer and resume this same Run.
                 model.text("FIRST_SAME_SETTLEMENT_ACKNOWLEDGED"),
                 model.text("SECOND_SAME_SETTLEMENT_ACKNOWLEDGED"),
+                model.text("FIRST_SAME_SETTLEMENT_RETRY_ACKNOWLEDGED"),
+                model.text("SECOND_SAME_SETTLEMENT_RETRY_ACKNOWLEDGED"),
               ],
             },
             { profile: "Task", steps: [model.text("CHILD_A"), model.text("CHILD_B")] },
