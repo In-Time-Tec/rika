@@ -352,7 +352,7 @@ describe("Runtime", () => {
       expect(stale).toMatchObject({ category: "conflict", outcome: "known", recovery: "after_change" })
       expect(stale.message).toContain("old_str was not found in the current file")
       expect(ambiguous).toMatchObject({ category: "conflict", outcome: "known", recovery: "after_change" })
-      expect(ambiguous.message).toContain("old_str is not unique")
+      expect(ambiguous.message).toContain("old_str is not unique in the current file: 2 matches at lines 1")
       expect(replacedAll.diff).toContain("+changed changed")
     }).pipe(provide(environment.runtime))
   })

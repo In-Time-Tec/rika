@@ -248,15 +248,23 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
                     nextAction: `Reread ${request.path} and retry with the current exact text`,
                   })
                 const second = content.indexOf(request.oldStr, first + request.oldStr.length)
-                if (second >= 0 && request.replaceAll !== true)
+                if (second >= 0 && request.replaceAll !== true) {
+                  const matchLines: Array<number> = []
+                  for (
+                    let matchIndex = first;
+                    matchIndex >= 0;
+                    matchIndex = content.indexOf(request.oldStr, matchIndex + request.oldStr.length)
+                  )
+                    matchLines.push(content.slice(0, matchIndex).split("\n").length)
                   return yield* runtimeError({
                     category: "conflict",
-                    message: "old_str is not unique in the current file",
+                    message: `old_str is not unique in the current file: ${matchLines.length} matches at lines ${[...new Set(matchLines)].join(", ")}`,
                     outcome: "known",
                     recovery: "after_change",
                     nextAction:
                       "Retry with more surrounding context, or set replace_all only when every match should change",
                   })
+                }
                 const next = RuntimeFilesystem.replaceText(
                   content,
                   request.oldStr,
