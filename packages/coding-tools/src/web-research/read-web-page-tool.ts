@@ -10,7 +10,9 @@ export const Request = Schema.Struct({
   forceRefetch: Schema.optionalKey(Schema.Boolean),
 })
 export const tool = Tool.make("read_web_page", {
-  description: "Read a public HTTP(S) page as readable Markdown, optionally selecting objective-relevant excerpts",
+  description:
+    "Read a public HTTP(S) page as readable Markdown, optionally selecting objective-relevant excerpts. " +
+    "Local paths and file:// URLs are unsupported; use rika.workspace.read or a local-capable child.",
   parameters: Schema.Struct({
     url: Schema.String,
     objective: Schema.optionalKey(Schema.String),

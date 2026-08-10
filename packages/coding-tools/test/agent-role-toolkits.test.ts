@@ -38,3 +38,12 @@ test("pins each product role to its minimum coding toolkit", () => {
     "write",
   ])
 })
+
+test("warns parents and web-only Librarians before local-path delegation", () => {
+  expect(Toolkits.delegationCapabilityGuidance).toContain("Before spawning a child")
+  expect(Toolkits.delegationCapabilityGuidance).toContain("Librarian is web-only")
+  expect(Toolkits.delegationCapabilityGuidance).toContain("Refuse a mismatched Librarian spawn")
+  expect(Toolkits.delegationCapabilityGuidance).toContain("Task or Oracle")
+  expect(Toolkits.librarianCapabilityGuidance).toContain("file://")
+  expect(Toolkits.librarianCapabilityGuidance).toContain("local-capable Task or Oracle")
+})

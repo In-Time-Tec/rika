@@ -146,6 +146,9 @@ describe("tool contracts", () => {
       action: "read-web-page",
       outputDisplay: "expandable",
     })
+    expect(Catalog.get("read_web_page")?.description).toContain("file:// URLs are unsupported")
+    expect(Catalog.get("read_web_page")?.description).toContain("rika.workspace.read")
+    expect(Catalog.get("read_web_page")?.description).toContain("local-capable child")
     expect(Catalog.get("search_threads")?.presentation).toMatchObject({
       family: "explore",
       activeLabel: "Exploring",

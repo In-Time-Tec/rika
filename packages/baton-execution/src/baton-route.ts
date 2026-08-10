@@ -16,6 +16,7 @@ import type { HarnessState } from "@batonfx/harness"
 import { CellTool, KernelPool } from "@batonfx/repl"
 import * as CellCallContext from "./baton-cell-call-context"
 import * as BindingModules from "@rika/kernel/binding-modules"
+import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
 import * as HarnessPromptSections from "@rika/kernel/harness-prompt-sections"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
@@ -36,18 +37,27 @@ type ResolvedAgent = ExecutableResolver.StaticAgentExecutable["agent"]
  * The exact values the Session's kernel is built from. The admitted profile pin is derived from
  * these and from nothing else, so a pin can never describe a kernel the host did not run.
  */
-const instructions = {
-  root: "Work directly on the user's request. Inspect relevant evidence, make necessary changes, and verify the result.",
+const childGroupGuidance =
+  "Call start_child_group with one flat object: { members: [{ key, selection, prompt }], concurrency }. " +
+  "members must be an array of member objects; never JSON-stringify it or nest it under another members field."
+
+export const profileInstructions = {
+  root:
+    "Work directly on the user's request. Inspect relevant evidence, make necessary changes, and verify the result. " +
+    `${RoleToolkits.delegationCapabilityGuidance} ${childGroupGuidance}`,
   title: "Return a concise title for the supplied request and nothing else.",
   Oracle: "Analyze the supplied problem deeply. Return a precise recommendation with risks and supporting reasoning.",
-  Librarian: "Research the supplied question and return a concise evidence-backed report.",
+  Librarian:
+    "Research the supplied question and return a concise evidence-backed report. " +
+    RoleToolkits.librarianCapabilityGuidance,
   Painter: "Inspect the supplied visual material and return concrete implementation guidance.",
   ReadThread: "Find and summarize only the thread evidence needed to answer the supplied question.",
   Review: "Review the supplied request for the assigned lane. Return ordered findings with evidence and severity.",
   Surgeon: "Implement the bounded code change, preserve unrelated work, and verify the result.",
   Task:
     "Complete the bounded task autonomously and return the result with verification evidence. " +
-    "You may spawn Oracle, Librarian, Painter, ReadThread, or Surgeon, but not another Task.",
+    "You may spawn Oracle, Librarian, Painter, ReadThread, or Surgeon, but not another Task. " +
+    `${RoleToolkits.delegationCapabilityGuidance} ${childGroupGuidance}`,
 } as const
 
 /**
@@ -74,7 +84,7 @@ export const agentInstructionsWith: {
   (own: string): (surface: string) => string
   (surface: string, own: string): string
 } = Function.dual(2, (surface: string, own: string): string =>
-  own === instructions.title ? own : [own, "", surface].join("\n"),
+  own === profileInstructions.title ? own : [own, "", surface].join("\n"),
 )
 
 const applicationPin = (route: RouteSnapshot, workspace: string) =>
@@ -470,22 +480,22 @@ export const configure = (
       supplemental === ""
         ? agentInstructionsWith(cellSurface, own)
         : agentInstructionsWith(`${cellSurface}\n\n${supplemental}`, own)
-    const profileInstructions = {
-      Title: instructions.title,
-      Oracle: instructions.Oracle,
-      Librarian: instructions.Librarian,
-      Painter: instructions.Painter,
-      ReadThread: instructions.ReadThread,
-      Review: instructions.Review,
-      Surgeon: instructions.Surgeon,
-      Task: instructions.Task,
+    const roleInstructions = {
+      Title: profileInstructions.title,
+      Oracle: profileInstructions.Oracle,
+      Librarian: profileInstructions.Librarian,
+      Painter: profileInstructions.Painter,
+      ReadThread: profileInstructions.ReadThread,
+      Review: profileInstructions.Review,
+      Surgeon: profileInstructions.Surgeon,
+      Task: profileInstructions.Task,
     } as const
-    const leaf = (name: Exclude<keyof typeof profileInstructions, "Task">) =>
+    const leaf = (name: Exclude<keyof typeof roleInstructions, "Task">) =>
       agentDefinition(
         routes[name],
         routed[name],
         name,
-        withSurface(profileInstructions[name]),
+        withSurface(roleInstructions[name]),
         roleTools[name],
         environment(name),
         [],
@@ -518,7 +528,7 @@ export const configure = (
       kernelProfilePin,
       pinnedCapabilities,
     )
-    const profiles: Readonly<Record<keyof typeof profileInstructions, AgentDefinition>> = {
+    const profiles: Readonly<Record<keyof typeof roleInstructions, AgentDefinition>> = {
       ...leafProfiles,
       Task: task,
     }
@@ -528,7 +538,7 @@ export const configure = (
       route.main,
       routed.Root,
       "Root",
-      withSurface(instructions.root),
+      withSurface(profileInstructions.root),
       roleTools.Root,
       environment("Root"),
       rootChildNames.map((selection) => ({ selection, agent: profiles[selection].pinned.pin })),

@@ -9,7 +9,7 @@ import * as ExecutionRouteResolution from "@rika/product/execution-route-resolut
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Cause, ConfigProvider, Effect, Exit, Schema } from "effect"
 import * as Registration from "../src/baton-registration"
-import { configure } from "../src/baton-route"
+import { configure, profileInstructions } from "../src/baton-route"
 
 const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const
 
@@ -704,3 +704,17 @@ it.effect("carries a harness refinement into the instructions the root agent is 
     ])
   }),
 )
+
+it("documents flat child groups and refuses local work delegated to web-only Librarians", () => {
+  for (const prompt of [profileInstructions.root, profileInstructions.Task]) {
+    expect(prompt).toContain("Before spawning a child")
+    expect(prompt).toContain("Librarian is web-only")
+    expect(prompt).toContain("Refuse a mismatched Librarian spawn")
+    expect(prompt).toContain("select Task or Oracle")
+    expect(prompt).toContain("{ members: [{ key, selection, prompt }], concurrency }")
+    expect(prompt).toContain("never JSON-stringify it or nest it under another members field")
+  }
+  expect(profileInstructions.Librarian).toContain("Your tools are web-only")
+  expect(profileInstructions.Librarian).toContain("refuse and tell the parent")
+  expect(profileInstructions.Librarian).toContain("local-capable Task or Oracle child")
+})
