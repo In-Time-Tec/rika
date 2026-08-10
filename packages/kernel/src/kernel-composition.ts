@@ -102,7 +102,7 @@ export const pool = (
     startTimeoutMillis: options.startTimeoutMillis ?? 20_000,
     bootstrap: KernelBootstrap.source(),
     interruptGraceMillis: options.interruptGraceMillis ?? 250,
-    maxConcurrentBoots: options.maxConcurrentBoots ?? 4,
+    maxConcurrentBoots: options.maxConcurrentBoots ?? Number.POSITIVE_INFINITY,
     idleTimeToLive: options.idleTimeToLive ?? defaultIdleTimeToLive,
     environment: options.environment ?? {},
   }).pipe(Layer.provide(state(options.dataRoot)))
