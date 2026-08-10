@@ -1,7 +1,8 @@
 # THE PLAN: Rika fixes, verified against the code
 
 Every claim below was checked against the actual code at:
-- Rika:  `.worktrees/rika-repl-kernel` @ b5d74ae4 (feat/typescript-cell-kernel)
+
+- Rika: `.worktrees/rika-repl-kernel` @ b5d74ae4 (feat/typescript-cell-kernel)
 - Baton: `.worktrees/baton-repl-kernel`
 
 and against 5 real session transcripts (2 kernel-surface, 3 built-in-tool-surface).
@@ -38,7 +39,7 @@ plus ISSUES.md in the Rika worktree.
 
 # PART A — STOP THE SHOUTING (the CPU/memory fire)
 
-### A1. Batch events into 25ms windows  — VERIFIED, unchanged
+### A1. Batch events into 25ms windows — VERIFIED, unchanged
 
 Every model fragment does the full trip. Confirmed in code, no time-coalescing
 anywhere (only 256-event read pages and 32 send permits, which don't help writes):
@@ -60,7 +61,7 @@ skip the window and flush instantly.
 Prototype already measured: 780 → 99 updates (−87%).
 **Owner:** Baton event append path + Rika projector/watch stream.
 
-### A2. Merge console output  — VERIFIED, unchanged
+### A2. Merge console output — VERIFIED, unchanged
 
 One `console.log` = one worker frame = one durable ToolProgress event
 (bun-worker.ts:84, cell-tool.ts:72). A directory listing = 8,207 events.
@@ -72,7 +73,7 @@ AFTER:  adjacent same-channel chunks ──> one "output grew" event
 
 **Owner:** Baton repl worker/cell-tool (adjacent stdout/stderr coalescing).
 
-### A3. Bound the cell RESULT the model sees  — VERIFIED, unchanged
+### A3. Bound the cell RESULT the model sees — VERIFIED, unchanged
 
 The result channel is explicitly exempt from metering (bun-runtime.ts:182:
 `if (channel === "result") return { ..., truncated: false }`). stdout is capped
@@ -87,7 +88,7 @@ AFTER:  model sees first 16KB + "[truncated: 16,384 of 1,416,000 bytes.
 
 **Owner:** Baton cell-tool result path.
 
-### A4. Render only own properties in results  ★new from transcripts
+### A4. Render only own properties in results ★new from transcripts
 
 `Bun.inspect` on mapped objects dumped `toString: [Function]`, `valueOf: …`,
 `__defineGetter__: …` — ~10 junk entries per object, × 6 children × 10 poll
@@ -95,9 +96,10 @@ cells of pure noise entering context.
 
 **Owner:** Baton bun-worker `format()`.
 
-### A5. Honest truncation everywhere  ★new from transcripts
+### A5. Honest truncation everywhere ★new from transcripts
 
 Two lies today:
+
 - Kernel stdout capped at exactly 16,384 with only a leading `…` — head dropped
   silently (22 occurrences in two sessions).
 - Built-in bash/grep output capped at 16,384 reports `"truncated": false`
@@ -115,7 +117,7 @@ AFTER:  every capped output says
 
 # PART B — SEAT EVERYONE (unlimited subagents)
 
-### B1. Remove the max-4 caps  — VERIFIED, both constants found
+### B1. Remove the max-4 caps — VERIFIED, both constants found
 
 ```
 Baton:  local-scheduler.ts:31      concurrency ?? 4
@@ -129,7 +131,7 @@ What still limits you (real, not chosen): provider 429s (surface + retry),
 measured memory pressure (typed refusal only with live evidence), SQLite
 contention (already ~10× reduced by Part A — which is why A lands first).
 
-### B2. Waiting parents cost nothing  — VERIFIED
+### B2. Waiting parents cost nothing — VERIFIED
 
 A parent waiting in `agents.inspectAll` is still an executing tool call: its run
 stays `running`, its fiber stays in the scheduler FiberMap, and seats are
@@ -142,7 +144,7 @@ TODAY:  [PARENT: waiting, burning a seat] [child][child][child]
 AFTER:  parent waits ──> holds nothing ──> wakes on notification
 ```
 
-### B3. Honest child states: queued vs running  — VERIFIED, root cause found
+### B3. Honest child states: queued vs running — VERIFIED, root cause found
 
 `admitChild` inserts the child as `queued` then IMMEDIATELY flips it to
 `running` before any seat exists (store-admit.ts:290-329). The scheduler then
@@ -155,7 +157,7 @@ FIX:  child stays `queued` until the scheduler actually starts it.
       inspect reports the truth. (Rika mapping already exists and starts working.)
 ```
 
-### B4. Push, don't poll — deliver ChildSettled to the parent  — VERIFIED
+### B4. Push, don't poll — deliver ChildSettled to the parent — VERIFIED
 
 `ChildSettled` is appended to the parent's durable event log
 (store-helpers.ts:412) but NO mailbox message is created, and the scheduler's
@@ -176,7 +178,7 @@ message CARRIES the child's result so no follow-up call is needed.
 **Owner:** Baton (wire ChildSettled -> baton_messages) + Rika inbox + prompt
 line: "after spawning, end your turn; you will be notified."
 
-### B5. A durable wait that spans cells  ★new from transcripts
+### B5. A durable wait that spans cells ★new from transcripts
 
 `maxWaitMillis = 30_000` (agents-binding.ts:26) meets the 120s cell deadline:
 a parent literally cannot wait for a child that takes minutes. Models hand-rolled
@@ -190,7 +192,7 @@ FIX 2:  the async-overrun kill must say "cell exceeded the 120s deadline"
 FIX 3:  an aborted cell must never poison the next one   <- real defect
 ```
 
-### B6. Fix the parallel-fanout replay defect  ★new from transcripts — REAL BUG
+### B6. Fix the parallel-fanout replay defect ★new from transcripts — REAL BUG
 
 Two sessions lost half their children to:
 `Pending operation …:tool:4:0:…:read does not match requested operation
@@ -203,7 +205,7 @@ FIX:  make replay matching order-independent for parallel fanout,
       and never surface an error with empty detail.
 ```
 
-### B7. Child results are handed over, not hunted  ★new from transcripts
+### B7. Child results are handed over, not hunted ★new from transcripts
 
 A 345KB child outcome arrived as one inline JSON blob; models stashed it in
 `globalThis` (69 cells across two sessions) or artifacts. `threads.read`
@@ -215,7 +217,7 @@ AFTER:  settlement notification carries result text (bounded, A3 rules)
         inspect on a RUNNING child shows lastActivityAt + latest-step preview
 ```
 
-### B8. Deeper delegation  — [CORRECTED]
+### B8. Deeper delegation — [CORRECTED]
 
 The old claim "subagents can't spawn subagents" was imprecise. Truth: leaf
 profiles have `children: []`; Task can spawn all five leaves but not another
@@ -226,7 +228,7 @@ TODAY:  Root ── Task ── leaf   (Task-in-Task refused)
 AFTER:  Root ── Task ── Task ── ...   (budget-guarded, not topology-capped)
 ```
 
-### B9. Parent resume instead of restart  — unchanged, lands last
+### B9. Parent resume instead of restart — unchanged, lands last
 
 All children succeed, the parent's model stream dies, everything is discarded.
 Baton's journal already holds everything needed to seed a new parent attempt.
@@ -238,7 +240,7 @@ AFTER:  A✓ B✓ C✓ D✓ ──> new attempt seeded with transcript ──> n
 
 ---
 
-# PART C — KEEP THE SCREEN ALIVE  — [CORRECTED]
+# PART C — KEEP THE SCREEN ALIVE — [CORRECTED]
 
 The old draft said "the client acks on receipt and there is no backpressure."
 **That is wrong.** Verified: the client acks AFTER applying each batch
@@ -277,7 +279,7 @@ actual initiator ("Cancelled by user" / "Cancelled: deadline").
 
 ---
 
-# PART D — FIX THE KERNEL TOOL SURFACE  (from transcript mining, verified)
+# PART D — FIX THE KERNEL TOOL SURFACE (from transcript mining, verified)
 
 The chain that armed the 8,207-event bomb, observed step by step in a real
 session:
@@ -315,7 +317,7 @@ model wants a file listing
 The validator knows the path — include `Missing key at ["threadId"], expected
 string` in every failure.
 
-### D4. The kernel must not gaslight the model  ★real defects
+### D4. The kernel must not gaslight the model ★real defects
 
 - Snapshot restore let a stale user variable SHADOW the `rika` global (`rika`
   evaluated to a string path). Reserve all mounted binding names in
@@ -342,12 +344,12 @@ count limits — agents explore freely; the system makes it cheap.
 
 ---
 
-# PART E — FIX THE BUILT-IN TOOLS  (non-kernel surface: bash/read/grep/edit)
+# PART E — FIX THE BUILT-IN TOOLS (non-kernel surface: bash/read/grep/edit)
 
 Three sessions ran on the classic tool surface and hit a different, equally
 real set of defects.
 
-### E1. `read` returns the WRONG FILE for a missing path  — CRITICAL
+### E1. `read` returns the WRONG FILE for a missing path — CRITICAL
 
 `read packages/runtime/package.json` (which didn't exist) returned the
 package.json of `ast-grep-outline` — a DIFFERENT PROJECT. ~30 occurrences.
@@ -413,7 +415,7 @@ backoff inside the turn.
 
 ---
 
-# PART F — THE MEMORY LEAKS  (from ISSUES.md, measured)
+# PART F — THE MEMORY LEAKS (from ISSUES.md, measured)
 
 ```
 Server RSS, one interactive session, 12 turns:
@@ -468,5 +470,6 @@ change ──> unit + mutation tests ──> serial local gates
 ```
 
 All work in the same worktrees:
-- Rika:  `.worktrees/rika-repl-kernel`  (feat/typescript-cell-kernel)
+
+- Rika: `.worktrees/rika-repl-kernel` (feat/typescript-cell-kernel)
 - Baton: `.worktrees/baton-repl-kernel` (feat/repl-kernel)
