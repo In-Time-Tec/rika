@@ -47,7 +47,7 @@
     },
     "apps/rika": {
       "name": "@rika/cli",
-      "version": "0.5.1",
+      "version": "0.5.3",
       "bin": {
         "rika": "./dist/client-main.js",
       },
@@ -289,14 +289,14 @@
   },
   "catalog": {
     "@ast-grep/cli": "0.44.0",
-    "@batonfx/core": "0.20.1",
-    "@batonfx/harness": "0.20.1",
-    "@batonfx/mcp": "0.20.1",
-    "@batonfx/providers": "0.20.1",
-    "@batonfx/repl": "0.20.1",
-    "@batonfx/runtime": "0.20.1",
-    "@batonfx/skills": "0.20.1",
-    "@batonfx/test": "0.20.1",
+    "@batonfx/core": "0.20.2",
+    "@batonfx/harness": "0.20.2",
+    "@batonfx/mcp": "0.20.2",
+    "@batonfx/providers": "0.20.2",
+    "@batonfx/repl": "0.20.2",
+    "@batonfx/runtime": "0.20.2",
+    "@batonfx/skills": "0.20.2",
+    "@batonfx/test": "0.20.2",
     "@effect/platform-bun": "4.0.0-beta.98",
     "@effect/sql-mysql2": "4.0.0-beta.98",
     "@effect/sql-sqlite-bun": "4.0.0-beta.98",
@@ -432,21 +432,21 @@
 
     "@babel/types": ["@babel/types@7.29.7", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA=="],
 
-    "@batonfx/core": ["@batonfx/core@0.20.1", "", { "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-lNTdLrE7qYUaWNzOQY8ZX462IsBzGNUguTMUZiV4NIBpEkuj1B/PohQ6Rjh8F5EF1VKoUJt4ioKU9RhDUo/isg=="],
+    "@batonfx/core": ["@batonfx/core@0.20.2", "", { "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-rNvvkTlv2AsSk8QyaTUUUor0Sd2cpiAYfCgmlaubFazdaK/Dny8uAeGm74opA1HUhwEySE3AMeSLcVY4zIg/LQ=="],
 
-    "@batonfx/harness": ["@batonfx/harness@0.20.1", "", { "dependencies": { "@batonfx/core": "0.20.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-1k1QXD+5rbM4R/jU9xFKl56OCeA8S7UOx909vO+q7W3EG5lH0zNRjbfEtV3y0TlfMbYbXT9bDwOB8kmPAD/mAg=="],
+    "@batonfx/harness": ["@batonfx/harness@0.20.2", "", { "dependencies": { "@batonfx/core": "0.20.2" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-F/rZL/w+m4ktEgF2EqSgkn1DBhrIoEzi/PH2DkDBZp3t4Ue2yeQrK/iptRBbVLuF2OrwovtpC90aPGYz9DLwEg=="],
 
-    "@batonfx/mcp": ["@batonfx/mcp@0.20.1", "", { "dependencies": { "@batonfx/core": "0.20.1", "@modelcontextprotocol/sdk": "1.29.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-D2lLvirdyp40We8BcKcj0Qxdiw9Q1hI9VzkoKLCl5nJtN0+opMwT4hNWD+wTWbVA4aP6LdXTZpvJsVUX8Gqp9A=="],
+    "@batonfx/mcp": ["@batonfx/mcp@0.20.2", "", { "dependencies": { "@batonfx/core": "0.20.2", "@modelcontextprotocol/sdk": "1.29.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-rqOns34zD9z9V+NEPo5fgxRiQG9mMwy+T+5kF2HwkLPADkVHT1ZZH89hpZPaXD9ML1BMKb/WbZA/KEg00iqpVg=="],
 
-    "@batonfx/providers": ["@batonfx/providers@0.20.1", "", { "dependencies": { "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@batonfx/core": "0.20.1", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@smithy/types": "4.3.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-JIVerlo26xbWW+eNJdXopZkpn2zm6dqyJvndVHxIbxTxAUIN/lUtfYxcygHvH0Xcozdm6kVrHGBHrgd8I0GGXg=="],
+    "@batonfx/providers": ["@batonfx/providers@0.20.2", "", { "dependencies": { "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@batonfx/core": "0.20.2", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@smithy/types": "4.3.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-yMhoAaxpL80GonhRlFzp9bx+tncmdSLv3zVppMTnRPENc+bkXMN8VsFEMiahrYrrZTU0uX6EbToiqU+ciHG2Qg=="],
 
-    "@batonfx/repl": ["@batonfx/repl@0.20.1", "", { "dependencies": { "@batonfx/core": "0.20.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-7A1oH7FRexLy1401dlEJQJ+ltnNhIFyV4TVvuFkFp8pFmGwFVxvVc0+u2YAd8lf8g3uDfxglMexUR7RPCqB2aQ=="],
+    "@batonfx/repl": ["@batonfx/repl@0.20.2", "", { "dependencies": { "@batonfx/core": "0.20.2" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-M5jzCmFH8YuPvT7Q2pM617VMBpGeIVor4ivbLd/QC2tvA/mIBqAARAUdsRX1E+BawIqF8c0CgqmytNxncuOXiw=="],
 
-    "@batonfx/runtime": ["@batonfx/runtime@0.20.1", "", { "dependencies": { "@batonfx/core": "0.20.1", "@effect/sql-mysql2": "4.0.0-beta.98", "@effect/sql-pg": "4.0.0-beta.98", "@effect/sql-sqlite-bun": "4.0.0-beta.98" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-0NIfLJImNsYLr2FUbwC5jR+SKYagjXSCSzBf8Zl7V+BQPTnJk2NWph80B4kbh/ZgPzjgBtXG9QE746/RGEkfQQ=="],
+    "@batonfx/runtime": ["@batonfx/runtime@0.20.2", "", { "dependencies": { "@batonfx/core": "0.20.2", "@effect/sql-mysql2": "4.0.0-beta.98", "@effect/sql-pg": "4.0.0-beta.98", "@effect/sql-sqlite-bun": "4.0.0-beta.98" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-Ssj+ULSpxyo1Dbu+FoMVyy59ru04kLzVCWnmTz8btb4detqVF6NCcagmfH90E/ein4qTNns5k13+egEW7yN34g=="],
 
-    "@batonfx/skills": ["@batonfx/skills@0.20.1", "", { "dependencies": { "@batonfx/core": "0.20.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-8SPkSNxU1geq/Out+Bgnnv6mqoL90cFL28Ba67v4KT42Cw5BfzVskiN9mgbgkPj7cxUwtXj+/VWiosAZAiudJw=="],
+    "@batonfx/skills": ["@batonfx/skills@0.20.2", "", { "dependencies": { "@batonfx/core": "0.20.2" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-D3jNTcmbeETZcc8mamIXVWcXtNPnAXdiMt3nrKm9SvKP8XGRQmabQKyrwoLPL5XBOGW22Tsb/9Iuc+//m6OSoA=="],
 
-    "@batonfx/test": ["@batonfx/test@0.20.1", "", { "dependencies": { "@batonfx/core": "0.20.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-kuS00C8eIh9UJkBUUecGhP8Z+ynsiieXW+87D9/hvhMyd+KyzqICg10H21Ul6XBSwOjr87hQ7DsHy8WHHnFVrg=="],
+    "@batonfx/test": ["@batonfx/test@0.20.2", "", { "dependencies": { "@batonfx/core": "0.20.2" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-2VSxZPyuSfAblWqjOo78VQnJ3cnlHPHMWpjNR4ywXSZOuP24GZPgEzJbok94B3XhQTnTLxuU4OGkMisHCkcwVQ=="],
 
     "@bcoe/v8-coverage": ["@bcoe/v8-coverage@1.0.2", "", {}, "sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA=="],
 
