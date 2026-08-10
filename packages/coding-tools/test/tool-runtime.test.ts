@@ -248,6 +248,34 @@ describe("Runtime", () => {
     }).pipe(provide(environment.runtime))
   })
 
+  it.effect("fails a missing path without returning another file's content", () => {
+    const environment = testEnvironment()
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const failure = yield* Effect.flip(runtime.run({ _tag: "Read", path: "src/z" }))
+      expect(failure).toMatchObject({
+        _tag: "ToolError",
+        tool: "read",
+        category: "not_found",
+        outcome: "known",
+        recovery: "after_change",
+      })
+      expect(failure.message).toContain("File not found: src/z")
+      expect(failure.message).toContain("Did you mean src/z.ts")
+      expect(failure.message).not.toContain("alpha")
+    }).pipe(provide(environment.runtime))
+  })
+
+  it.effect("reports a directory read as a directory instead of a generic failure", () => {
+    const environment = testEnvironment()
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const failure = yield* Effect.flip(runtime.run({ _tag: "Read", path: "src" }))
+      expect(failure).toMatchObject({ _tag: "ToolError", tool: "read", category: "invalid_input" })
+      expect(failure.message).toContain("src is a directory")
+    }).pipe(provide(environment.runtime))
+  })
+
   it.effect("rejects invalid regular expressions", () => {
     const environment = testEnvironment()
     return Effect.gen(function* () {

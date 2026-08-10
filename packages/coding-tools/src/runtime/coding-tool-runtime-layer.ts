@@ -98,17 +98,23 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
         const notFound =
           Schema.is(LocalPath.LocalPathError)(resolved.failure) && resolved.failure.reason === "not_found"
         if (!notFound || !withinWorkspace(value)) return yield* localPathError(value, resolved.failure)
-        const found = yield* workspaceIndex.fileSearch(value, { pageSize: 20 })
-        const bestMatch = found.items[0]
-        if (bestMatch === undefined)
-          return yield* runtimeError({
-            category: "not_found",
-            message: `File not found: ${value}`,
-            outcome: "known",
-            recovery: "after_change",
-            nextAction: "Search for the file or call read with a corrected path",
-          })
-        return yield* resolveExisting(bestMatch.relativePath)
+        const found = yield* workspaceIndex
+          .fileSearch(value, { pageSize: 3 })
+          .pipe(Effect.orElseSucceed(() => ({ items: [], scores: [], totalMatched: 0, totalFiles: 0 })))
+        const suggestions = found.items.map((item) => item.relativePath)
+        return yield* runtimeError({
+          category: "not_found",
+          message:
+            suggestions.length === 0
+              ? `File not found: ${value}`
+              : `File not found: ${value}. Did you mean ${suggestions.join(", ")}?`,
+          outcome: "known",
+          recovery: "after_change",
+          nextAction:
+            suggestions.length === 0
+              ? "Search for the file or call read with a corrected path"
+              : "Call read again with one of the suggested existing paths",
+        })
       })
       const requireRegularFile = (value: string, target: string) =>
         fileSystem.stat(target).pipe(
@@ -182,6 +188,15 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
                     nextAction: "Use whole-number line bounds where start is at least 1 and end is not before start",
                   })
                 const target = yield* resolveRead(request.path)
+                const targetInfo = yield* fileSystem.stat(target).pipe(Effect.mapError(operationError))
+                if (targetInfo.type === "Directory")
+                  return yield* runtimeError({
+                    category: "invalid_input",
+                    message: `${request.path} is a directory — list it or read a file inside it`,
+                    outcome: "known",
+                    recovery: "after_change",
+                    nextAction: "List the directory with bash or glob, then read a specific file inside it",
+                  })
                 const content = yield* fileSystem.readFileString(target)
                 return bounded(RuntimeFilesystem.lineWindow(content, start, end))
               }
