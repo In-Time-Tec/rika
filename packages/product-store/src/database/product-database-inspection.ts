@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { schemaFingerprint, schemaObjects as productSchemaObjects } from "./product-schema"
+import { additions, schemaFingerprint, schemaObjects as productSchemaObjects } from "./product-schema"
 import { ProductDatabaseError } from "./product-database-layer"
 
 const SchemaObject = Schema.Struct({
@@ -31,13 +31,26 @@ export const inspectDatabase = Effect.fn("ProductDatabase.inspect")(function* ()
   return { objects, fingerprint: identity[0]?.fingerprint }
 })
 
+/** The schema objects a database currently holds, for recomputing identity after an upgrade. */
+export const currentObjects = Effect.fn("ProductDatabase.currentObjects")(function* () {
+  const state = yield* inspectDatabase()
+  return state.objects
+})
+
 export const validateKnown = (state: Effect.Success<ReturnType<typeof inspectDatabase>>) =>
   Effect.gen(function* () {
     if (state.objects.length === 0) return "fresh" as const
     const actual = new Set(state.objects.map((object) => `${object.type}:${object.name}`))
+    const missing = productSchemaObjects.filter((key) => !actual.has(key))
+    /**
+     * A data root outlives the version that made it. A database missing only objects a later release
+     * added is upgradable; anything else differs in a way this cannot reason about.
+     */
+    if (missing.length > 0 && missing.every((key) => additions.some((addition) => addition.name === key)))
+      return "upgradable" as const
     if (
       actual.size !== productSchemaObjects.length ||
-      productSchemaObjects.some((key) => !actual.has(key)) ||
+      missing.length > 0 ||
       state.fingerprint !== schemaFingerprint(state.objects)
     )
       return yield* fail(incompatible)

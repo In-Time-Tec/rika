@@ -147,4 +147,27 @@ it.layer(BunServices.layer)("product database", (test) => {
       }),
     ),
   )
+
+  test.effect("brings a database made by an earlier Rika up to the current schema", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // A data root outlives the version that made it, so a release that adds a table has to bring
+        // it rather than tell a user their history is unreadable.
+        const fileSystem = yield* FileSystem.FileSystem
+        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-product-upgrade-" })
+        const filename = `${directory}/rika.db`
+        const built = yield* Layer.build(layer(filename))
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient
+          yield* sql`DROP TABLE rika_goals`
+        }).pipe(Effect.provide(built))
+        const reopened = yield* Layer.build(layer(filename))
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient
+          const rows = yield* sql`SELECT name FROM sqlite_schema WHERE name = 'rika_goals'`
+          expect(rows).toHaveLength(1)
+        }).pipe(Effect.provide(reopened))
+      }),
+    ),
+  )
 })

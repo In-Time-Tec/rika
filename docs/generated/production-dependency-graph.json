@@ -16233,6 +16233,14 @@
       "production": true
     },
     {
+      "from": "packages/product-store/src/database/product-schema.ts",
+      "to": "external:effect/unstable/sql/SqlError",
+      "specifier": "effect/unstable/sql/SqlError",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/product-store/src/goal/goal-row-codec.ts",
       "to": "external:effect",
       "specifier": "effect",

@@ -1,8 +1,8 @@
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient"
 import { Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { create } from "./product-schema"
-import { inspectDatabase, validateKnown } from "./product-database-inspection"
+import { additions, create, schemaFingerprint } from "./product-schema"
+import { currentObjects, inspectDatabase, validateKnown } from "./product-database-inspection"
 
 export class ProductDatabaseError extends Schema.TaggedErrorClass<ProductDatabaseError>()("ProductDatabaseError", {
   message: Schema.String,
@@ -25,6 +25,21 @@ const prepare = Effect.gen(function* () {
     yield* sql
       .withTransaction(create)
       .pipe(Effect.mapError((error) => fail(`Could not create the Rika product database: ${String(error)}`)))
+  }
+  if (kind === "upgradable") {
+    const sql = yield* SqlClient
+    const present = new Set(state.objects.map((object) => `${object.type}:${object.name}`))
+    yield* sql
+      .withTransaction(
+        Effect.gen(function* () {
+          for (const addition of additions) if (!present.has(addition.name)) yield* addition.apply(sql)
+          yield* sql`DELETE FROM rika_schema_identity`
+          yield* sql`INSERT INTO rika_schema_identity (id, fingerprint) VALUES (1, ${schemaFingerprint(
+            yield* currentObjects(),
+          )})`
+        }),
+      )
+      .pipe(Effect.mapError((error) => fail(`Could not upgrade the Rika product database: ${String(error)}`)))
   }
   yield* enableForeignKeys
   yield* inspectDatabase().pipe(Effect.flatMap(validateKnown))

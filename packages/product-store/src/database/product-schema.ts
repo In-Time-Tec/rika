@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 
 export interface SchemaObject {
   readonly type: string
@@ -377,4 +378,32 @@ export const schemaObjects: ReadonlyArray<string> = [
   "trigger:rika_thread_picker_summary_activity_update",
   "trigger:rika_thread_picker_summary_activity_delete",
   "table:rika_schema_identity",
+]
+
+/**
+ * Objects a database created by an earlier Rika will not have. A data root outlives the version that
+ * made it, so a release that adds a table brings it rather than asking for a fresh one.
+ */
+export const additions: ReadonlyArray<{
+  readonly name: string
+  readonly apply: (sql: SqlClient) => Effect.Effect<unknown, SqlError>
+}> = [
+  {
+    name: "table:rika_goals",
+    apply: (sql) => sql`CREATE TABLE rika_goals (
+    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    objective TEXT NOT NULL CHECK (length(objective) > 0 AND length(objective) <= 4096),
+    status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'complete', 'errored')),
+    budget_tokens INTEGER CHECK (budget_tokens IS NULL OR budget_tokens > 0),
+    budget_wall_clock_millis INTEGER CHECK (budget_wall_clock_millis IS NULL OR budget_wall_clock_millis > 0),
+    usage_tokens INTEGER NOT NULL DEFAULT 0 CHECK (usage_tokens >= 0),
+    usage_elapsed_millis INTEGER NOT NULL DEFAULT 0 CHECK (usage_elapsed_millis >= 0),
+    usage_turns INTEGER NOT NULL DEFAULT 0 CHECK (usage_turns >= 0),
+    started_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    summary TEXT,
+    CHECK ((status = 'complete') = (completed_at IS NOT NULL))
+  )`,
+  },
 ]
