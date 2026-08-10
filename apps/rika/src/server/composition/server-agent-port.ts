@@ -4,10 +4,27 @@ import { AgentDirectoryUnavailable, AgentPort } from "@rika/kernel/agent-port"
 import { Effect, Layer } from "effect"
 import type { Prompt } from "effect/unstable/ai"
 
+const messageOf = (cause: unknown): string => {
+  if (cause instanceof Error && cause.message.length > 0) return cause.message
+  if (typeof cause === "object" && cause !== null) {
+    const own = "message" in cause ? cause.message : undefined
+    if (typeof own === "string" && own.length > 0) return own
+    const tag = "_tag" in cause ? String(cause._tag) : ""
+    if (tag.length > 0) return tag
+  }
+  const text = String(cause)
+  return text.length > 0 && text !== "[object Object]" ? text : "the agent directory refused the request"
+}
+
 const unavailable = (reason: AgentDirectoryUnavailable["reason"], cause: unknown) =>
   AgentDirectoryUnavailable.make({
     reason,
-    message: cause instanceof Error ? cause.message : String(cause),
+    /**
+     * A tagged failure is an object whose own `message` is where its account lives, and stringifying
+     * it produced an empty line. A cell told only that a spawn failed cannot tell a bad profile from
+     * a closed run.
+     */
+    message: messageOf(cause),
   })
 
 const reasonOf = (cause: unknown): AgentDirectoryUnavailable["reason"] => {

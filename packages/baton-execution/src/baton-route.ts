@@ -45,7 +45,9 @@ const instructions = {
   ReadThread: "Find and summarize only the thread evidence needed to answer the supplied question.",
   Review: "Review the supplied request for the assigned lane. Return ordered findings with evidence and severity.",
   Surgeon: "Implement the bounded code change, preserve unrelated work, and verify the result.",
-  Task: "Complete the bounded task autonomously and return the result with verification evidence.",
+  Task:
+    "Complete the bounded task autonomously and return the result with verification evidence. " +
+    "You may spawn Oracle, Librarian, Painter, ReadThread, or Surgeon, but not another Task.",
 } as const
 
 /**

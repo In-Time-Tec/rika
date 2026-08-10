@@ -239,3 +239,31 @@ it.effect("scopes a spawn's ordinal to the cell that admitted it, not to the pro
     for (const { toolCallId, invocationId } of invocations) expect(invocationId).toContain(toolCallId)
   }),
 )
+
+it.effect("tells the cell what refused a spawn instead of an empty line", () =>
+  Effect.gen(function* () {
+    // A tagged failure keeps its account in its own `message`, and stringifying the object produced
+    // nothing. A cell told only that a spawn failed cannot tell a bad profile from a closed run.
+    const failure = yield* Effect.flip(
+      withPort(
+        {
+          spawn: () =>
+            Effect.fail({ _tag: "@batonfx/runtime/HandoffUnavailable", message: "Task cannot spawn Task" } as never),
+          inspect: () => Effect.succeed(runInspection("run-self") as never),
+          inspectTree: () =>
+            Effect.succeed({
+              _tag: "Active",
+              rootRunId: "run-self",
+              cursor: "c",
+              runs: [],
+              usage: [],
+              compactions: [],
+              activeRunIds: [],
+            } as never),
+        },
+        (value) => value.spawn({ profile: "Task", prompt: "p", key: "k" }),
+      ),
+    )
+    expect(failure.message).toContain("Task cannot spawn Task")
+  }),
+)
