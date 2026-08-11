@@ -11883,6 +11883,14 @@
     },
     {
       "from": "packages/terminal/test/subagent-cell-transcript.test.ts",
+      "to": "external:string-width",
+      "specifier": "string-width",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/subagent-cell-transcript.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

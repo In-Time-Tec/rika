@@ -26222,6 +26222,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/rendering/opentui-render-unit-bodies.ts",
+      "to": "packages/terminal/src/opentui/rendering/terminal-text-adapter.ts",
+      "specifier": "./terminal-text-adapter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/rendering/opentui-render-unit-bodies.ts",
       "to": "packages/terminal/src/presentation/markdown/styled-text.ts",
       "specifier": "../../presentation/markdown/styled-text",
       "kind": "import",

@@ -74,7 +74,7 @@ test("truncation is either source or output loss", () => {
   )
 })
 
-test("the collapsed line carries glyph, summary, lines, duration, and truncation", () => {
+test("the collapsed line carries only the glyph, source summary, duration, and truncation", () => {
   expect(
     cellCollapsedLine(
       cell({
@@ -85,12 +85,12 @@ test("the collapsed line carries glyph, summary, lines, duration, and truncation
         durationMillis: 1_240,
       }),
     ),
-  ).toBe("$ await Bun.$`bun test` · 1 line · 1.2s · truncated")
+  ).toBe("$ await Bun.$`bun test` 1.2s truncated")
   expect(
     cellCollapsedLine(
       cell({ summary: "const a = 1", source: { text: "const a = 1\nconst b = 2", lines: 2, truncated: false } }),
     ),
-  ).toBe("ts const a = 1 · 2 lines")
+  ).toBe("ts const a = 1")
   expect(cellCollapsedLine(cell())).toBe("ts")
 })
 

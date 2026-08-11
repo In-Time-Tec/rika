@@ -18,12 +18,10 @@ export const cellOutputTruncated = (cell: Cell): boolean =>
 export const cellCollapsedLine = (cell: Cell): string => {
   const parts = [cellGlyph(cell.visual)]
   if (cell.summary.length > 0) parts.push(cell.summary)
-  const details: Array<string> = []
-  if (cell.source.lines > 0) details.push(`${cell.source.lines} ${cell.source.lines === 1 ? "line" : "lines"}`)
   const duration = cell.durationMillis === undefined ? "" : formatCellDuration(cell.durationMillis)
-  if (duration.length > 0) details.push(duration)
-  if (cellOutputTruncated(cell)) details.push("truncated")
-  return [parts.join(" "), ...details].join(" · ")
+  if (duration.length > 0) parts.push(duration)
+  if (cellOutputTruncated(cell)) parts.push("truncated")
+  return parts.join(" ")
 }
 
 export const cellBodyText = (cell: Cell): string =>

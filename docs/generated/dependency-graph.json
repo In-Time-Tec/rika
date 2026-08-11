@@ -44302,6 +44302,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/rendering/opentui-render-unit-bodies.ts",
+      "to": "packages/terminal/src/opentui/rendering/terminal-text-adapter.ts",
+      "specifier": "./terminal-text-adapter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/rendering/opentui-render-unit-bodies.ts",
       "to": "packages/terminal/src/presentation/markdown/styled-text.ts",
       "specifier": "../../presentation/markdown/styled-text",
       "kind": "import",
@@ -53590,6 +53598,14 @@
     },
     {
       "from": "packages/terminal/test/subagent-cell-transcript.test.ts",
+      "to": "external:string-width",
+      "specifier": "string-width",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/subagent-cell-transcript.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -53606,6 +53622,14 @@
     },
     {
       "from": "packages/terminal/test/subagent-cell-transcript.test.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
+      "specifier": "../src/presentation/terminal/terminal-theme",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/subagent-cell-transcript.test.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-row.ts",
       "specifier": "../src/presentation/transcript/transcript-row",
       "kind": "import",
@@ -53616,6 +53640,14 @@
       "from": "packages/terminal/test/subagent-cell-transcript.test.ts",
       "to": "packages/terminal/src/state/model/terminal-state.ts",
       "specifier": "../src/state/model/terminal-state",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/subagent-cell-transcript.test.ts",
+      "to": "packages/terminal/src/state/model/terminal-transcript-state.ts",
+      "specifier": "../src/state/model/terminal-transcript-state",
       "kind": "import",
       "relationship": "test",
       "production": false
