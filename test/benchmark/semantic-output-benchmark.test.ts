@@ -125,7 +125,14 @@ const makeSample = (
   source: Source,
   caseName: Case,
   sampleNumber: number,
-  values: { events: number; eventBytes?: number },
+  values: {
+    events: number
+    eventBytes?: number
+    databaseBytes?: number
+    wallMilliseconds?: number
+    peakHeapBytes?: number
+    postGcHeapBytes?: number
+  },
 ): Sample => ({
   schemaVersion: 1,
   source,
@@ -139,10 +146,15 @@ const makeSample = (
     modelResponsesCommitted: source === "candidate" ? 1 : 0,
     terminalFinishes: 1,
   },
-  timing: { wallMilliseconds: 10, cpuMilliseconds: 10, firstPreviewMilliseconds: 10, completionMilliseconds: 10 },
+  timing: {
+    wallMilliseconds: values.wallMilliseconds ?? 10,
+    cpuMilliseconds: 10,
+    firstPreviewMilliseconds: 10,
+    completionMilliseconds: values.wallMilliseconds ?? 10,
+  },
   memory: {
-    peakHeapBytes: 100,
-    postGcHeapBytes: 90,
+    peakHeapBytes: values.peakHeapBytes ?? 100,
+    postGcHeapBytes: values.postGcHeapBytes ?? 90,
     peakProcessTreeRssBytes: 200,
     postGcProcessTreeRssBytes: 180,
     bunHeapStats: {},
@@ -157,7 +169,7 @@ const makeSample = (
     modelResponseCommittedEvents: source === "candidate" ? 1 : 0,
   },
   projection: { commitProjectionCalls: 0 },
-  databases: {},
+  databases: { afterCheckpoint: { total: values.databaseBytes ?? 1_000 } },
   identity: {},
 })
 
@@ -192,13 +204,61 @@ describe("aggregation and comparison", () => {
     const baseline = groups("baseline")
     const candidate = groups("candidate").map((group) =>
       group.case === "alternating-empty"
-        ? aggregate([1, 2, 3].map((number) => makeSample("candidate", group.case, number, { events: 11 })))
+        ? aggregate(
+            [1, 2, 3].map((number) =>
+              makeSample("candidate", group.case, number, { events: 11, wallMilliseconds: 11 }),
+            ),
+          )
         : group,
     )
     const result = compare({ baseline, candidate })
     expect(result.pass).toBe(false)
     expect(result.failures).toContain("candidate event count is shape-dependent")
     expect(result.failures).toContain("alternating-empty: batonSql.totalEvents exceeds 10% of baseline")
+    expect(result.failures).toContain("alternating-empty: timing.wallMilliseconds regressed by ratio 1.100")
+  })
+
+  it("rejects candidate retained-memory and database growth that follows fragment shape", () => {
+    const baseline = groups("baseline")
+    const candidate = groups("candidate").map((group) =>
+      group.case === "ten-thousand"
+        ? aggregate(
+            [1, 2, 3].map((number) =>
+              makeSample("candidate", group.case, number, {
+                events: 5,
+                databaseBytes: 1_201,
+                postGcHeapBytes: 109,
+              }),
+            ),
+          )
+        : group,
+    )
+    const result = compare({ baseline, candidate })
+    expect(result.pass).toBe(false)
+    expect(result.failures).toContain("ten-thousand: databases.afterCheckpoint.total exceeds 1.2x candidate one-case")
+    expect(result.failures).toContain("ten-thousand: memory.postGcHeapBytes exceeds 1.2x candidate one-case")
+  })
+
+  it("reports fixed one-case settlement overhead without treating it as fragment amplification", () => {
+    const baseline = groups("baseline")
+    const candidate = groups("candidate").map((group) =>
+      group.case === "one"
+        ? aggregate(
+            [1, 2, 3].map((number) =>
+              makeSample("candidate", group.case, number, {
+                events: 5,
+                wallMilliseconds: 20,
+                peakHeapBytes: 200,
+                postGcHeapBytes: 180,
+              }),
+            ),
+          )
+        : group,
+    )
+    const result = compare({ baseline, candidate })
+    expect(result.pass).toBe(true)
+    expect(result.ratios["one:timing.wallMilliseconds"]).toBe(2)
+    expect(result.ratios["one:memory.postGcHeapBytes"]).toBe(2)
   })
 })
 

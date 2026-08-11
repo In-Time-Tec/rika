@@ -16,6 +16,7 @@ const paths = [
   "batonSql.totalEvents",
   "batonSql.eventJsonBytes",
   "batonSql.operationResultBytes",
+  "databases.afterCheckpoint.total",
   "projection.commitProjectionCalls",
 ] as const
 
@@ -102,7 +103,6 @@ export const compare = (input: {
         if (value > 0.1) failures.push(`${caseName}: ${path} exceeds 10% of baseline`)
       }
     }
-    const ceiling = caseName === "one" ? 1.2 : 1
     for (const path of [
       "timing.wallMilliseconds",
       "timing.cpuMilliseconds",
@@ -114,7 +114,13 @@ export const compare = (input: {
       if (current.median[path] === undefined || old.median[path] === undefined) continue
       const value = ratio(metric(current, path), metric(old, path))
       ratios[`${caseName}:${path}`] = value
-      if (value > ceiling) failures.push(`${caseName}: ${path} regressed by ratio ${value.toFixed(3)}`)
+      const floodScaleMetric =
+        path === "timing.wallMilliseconds" ||
+        path === "timing.cpuMilliseconds" ||
+        path === "memory.peakHeapBytes" ||
+        path === "memory.peakProcessTreeRssBytes"
+      if (caseName !== "one" && floodScaleMetric && value > 1)
+        failures.push(`${caseName}: ${path} regressed by ratio ${value.toFixed(3)}`)
     }
     for (const path of ["timing.firstPreviewMilliseconds", "timing.controlAckMilliseconds"] as const) {
       if (current.median[path] === undefined) continue
@@ -142,7 +148,14 @@ export const compare = (input: {
     if (projectionCounts.size !== 1) failures.push("candidate projection count is shape-dependent")
     const one = newByCase.get("one")!
     for (const group of candidateGroups) {
-      for (const path of ["batonSql.eventJsonBytes", "batonSql.operationResultBytes"] as const) {
+      for (const path of [
+        "batonSql.eventJsonBytes",
+        "batonSql.operationResultBytes",
+        "databases.afterCheckpoint.total",
+        "memory.postGcHeapBytes",
+        "memory.postGcProcessTreeRssBytes",
+      ] as const) {
+        if (group.median[path] === undefined || one.median[path] === undefined) continue
         const value = ratio(metric(group, path), Math.max(1, metric(one, path)))
         ratios[`${group.case}:${path}:candidate-amplification`] = value
         if (value > 1.2) failures.push(`${group.case}: ${path} exceeds 1.2x candidate one-case`)

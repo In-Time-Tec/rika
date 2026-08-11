@@ -40,6 +40,12 @@ The command writes raw samples, medians, identities, and the comparison to `/tmp
 
 The three streams all carry exactly 1,000,000 ASCII `x` bytes: one delta, 10,000 100-byte deltas, and 10,000 alternating empty/200-byte deltas. The model uses fixed part IDs, finish reason, and usage and yields after every 32 fragments. The report includes output bytes/SHA-256, wall and CPU time, peak and post-full-GC heap, sampled process-tree peak and post-GC RSS, SQL event/tag/JSON/operation-result bytes, SQLite database/WAL/SHM/page/freelist/checkpoint evidence, first live response where the installed Runtime exposes it, and package/source identity.
 
+## Comparison policy
+
+The comparison fails unless every sample is semantically identical, the candidate persists zero `ModelPart` events and exactly one `ModelResponseCommitted`, and candidate event, encoded-result, and database bytes stay within 1.2× of the one-fragment case. For both flood shapes, event and projection counts must be at most 10% of baseline, and wall time, CPU time, peak heap, and peak process-tree RSS may not regress. Candidate post-GC heap and RSS must stay within 1.2× across transport shapes, which gates retained fragment-dependent growth separately from the constant loaded-code and semantic-settlement footprint. First live response remains bounded at 250 ms and 1.2× baseline when both sources expose a measurement.
+
+The one-fragment baseline is not a correctness-equivalent implementation: it omits the candidate's semantic operation outcome, Session projection, and transactional outbox. The report therefore records its wall, CPU, heap, and RSS ratios but does not turn fixed one-case overhead or a fixed post-GC source offset into fragment-amplification failures. Those values must still be reported honestly alongside the flood-scale and within-candidate retention gates.
+
 ## Limitations
 
 - The automated owning interface is Baton-only. It does not claim Rika transcript, projection, or OpenTUI measurements; `commitProjectionCalls` is zero and excluded from a ratio gate when both sources are zero.
