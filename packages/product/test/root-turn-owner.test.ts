@@ -62,12 +62,14 @@ it.effect("returns stored terminal state and units when checkpoint resume yields
       } as TranscriptRepository.Interface,
       { watchTurn: () => Stream.empty } as ExecutionGateway.Interface,
     )
-    expect(yield* owner.watchTurn(turn.id)).toMatchObject({
+    const result = yield* owner.watchTurn(turn.id)
+    expect(result).toMatchObject({
       status: "completed",
       state: { status: "completed" },
       units: [{ content: { text: "stored answer" } }],
       checkpoint: { cursor: "stored-cursor" },
     })
+    expect(Object.hasOwn(result, "changes")).toBe(false)
   }),
 )
 
@@ -100,6 +102,7 @@ it.effect("commits and delivers each live change once without retaining or redel
     }
     let stored: Projection | undefined
     const commits: Array<ExecutionProjection.Change> = []
+    const trace: Array<string> = []
     let watches = 0
     const owner = yield* make(
       { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
@@ -108,6 +111,7 @@ it.effect("commits and delivers each live change once without retaining or redel
         commitProjection: (_turn, change) =>
           Effect.sync(() => {
             commits.push(change)
+            trace.push(`commit:${change.revision}`)
             stored = {
               turn,
               units: [],
@@ -128,9 +132,13 @@ it.effect("commits and delivers each live change once without retaining or redel
       } as ExecutionGateway.Interface,
     )
     const delivered: Array<ExecutionProjection.Change> = []
-    const first = yield* owner.watchTurn(turn.id, (change) => delivered.push(change))
+    const first = yield* owner.watchTurn(turn.id, (change) => {
+      delivered.push(change)
+      trace.push(`callback:${change.revision}`)
+    })
     expect(commits).toEqual([running, completed])
     expect(delivered).toEqual([running, completed])
+    expect(trace).toEqual(["commit:1", "callback:1", "commit:2", "callback:2"])
     expect(first).toMatchObject({
       status: "completed",
       state: { status: "completed" },

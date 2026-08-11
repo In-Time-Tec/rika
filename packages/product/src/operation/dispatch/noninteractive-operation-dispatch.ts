@@ -50,21 +50,8 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
       const clock = yield* Clock.Clock
       const startedAt = clock.currentTimeMillisUnsafe()
       const changes = new Array<ExecutionProjection.Change>()
-      const units = new Map<string, import("@rika/transcript/transcript-unit").Unit>()
-      let projectionRevision: number | undefined
-      let projectionInvalid = false
       const applyChange = (change: ExecutionProjection.Change) => {
         changes.push(change)
-        if (change._tag === "ProjectionSnapshot") {
-          units.clear()
-          for (const unit of change.units) units.set(unit.key, unit)
-          projectionRevision = change.revision
-        } else if (projectionRevision !== change.baseRevision) projectionInvalid = true
-        else {
-          for (const removedKey of change.remove) units.delete(removedKey)
-          for (const unit of change.upsert) units.set(unit.key, unit)
-          projectionRevision = change.revision
-        }
         dependencies.publishInteractiveActivity(0, {
           _tag: "ExecutionProjectionChanged",
           threadId: turn.threadId,
@@ -103,10 +90,7 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
           ...(titleIntent === undefined ? {} : { titleIntent }),
           ...(isReviewRouteMode(turn.executionRoute.mode) ? { reviewIntent: reviewIntent(turn.prompt) } : {}),
         })
-        const result = yield* dependencies.rootTurnOwner.watchTurn(turn.id, applyChange)
-        if (projectionInvalid)
-          return yield* dependencies.operationError(`Turn ${turn.id} produced a non-contiguous projection`)
-        return result
+        return yield* dependencies.rootTurnOwner.watchTurn(turn.id, applyChange)
       }).pipe(
         Effect.catch((error) =>
           Effect.gen(function* () {
@@ -126,7 +110,7 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
       )
       const result = execution
       const completedAt = yield* Clock.currentTimeMillis
-      const settledFailure = turnFailure([...units.values()])
+      const settledFailure = turnFailure(result.units)
       yield* result.status === "failed"
         ? Effect.logError("turn.failed").pipe(
             Effect.annotateLogs({
@@ -147,7 +131,7 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
             }),
           )
       yield* dependencies.setTurnStatus(turn.id, result.status, completedAt)
-      return { result, changes, units: [...units.values()] }
+      return { result, changes, units: result.units }
     })
     const drainRunQueue = Effect.fn("ProductOperation.drainRunQueue")(function* () {
       while (true) {
