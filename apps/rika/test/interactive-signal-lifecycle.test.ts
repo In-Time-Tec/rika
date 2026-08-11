@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events"
 import { expect, it } from "@effect/vitest"
-import { Duration, Effect, Fiber, Stream } from "effect"
+import { Deferred, Effect, Fiber, Schedule, Stream } from "effect"
 import { test } from "vitest"
 import { interruptDecision } from "../src/interactive/process/process-interrupt"
 import { lifecycleEvents } from "../src/interactive/process/process-signals"
@@ -54,22 +54,28 @@ it.live("lifecycle events publish signals and release every listener when the sc
     const emitter = new EventEmitter()
     const stdin = new EventEmitter() as unknown as NodeJS.ReadStream
     const observed: Array<string> = []
+    const allObserved = yield* Deferred.make<void>()
     const fiber = yield* Effect.forkChild(
       Effect.scoped(
         lifecycleEvents({ signals: ["SIGINT", "SIGTERM"], stdin, process: emitter }).pipe(
           Stream.runForEach((event) =>
-            Effect.sync(() => {
+            Effect.gen(function* () {
               observed.push(event._tag === "Hangup" ? "Hangup" : event.signal)
+              if (observed.length === 3) yield* Deferred.succeed(allObserved, undefined)
             }),
           ),
         ),
       ),
     )
-    yield* Effect.sleep(Duration.millis(50))
+    yield* Effect.sync(() => emitter.listenerCount("SIGINT")).pipe(
+      Effect.filterOrFail((listeners) => listeners === 1),
+      Effect.retry(Schedule.spaced("1 millis")),
+      Effect.timeout("1 second"),
+    )
     emitter.emit("SIGINT")
     emitter.emit("SIGTERM")
     ;(stdin as unknown as EventEmitter).emit("end")
-    yield* Effect.sleep(Duration.millis(100))
+    yield* Deferred.await(allObserved).pipe(Effect.timeout("1 second"))
     expect(emitter.listenerCount("SIGINT")).toBe(1)
     yield* Fiber.interrupt(fiber)
     expect(observed).toEqual(["SIGINT", "SIGTERM", "Hangup"])
