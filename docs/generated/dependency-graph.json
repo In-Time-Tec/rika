@@ -949,16 +949,6 @@
       "testKind": "tui-test"
     },
     {
-      "id": "apps/rika/test/app-activity.tui.test.ts",
-      "path": "apps/rika/test/app-activity.tui.test.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "tui-test"
-    },
-    {
       "id": "apps/rika/test/app-delegation-2-2.tui.test.ts",
       "path": "apps/rika/test/app-delegation-2-2.tui.test.ts",
       "workspace": "@rika/cli",
@@ -15705,46 +15695,6 @@
       "from": "apps/rika/test/app-2.tui.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/app-activity.tui.test.ts",
-      "to": "apps/rika/test/tui-app-model.ts",
-      "specifier": "./tui-app-model",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/app-activity.tui.test.ts",
-      "to": "apps/rika/test/tui-app.ts",
-      "specifier": "./tui-app",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/app-activity.tui.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/app-activity.tui.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/app-activity.tui.test.ts",
-      "to": "packages/product/src/operation/interactive/interactive-event.ts",
-      "specifier": "@rika/product/interactive-event",
       "kind": "import",
       "relationship": "test",
       "production": false
