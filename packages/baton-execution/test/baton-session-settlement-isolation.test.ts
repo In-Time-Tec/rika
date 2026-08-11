@@ -9,7 +9,7 @@ import {
 } from "@batonfx/runtime"
 import { TestModel } from "@batonfx/test"
 import { expect, layer } from "@effect/vitest"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Random } from "effect"
 
 const modelPin = Pins.makeModel({ provider: "test", model: "settlement-isolation" })
 const policy = { _tag: "Portable" as const, policy: { _tag: "Forever" as const } }
@@ -54,14 +54,15 @@ const fixture = Effect.gen(function* () {
     version: "1",
     payload: {},
   }))
-  return { parentExecutable, resolver, registrations }
+  const unique = yield* Random.nextIntBetween(1, 2 ** 31)
+  return { parentExecutable, resolver, registrations, unique }
 })
 
 const runtimeLayer = Layer.unwrap(
   fixture.pipe(
-    Effect.map(({ parentExecutable, resolver, registrations }) =>
+    Effect.map(({ parentExecutable, resolver, registrations, unique }) =>
       Runtime.layerSqlite({
-        filename: `/tmp/rika-baton-settlement-isolation-${process.pid}-${crypto.randomUUID()}.db`,
+        filename: `/tmp/rika-baton-settlement-isolation-${process.pid}-${unique}.db`,
         resolver,
         addresses: [
           {

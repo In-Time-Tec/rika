@@ -446,4 +446,3 @@ export const knownObjectShapes: ReadonlyArray<{
     (key) => !additions.some((addition) => addition.since >= version && addition.name === key),
   ),
 }))
-

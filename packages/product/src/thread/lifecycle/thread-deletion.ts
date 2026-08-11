@@ -35,9 +35,9 @@ export const make = (input: {
     yield* Effect.forEach(
       titleSessionIds,
       (sessionId) =>
-        input.sessions.requestCancellation({ sessionId, reason: "Thread deleted" }).pipe(
-          Effect.andThen(input.sessions.awaitTerminal({ sessionId })),
-        ),
+        input.sessions
+          .requestCancellation({ sessionId, reason: "Thread deleted" })
+          .pipe(Effect.andThen(input.sessions.awaitTerminal({ sessionId }))),
       { concurrency: 4, discard: true },
     )
   })

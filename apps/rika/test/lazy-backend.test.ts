@@ -80,6 +80,7 @@ it.effect("keeps deletion tombstoned when a gateway-only backend lacks session l
       } as unknown as RootTurnOwner.Interface
       const deletion = ThreadDeletion.make({
         threads,
+        turns: { list: () => Effect.succeed([]) } as unknown as import("@rika/product/turn-repository").Interface,
         sessions,
         rootTurns,
         turnMutationAdmission: yield* Semaphore.make(1),

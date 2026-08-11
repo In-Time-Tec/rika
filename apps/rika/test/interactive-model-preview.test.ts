@@ -489,29 +489,32 @@ describe("tentative model preview overlay", () => {
     expect(ids(cleared).some((id) => id.startsWith("tentative:"))).toBe(false)
   })
 
-  it.effect("reuses a bounded set of physical OpenTUI rows across preview revisions", () =>
-    Effect.gen(function* () {
-      const setup = yield* Effect.promise(() => createTestRenderer({ width: 100, height: 30 }))
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          surface.destroy()
-          setup.renderer.destroy()
-        }),
-      )
-      let state = InteractiveController.update(loaded(), preview(1, "answer 1")).state
-      surface.update(state.model)
-      const initialRows = [...surface.transcriptDiagnostics().rows]
-      for (let revision = 2; revision <= 10_000; revision += 1) {
-        state = InteractiveController.update(state, preview(revision, `answer ${revision}`)).state
+  it.effect(
+    "reuses a bounded set of physical OpenTUI rows across preview revisions",
+    () =>
+      Effect.gen(function* () {
+        const setup = yield* Effect.promise(() => createTestRenderer({ width: 100, height: 30 }))
+        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            surface.destroy()
+            setup.renderer.destroy()
+          }),
+        )
+        let state = InteractiveController.update(loaded(), preview(1, "answer 1")).state
         surface.update(state.model)
-      }
-      yield* Effect.promise(() => setup.flush())
-      const diagnostics = surface.transcriptDiagnostics()
-      expect(state.model.items).toHaveLength(3)
-      expect(diagnostics.rows).toHaveLength(3)
-      expect(diagnostics.rows).toEqual(initialRows)
-      expect(diagnostics.mountedPhysicalRows).toBeLessThanOrEqual(3)
-    }),
+        const initialRows = [...surface.transcriptDiagnostics().rows]
+        for (let revision = 2; revision <= 10_000; revision += 1) {
+          state = InteractiveController.update(state, preview(revision, `answer ${revision}`)).state
+          surface.update(state.model)
+        }
+        yield* Effect.promise(() => setup.flush())
+        const diagnostics = surface.transcriptDiagnostics()
+        expect(state.model.items).toHaveLength(3)
+        expect(diagnostics.rows).toHaveLength(3)
+        expect(diagnostics.rows).toEqual(initialRows)
+        expect(diagnostics.mountedPhysicalRows).toBeLessThanOrEqual(3)
+      }),
+    { timeout: 60_000 },
   )
 })

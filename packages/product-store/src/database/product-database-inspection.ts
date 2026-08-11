@@ -1,6 +1,11 @@
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { additions, knownObjectShapes, schemaFingerprint, schemaObjects as productSchemaObjects } from "./product-schema"
+import {
+  additions,
+  knownObjectShapes,
+  schemaFingerprint,
+  schemaObjects as productSchemaObjects,
+} from "./product-schema"
 import { ProductDatabaseError } from "./product-database-layer"
 
 const SchemaObject = Schema.Struct({
@@ -51,8 +56,7 @@ export const validateKnown = (state: Effect.Success<ReturnType<typeof inspectDat
      * rewritten by the upgrade.
      */
     if (missing.length > 0) {
-      if (!missing.every((key) => additions.some((addition) => addition.name === key)))
-        return yield* fail(incompatible)
+      if (!missing.every((key) => additions.some((addition) => addition.name === key))) return yield* fail(incompatible)
       const upgradable = knownObjectShapes.some(
         (shape) =>
           shape.objects.length === actual.size &&

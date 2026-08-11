@@ -385,9 +385,10 @@ const make: Effect.Effect<AgentPort["Service"], never, ArtifactStore> = Effect.g
               ),
             ),
             Effect.map(([messages, settlements]) => {
+              const settlementIds = new Set(settlements.map((entry) => entry.notificationId))
               const afterSequence = input.afterSequence ?? -1
               const messageEntries: ReadonlyArray<typeof InboxEntry.Type> = messages.flatMap((entry) =>
-                entry.sequence <= afterSequence
+                entry.sequence <= afterSequence || settlementIds.has(entry.entryId)
                   ? []
                   : [
                       {

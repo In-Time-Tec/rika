@@ -172,11 +172,14 @@ it.layer(BunServices.layer)("product database", (test) => {
         const reopened = yield* Layer.build(layer(filename))
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
-          const rows = yield* sql`SELECT name FROM sqlite_schema WHERE name IN ('rika_goals', 'rika_thread_deletion_outbox', 'rika_tombstoned_thread_turn_insert')`
+          const rows =
+            yield* sql`SELECT name FROM sqlite_schema WHERE name IN ('rika_goals', 'rika_thread_deletion_outbox', 'rika_tombstoned_thread_turn_insert')`
           expect(rows).toHaveLength(3)
         }).pipe(Effect.provide(reopened))
       }),
     ),
+  )
+
   test.effect("upgrades the exact released predecessor schema with its data and identity, and refuses drift", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -207,7 +210,8 @@ it.layer(BunServices.layer)("product database", (test) => {
         const reopened = yield* Layer.build(layer(filename))
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
-          const names = yield* sql`SELECT name FROM sqlite_schema WHERE name LIKE 'rika_thread_deletion_outbox' OR name LIKE 'rika_tombstoned_thread_turn_insert'`
+          const names =
+            yield* sql`SELECT name FROM sqlite_schema WHERE name LIKE 'rika_thread_deletion_outbox' OR name LIKE 'rika_tombstoned_thread_turn_insert'`
           expect(names).toHaveLength(2)
           const rows = yield* sql`SELECT workspace FROM rika_threads WHERE id = 't1'`
           expect(rows).toEqual([{ workspace: "/preserved" }])
@@ -239,6 +243,5 @@ it.layer(BunServices.layer)("product database", (test) => {
         ).toEqual([{ path: "/drift" }])
       }),
     ),
-  )
   )
 })

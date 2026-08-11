@@ -11,7 +11,7 @@ import { ProviderCredentialStore, type ProviderCredentialStoreShape } from "@rik
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 export type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 export type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
-import { Cause, Context, Deferred, Effect, Layer, Option, Schema, Stream } from "effect"
+import { Cause, Context, Deferred, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
 import type { AgentToolHandlers, KernelOptions } from "./baton-route-options"
 import { configure, makeResolver } from "./baton-route"
 import * as PreviewAdapter from "./baton-preview-adapter"
@@ -122,6 +122,57 @@ const make = (
   Effect.gen(function* () {
     const runtime = yield* Runtime.Runtime
     if (durableRuntimeSlot !== undefined) yield* Deferred.succeed(durableRuntimeSlot, runtime)
+    // A replayPolicy:"never" operation interrupted by cancellation parks the Run in
+    // `needs-resolution` until it is explicitly resolved. Baton cannot decide the outcome of a
+    // side-effecting operation on its own, so the product settles it as Failed and lets the Run
+    // reach its terminal state. Idempotent and restart-safe: resolving an already-resolved
+    // operation is a no-op, and the operation id is recovered from durable history.
+    const resolveParkedOperations = (runId: string, reason: string) =>
+      Effect.gen(function* () {
+        const inspection = yield* RunTree.inspect(runId).pipe(Effect.provideService(Runtime.Runtime, runtime))
+        const parked = inspection.runs.filter(({ run }) => run.status === "needs-resolution")
+        if (parked.length === 0) return
+        yield* Effect.forEach(
+          parked,
+          ({ run }) =>
+            runtime.history({ runId: run.runId, limit: 512 }).pipe(
+              Effect.map((events) =>
+                events.flatMap((event) => (event._tag === "OperationUnknown" ? [event.operationId] : [])),
+              ),
+              Effect.flatMap((operationIds) =>
+                Effect.forEach(
+                  [...new Set(operationIds)],
+                  (operationId) =>
+                    runtime.resolveOperation({
+                      runId: run.runId,
+                      operationId,
+                      idempotencyKey: `${operationId}:cancelled`,
+                      resolution: {
+                        _tag: "Failed",
+                        error: { _tag: "OperationInterrupted", message: reason },
+                      },
+                    }),
+                  { discard: true },
+                ),
+              ),
+            ),
+          { discard: true },
+        )
+      }).pipe(Effect.ignore)
+
+    // Cancellation is only complete once the Run is terminal. A parked Run is resolved and then
+    // re-checked, because the park may be recorded after `cancel` returns.
+    const awaitSettledCancellation = (runId: string, reason: string) =>
+      resolveParkedOperations(runId, reason).pipe(
+        Effect.andThen(RunTree.inspect(runId).pipe(Effect.provideService(Runtime.Runtime, runtime))),
+        Effect.map((inspection) =>
+          inspection.runs.some(({ run }) => run.status === "needs-resolution" || run.status === "cancelling"),
+        ),
+        Effect.flatMap((pending) => (pending ? Effect.fail("pending" as const) : Effect.void)),
+        Effect.retry({ times: 40, schedule: Schedule.spaced("100 millis") }),
+        Effect.ignore,
+      )
+
     const respondToApproval = (
       decision: "approve" | "deny",
       link: ExecutionGateway.ExecutionLink,
