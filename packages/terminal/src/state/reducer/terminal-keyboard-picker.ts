@@ -4,7 +4,7 @@ import type { Message } from "../model/terminal-message"
 import type { Model } from "../model/terminal-state"
 import { idle } from "../model/terminal-loadable-state"
 import { filteredFiles, filteredThreads } from "../model/terminal-thread-navigation"
-import { filter, type PaletteAction } from "../../presentation/terminal/command-palette"
+import { filter } from "../../presentation/terminal/command-palette"
 import { isPrintable, type Key } from "../../presentation/terminal/terminal-keymap"
 import { expandPastedText } from "../model/terminal-composer-paste"
 
@@ -217,7 +217,7 @@ const reduceKeyboardPickerImpl = (
       selected = Math.max(0, Math.min(results.length - 1, model.palette.selected + 1))
     }
     if (key.name === "return") {
-      const action = results[selected]?.action as PaletteAction | undefined
+      const action = results[selected]?.action
       if (action === undefined) return { ...model, palette: { ...model.palette, selected: 0 } }
       if (action._tag === "OpenModePicker")
         return model.busy
@@ -239,6 +239,7 @@ const reduceKeyboardPickerImpl = (
           palette: { open: false, query: "", selected: 0 },
           threadSwitcher: { open: true, query: "", selected: 0, kind: "switch", previewScroll: 0 },
         }
+      if (action._tag === "ToggleContextDetails") return update(model, { _tag: "ContextDetailsToggled" })
       if (action._tag === "ToggleFastMode")
         return {
           ...model,

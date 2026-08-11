@@ -144,6 +144,14 @@ test("executes every focused palette action", () => {
   model = update(model, { _tag: "KeyPressed", key: key({ name: "escape" }) })
 
   model = update(model, { _tag: "KeyPressed", key: key({ name: "o", ctrl: true }) })
+  for (const character of "usage")
+    model = update(model, { _tag: "KeyPressed", key: key({ name: character, sequence: character }) })
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
+  expect(model.contextDetailsOpen).toBe(true)
+  expect(model.pendingAction).toBeUndefined()
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "escape" }) })
+
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "o", ctrl: true }) })
   for (const character of "fast")
     model = update(model, { _tag: "KeyPressed", key: key({ name: character, sequence: character }) })
   model = update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })

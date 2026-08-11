@@ -78,8 +78,11 @@ test(
         expect(palette).toContain("switch")
         expect(palette).toContain("toggle fast mode")
         expect(palette).toContain("quit")
+        yield* Effect.promise(() => app.type("usage"))
+        app.pressEnter()
+        yield* app.waitFrame("Context & Usage")
         app.pressEscape()
-        yield* app.waitGone("Command Palette")
+        yield* app.waitGone("Context & Usage")
 
         yield* app.quit
       }),
