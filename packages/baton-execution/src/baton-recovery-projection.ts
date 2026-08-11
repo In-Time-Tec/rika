@@ -18,8 +18,6 @@ export const eventNotice = (event: Readonly<Record<string, unknown>>): CellNotic
   switch (event._tag) {
     case "KernelStarting":
       return { kind: "starting", detail: "Starting the kernel." }
-    case "KernelReady":
-      return { kind: "ready", detail: `Kernel ready at profile ${optionalString(event.profileDigest)}.` }
     case "KernelRestarted":
       return {
         kind: "restarted",

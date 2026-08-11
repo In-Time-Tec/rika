@@ -478,12 +478,21 @@ const checkSourceBasename = (filePath: string) => {
       "index basenames are not semantic module names",
       "Rename the module to its domain role",
     )
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+){1,4}\.(?:tsx?|mts|cts)$/.test(basename) && !basename.endsWith(".test.ts"))
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+){0,4}\.(?:tsx?|mts|cts)$/.test(basename) && !basename.endsWith(".test.ts"))
     return diagnostic(
       filePath,
       "basename",
-      "source basename is not two-to-five-word kebab case",
+      "source basename is not one-to-five-word kebab case",
       "Rename the file to a descriptive semantic role",
+    )
+  const stem = basename.replace(/\.(?:tsx?|mts|cts)$/, "")
+  const parent = filePath.split("/").filter(Boolean).at(-2)
+  if (parent !== undefined && stem === parent)
+    return diagnostic(
+      filePath,
+      "basename-echo",
+      `"${stem}" repeats its enclosing directory name`,
+      "Drop the echo; the directory already names it",
     )
   return undefined
 }
