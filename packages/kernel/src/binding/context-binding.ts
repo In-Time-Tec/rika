@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import { Session, SessionHistory, ToolContext } from "@batonfx/core"
+import { Prompt, Session, SessionHistory, ToolContext } from "@batonfx/core"
 import type { HostBindingRegistry } from "@batonfx/repl"
 import { operation } from "./nested-operation-envelope"
 
@@ -51,29 +51,27 @@ const SearchInput = Schema.Struct({
   limit: Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(200)),
 })
 
+const textOfMessage = (message: Prompt.Message): string => {
+  const content = message.content
+  return typeof content === "string"
+    ? content
+    : content
+        .flatMap((part) => {
+          if (part.type === "text" || part.type === "reasoning") return [part.text]
+          if (part.type === "tool-call") return [`${part.name}(${JSON.stringify(part.params)})`]
+          if (part.type === "tool-result") return [JSON.stringify(part.result)]
+          return []
+        })
+        .join("\n")
+}
+
 const textOf = (entry: Session.Entry): string => {
-  if (entry._tag === "Message" || entry._tag === "Steering") {
-    const content = entry.message.content
-    return typeof content === "string"
-      ? content
-      : content
-          .flatMap((part) => {
-            /**
-             * An assistant turn is mostly reasoning and tool calls, and keeping only `text` rendered
-             * a model's own history as a column of empty messages. What it thought and what it
-             * called is the part worth reading back.
-             */
-            if (part.type === "text" || part.type === "reasoning") return [part.text]
-            if (part.type === "tool-call") return [`${part.name}(${JSON.stringify(part.params)})`]
-            return []
-          })
-          .join("\n")
-  }
+  if (entry._tag === "Message" || entry._tag === "Steering") return textOfMessage(entry.message)
   if (entry._tag === "ToolCall") return JSON.stringify(entry.part.params)
   if (entry._tag === "ToolResult") return JSON.stringify(entry.part.result)
   if (entry._tag === "Memory") return entry.items.join("\n")
   if (entry._tag === "Skill") return entry.name
-  if (entry._tag === "Handoff") return entry.summary
+  if (entry._tag === "Handoff") return entry.projectedHistory.content.map(textOfMessage).filter(Boolean).join("\n")
   if (entry._tag === "BranchSummary") return entry.summary
   return entry.summary ?? ""
 }

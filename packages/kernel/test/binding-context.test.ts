@@ -20,6 +20,38 @@ const compaction = (id: string, summary: string): Session.Entry => ({
   summary,
 })
 
+const handoff = (id: string): Session.Entry => ({
+  _tag: "Handoff",
+  id,
+  parentId: null,
+  handoffId: "handoff-1",
+  target: "specialist",
+  projectedHistory: Prompt.fromMessages([
+    Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "handoff question" })] }),
+    Prompt.makeMessage("assistant", {
+      content: [
+        Prompt.makePart("reasoning", { text: "handoff reasoning" }),
+        Prompt.makePart("tool-call", {
+          id: "call-1",
+          name: "typescript",
+          params: { code: "inspect()" },
+          providerExecuted: false,
+        }),
+      ],
+    }),
+    Prompt.makeMessage("tool", {
+      content: [
+        Prompt.makePart("tool-result", {
+          id: "call-1",
+          name: "typescript",
+          isFailure: false,
+          result: { answer: "handoff result" },
+        }),
+      ],
+    }),
+  ]),
+})
+
 interface Recorder {
   readonly appended: Array<unknown>
   readonly service: Session.Interface
@@ -113,6 +145,50 @@ describe("context binding", () => {
       const mounted = yield* registry(sessionStore([message("1", "a"), compaction("2", "summarised")]))
       const response = yield* mounted.invoke({ module: "context", operation: "compactions", input: {} })
       expect(response).toEqual({ _tag: "Success", output: [{ id: "2", summary: "summarised" }] })
+    }),
+  )
+
+  it.effect("reads and searches the authoritative conversation projected by a handoff", () =>
+    Effect.gen(function* () {
+      const mounted = yield* registry(sessionStore([handoff("1")]))
+      const page = yield* mounted.invoke({ module: "context", operation: "historyPage", input: { limit: 1 } })
+      expect(page).toEqual({
+        _tag: "Success",
+        output: {
+          entries: [
+            {
+              id: "1",
+              parentId: null,
+              kind: "Handoff",
+              text: 'handoff question\nhandoff reasoning\ntypescript({"code":"inspect()"})\n{"answer":"handoff result"}',
+            },
+          ],
+          hasBefore: false,
+          hasAfter: false,
+          firstEntryId: "1",
+          lastEntryId: "1",
+        },
+      })
+
+      const found = yield* mounted.invoke({
+        module: "context",
+        operation: "searchHistory",
+        input: { query: "HANDOFF RESULT", limit: 1 },
+      })
+      expect(found).toEqual({
+        _tag: "Success",
+        output: {
+          entries: [
+            {
+              id: "1",
+              parentId: null,
+              kind: "Handoff",
+              text: 'handoff question\nhandoff reasoning\ntypescript({"code":"inspect()"})\n{"answer":"handoff result"}',
+            },
+          ],
+          hasMore: false,
+        },
+      })
     }),
   )
 
