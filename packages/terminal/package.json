@@ -13,7 +13,8 @@
     "./terminal-state-reducer": "./src/state/reducer/terminal-state-reducer.ts",
     "./terminal-timeline-bounds": "./src/state/model/terminal-timeline-bounds.ts",
     "./terminal-transcript-presentation": "./src/presentation/transcript/terminal-transcript-presentation.ts",
-    "./transcript-viewport": "./src/presentation/transcript/transcript-viewport.ts"
+    "./transcript-viewport": "./src/presentation/transcript/transcript-viewport.ts",
+    "./terminal-submission-state": "./src/state/model/terminal-submission-state.ts"
   },
   "dependencies": {
     "@opentui/core": "catalog:",
