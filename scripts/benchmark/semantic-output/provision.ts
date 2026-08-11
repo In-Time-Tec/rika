@@ -155,7 +155,7 @@ export const setup = (input: {
   if (!HostFiles.exists(HostFiles.join(sourceOld, ".git")))
     run(["git", "worktree", "add", "--detach", sourceOld, "v0.5.3"], repositoryRoot)
   if (
-    run(["git", "rev-parse", "HEAD"], sourceOld).trim() !== run(["git", "rev-parse", "v0.5.3"], repositoryRoot).trim()
+    run(["git", "rev-parse", "HEAD"], sourceOld).trim() !== run(["git", "rev-parse", "v0.5.3^{commit}"], repositoryRoot).trim()
   )
     throw new Error("baseline source worktree is not detached at v0.5.3")
 
