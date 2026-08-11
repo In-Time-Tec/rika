@@ -15,6 +15,7 @@ const withEpoch = (event: RuntimeEvent, epoch: number): RuntimeEvent => {
     case "TurnSettled":
     case "ContextDiagnostics":
     case "ExecutionFailed":
+    case "SubmissionRejected":
     case "ExecutionControlFailed":
     case "ExecutionControlled":
       return { ...event, selectionEpoch: epoch }

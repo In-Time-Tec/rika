@@ -126,6 +126,12 @@ export type InteractiveEvent =
       readonly submissionId?: string
     }
   | {
+      readonly _tag: "SubmissionRejected"
+      readonly selectionEpoch: number
+      readonly message: string
+      readonly submissionId?: string
+    }
+  | {
       readonly _tag: "SelectionLoaded"
       readonly selectionEpoch: number
       readonly activitySequence: number
@@ -291,6 +297,12 @@ export const InteractiveEventSchema = Schema.Union([
     threadId: Thread.ThreadId,
     turnId: Turn.TurnId,
     status: Schema.Literals(["active", "queued"]),
+    submissionId: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("SubmissionRejected"),
+    selectionEpoch: Schema.Int,
+    message: Schema.String,
     submissionId: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({

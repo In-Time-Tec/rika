@@ -434,7 +434,20 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
       .pipe(
         Effect.provide(executionDependencies),
         Effect.scoped,
-        Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error, undefined, observerTurn?.id))),
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            if (observerTurn !== undefined) {
+              dispatchFailure(dispatch, error, undefined, observerTurn.id)
+              return
+            }
+            emitEvent(input, dispatch, {
+              _tag: "SubmissionRejected",
+              selectionEpoch: 0,
+              message: makeFailure(error).message,
+              ...(submissionId === undefined ? {} : { submissionId }),
+            })
+          }),
+        ),
         Effect.ensuring(
           Effect.suspend(() =>
             observerTurn === undefined || executionLaunched

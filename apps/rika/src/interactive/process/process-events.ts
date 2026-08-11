@@ -78,6 +78,12 @@ export const makeEventRouter = (runtime: Runtime) => {
           status: event.status,
           ...(event.submissionId === undefined ? {} : { submissionId: event.submissionId }),
         })
+    } else if (event._tag === "SubmissionRejected") {
+      loop.model = update(loop.model, {
+        _tag: "SubmissionRejected",
+        message: event.message,
+        ...(event.submissionId === undefined ? {} : { submissionId: event.submissionId }),
+      })
     } else if (event._tag === "ThreadsListed") {
       loop.model = update(loop.model, {
         _tag: "ThreadsReplaced",
@@ -200,6 +206,7 @@ export const makeEventRouter = (runtime: Runtime) => {
       event._tag === "ContextDiagnostics" ||
         event._tag === "TurnRetryScheduled" ||
         event._tag === "ExecutionFailed" ||
+        event._tag === "SubmissionRejected" ||
         event._tag === "QueueFull" ||
         event._tag === "ExecutionControlled",
     )

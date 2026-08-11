@@ -485,6 +485,7 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       case "ContextDiagnostics":
       case "TurnRetryScheduled":
       case "ExecutionFailed":
+      case "SubmissionRejected":
       case "ExecutionControlFailed":
       case "QueueFull":
       case "SubmissionAdmitted":

@@ -45,6 +45,7 @@ export const isCritical = (event: InteractiveEvent): boolean => {
     case "ContextDiagnostics":
     case "ExecutionControlFailed":
     case "ExecutionFailed":
+    case "SubmissionRejected":
     case "QueueFull":
     case "ShellCompleted":
     case "ExecutionControlled":
@@ -106,6 +107,7 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
     case "ContextDiagnostics":
     case "ExecutionControlFailed":
     case "ExecutionFailed":
+    case "SubmissionRejected":
     case "QueueFull":
     case "ShellCompleted":
     case "ExecutionControlled":
