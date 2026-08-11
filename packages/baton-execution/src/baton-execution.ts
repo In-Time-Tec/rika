@@ -12,8 +12,8 @@ export type { ProviderCredentialStoreShape } from "@rika/product/provider-creden
 import { Cause, Context, Deferred, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
 import type { AgentToolHandlers, KernelOptions } from "./baton-route-options"
 import { configure, makeResolver } from "./baton-route"
-import { batchProjectionEvents } from "./baton-projection-batching"
-import { TreeProjector, titleInvocationId } from "./baton-tree-projector"
+import { batchProjectionEvents } from "./projection/batching"
+import { TreeProjector, titleInvocationId } from "./projection/tree"
 
 export type AgentToolServices = AgentToolHandlers
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { TreeProjector } from "../src/baton-tree-projector"
+import { TreeProjector } from "../src/projection/tree"
 import { modelPart, resetEventPosition, treeEvent } from "./baton-projector-event-fixtures"
 
 describe("Baton tree projector parent attribution", () => {

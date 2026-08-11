@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "@effect/vitest"
 import { Effect, Fiber, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import { batchProjectionEvents } from "../src/baton-projection-batching"
-import { TreeProjector } from "../src/baton-tree-projector"
+import { batchProjectionEvents } from "../src/projection/batching"
+import { TreeProjector } from "../src/projection/tree"
 import { modelPart, resetEventPosition, treeEvent } from "./baton-projector-event-fixtures"
 
 const cellCall = (id: string) => ({

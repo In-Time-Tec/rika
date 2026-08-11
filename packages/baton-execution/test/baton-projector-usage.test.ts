@@ -1,7 +1,7 @@
 import { RunTree, type RunEvent } from "@batonfx/runtime"
 import { DateTime } from "effect"
 import { describe, expect, it } from "@effect/vitest"
-import { TreeProjector } from "../src/baton-tree-projector"
+import { TreeProjector } from "../src/projection/tree"
 
 let position = 0
 const treeEvent = (

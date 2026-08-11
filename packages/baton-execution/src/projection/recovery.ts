@@ -1,5 +1,5 @@
 import type { Block } from "@rika/product/execution-transcript-contract"
-import { optionalString, record, string } from "./baton-projector-values"
+import { optionalString, record, string } from "./values"
 
 type Cell = Extract<Block, { readonly _tag: "Cell" }>
 export type CellNotice = Cell["notices"][number]

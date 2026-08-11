@@ -1,6 +1,6 @@
 import type { Unit } from "@rika/product/execution-transcript-contract"
-import { type Node } from "./baton-projector-model"
-import { textLimit } from "./baton-projector-values"
+import { type Node } from "./model"
+import { textLimit } from "./values"
 
 export interface StreamedTextProjection {
   readonly assistant: (node: Node, delta: string) => void

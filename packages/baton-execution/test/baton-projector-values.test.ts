@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { bounded, boundedHead } from "../src/baton-projector-values"
+import { bounded, boundedHead } from "../src/projection/values"
 
 describe("projector value bounds", () => {
   it("keeps the tail for streamed text so the newest content survives", () => {

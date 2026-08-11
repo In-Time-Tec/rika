@@ -1,12 +1,12 @@
 import type { Block } from "@rika/product/execution-transcript-contract"
-import { bounded, optionalString, record, string } from "./baton-projector-values"
-import { cellTextLimit } from "./baton-cell-projection"
+import { bounded, optionalString, record, string } from "./projection/values"
+import { cellTextLimit } from "./projection/cell"
 import {
   cellExecutionFailedTag,
   cellOutcomeUnknownTag,
   kernelProtocolViolationTag,
   kernelUnavailableTag,
-} from "./baton-recovery-projection"
+} from "./projection/recovery"
 
 type Cell = Extract<Block, { readonly _tag: "Cell" }>
 

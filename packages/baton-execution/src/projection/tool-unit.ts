@@ -1,8 +1,8 @@
 import type { Block, Unit } from "@rika/product/execution-transcript-contract"
-import { makeTool } from "./baton-tool-projection"
-import { type Node, type ToolState } from "./baton-projector-model"
-import { bounded } from "./baton-projector-values"
-import { projectorNames, toolTextLimit } from "./baton-projector-values"
+import { makeTool } from "./tool"
+import { type Node, type ToolState } from "./model"
+import { bounded } from "./values"
+import { projectorNames, toolTextLimit } from "./values"
 
 export interface ToolUnitProjection {
   readonly toolState: (node: Node, rawId: string) => ToolState

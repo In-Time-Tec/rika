@@ -1,6 +1,6 @@
 import type { RunTree } from "@batonfx/runtime"
 import { Effect, Schedule, Sink, Stream } from "effect"
-import { cellToolName } from "./baton-cell-projection"
+import { cellToolName } from "./cell"
 
 export const projectionBatchSize = 256
 export const projectionBatchWindow = "25 millis"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { Block } from "@rika/product/execution-transcript-contract"
-import { TreeProjector } from "../src/baton-tree-projector"
+import { TreeProjector } from "../src/projection/tree"
 import { block, modelPart, resetEventPosition, treeEvent } from "./baton-projector-event-fixtures"
 
 type Cell = Extract<Block, { readonly _tag: "Cell" }>

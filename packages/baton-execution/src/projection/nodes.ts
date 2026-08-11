@@ -1,6 +1,6 @@
 import { Function } from "effect"
-import type { Node } from "./baton-projector-model"
-import type { PersistedProjector } from "./baton-projector-persistence"
+import type { Node } from "./model"
+import type { PersistedProjector } from "./persistence"
 
 export const subagentCardStatus = (status: Node["status"]): "running" | "complete" | "failed" | "cancelled" => {
   if (status === "completed") return "complete"
