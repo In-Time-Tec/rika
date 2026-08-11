@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as Thread from "@rika/product/thread-record"
+import type { Projection } from "@rika/product/transcript-page"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
@@ -65,9 +66,84 @@ it.effect("returns stored terminal state and units when checkpoint resume yields
       status: "completed",
       state: { status: "completed" },
       units: [{ content: { text: "stored answer" } }],
-      changes: [],
       checkpoint: { cursor: "stored-cursor" },
     })
+  }),
+)
+
+it.effect("commits and delivers each live change once without retaining or redelivering completion", () =>
+  Effect.gen(function* () {
+    const running: ExecutionProjection.Change = {
+      _tag: "ProjectionSnapshot",
+      revision: 1,
+      checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "running", state: "{}" },
+      units: [],
+      hasOlder: false,
+      state: {
+        status: "running",
+        usage: ExecutionProjection.emptyUsageState(),
+        steering: { steeringMessages: 0, followUpMessages: 0 },
+      },
+    }
+    const completed: ExecutionProjection.Change = {
+      _tag: "ProjectionPatch",
+      baseRevision: 1,
+      revision: 2,
+      checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "completed", state: "{}" },
+      upsert: [],
+      remove: [],
+      state: {
+        status: "completed",
+        usage: ExecutionProjection.emptyUsageState(),
+        steering: { steeringMessages: 0, followUpMessages: 0 },
+      },
+    }
+    let stored: Projection | undefined
+    const commits: Array<ExecutionProjection.Change> = []
+    let watches = 0
+    const owner = yield* make(
+      { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
+      {
+        get: () => Effect.succeed(stored),
+        commitProjection: (_turn, change) =>
+          Effect.sync(() => {
+            commits.push(change)
+            stored = {
+              turn,
+              units: [],
+              checkpointGeneration: commits.length,
+              revision: change.revision,
+              state: change.state,
+              ...(change.checkpoint === undefined ? {} : { projectorCheckpoint: change.checkpoint }),
+              projectionVersion: ExecutionProjection.projectionVersion,
+            }
+            return "committed" as const
+          }),
+      } as TranscriptRepository.Interface,
+      {
+        watchTurn: () => {
+          watches += 1
+          return watches === 1 ? Stream.fromIterable([running, completed]) : Stream.empty
+        },
+      } as ExecutionGateway.Interface,
+    )
+    const delivered: Array<ExecutionProjection.Change> = []
+    const first = yield* owner.watchTurn(turn.id, (change) => delivered.push(change))
+    expect(commits).toEqual([running, completed])
+    expect(delivered).toEqual([running, completed])
+    expect(first).toMatchObject({
+      status: "completed",
+      state: { status: "completed" },
+      checkpoint: { cursor: "completed" },
+    })
+    expect(Object.hasOwn(first, "changes")).toBe(false)
+
+    const completionDeliveries: Array<ExecutionProjection.Change> = []
+    const resumed = yield* owner.watchTurn(turn.id, (change) => completionDeliveries.push(change))
+    expect(completionDeliveries).toEqual([])
+    expect(commits).toHaveLength(2)
+    expect(resumed.status).toBe("completed")
+    expect(Object.hasOwn(resumed, "changes")).toBe(false)
   }),
 )
 

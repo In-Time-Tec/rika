@@ -111,7 +111,6 @@ interface SettleInteractiveSubmissionState {
   readonly thread: Thread.Thread
   readonly turn: Turn.AgentExecutionTurn
   readonly outcome: Exit.Exit<ExecutionProjection.Result | undefined, unknown>
-  readonly publish: (change: ExecutionProjection.Change) => void
   readonly dispatch: (event: InteractiveEvent) => void
   readonly retry?: { readonly attempt: number; readonly sourceTurnId: string }
 }
@@ -121,7 +120,7 @@ const settleInteractiveSubmissionImpl = (
   state: SettleInteractiveSubmissionState,
 ) => {
   const { setTurnStatus, settleThread } = input
-  const { thread, turn, outcome, publish, dispatch, retry } = state
+  const { thread, turn, outcome, dispatch, retry } = state
   return Effect.uninterruptible(
     Effect.gen(function* () {
       if (outcome._tag === "Failure") {
@@ -146,7 +145,6 @@ const settleInteractiveSubmissionImpl = (
         yield* settleThread(thread, dispatch)
         return { _tag: "settled" }
       }
-      for (const change of result.changes) publish(change)
       yield* setTurnStatus(turn.id, result.status, yield* Clock.currentTimeMillis)
       if (result.status === "waiting" || result.status === "running" || result.status === "cancelling")
         return { _tag: "settled" }
@@ -205,12 +203,8 @@ const executeInteractiveSubmissionImpl = (
     let sourceTurnId = turn.id
     let submission = submissionId
     for (;;) {
-      const delivered = new Set<string>()
       const startedAt = clock.currentTimeMillisUnsafe()
       const publish = (change: ExecutionProjection.Change) => {
-        const key = `${change._tag}:${change.revision}`
-        if (delivered.has(key)) return
-        delivered.add(key)
         emitEvent(input, dispatch, {
           _tag: "ExecutionProjectionChanged",
           threadId: thread.id,
@@ -260,7 +254,6 @@ const executeInteractiveSubmissionImpl = (
         thread,
         turn: current,
         outcome,
-        publish,
         dispatch,
         retry: { attempt, sourceTurnId },
       })

@@ -135,7 +135,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           })
         const executionLink = turn.executionLink
         const projection = yield* transcripts.get(turnId)
-        const changes: Array<ExecutionProjection.Change> = []
+        let latestChange: ExecutionProjection.Change | undefined
         yield* backend
           .watchTurn(executionLink, {
             prompt: turn.prompt,
@@ -150,15 +150,16 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
                   return yield* TranscriptRepository.RepositoryError.make({
                     message: `Turn ${turnId} projection revision is stale`,
                   })
-                changes.push(change)
+                latestChange = change
                 onChange?.(change)
               }),
             ),
           )
-        const last = changes.at(-1)
         const stored = yield* transcripts.get(turnId)
         const checkpoint =
-          last?._tag === "ProjectionPatch" ? last.checkpoint : (last?.checkpoint ?? stored?.projectorCheckpoint)
+          latestChange?._tag === "ProjectionPatch"
+            ? latestChange.checkpoint
+            : (latestChange?.checkpoint ?? stored?.projectorCheckpoint)
         const fallbackStatus =
           turn.status === "completed" ||
           turn.status === "failed" ||
@@ -167,7 +168,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           turn.status === "cancelling"
             ? turn.status
             : "running"
-        const state = last?.state ??
+        const state = latestChange?.state ??
           stored?.state ??
           (yield* Effect.option(backend.inspectTurn(executionLink)).pipe(
             Effect.map((inspection) =>
@@ -193,7 +194,6 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           status: state.status,
           state,
           units: stored?.units ?? [],
-          changes,
           ...(checkpoint === undefined ? {} : { checkpoint }),
         }
       }),

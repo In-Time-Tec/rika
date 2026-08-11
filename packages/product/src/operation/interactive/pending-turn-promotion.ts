@@ -123,7 +123,6 @@ export const promotePendingTurns = (input: {
       never
     > =>
       Effect.gen(function* () {
-        const delivered = new Set<string>()
         const prepared = yield* input.prepareExecution(turn, input.thread.workspace, false)
         if (prepared.messages.length > 0)
           input.emit(input.dispatch, {
@@ -155,9 +154,6 @@ export const promotePendingTurns = (input: {
         })
         const clock = yield* Clock.Clock
         const publish = (change: ExecutionProjection.Change) => {
-          const key = `${change._tag}:${change.revision}`
-          if (delivered.has(key)) return
-          delivered.add(key)
           input.emit(input.dispatch, {
             _tag: "ExecutionProjectionChanged",
             threadId: input.thread.id,
@@ -166,7 +162,6 @@ export const promotePendingTurns = (input: {
           })
         }
         const result = yield* input.owner.watchTurn(turn.id, publish)
-        for (const change of result.changes) publish(change)
         if (result.status === "failed") {
           const failure = turnFailure(result.units)
           const retryable = failure?.retryable ?? false
@@ -188,7 +183,6 @@ export const promotePendingTurns = (input: {
     const runPromoted = (claim: TurnQueuePromotion.QueueClaim) =>
       Effect.gen(function* () {
         const promoted = claim.turn
-        const delivered = new Set<string>()
         const outcome = yield* Effect.gen(function* () {
           const prepared = yield* input.prepareExecution(promoted, input.thread.workspace, false)
           if (prepared.messages.length > 0)
@@ -223,9 +217,6 @@ export const promotePendingTurns = (input: {
           })
           const clock = yield* Clock.Clock
           const publish = (change: ExecutionProjection.Change) => {
-            const key = `${change._tag}:${change.revision}`
-            if (delivered.has(key)) return
-            delivered.add(key)
             input.emit(input.dispatch, {
               _tag: "ExecutionProjectionChanged",
               threadId: input.thread.id,
@@ -234,7 +225,6 @@ export const promotePendingTurns = (input: {
             })
           }
           const result = yield* input.owner.watchTurn(promoted.id, publish)
-          for (const change of result.changes) publish(change)
           return result
         }).pipe(
           Effect.map((value) => ({ _tag: "Success" as const, value })),

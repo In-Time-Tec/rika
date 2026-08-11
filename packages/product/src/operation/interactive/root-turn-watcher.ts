@@ -54,12 +54,8 @@ export const watchRootTurn = (input: {
     if (!ThreadResult.TurnResult.isAgentExecution(turn))
       return yield* operationError(`Recorded shell turn ${input.turnId} cannot be watched as an execution`)
     const thread = yield* input.threadForTurn(turn)
-    const delivered = new Set<string>()
     const clock = yield* Clock.Clock
     const publish = (change: ExecutionProjection.Change) => {
-      const key = `${change._tag}:${change.revision}`
-      if (delivered.has(key)) return
-      delivered.add(key)
       input.dispatch({
         _tag: "ExecutionProjectionChanged",
         threadId: turn.threadId,
@@ -68,7 +64,6 @@ export const watchRootTurn = (input: {
       })
     }
     const result = yield* input.owner.watchTurn(turn.id, publish)
-    for (const change of result.changes) publish(change)
     if (turn.status !== result.status) yield* input.setTurnStatus(turn.id, result.status, yield* input.now)
     if (isTerminalStatus(result.status)) yield* input.settleThread(thread, input.dispatch)
   })

@@ -32,6 +32,5 @@ export interface Result {
   readonly status: ProjectionState["status"]
   readonly state: ProjectionState
   readonly units: ReadonlyArray<TranscriptUnit.Unit>
-  readonly changes: ReadonlyArray<Change>
   readonly checkpoint?: Checkpoint
 }

@@ -50,14 +50,10 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
       const clock = yield* Clock.Clock
       const startedAt = clock.currentTimeMillisUnsafe()
       const changes = new Array<ExecutionProjection.Change>()
-      const delivered = new Set<string>()
       const units = new Map<string, import("@rika/transcript/transcript-unit").Unit>()
       let projectionRevision: number | undefined
       let projectionInvalid = false
       const applyChange = (change: ExecutionProjection.Change) => {
-        const key = `${change._tag}:${change.revision}`
-        if (delivered.has(key)) return
-        delivered.add(key)
         changes.push(change)
         if (change._tag === "ProjectionSnapshot") {
           units.clear()
@@ -108,7 +104,6 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
           ...(isReviewRouteMode(turn.executionRoute.mode) ? { reviewIntent: reviewIntent(turn.prompt) } : {}),
         })
         const result = yield* dependencies.rootTurnOwner.watchTurn(turn.id, applyChange)
-        for (const change of result.changes) applyChange(change)
         if (projectionInvalid)
           return yield* dependencies.operationError(`Turn ${turn.id} produced a non-contiguous projection`)
         return result
