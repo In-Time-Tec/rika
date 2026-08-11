@@ -11,6 +11,7 @@ export interface Overlay {
   readonly turnId: string
   readonly preview: ExecutionGateway.ModelPreviewed
   readonly identity: string
+  readonly baselineAuthoritativeUnitKeys: ReadonlySet<string>
   readonly retiredIdentities: ReadonlyArray<string>
 }
 
@@ -37,15 +38,43 @@ const bounded = (preview: ExecutionGateway.ModelPreviewed): ExecutionGateway.Mod
   return { ...preview, text, reasoning, truncated: true }
 }
 
+const authoritative = (unit: TranscriptUnit.Unit): boolean => {
+  if (unit.content._tag === "Entry") return unit.content.role === "assistant"
+  const tag = unit.content.block._tag
+  return (
+    tag === "Reasoning" ||
+    tag === "ToolCall" ||
+    tag === "Cell" ||
+    tag === "SubagentCard" ||
+    tag === "Notification" ||
+    tag === "Error"
+  )
+}
+
+const authoritativeUnitKeys = (view: ThreadView.ThreadViewSnapshot, turnId: string): ReadonlySet<string> =>
+  new Set(
+    view.turns
+      .find((candidate) => String(candidate.turn.id) === turnId)
+      ?.units.filter(authoritative)
+      .map((unit) => unit.key) ?? [],
+  )
+
 const replaceImpl = (
   current: Overlay | undefined,
+  view: ThreadView.ThreadViewSnapshot,
   turnId: string,
   incoming: ExecutionGateway.ModelPreviewed,
 ): Overlay | undefined => {
   const preview = bounded(incoming)
   const nextIdentity = identity(preview)
   if (current === undefined || current.turnId !== turnId)
-    return { turnId, preview, identity: nextIdentity, retiredIdentities: [] }
+    return {
+      turnId,
+      preview,
+      identity: nextIdentity,
+      baselineAuthoritativeUnitKeys: authoritativeUnitKeys(view, turnId),
+      retiredIdentities: [],
+    }
   if (current.retiredIdentities.includes(nextIdentity)) return current
   if (current.identity === nextIdentity)
     return preview.revision <= current.preview.revision ? current : { ...current, preview }
@@ -54,24 +83,24 @@ const replaceImpl = (
     turnId,
     preview,
     identity: nextIdentity,
+    baselineAuthoritativeUnitKeys: authoritativeUnitKeys(view, turnId),
     retiredIdentities: [current.identity, ...current.retiredIdentities].slice(0, retiredIdentityCapacity),
   }
 }
 
 export const replace: {
-  (turnId: string, incoming: ExecutionGateway.ModelPreviewed): (current: Overlay | undefined) => Overlay | undefined
-  (current: Overlay | undefined, turnId: string, incoming: ExecutionGateway.ModelPreviewed): Overlay | undefined
-} = Function.dual(3, replaceImpl)
-
-const semantic = (turn: ThreadView.ThreadViewTurn) => {
-  let assistant = false
-  let reasoning = false
-  for (const unit of turn.units) {
-    if (unit.content._tag === "Entry" && unit.content.role === "assistant") assistant = true
-    if (unit.content._tag === "Block" && unit.content.block._tag === "Reasoning") reasoning = true
-  }
-  return { assistant, reasoning }
-}
+  (
+    view: ThreadView.ThreadViewSnapshot,
+    turnId: string,
+    incoming: ExecutionGateway.ModelPreviewed,
+  ): (current: Overlay | undefined) => Overlay | undefined
+  (
+    current: Overlay | undefined,
+    view: ThreadView.ThreadViewSnapshot,
+    turnId: string,
+    incoming: ExecutionGateway.ModelPreviewed,
+  ): Overlay | undefined
+} = Function.dual(4, replaceImpl)
 
 const terminal = (status: ThreadView.ThreadViewTurnRecord["status"]): boolean =>
   status === "completed" || status === "failed" || status === "cancelled"
@@ -80,12 +109,8 @@ const reconcileImpl = (overlay: Overlay | undefined, view: ThreadView.ThreadView
   if (overlay === undefined) return undefined
   const turn = view.turns.find((candidate) => String(candidate.turn.id) === overlay.turnId)
   if (turn === undefined || terminal(turn.turn.status)) return undefined
-  const durable = semantic(turn)
-  if (
-    (overlay.preview.text.length === 0 || durable.assistant) &&
-    (overlay.preview.reasoning.length === 0 || durable.reasoning)
-  )
-    return undefined
+  for (const unit of turn.units)
+    if (authoritative(unit) && !overlay.baselineAuthoritativeUnitKeys.has(unit.key)) return undefined
   return overlay
 }
 
@@ -102,10 +127,9 @@ const unitsImpl = (
   if (current === undefined) return []
   const turn = view.turns.find((candidate) => String(candidate.turn.id) === current.turnId)
   if (turn === undefined) return []
-  const durable = semantic(turn)
   const result: Array<TranscriptUnit.Unit> = []
   const prefix = `tentative:${current.turnId}:${current.identity}`
-  if (!durable.reasoning && current.preview.reasoning.length > 0) {
+  if (current.preview.reasoning.length > 0) {
     const key = `${prefix}:reasoning`
     result.push({
       key,
@@ -115,7 +139,7 @@ const unitsImpl = (
       content: { _tag: "Block", block: { _tag: "Reasoning", text: current.preview.reasoning } },
     })
   }
-  if (!durable.assistant && current.preview.text.length > 0) {
+  if (current.preview.text.length > 0) {
     const key = `${prefix}:assistant`
     result.push({
       key,

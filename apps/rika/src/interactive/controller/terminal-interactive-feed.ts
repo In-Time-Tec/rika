@@ -171,7 +171,7 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
         turn.turn.status !== "waiting")
     )
       return unchanged(state)
-    const modelPreview = ModelPreview.replace(state.modelPreview, String(event.turnId), event.preview)
+    const modelPreview = ModelPreview.replace(state.modelPreview, state.view, String(event.turnId), event.preview)
     if (modelPreview === state.modelPreview) return unchanged(state)
     return {
       state: { ...state, modelPreview, model: project(state.model, state.view, modelPreview) },
