@@ -5,6 +5,7 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import * as ResolvedContext from "../../context/context-resolution-service"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
+import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import { Context, Effect, Layer, Scope } from "effect"
 import type { ProductLayerOptions } from "./product-operation-options"
 import type { OperationError } from "../operation-error"
@@ -27,6 +28,7 @@ export interface ProductOperationDependencies {
     | ExecutionExtensions.ExecutionExtensionService
   >
   readonly rawBackend: ExecutionGateway.Interface
+  readonly executionSessionLifecycle: ExecutionSessionLifecycle.Interface
   readonly extensionService: ExecutionExtensions.ExecutionExtensionInterface | undefined
 }
 
@@ -71,11 +73,18 @@ export const buildProductOperationDependencies = <
       options.executionExtensions?.layer ?? Layer.empty,
     )
     const dependencyContext = yield* Layer.buildWithScope(dependencies, ownerScope)
-    const backendContext = yield* Layer.buildWithScope(options.backendLayer, ownerScope)
+    const backendContext = yield* Layer.buildWithScope(
+      Layer.merge(
+        options.backendLayer,
+        options.executionSessionLifecycleLayer ?? ExecutionSessionLifecycle.layerTest(),
+      ),
+      ownerScope,
+    )
     return {
       dependencyContext,
       acquiredDependencies: Layer.succeedContext(dependencyContext),
       rawBackend: Context.get(backendContext, ExecutionGateway.Service),
+      executionSessionLifecycle: Context.get(backendContext, ExecutionSessionLifecycle.Service),
       extensionService:
         options.executionExtensions === undefined
           ? undefined

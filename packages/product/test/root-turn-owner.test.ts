@@ -369,3 +369,23 @@ it.effect("keeps preview traffic out of the transcript repository and final resu
     expect(observed.result).toEqual(baseline.result)
   }),
 )
+
+it.effect("keeps late accepted callbacks behind a quiesced Thread fence", () =>
+  Effect.gen(function* () {
+    let launches = 0
+    const owner = yield* make(
+      {
+        get: () => Effect.succeed(turn),
+        list: () => Effect.succeed([turn]),
+      } as TurnRepository.Interface,
+      {} as TranscriptRepository.Interface,
+      {} as ExecutionGateway.Interface,
+    )
+    yield* owner.install({ run: () => Effect.sync(() => (launches += 1)).pipe(Effect.asVoid) })
+    expect(yield* owner.claim(turn.id, "running")).toBe(true)
+    yield* owner.quiesceThread(turn.threadId)
+    yield* owner.accepted(turn.id)
+    yield* Effect.yieldNow
+    expect(launches).toBe(0)
+  }),
+)

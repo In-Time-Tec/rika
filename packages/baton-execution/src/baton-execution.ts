@@ -1,16 +1,17 @@
 import { ModelRegistry } from "@batonfx/core"
 import type { HarnessState } from "@batonfx/harness"
-import type { KernelPool } from "@batonfx/repl"
+import { KernelPool, KernelStateStore } from "@batonfx/repl"
 import type * as ExecutionPins from "@rika/kernel/execution-pins"
 import type * as CellCallContext from "./baton-cell-call-context"
 import { Approval, Run, RunTree, Runtime } from "@batonfx/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
+import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import type { Status } from "@rika/product/execution-status"
 import { ProviderCredentialStore, type ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 export type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 export type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
-import { Cause, Context, Deferred, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
+import { Cause, Context, Deferred, Effect, Layer, Option, Schema, Stream } from "effect"
 import type { AgentToolHandlers, KernelOptions } from "./baton-route-options"
 import { configure, makeResolver } from "./baton-route"
 import * as PreviewAdapter from "./baton-preview-adapter"
@@ -42,7 +43,9 @@ export interface Options {
    * cell, so a host builds it once where a Server-lifetime scope exists rather than letting the
    * first cell that needs one decide how long it lives.
    */
-  readonly kernelPool?: Context.Context<KernelPoolServices>
+  readonly kernelPool?:
+    | Context.Context<KernelPoolServices>
+    | Context.Context<KernelPoolServices | KernelStateStore.KernelStateStore>
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: HarnessState.HarnessState
   readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolServices, never, never>
@@ -119,57 +122,6 @@ const make = (
   Effect.gen(function* () {
     const runtime = yield* Runtime.Runtime
     if (durableRuntimeSlot !== undefined) yield* Deferred.succeed(durableRuntimeSlot, runtime)
-    // A replayPolicy:"never" operation interrupted by cancellation parks the Run in
-    // `needs-resolution` until it is explicitly resolved. Baton cannot decide the outcome of a
-    // side-effecting operation on its own, so the product settles it as Failed and lets the Run
-    // reach its terminal state. Idempotent and restart-safe: resolving an already-resolved
-    // operation is a no-op, and the operation id is recovered from durable history.
-    const resolveParkedOperations = (runId: string, reason: string) =>
-      Effect.gen(function* () {
-        const inspection = yield* RunTree.inspect(runId).pipe(Effect.provideService(Runtime.Runtime, runtime))
-        const parked = inspection.runs.filter(({ run }) => run.status === "needs-resolution")
-        if (parked.length === 0) return
-        yield* Effect.forEach(
-          parked,
-          ({ run }) =>
-            runtime.history({ runId: run.runId, limit: 512 }).pipe(
-              Effect.map((events) =>
-                events.flatMap((event) => (event._tag === "OperationUnknown" ? [event.operationId] : [])),
-              ),
-              Effect.flatMap((operationIds) =>
-                Effect.forEach(
-                  [...new Set(operationIds)],
-                  (operationId) =>
-                    runtime.resolveOperation({
-                      runId: run.runId,
-                      operationId,
-                      idempotencyKey: `${operationId}:cancelled`,
-                      resolution: {
-                        _tag: "Failed",
-                        error: { _tag: "OperationInterrupted", message: reason },
-                      },
-                    }),
-                  { discard: true },
-                ),
-              ),
-            ),
-          { discard: true },
-        )
-      }).pipe(Effect.ignore)
-
-    // Cancellation is only complete once the Run is terminal. A parked Run is resolved and then
-    // re-checked, because the park may be recorded after `cancel` returns.
-    const awaitSettledCancellation = (runId: string, reason: string) =>
-      resolveParkedOperations(runId, reason).pipe(
-        Effect.andThen(RunTree.inspect(runId).pipe(Effect.provideService(Runtime.Runtime, runtime))),
-        Effect.map((inspection) =>
-          inspection.runs.some(({ run }) => run.status === "needs-resolution" || run.status === "cancelling"),
-        ),
-        Effect.flatMap((pending) => (pending ? Effect.fail("pending" as const) : Effect.void)),
-        Effect.retry({ times: 40, schedule: Schedule.spaced("100 millis") }),
-        Effect.ignore,
-      )
-
     const respondToApproval = (
       decision: "approve" | "deny",
       link: ExecutionGateway.ExecutionLink,
@@ -193,7 +145,7 @@ const make = (
         )
       }).pipe(Effect.mapError(approvalFailure))
 
-    return ExecutionGateway.Service.of({
+    const gateway = ExecutionGateway.Service.of({
       startTurn: (input) =>
         Effect.gen(function* () {
           const configured = yield* configure({
@@ -370,9 +322,35 @@ const make = (
           Effect.mapError((cause) => ExecutionGateway.InspectTurnFailure.make({ message: message(cause) })),
         ),
     })
+    const unavailable = (cause: unknown) => ExecutionSessionLifecycle.Unavailable.make({ message: message(cause) })
+    const pool =
+      options.kernelPool === undefined ? Option.none() : Context.getOption(options.kernelPool, KernelPool.KernelPool)
+    const stateStore =
+      options.kernelPool === undefined
+        ? Option.none()
+        : Context.getOption(options.kernelPool, KernelStateStore.KernelStateStore)
+    const lifecycle = ExecutionSessionLifecycle.Service.of({
+      requestCancellation: (input) => runtime.cancelSession(input).pipe(Effect.mapError(unavailable)),
+      awaitTerminal: (input) => runtime.awaitSessionTerminal(input).pipe(Effect.mapError(unavailable)),
+      closeKernel: ({ sessionId }) =>
+        Option.match(pool, {
+          onNone: () => Effect.void,
+          onSome: (service) => service.close(sessionId).pipe(Effect.mapError(unavailable)),
+        }),
+      dropKernelState: ({ sessionId }) =>
+        Option.match(stateStore, {
+          onNone: () => Effect.void,
+          onSome: (service) => service.drop(sessionId).pipe(Effect.mapError(unavailable)),
+        }),
+    })
+    return Context.make(ExecutionGateway.Service, gateway).pipe(
+      Context.add(ExecutionSessionLifecycle.Service, lifecycle),
+    )
   })
 
-export const layer = (options: Options): Layer.Layer<ExecutionGateway.Service, ExecutionGateway.StartTurnFailure> =>
+export const layer = (
+  options: Options,
+): Layer.Layer<ExecutionGateway.Service | ExecutionSessionLifecycle.Service, ExecutionGateway.StartTurnFailure> =>
   Layer.unwrap(
     Effect.gen(function* () {
       const credentialStore: ProviderCredentialStoreShape | undefined =
@@ -408,10 +386,9 @@ export const layer = (options: Options): Layer.Layer<ExecutionGateway.Service, E
           ? {}
           : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
       })
-      const executionLayer = Layer.effect(
-        ExecutionGateway.Service,
-        make(options, credentialStore, durableRuntimeSlot),
-      ).pipe(Layer.provide(runtimeLayer))
+      const executionLayer = Layer.effectContext(make(options, credentialStore, durableRuntimeSlot)).pipe(
+        Layer.provide(runtimeLayer),
+      )
       return executionLayer.pipe(
         Layer.catchCause((cause) =>
           Layer.effectContext(

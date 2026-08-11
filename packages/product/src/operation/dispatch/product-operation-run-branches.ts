@@ -217,6 +217,7 @@ const runSystemOperationImpl = (
       turnMutationAdmission: factory.turnMutationAdmission,
       backend: factory.backend,
       notifyThreadSummaries: typedNotifyThreadSummaries,
+      deleteThread: factory.deleteThread,
       writeThread: factory.writeThread,
       requireThread: factory.requireThread,
       markdownExport: factory.markdownExport,

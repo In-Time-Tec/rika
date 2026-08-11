@@ -50,6 +50,7 @@ export const makeProductOperationFoundation = Effect.fn("ProductOperation.makeFo
     replacementAdmission,
     replacementState,
     rawBackend: dependencies.rawBackend,
+    executionSessionLifecycle: dependencies.executionSessionLifecycle,
     acquiredBackend,
     backendLayer,
     dependencyContext,

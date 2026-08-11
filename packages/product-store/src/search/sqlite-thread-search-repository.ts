@@ -183,11 +183,14 @@ export const layer = Layer.effect(
           ? yield* sql`SELECT t.*, s.title AS search_title, s.labels AS search_labels,
             s.human_prompts, s.agent_prompts, s.root_assistant, s.child_assistant, s.files
             FROM rika_thread_search s JOIN rika_threads t ON t.id = s.thread_id
-            WHERE t.workspace = ${workspace}`
+            WHERE t.workspace = ${workspace}
+              AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox d WHERE d.thread_id = t.id)`
           : yield* sql`SELECT t.*, s.title AS search_title, s.labels AS search_labels,
             s.human_prompts, s.agent_prompts, s.root_assistant, s.child_assistant, s.files
             FROM rika_thread_search s JOIN rika_threads t ON t.id = s.thread_id
-            WHERE t.workspace = ${workspace} AND rika_thread_search MATCH ${match}`
+            WHERE t.workspace = ${workspace}
+              AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox d WHERE d.thread_id = t.id)
+              AND rika_thread_search MATCH ${match}`
       return yield* Effect.all(
         rows.map((value) =>
           Effect.gen(function* () {

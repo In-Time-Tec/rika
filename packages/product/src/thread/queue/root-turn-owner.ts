@@ -39,6 +39,7 @@ export interface Interface {
   >
   readonly install: (lifecycle: Lifecycle) => Effect.Effect<void>
   readonly accepted: (turnId: Turn.TurnId) => Effect.Effect<void>
+  readonly quiesceThread: (threadId: Thread.ThreadId) => Effect.Effect<void, TurnRepository.RepositoryError>
 }
 
 export const make = Effect.fn("RootTurnOwner.make")(function* (
@@ -50,6 +51,9 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
   const admission = yield* Semaphore.make(1)
   const ownerScope = scope ?? (yield* Scope.make())
   const claimed = new Set<string>()
+  const claimedThreads = new Map<string, string>()
+  const quiesced = new Set<string>()
+  const quiescedTurns = new Set<string>()
   let lifecycle: Lifecycle | undefined
   const running = new Map<string, Fiber.Fiber<void, Error>>()
   const claim = (turnId: Turn.TurnId, expectedStatus?: ExecutionStatus.Status) =>
@@ -60,6 +64,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
         const current = yield* turns.get(turnId)
         if (
           current === undefined ||
+          quiesced.has(String(current.threadId)) ||
           current.status === "queued" ||
           current.status === "completed" ||
           current.status === "failed" ||
@@ -68,14 +73,22 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
         )
           return false
         claimed.add(key)
+        claimedThreads.set(key, String(current.threadId))
         return true
       }),
     )
-  const release = (turnId: Turn.TurnId) => admission.withPermits(1)(Effect.sync(() => claimed.delete(String(turnId))))
+  const release = (turnId: Turn.TurnId) =>
+    admission.withPermits(1)(
+      Effect.sync(() => {
+        claimedThreads.delete(String(turnId))
+        return claimed.delete(String(turnId))
+      }),
+    )
   const launch = (turnId: Turn.TurnId) =>
     admission.withPermits(1)(
       Effect.gen(function* () {
         if (lifecycle === undefined || running.has(String(turnId))) return
+        if (quiescedTurns.has(String(turnId)) || quiesced.has(claimedThreads.get(String(turnId)) ?? "")) return
         const program = lifecycle.run(turnId).pipe(
           Effect.catchCause((cause) =>
             Cause.hasInterruptsOnly(cause)
@@ -93,6 +106,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
   const claimQueued = (threadId: Thread.ThreadId, now: number) =>
     admission.withPermits(1)(
       Effect.gen(function* () {
+        if (quiesced.has(String(threadId))) return undefined
         const queueClaim = yield* turns.claimNextQueued(threadId, now)
         if (queueClaim === undefined) return undefined
         const key = String(queueClaim.turn.id)
@@ -101,10 +115,13 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           return undefined
         }
         claimed.add(key)
+        claimedThreads.set(key, String(queueClaim.turn.threadId))
         return queueClaim
       }),
     )
   const admitPrepared = Effect.fn("RootTurnOwner.admitPrepared")(function* (input: ExecutionGateway.StartTurn) {
+    if (quiesced.has(input.threadId))
+      return yield* ExecutionGateway.StartTurnFailure.make({ message: `Thread ${input.threadId} is being deleted` })
     const link = yield* backend.startTurn(input)
     yield* turns.attachExecutionLink(Turn.TurnId.make(input.turnId), link, yield* Clock.currentTimeMillis)
     return link
@@ -205,5 +222,24 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
         lifecycle = installed
       }),
     accepted: launch,
+    quiesceThread: (threadId) =>
+      Effect.gen(function* () {
+        const threadTurns = yield* turns.list(threadId)
+        const keys = new Set(threadTurns.map((turn) => String(turn.id)))
+        const fibers = yield* admission.withPermits(1)(
+          Effect.sync(() => {
+            quiesced.add(String(threadId))
+            const owned = [...running].flatMap(([key, fiber]) => (keys.has(key) ? [fiber] : []))
+            for (const key of keys) {
+              quiescedTurns.add(key)
+              claimed.delete(key)
+              claimedThreads.delete(key)
+              running.delete(key)
+            }
+            return owned
+          }),
+        )
+        yield* Effect.forEach(fibers, Fiber.interrupt, { concurrency: "unbounded", discard: true })
+      }),
   } satisfies Interface
 })

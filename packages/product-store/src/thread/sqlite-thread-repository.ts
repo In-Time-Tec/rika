@@ -16,6 +16,11 @@ export interface CreateInput {
   readonly now: number
 }
 
+interface PendingDeletion {
+  readonly threadId: ThreadId
+  readonly requestedAt: number
+}
+
 export interface ListInput {
   readonly includeArchived?: boolean
   readonly limit?: number
@@ -37,7 +42,10 @@ export interface Interface {
   readonly label: (id: ThreadId, labels: ReadonlyArray<string>, now: number) => Effect.Effect<Thread, RepositoryError>
   readonly setPinned: (id: ThreadId, pinned: boolean, now: number) => Effect.Effect<Thread, RepositoryError>
   readonly setArchived: (id: ThreadId, archived: boolean, now: number) => Effect.Effect<Thread, RepositoryError>
-  readonly remove: (id: ThreadId) => Effect.Effect<void, RepositoryError>
+  readonly requestDeletion: (id: ThreadId, requestedAt: number) => Effect.Effect<void, RepositoryError>
+  readonly pendingDeletions: Effect.Effect<ReadonlyArray<PendingDeletion>, RepositoryError>
+  readonly completeDeletion: (id: ThreadId) => Effect.Effect<void, RepositoryError>
+  readonly discard: (id: ThreadId) => Effect.Effect<void, RepositoryError>
 }
 
 import { ThreadRow as Row } from "./thread-row-codec"
@@ -88,7 +96,10 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const sql = yield* SqlClient
     const get = Effect.fn("ThreadRepository.get")(function* (id: ThreadId) {
-      const rows = yield* sql`SELECT * FROM rika_threads WHERE id = ${id}`.pipe(Effect.mapError(repositoryError))
+      const rows =
+        yield* sql`SELECT * FROM rika_threads WHERE id = ${id} AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id)`.pipe(
+          Effect.mapError(repositoryError),
+        )
       return rows[0] === undefined ? undefined : yield* decode(rows[0])
     })
     const requireThread = Effect.fn("ThreadRepository.requireThread")(function* (id: ThreadId) {
@@ -139,7 +150,8 @@ export const layer = Layer.effect(
       get,
       list: Effect.fn("ThreadRepository.list")(function* (input = {}) {
         const rows = yield* sql`SELECT * FROM rika_threads
-          WHERE (${input.includeArchived === true ? 1 : 0} = 1 OR archived = 0)
+          WHERE NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id)
+            AND (${input.includeArchived === true ? 1 : 0} = 1 OR archived = 0)
             AND (${input.query === undefined ? 1 : 0} = 1
               OR INSTR(LOWER(title), LOWER(${input.query ?? ""})) > 0
               OR INSTR(LOWER(workspace), LOWER(${input.query ?? ""})) > 0
@@ -151,20 +163,52 @@ export const layer = Layer.effect(
         return select(threads, input)
       }),
       listAll: Effect.gen(function* () {
-        const rows = yield* sql`SELECT * FROM rika_threads`.pipe(Effect.mapError(repositoryError))
+        const rows =
+          yield* sql`SELECT * FROM rika_threads WHERE NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id)`.pipe(
+            Effect.mapError(repositoryError),
+          )
         return (yield* Effect.all(rows.map(decode))).toSorted(compare)
       }),
       rename: (id, title, now) => update(id, now, { title }),
       renameIfTitle: Effect.fn("ThreadRepository.renameIfTitle")(function* (id, expected, title, now) {
         const rows = yield* sql`UPDATE rika_threads SET title = ${title}, updated_at = ${now}
-          WHERE id = ${id} AND title = ${expected} RETURNING *`.pipe(Effect.mapError(repositoryError))
+          WHERE id = ${id} AND title = ${expected}
+            AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id)
+          RETURNING *`.pipe(Effect.mapError(repositoryError))
         return rows[0] === undefined ? undefined : yield* decode(rows[0])
       }),
       label: (id, labels, now) => update(id, now, { labels: [...new Set(labels)] }),
       setPinned: (id, pinned, now) => update(id, now, { pinned }),
       setArchived: (id, archived, now) => update(id, now, { archived }),
-      remove: Effect.fn("ThreadRepository.remove")(function* (id) {
-        yield* requireThread(id)
+      requestDeletion: Effect.fn("ThreadRepository.requestDeletion")(function* (id, requestedAt) {
+        const rows = yield* sql`SELECT id FROM rika_threads WHERE id = ${id}`.pipe(Effect.mapError(repositoryError))
+        if (rows[0] === undefined) return yield* missing(id)
+        yield* sql`INSERT INTO rika_thread_deletion_outbox (thread_id, requested_at)
+          VALUES (${id}, ${requestedAt}) ON CONFLICT (thread_id) DO NOTHING`.pipe(Effect.mapError(repositoryError))
+      }),
+      pendingDeletions: Effect.gen(function* () {
+        const rows = yield* sql<{
+          readonly thread_id: string
+          readonly requested_at: number
+        }>`SELECT thread_id, requested_at
+          FROM rika_thread_deletion_outbox ORDER BY requested_at ASC, thread_id ASC`.pipe(
+          Effect.mapError(repositoryError),
+        )
+        return yield* Effect.forEach(rows, (row) =>
+          Schema.decodeUnknownEffect(ThreadId)(row.thread_id).pipe(
+            Effect.map((threadId) => ({ threadId, requestedAt: Number(row.requested_at) })),
+            Effect.mapError(repositoryError),
+          ),
+        )
+      }),
+      completeDeletion: Effect.fn("ThreadRepository.completeDeletion")(function* (id) {
+        yield* sql
+          .withTransaction(sql`DELETE FROM rika_threads WHERE id = ${id}`)
+          .pipe(Effect.mapError(repositoryError))
+      }),
+      discard: Effect.fn("ThreadRepository.discard")(function* (id) {
+        const rows = yield* sql`SELECT id FROM rika_threads WHERE id = ${id}`.pipe(Effect.mapError(repositoryError))
+        if (rows[0] === undefined) return yield* missing(id)
         yield* sql`DELETE FROM rika_threads WHERE id = ${id}`.pipe(Effect.mapError(repositoryError))
       }),
     })

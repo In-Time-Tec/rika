@@ -151,6 +151,11 @@ const createOperationLayerImpl = (
         yield* Layer.build(GoalService.layer.pipe(Layer.provide(goalRepositories))),
         GoalService.GoalService,
       )
+      const executionLayer = lazyBackendLayer(backendLayer).pipe(
+        Layer.catchCause((cause) =>
+          Layer.effectContext(Effect.fail(ServerAuth.OperationProductError.make({ message: Cause.pretty(cause) }))),
+        ),
+      )
       const operationLayer = Operation.productLayer({
         goals,
         repositoryLayer: repositories,
@@ -158,11 +163,8 @@ const createOperationLayerImpl = (
         threadSummaryRepositoryLayer: repositories,
         transcriptRepositoryLayer: repositories,
         resolvedContextLayer: contextLayer,
-        backendLayer: lazyBackendLayer(backendLayer).pipe(
-          Layer.catchCause((cause) =>
-            Layer.effectContext(Effect.fail(ServerAuth.OperationProductError.make({ message: Cause.pretty(cause) }))),
-          ),
-        ),
+        backendLayer: executionLayer,
+        executionSessionLifecycleLayer: executionLayer,
         resolveExecutionRoute: (...arguments_) =>
           resolveWorkspaceExecutionRoute(...arguments_).pipe(
             Effect.mapError((error) =>

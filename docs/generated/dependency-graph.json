@@ -2648,6 +2648,7 @@
         "./execution-request",
         "./execution-route-resolution",
         "./execution-route-snapshot",
+        "./execution-session-lifecycle",
         "./execution-status",
         "./execution-transcript-contract",
         "./extension-operation",
@@ -2675,11 +2676,13 @@
         "./resolved-context",
         "./review-intent",
         "./review-policy",
+        "./root-turn-owner",
         "./server-interactive-feed",
         "./server-operation-request",
         "./server-service",
         "./server-service-handshake",
         "./subagent-policy",
+        "./thread-deletion",
         "./thread-operation",
         "./thread-query-service",
         "./thread-record",
@@ -5722,6 +5725,26 @@
       "publicExports": []
     },
     {
+      "id": "packages/product-store/test/thread-deletion-repository.test.ts",
+      "path": "packages/product-store/test/thread-deletion-repository.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product-store/test/thread-deletion-saga.test.ts",
+      "path": "packages/product-store/test/thread-deletion-saga.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/product-store/test/thread-repository.test.ts",
       "path": "packages/product-store/test/thread-repository.test.ts",
       "workspace": "@rika/product-store",
@@ -6072,6 +6095,16 @@
       "kind": "source",
       "production": false,
       "publicExports": ["./execution-route-snapshot"],
+      "testKind": "contract-test"
+    },
+    {
+      "id": "packages/product/src/execution/contract/execution-session-lifecycle.ts",
+      "path": "packages/product/src/execution/contract/execution-session-lifecycle.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": ["./execution-session-lifecycle"],
       "testKind": "contract-test"
     },
     {
@@ -6946,6 +6979,15 @@
       "publicExports": ["./goal-service"]
     },
     {
+      "id": "packages/product/src/thread/lifecycle/thread-deletion.ts",
+      "path": "packages/product/src/thread/lifecycle/thread-deletion.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./thread-deletion"]
+    },
+    {
       "id": "packages/product/src/thread/model/goal-record.ts",
       "path": "packages/product/src/thread/model/goal-record.ts",
       "workspace": "@rika/product",
@@ -7204,7 +7246,7 @@
       "package": "@rika/product",
       "kind": "source",
       "production": true,
-      "publicExports": []
+      "publicExports": ["./root-turn-owner"]
     },
     {
       "id": "packages/product/src/thread/repository/goal-repository.ts",
@@ -13433,6 +13475,14 @@
       "production": true
     },
     {
+      "from": "apps/rika/src/server/composition/lazy-execution-backend.ts",
+      "to": "packages/product/src/execution/contract/execution-session-lifecycle.ts",
+      "specifier": "@rika/product/execution-session-lifecycle",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "apps/rika/src/server/composition/server-agent-port.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
@@ -13772,6 +13822,14 @@
       "from": "apps/rika/src/server/composition/server-execution-layer.ts",
       "to": "packages/product/src/execution/contract/execution-gateway.ts",
       "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-execution-layer.ts",
+      "to": "packages/product/src/execution/contract/execution-session-lifecycle.ts",
+      "specifier": "@rika/product/execution-session-lifecycle",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -20905,6 +20963,14 @@
       "from": "packages/baton-execution/src/baton-execution.ts",
       "to": "packages/product/src/execution/contract/execution-gateway.ts",
       "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-execution.ts",
+      "to": "packages/product/src/execution/contract/execution-session-lifecycle.ts",
+      "specifier": "@rika/product/execution-session-lifecycle",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -33846,6 +33912,134 @@
       "production": true
     },
     {
+      "from": "packages/product-store/test/thread-deletion-repository.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-repository.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-repository.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-repository.test.ts",
+      "to": "external:effect/unstable/sql/SqlClient",
+      "specifier": "effect/unstable/sql/SqlClient",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-repository.test.ts",
+      "to": "packages/product-store/src/database/product-database-layer.ts",
+      "specifier": "../src/database/product-database-layer",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-repository.test.ts",
+      "to": "packages/product-store/src/search/sqlite-thread-search-repository.ts",
+      "specifier": "../src/search/sqlite-thread-search-repository",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-repository.test.ts",
+      "to": "packages/product-store/src/summary/sqlite-thread-summary-repository.ts",
+      "specifier": "../src/summary/sqlite-thread-summary-repository",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-repository.test.ts",
+      "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
+      "specifier": "../src/thread/sqlite-thread-repository",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-repository.test.ts",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-saga.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-saga.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-saga.test.ts",
+      "to": "packages/product-store/src/thread/memory-thread-repository.ts",
+      "specifier": "../src/thread/memory-thread-repository",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-saga.test.ts",
+      "to": "packages/product/src/execution/contract/execution-session-lifecycle.ts",
+      "specifier": "@rika/product/execution-session-lifecycle",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-saga.test.ts",
+      "to": "packages/product/src/thread/lifecycle/thread-deletion.ts",
+      "specifier": "@rika/product/thread-deletion",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-saga.test.ts",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-saga.test.ts",
+      "to": "packages/product/src/thread/queue/root-turn-owner.ts",
+      "specifier": "@rika/product/root-turn-owner",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product-store/test/thread-repository.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -34993,6 +35187,14 @@
       "from": "packages/product/src/execution/contract/execution-route-snapshot.ts",
       "to": "packages/product/src/execution/contract/provider-connection-snapshot.ts",
       "specifier": "./provider-connection-snapshot",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-session-lifecycle.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -36303,6 +36505,14 @@
     },
     {
       "from": "packages/product/src/operation/dispatch/product-operation-foundation-dependencies.ts",
+      "to": "packages/product/src/execution/contract/execution-session-lifecycle.ts",
+      "specifier": "@rika/product/execution-session-lifecycle",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-foundation-dependencies.ts",
       "to": "packages/product/src/operation/dispatch/product-operation-options.ts",
       "specifier": "./product-operation-options",
       "kind": "import",
@@ -36871,6 +37081,14 @@
     },
     {
       "from": "packages/product/src/operation/dispatch/product-operation-runtime-execution-state.ts",
+      "to": "packages/product/src/execution/contract/execution-session-lifecycle.ts",
+      "specifier": "@rika/product/execution-session-lifecycle",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-runtime-execution-state.ts",
       "to": "packages/product/src/execution/contract/execution-status.ts",
       "specifier": "@rika/product/execution-status",
       "kind": "dynamic-import",
@@ -36951,6 +37169,14 @@
     },
     {
       "from": "packages/product/src/operation/dispatch/product-operation-runtime-execution-state.ts",
+      "to": "packages/product/src/thread/lifecycle/thread-deletion.ts",
+      "specifier": "../../thread/lifecycle/thread-deletion",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-runtime-execution-state.ts",
       "to": "packages/product/src/thread/model/thread-record.ts",
       "specifier": "@rika/product/thread-record",
       "kind": "dynamic-import",
@@ -36985,7 +37211,7 @@
       "from": "packages/product/src/operation/dispatch/product-operation-runtime-execution-state.ts",
       "to": "packages/product/src/thread/repository/thread-repository.ts",
       "specifier": "@rika/product/thread-repository",
-      "kind": "dynamic-import",
+      "kind": "import",
       "relationship": "runtime",
       "production": true
     },
@@ -37025,7 +37251,7 @@
       "from": "packages/product/src/operation/dispatch/product-operation-runtime-execution-state.ts",
       "to": "packages/product/src/thread/repository/turn-repository.ts",
       "specifier": "@rika/product/turn-repository",
-      "kind": "dynamic-import",
+      "kind": "import",
       "relationship": "runtime",
       "production": true
     },
@@ -40537,6 +40763,46 @@
       "from": "packages/product/src/thread/goal/goal-service.ts",
       "to": "packages/product/src/thread/repository/goal-repository.ts",
       "specifier": "@rika/product/goal-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/thread/lifecycle/thread-deletion.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/thread/lifecycle/thread-deletion.ts",
+      "to": "packages/product/src/execution/contract/execution-session-lifecycle.ts",
+      "specifier": "@rika/product/execution-session-lifecycle",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/thread/lifecycle/thread-deletion.ts",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/thread/lifecycle/thread-deletion.ts",
+      "to": "packages/product/src/thread/queue/root-turn-owner.ts",
+      "specifier": "../queue/root-turn-owner",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/thread/lifecycle/thread-deletion.ts",
+      "to": "packages/product/src/thread/repository/thread-repository.ts",
+      "specifier": "@rika/product/thread-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true

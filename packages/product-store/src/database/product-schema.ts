@@ -35,6 +35,10 @@ export const create = Effect.gen(function* () {
     updated_at INTEGER NOT NULL
   )`
   yield* sql`CREATE INDEX rika_threads_listing ON rika_threads (pinned DESC, updated_at DESC, id ASC)`
+  yield* sql`CREATE TABLE rika_thread_deletion_outbox (
+    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    requested_at INTEGER NOT NULL
+  )`
   yield* sql`CREATE TABLE rika_turns (
     id TEXT PRIMARY KEY NOT NULL,
     thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
@@ -89,6 +93,11 @@ export const create = Effect.gen(function* () {
   yield* sql`CREATE INDEX rika_turns_thread_updated ON rika_turns (thread_id, updated_at DESC)`
   yield* sql`CREATE INDEX rika_turns_thread_nonqueued ON rika_turns (thread_id, created_at DESC, id DESC)
     WHERE status <> 'queued'`
+  yield* sql`CREATE TRIGGER rika_tombstoned_thread_turn_insert
+    BEFORE INSERT ON rika_turns
+    WHEN EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = NEW.thread_id) BEGIN
+      SELECT RAISE(ABORT, 'thread deletion is pending');
+    END`
   yield* sql`CREATE TABLE rika_turn_admission_outbox (
     turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
     start_input_json TEXT NOT NULL,
@@ -342,12 +351,14 @@ export const schemaObjects: ReadonlyArray<string> = [
   "table:rika_workspaces",
   "table:rika_threads",
   "index:rika_threads_listing",
+  "table:rika_thread_deletion_outbox",
   "table:rika_turns",
   "index:rika_turns_thread",
   "index:rika_turns_queue",
   "index:rika_turns_queue_claim",
   "index:rika_turns_thread_updated",
   "index:rika_turns_thread_nonqueued",
+  "trigger:rika_tombstoned_thread_turn_insert",
   "table:rika_turn_admission_outbox",
   "table:rika_thread_queue_state",
   "table:rika_thread_turn_activity",
@@ -388,6 +399,21 @@ export const additions: ReadonlyArray<{
   readonly name: string
   readonly apply: (sql: SqlClient) => Effect.Effect<unknown, SqlError>
 }> = [
+  {
+    name: "table:rika_thread_deletion_outbox",
+    apply: (sql) => sql`CREATE TABLE rika_thread_deletion_outbox (
+    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    requested_at INTEGER NOT NULL
+  )`,
+  },
+  {
+    name: "trigger:rika_tombstoned_thread_turn_insert",
+    apply: (sql) => sql`CREATE TRIGGER rika_tombstoned_thread_turn_insert
+    BEFORE INSERT ON rika_turns
+    WHEN EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = NEW.thread_id) BEGIN
+      SELECT RAISE(ABORT, 'thread deletion is pending');
+    END`,
+  },
   {
     name: "table:rika_goals",
     apply: (sql) => sql`CREATE TABLE rika_goals (

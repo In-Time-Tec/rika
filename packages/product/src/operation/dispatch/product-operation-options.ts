@@ -18,6 +18,10 @@ export interface ProductLayerOptions<
     TranscriptError
   >
   readonly backendLayer: import("effect").Layer.Layer<import("@rika/product/execution-gateway").Service, BackendError>
+  readonly executionSessionLifecycleLayer?: import("effect").Layer.Layer<
+    import("@rika/product/execution-session-lifecycle").Service,
+    BackendError
+  >
   readonly resolveExecutionRoute?: (
     mode: import("@rika/configuration/behavior-mode").ModeId,
     tuning?: { readonly fastMode?: boolean },

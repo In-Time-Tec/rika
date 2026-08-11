@@ -15,6 +15,11 @@ export interface CreateInput {
   readonly now: number
 }
 
+interface PendingDeletion {
+  readonly threadId: ThreadId
+  readonly requestedAt: number
+}
+
 export interface ListInput {
   readonly includeArchived?: boolean
   readonly limit?: number
@@ -36,7 +41,10 @@ export interface Interface {
   readonly label: (id: ThreadId, labels: ReadonlyArray<string>, now: number) => Effect.Effect<Thread, RepositoryError>
   readonly setPinned: (id: ThreadId, pinned: boolean, now: number) => Effect.Effect<Thread, RepositoryError>
   readonly setArchived: (id: ThreadId, archived: boolean, now: number) => Effect.Effect<Thread, RepositoryError>
-  readonly remove: (id: ThreadId) => Effect.Effect<void, RepositoryError>
+  readonly requestDeletion: (id: ThreadId, requestedAt: number) => Effect.Effect<void, RepositoryError>
+  readonly pendingDeletions: Effect.Effect<ReadonlyArray<PendingDeletion>, RepositoryError>
+  readonly completeDeletion: (id: ThreadId) => Effect.Effect<void, RepositoryError>
+  readonly discard: (id: ThreadId) => Effect.Effect<void, RepositoryError>
 }
 
 const listLimit = (value: number | undefined) => Math.min(Math.max(value ?? 50, 1), 100)
@@ -62,9 +70,10 @@ const select = (threads: ReadonlyArray<Thread>, input: ListInput = {}) =>
 export const makeMemory = (initial: ReadonlyArray<Thread> = []) =>
   Effect.gen(function* () {
     const state = yield* Ref.make(new Map(initial.map((thread) => [thread.id, clone(thread)])))
+    const deletions = yield* Ref.make(new Map<ThreadId, number>())
     const requireThread = Effect.fn("ThreadRepository.requireThread")(function* (id: ThreadId) {
       const thread = (yield* Ref.get(state)).get(id)
-      if (thread === undefined) return yield* missing(id)
+      if (thread === undefined || (yield* Ref.get(deletions)).has(id)) return yield* missing(id)
       return thread
     })
     const update = Effect.fn("ThreadRepository.update")(function* (
@@ -99,14 +108,25 @@ export const makeMemory = (initial: ReadonlyArray<Thread> = []) =>
       }),
       get: Effect.fn("ThreadRepository.get")(function* (id) {
         const thread = (yield* Ref.get(state)).get(id)
-        return thread === undefined ? undefined : clone(thread)
+        return thread === undefined || (yield* Ref.get(deletions)).has(id) ? undefined : clone(thread)
       }),
       list: Effect.fn("ThreadRepository.list")(function* (input = {}) {
-        return select([...(yield* Ref.get(state)).values()], input)
+        const tombstones = yield* Ref.get(deletions)
+        return select(
+          [...(yield* Ref.get(state)).values()].filter((thread) => !tombstones.has(thread.id)),
+          input,
+        )
       }),
-      listAll: Ref.get(state).pipe(Effect.map((threads) => [...threads.values()].toSorted(compare).map(clone))),
+      listAll: Effect.gen(function* () {
+        const tombstones = yield* Ref.get(deletions)
+        return [...(yield* Ref.get(state)).values()]
+          .filter((thread) => !tombstones.has(thread.id))
+          .toSorted(compare)
+          .map(clone)
+      }),
       rename: (id, title, now) => update(id, now, (thread) => ({ ...thread, title })),
       renameIfTitle: Effect.fn("ThreadRepository.renameIfTitle")(function* (id, expected, title, now) {
+        if ((yield* Ref.get(deletions)).has(id)) return undefined
         const result = yield* Ref.modify(state, (threads) => {
           const thread = threads.get(id)
           if (thread === undefined || thread.title !== expected) return [undefined, threads] as const
@@ -118,8 +138,33 @@ export const makeMemory = (initial: ReadonlyArray<Thread> = []) =>
       label: (id, labels, now) => update(id, now, (thread) => ({ ...thread, labels: [...new Set(labels)] })),
       setPinned: (id, pinned, now) => update(id, now, (thread) => ({ ...thread, pinned })),
       setArchived: (id, archived, now) => update(id, now, (thread) => ({ ...thread, archived })),
-      remove: Effect.fn("ThreadRepository.remove")(function* (id) {
-        yield* requireThread(id)
+      requestDeletion: Effect.fn("ThreadRepository.requestDeletion")(function* (id, requestedAt) {
+        if (!(yield* Ref.get(state)).has(id)) return yield* missing(id)
+        yield* Ref.update(deletions, (current) => (current.has(id) ? current : new Map(current).set(id, requestedAt)))
+      }),
+      pendingDeletions: Ref.get(deletions).pipe(
+        Effect.map((current) =>
+          [...current]
+            .map(([threadId, requestedAt]) => ({ threadId, requestedAt }))
+            .toSorted(
+              (left, right) => left.requestedAt - right.requestedAt || left.threadId.localeCompare(right.threadId),
+            ),
+        ),
+      ),
+      completeDeletion: Effect.fn("ThreadRepository.completeDeletion")(function* (id) {
+        yield* Ref.update(state, (threads) => {
+          const next = new Map(threads)
+          next.delete(id)
+          return next
+        })
+        yield* Ref.update(deletions, (current) => {
+          const next = new Map(current)
+          next.delete(id)
+          return next
+        })
+      }),
+      discard: Effect.fn("ThreadRepository.discard")(function* (id) {
+        if (!(yield* Ref.get(state)).has(id)) return yield* missing(id)
         yield* Ref.update(state, (threads) => {
           const next = new Map(threads)
           next.delete(id)

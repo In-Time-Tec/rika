@@ -1,4 +1,4 @@
-import { HostBindingRegistry, type KernelPool } from "@batonfx/repl"
+import { HostBindingRegistry, KernelStateStore, type KernelPool } from "@batonfx/repl"
 import type { Options } from "./server-kernel-options"
 import { discoverServers, discoverSkills, harnessStoreLayer, workspaceDigest } from "./server-kernel-harness"
 import { NestedOperation, Session, ToolContext } from "@batonfx/core"
@@ -56,7 +56,7 @@ const mountingPlaceholders: Layer.Layer<
 export const layer = (
   options: Options,
 ): Layer.Layer<
-  KernelPool.KernelPool | CellCallContext.CellCallContext,
+  KernelPool.KernelPool | KernelStateStore.KernelStateStore | CellCallContext.CellCallContext,
   never,
   ChildProcessSpawner.ChildProcessSpawner
 > =>

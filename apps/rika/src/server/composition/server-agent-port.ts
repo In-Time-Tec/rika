@@ -145,32 +145,6 @@ const ambientRuntime = Effect.flatMap(Effect.serviceOption(Runtime.Runtime), (ru
     : Effect.succeed(runtime.value),
 )
 
-type ChildSettlementReader = {
-  readonly childSettlements: (input: {
-    readonly parentRunId: string
-    readonly afterSequence?: number
-    readonly limit: number
-  }) => Effect.Effect<ReadonlyArray<typeof ChildSettlementInboxEntry.Type>, Runtime.DirectoryError>
-}
-
-const hasChildSettlementReader = (
-  runtime: Runtime.Runtime["Service"],
-): runtime is Runtime.Runtime["Service"] & ChildSettlementReader =>
-  "childSettlements" in runtime && typeof runtime.childSettlements === "function"
-
-const readChildSettlements = (
-  runtime: Runtime.Runtime["Service"],
-  input: { readonly parentRunId: string; readonly afterSequence?: number; readonly limit: number },
-) =>
-  hasChildSettlementReader(runtime)
-    ? runtime.childSettlements(input).pipe(Effect.mapError(failed))
-    : Effect.fail(
-        unavailable(
-          "unavailable",
-          "the installed @batonfx/runtime does not expose Runtime.childSettlements; use the Baton build containing d4a83b3",
-        ),
-      )
-
 const activityPreview = (event: RunEvent.RunEvent): string => {
   if (event._tag === "ToolProgress" && event.message !== undefined) return event.message.slice(0, 512)
   if (event._tag === "ToolExecutionStarted") return `${event.call.name} started`
@@ -396,11 +370,13 @@ const make: Effect.Effect<AgentPort["Service"], never, ArtifactStore> = Effect.g
         Effect.flatMap(ambientRuntime, (runtime) =>
           Effect.all([
             runtime.messages({ runId: self.runId, limit: input.limit }).pipe(Effect.mapError(failed)),
-            readChildSettlements(runtime, {
-              parentRunId: self.runId,
-              afterSequence: input.afterSequence ?? -1,
-              limit: input.limit,
-            }),
+            runtime
+              .childSettlements({
+                parentRunId: self.runId,
+                afterSequence: input.afterSequence ?? -1,
+                limit: input.limit,
+              })
+              .pipe(Effect.mapError(failed)),
           ]).pipe(
             Effect.flatMap(([messages, settlements]) =>
               Effect.map(
@@ -409,10 +385,9 @@ const make: Effect.Effect<AgentPort["Service"], never, ArtifactStore> = Effect.g
               ),
             ),
             Effect.map(([messages, settlements]) => {
-              const settlementIds = new Set(settlements.map((entry) => entry.notificationId))
               const afterSequence = input.afterSequence ?? -1
               const messageEntries: ReadonlyArray<typeof InboxEntry.Type> = messages.flatMap((entry) =>
-                entry.sequence <= afterSequence || settlementIds.has(entry.entryId)
+                entry.sequence <= afterSequence
                   ? []
                   : [
                       {

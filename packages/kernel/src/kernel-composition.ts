@@ -94,21 +94,27 @@ export const state = (
 export const pool = (
   options: Options,
 ): Layer.Layer<
-  KernelPool.KernelPool,
+  KernelPool.KernelPool | KernelStateStore.KernelStateStore,
   never,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > =>
-  BunKernelPool.layer({
-    profile: makeProfile(profileOptions(options)),
-    runtimeCommand: options.runtimeCommand ?? "bun",
-    workerModule: options.workerModule ?? workerModule,
-    startTimeoutMillis: options.startTimeoutMillis ?? 20_000,
-    bootstrap: KernelBootstrap.source(),
-    interruptGraceMillis: options.interruptGraceMillis ?? 250,
-    maxConcurrentBoots: options.maxConcurrentBoots ?? Number.POSITIVE_INFINITY,
-    idleTimeToLive: options.idleTimeToLive ?? defaultIdleTimeToLive,
-    environment: options.environment ?? {},
-  }).pipe(Layer.provide(state(options.dataRoot)))
+  (() => {
+    const stateStore = state(options.dataRoot)
+    return Layer.merge(
+      BunKernelPool.layer({
+        profile: makeProfile(profileOptions(options)),
+        runtimeCommand: options.runtimeCommand ?? "bun",
+        workerModule: options.workerModule ?? workerModule,
+        startTimeoutMillis: options.startTimeoutMillis ?? 20_000,
+        bootstrap: KernelBootstrap.source(),
+        interruptGraceMillis: options.interruptGraceMillis ?? 250,
+        maxConcurrentBoots: options.maxConcurrentBoots ?? Number.POSITIVE_INFINITY,
+        idleTimeToLive: options.idleTimeToLive ?? defaultIdleTimeToLive,
+        environment: options.environment ?? {},
+      }).pipe(Layer.provide(stateStore)),
+      stateStore,
+    )
+  })()
 
 /**
  * The kernel a Rika Execution runs cells in, plus the surface those cells can call.
@@ -122,7 +128,7 @@ export const pool = (
 export const layer = (
   options: Options,
 ): Layer.Layer<
-  KernelPool.KernelPool | HostBindingRegistry.HostBindingRegistry,
+  KernelPool.KernelPool | KernelStateStore.KernelStateStore | HostBindingRegistry.HostBindingRegistry,
   HostBindingRegistry.HostBindingConflict,
   BindingRequirements | ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > => {
