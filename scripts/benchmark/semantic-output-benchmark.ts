@@ -44,6 +44,7 @@ const execute = (options: Options): void => {
   const samples: Array<Sample> = []
   for (const run of plan) {
     const consumer = run.source === "baseline" ? provisioned.baselineConsumer : provisioned.candidateConsumer
+    const worker = HostFiles.join(consumer, "scripts", "benchmark", "semantic-output-worker.ts")
     const identity = run.source === "baseline" ? provisioned.baselineIdentity : provisioned.candidateIdentity
     const isolation = makeIsolation(run.root)
     for (const directory of [isolation.root, isolation.cwd, isolation.home, isolation.temporary])
@@ -55,7 +56,7 @@ const execute = (options: Options): void => {
         ...environment,
         "bun",
         "run",
-        HostFiles.join(consumer, "semantic-output-worker.ts"),
+        worker,
         "--source",
         run.source,
         "--case",
