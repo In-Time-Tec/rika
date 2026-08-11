@@ -34,6 +34,23 @@ afterEach(() => {
   for (const path of temporary.splice(0)) HostFiles.remove(path)
 })
 
+describe("host file copying", () => {
+  it("preserves a tracked directory symlink instead of following it", () => {
+    const root = temp()
+    const target = HostFiles.join(root, "target")
+    const source = HostFiles.join(root, "source-link")
+    const destination = HostFiles.join(root, "copy", "source-link")
+    HostFiles.mkdir(target)
+    HostFiles.write(HostFiles.join(target, "file.txt"), "target")
+    expect(Bun.spawnSync(["ln", "-s", "target", source]).exitCode).toBe(0)
+
+    HostFiles.copy(source, destination)
+
+    expect(Bun.spawnSync(["test", "-L", destination]).exitCode).toBe(0)
+    expect(Bun.spawnSync(["readlink", destination]).stdout.toString().trim()).toBe("target")
+  })
+})
+
 describe("semantic output workload", () => {
   it("keeps every transport shape at exactly one million ASCII bytes and one hash", () => {
     expect(describeWorkload("one")).toMatchObject({ fragments: 1, nonemptyFragments: 1, outputBytes, outputSha256 })

@@ -43,6 +43,6 @@ export const HostFiles = {
   },
   copy: (source: string, destination: string): void => {
     void spawn(["mkdir", "-p", dirname(destination)])
-    void spawn(["cp", source, destination])
+    void spawn(["cp", "-P", source, destination])
   },
 } as const
