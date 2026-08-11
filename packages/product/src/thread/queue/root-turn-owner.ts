@@ -32,6 +32,7 @@ export interface Interface {
   readonly watchTurn: (
     turnId: Turn.TurnId,
     onChange?: (change: ExecutionProjection.Change) => void,
+    onPreview?: (preview: ExecutionGateway.ModelPreviewed) => void,
   ) => Effect.Effect<
     ExecutionProjection.Result,
     ExecutionGateway.WatchTurnFailure | TurnRepository.RepositoryError | TranscriptRepository.RepositoryError
@@ -126,7 +127,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
         ),
       ),
     ),
-    watchTurn: (turnId, onChange) =>
+    watchTurn: (turnId, onChange, onPreview) =>
       Effect.gen(function* () {
         const turn = yield* turns.get(turnId)
         if (turn === undefined || turn._tag !== "AgentExecution" || turn.executionLink === undefined)
@@ -143,16 +144,18 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
             ...(projection?.projectorCheckpoint === undefined ? {} : { checkpoint: projection.projectorCheckpoint }),
           })
           .pipe(
-            Stream.runForEach((change) =>
-              Effect.gen(function* () {
-                const committed = yield* transcripts.commitProjection(turn, change)
-                if (committed === "stale")
-                  return yield* TranscriptRepository.RepositoryError.make({
-                    message: `Turn ${turnId} projection revision is stale`,
-                  })
-                latestChange = change
-                onChange?.(change)
-              }),
+            Stream.runForEach((event) =>
+              event._tag === "ModelPreviewed"
+                ? Effect.sync(() => onPreview?.(event))
+                : Effect.gen(function* () {
+                    const committed = yield* transcripts.commitProjection(turn, event)
+                    if (committed === "stale")
+                      return yield* TranscriptRepository.RepositoryError.make({
+                        message: `Turn ${turnId} projection revision is stale`,
+                      })
+                    latestChange = event
+                    onChange?.(event)
+                  }),
             ),
           )
         const stored = yield* transcripts.get(turnId)

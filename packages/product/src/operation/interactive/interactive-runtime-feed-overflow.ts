@@ -55,6 +55,7 @@ export const isCritical = (event: InteractiveEvent): boolean => {
     case "TurnSettled":
       return true
     case "TurnRetryScheduled":
+    case "ExecutionModelPreviewed":
       return false
     case "ThreadsListed":
     case "ThreadRefolding":
@@ -80,6 +81,8 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
   if (state.criticalOverflowed) return
   const id = threadId(event)
   switch (event._tag) {
+    case "ExecutionModelPreviewed":
+      return
     case "ExecutionProjectionChanged":
     case "ExecutionProjectionResyncRequired":
     case "TurnStarted":

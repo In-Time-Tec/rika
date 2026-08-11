@@ -5,6 +5,7 @@ import * as Turn from "@rika/product/turn-record"
 import { Schema } from "effect"
 import { Failure } from "../operation-failure"
 import * as ExecutionProjection from "../../execution/contract/execution-projection"
+import * as ExecutionGateway from "../../execution/contract/execution-gateway"
 
 export interface QueueItem {
   readonly id: Turn.TurnId
@@ -33,6 +34,12 @@ export type InteractiveEvent =
       readonly threadId: Thread.ThreadId
       readonly turn?: Turn.Turn
       readonly change: ExecutionProjection.Change
+    }
+  | {
+      readonly _tag: "ExecutionModelPreviewed"
+      readonly threadId: Thread.ThreadId
+      readonly turnId: Turn.TurnId
+      readonly preview: ExecutionGateway.ModelPreviewed
     }
   | {
       readonly _tag: "ExecutionProjectionResyncRequired"
@@ -183,6 +190,12 @@ export const InteractiveEventSchema = Schema.Union([
     threadId: Thread.ThreadId,
     turn: Schema.optionalKey(Turn.Turn),
     change: ExecutionProjection.Change,
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("ExecutionModelPreviewed"),
+    threadId: Thread.ThreadId,
+    turnId: Turn.TurnId,
+    preview: ExecutionGateway.ModelPreviewed,
   }),
   Schema.Struct({
     _tag: Schema.tag("ExecutionProjectionResyncRequired"),

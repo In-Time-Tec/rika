@@ -58,15 +58,32 @@ it.effect("delivers completion only through the live projection callback", () =>
       hasOlder: false,
       state,
     }
+    const preview = {
+      _tag: "ModelPreviewed" as const,
+      key: {
+        runId: "run",
+        attemptFence: 1,
+        turn: 0,
+        modelCallId: "call",
+        modelAttemptId: "attempt",
+        attempt: 0,
+      },
+      revision: 1,
+      text: "tentative",
+      reasoning: "",
+      truncated: false,
+    }
     const projectionEvents: Array<ExecutionProjection.Change> = []
+    const previewEvents: Array<typeof preview> = []
     let statusUpdates = 0
     let settlements = 0
     const watched = watchRootTurn({
       turnId: turn.id,
       turns: { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
       owner: {
-        watchTurn: (_turnId, onChange) =>
+        watchTurn: (_turnId, onChange, onPreview) =>
           Effect.sync(() => {
+            onPreview?.(preview)
             onChange?.(change)
             return { turnId: turn.id, status: "completed" as const, state, units: [] }
           }),
@@ -83,6 +100,7 @@ it.effect("delivers completion only through the live projection callback", () =>
       threadForTurn: () => Effect.succeed(thread),
       dispatch: (event) => {
         if (event._tag === "ExecutionProjectionChanged") projectionEvents.push(event.change)
+        if (event._tag === "ExecutionModelPreviewed") previewEvents.push(event.preview)
       },
       now: Effect.succeed(1),
     }).pipe(
@@ -101,6 +119,7 @@ it.effect("delivers completion only through the live projection callback", () =>
     )
     yield* watched
     expect(projectionEvents).toEqual([change])
+    expect(previewEvents).toEqual([preview])
     expect(statusUpdates).toBe(1)
     expect(settlements).toBe(1)
   }),

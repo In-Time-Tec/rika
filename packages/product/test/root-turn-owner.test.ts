@@ -296,3 +296,76 @@ it.effect("falls back to the persisted running status when the backend run is un
     expect(result.state.status).toBe("running")
   }),
 )
+
+it.effect("keeps preview traffic out of the transcript repository and final result", () =>
+  Effect.gen(function* () {
+    const completed: ExecutionProjection.Change = {
+      _tag: "ProjectionSnapshot",
+      revision: 1,
+      units: [],
+      hasOlder: false,
+      state: {
+        status: "completed",
+        usage: ExecutionProjection.emptyUsageState(),
+        steering: { steeringMessages: 0, followUpMessages: 0 },
+      },
+    }
+    const previews: ReadonlyArray<ExecutionGateway.ModelPreviewed> = Array.from({ length: 100 }, (_, index) => ({
+      _tag: "ModelPreviewed",
+      key: {
+        runId: link.runId,
+        attemptFence: 1,
+        turn: 0,
+        modelCallId: "call",
+        modelAttemptId: "attempt",
+        attempt: 0,
+      },
+      revision: index + 1,
+      text: "x".repeat(index + 1),
+      reasoning: "",
+      truncated: false,
+    }))
+    const execute = Effect.fn("RootTurnOwner.testPreviewNonAuthority")(function* (enabled: boolean) {
+      let stored: Projection | undefined
+      const commits: Array<ExecutionProjection.Change> = []
+      const delivered: Array<ExecutionProjection.Change | ExecutionGateway.ModelPreviewed> = []
+      const owner = yield* make(
+        { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
+        {
+          get: () => Effect.succeed(stored),
+          commitProjection: (_turn, change) =>
+            Effect.sync(() => {
+              commits.push(change)
+              stored = {
+                turn,
+                units: change._tag === "ProjectionSnapshot" ? change.units : change.upsert,
+                checkpointGeneration: commits.length,
+                revision: change.revision,
+                state: change.state,
+                ...(change.checkpoint === undefined ? {} : { projectorCheckpoint: change.checkpoint }),
+                projectionVersion: ExecutionProjection.projectionVersion,
+              }
+              return "committed" as const
+            }),
+        } as TranscriptRepository.Interface,
+        {
+          watchTurn: () => Stream.fromIterable(enabled ? [...previews, completed] : [completed]),
+        } as ExecutionGateway.Interface,
+      )
+      const result = yield* owner.watchTurn(
+        turn.id,
+        (change) => delivered.push(change),
+        (preview) => delivered.push(preview),
+      )
+      return { commits, delivered, result }
+    })
+
+    const observed = yield* execute(true)
+    const baseline = yield* execute(false)
+    expect(observed.delivered).toHaveLength(101)
+    expect(observed.delivered.filter((event) => event._tag === "ModelPreviewed")).toHaveLength(100)
+    expect(observed.commits).toEqual([completed])
+    expect(baseline.commits).toEqual([completed])
+    expect(observed.result).toEqual(baseline.result)
+  }),
+)

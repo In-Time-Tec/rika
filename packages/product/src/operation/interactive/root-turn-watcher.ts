@@ -55,7 +55,7 @@ export const watchRootTurn = (input: {
       return yield* operationError(`Recorded shell turn ${input.turnId} cannot be watched as an execution`)
     const thread = yield* input.threadForTurn(turn)
     const clock = yield* Clock.Clock
-    const publish = (change: ExecutionProjection.Change) => {
+    const publishChange = (change: ExecutionProjection.Change) => {
       input.dispatch({
         _tag: "ExecutionProjectionChanged",
         threadId: turn.threadId,
@@ -63,7 +63,15 @@ export const watchRootTurn = (input: {
         change,
       })
     }
-    const result = yield* input.owner.watchTurn(turn.id, publish)
+    const publishPreview = (preview: ExecutionGateway.ModelPreviewed) => {
+      input.dispatch({
+        _tag: "ExecutionModelPreviewed",
+        threadId: turn.threadId,
+        turnId: turn.id,
+        preview,
+      })
+    }
+    const result = yield* input.owner.watchTurn(turn.id, publishChange, publishPreview)
     if (turn.status !== result.status) yield* input.setTurnStatus(turn.id, result.status, yield* input.now)
     if (isTerminalStatus(result.status)) yield* input.settleThread(thread, input.dispatch)
   })
