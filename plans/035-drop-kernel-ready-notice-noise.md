@@ -21,8 +21,8 @@ model never consumes. Because a session's kernel idles out after 5 minutes and
 is re-provisioned on the next call, the notice reappears on the first cell of
 each resumed turn, so to a user it looks like it fires "after every call."
 
-The model's only real need at a fresh-kernel boundary is: *which previously-set
-state survived?* That answer is already carried by the notices we **keep** —
+The model's only real need at a fresh-kernel boundary is: _which previously-set
+state survived?_ That answer is already carried by the notices we **keep** —
 `StateRestored` ("Restored total, rows."), `StateLost` ("Lost handle
 (live-handle)."), and for in-session crashes `KernelRestarted` ("Kernel
 restarted (reason) at epoch N"). The `KernelReady` line adds nothing to any of
