@@ -2,7 +2,7 @@
 
 Rika maps model aliases to ordered provider candidates for the main and Oracle routes. A mode pins both routes: Task and Surgeon children use main, while Oracle, Librarian, Painter, and ReadThread children use Oracle. Child tools never choose a model or reasoning effort.
 
-Each accepted Turn pins the chosen models and non-secret provider settings. Missing aliases, unavailable variants, or routes that cannot be registered fail before execution starts; later configuration changes apply only to work not yet admitted.
+Each accepted Turn pins the chosen models, authentication kind, non-secret credential identity, and provider settings. An OpenAI account change therefore affects only newly admitted work; replay of older work refuses a different account rather than silently changing authority. Missing aliases, unavailable variants, corrupt stored credentials, or routes that cannot be registered fail before execution starts; later configuration changes apply only to work not yet admitted.
 
 Transient provider failures show the retry reason and schedule. A terminal provider failure keeps the technical cause in expandable details and shows a category-specific title and recovery action. Rika never displays credential values.
 

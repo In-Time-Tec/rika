@@ -108,6 +108,8 @@ it("states the kernel house rules from its mounted workspace and limits", () => 
   expect(text).toContain('Your workspace is "/actual/workspace" and it is empty.')
   expect(text).toContain("page big results at 16KB per page")
   expect(text).toContain("Run shell commands with rika.processes.start")
+  expect(text).toContain("at most 6 subagents across this execution tree")
+  expect(text).toContain("recursive Task delegation uses the same total")
   expect(text).toContain("bounded settlements are delivered durably")
   expect(text).toContain("Do not poll or sleep")
 })

@@ -105,6 +105,34 @@ describe("agents binding", () => {
     }),
   )
 
+  it.effect("returns a journaled duplicate without re-entering the admission port", () =>
+    Effect.gen(function* () {
+      let spawnCalls = 0
+      const mounted = yield* registry(
+        port({
+          spawn: () =>
+            Effect.sync(() => {
+              spawnCalls = spawnCalls + 1
+              return { childRunId: "fresh", key: "Task#0", duplicate: false }
+            }),
+        }),
+        {
+          run: () => Effect.succeed({ childRunId: "existing", key: "Task#0", duplicate: true }),
+        } as never,
+      )
+      const response = yield* mounted.invoke({
+        module: "agents",
+        operation: "spawn",
+        input: { profile: "Task", prompt: "replayed work" },
+      })
+      expect(response).toEqual({
+        _tag: "Success",
+        output: { childRunId: "existing", key: "Task#0", duplicate: true },
+      })
+      expect(spawnCalls).toBe(0)
+    }),
+  )
+
   it.effect("inspectAll reads current child state without blocking or polling", () =>
     Effect.gen(function* () {
       let reads = 0

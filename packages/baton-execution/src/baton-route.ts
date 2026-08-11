@@ -10,24 +10,22 @@ import {
   ToolExecutor,
   TurnPolicy,
 } from "@batonfx/core"
-import { AmazonBedrock, Anthropic, Deterministic, ModelRoute, OpenAi, OpenRouter } from "@batonfx/providers"
+import { ModelRoute } from "@batonfx/providers"
 import { Errors, ExecutableRegistration, ExecutableResolver, Runtime } from "@batonfx/runtime"
 import type { HarnessState } from "@batonfx/harness"
 import { Cell, CellTool, KernelPool } from "@batonfx/repl"
 import * as CellCallContext from "./baton-cell-call-context"
 import * as BindingModules from "@rika/kernel/binding-modules"
-import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
 import * as HarnessPromptSections from "@rika/kernel/harness-prompt-sections"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
-import type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
-import { Config, Context, Effect, Function, Layer, Option, Redacted, Schema, Stream } from "effect"
+import { Context, Effect, Function, Layer, Option, Schema, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
-import { providerHttpClientLayer } from "./baton-provider-http"
+import { agentBudget, profileInstructions } from "./baton-agent-profile"
+import * as CandidateRegistry from "./baton-candidate-registry"
 import * as Registration from "./baton-registration"
 
-type CandidateSnapshot = ExecutionRoute.ExecutionRouteModelCandidateSnapshot
 type ModelSnapshot = ExecutionRoute.ExecutionRouteModelSnapshot
 type RouteSnapshot = ExecutionRoute.ExecutionRouteSnapshot
 
@@ -37,28 +35,7 @@ type ResolvedAgent = ExecutableResolver.StaticAgentExecutable["agent"]
  * The exact values the Session's kernel is built from. The admitted profile pin is derived from
  * these and from nothing else, so a pin can never describe a kernel the host did not run.
  */
-const childGroupGuidance =
-  "Call start_child_group with one flat object: { members: [{ key, selection, prompt }], concurrency }. " +
-  "members must be an array of member objects; never JSON-stringify it or nest it under another members field."
-
-export const profileInstructions = {
-  root:
-    "Work directly on the user's request. Inspect relevant evidence, make necessary changes, and verify the result. " +
-    `${RoleToolkits.delegationCapabilityGuidance} ${childGroupGuidance}`,
-  title: "Return a concise title for the supplied request and nothing else.",
-  Oracle: "Analyze the supplied problem deeply. Return a precise recommendation with risks and supporting reasoning.",
-  Librarian:
-    "Research the supplied question and return a concise evidence-backed report. " +
-    RoleToolkits.librarianCapabilityGuidance,
-  Painter: "Inspect the supplied visual material and return concrete implementation guidance.",
-  ReadThread: "Find and summarize only the thread evidence needed to answer the supplied question.",
-  Review: "Review the supplied request for the assigned lane. Return ordered findings with evidence and severity.",
-  Surgeon: "Implement the bounded code change, preserve unrelated work, and verify the result.",
-  Task:
-    "Complete the bounded task autonomously and return the result with verification evidence. " +
-    "You may spawn Oracle, Librarian, Painter, ReadThread, Surgeon, or another Task; recursive Task delegation is guarded by Baton's depth budget. " +
-    `${RoleToolkits.delegationCapabilityGuidance} ${childGroupGuidance}`,
-} as const
+export { profileInstructions }
 
 /**
  * An agent that runs cells is told what its cell can reach. The Title agent carries no tool, so it
@@ -118,89 +95,7 @@ const agentEntry = (pinned: AgentManifest.PinnedAgent) => ({
   manifest: pinned.manifest,
 })
 
-const apiKey = (candidate: CandidateSnapshot) =>
-  candidate.providerConnection.apiKeyEnvironment === undefined
-    ? Config.succeed(Redacted.make(""))
-    : Config.redacted(candidate.providerConnection.apiKeyEnvironment)
-
-const storedCredentialApiKey = (
-  candidate: CandidateSnapshot,
-  store: ProviderCredentialStoreShape | undefined,
-): Effect.Effect<Config.Config<Redacted.Redacted<string>>> => {
-  const identity = candidate.providerConnection.credentialIdentity
-  if (identity === undefined || store === undefined) return Effect.succeed(apiKey(candidate))
-  return store.load(identity).pipe(
-    Effect.orElseSucceed(() => Option.none<Redacted.Redacted<string>>()),
-    Effect.map((credential) => (Option.isSome(credential) ? Config.succeed(credential.value) : apiKey(candidate))),
-  )
-}
-
-const candidateRegistryLayer = (
-  candidate: CandidateSnapshot,
-  credentialStore: ProviderCredentialStoreShape | undefined,
-): Layer.Layer<ModelRegistry.ModelRegistry, Config.ConfigError> => {
-  const registrationKey = candidate.registrationIdentity
-  switch (candidate.providerConnection.protocol) {
-    case "openai":
-      return OpenAi.layer({
-        model: candidate.model,
-        registrationKey,
-        config: OpenAi.decodeConfig(candidate.providerOptions),
-        apiKey: apiKey(candidate),
-        clientConfig: { apiUrl: Config.succeed(candidate.providerConnection.baseUrl) },
-      }).pipe(Layer.provide(providerHttpClientLayer))
-    case "anthropic":
-      return Anthropic.layer({
-        model: candidate.model,
-        registrationKey,
-        config: Anthropic.decodeConfig(candidate.providerOptions),
-        apiKey: apiKey(candidate),
-        clientConfig: { apiUrl: Config.succeed(candidate.providerConnection.baseUrl) },
-      }).pipe(Layer.provide(providerHttpClientLayer))
-    case "openrouter":
-      return Layer.unwrap(
-        storedCredentialApiKey(candidate, credentialStore).pipe(
-          Effect.map((resolvedApiKey) =>
-            OpenRouter.layer({
-              model: candidate.model,
-              registrationKey,
-              config: OpenRouter.decodeConfig(candidate.providerOptions),
-              apiKey: resolvedApiKey,
-              clientConfig: { apiUrl: Config.succeed(candidate.providerConnection.baseUrl) },
-            }).pipe(Layer.provide(providerHttpClientLayer)),
-          ),
-        ),
-      )
-    case "amazon-bedrock": {
-      const connection = new URL(candidate.providerConnection.baseUrl)
-      return AmazonBedrock.layer({
-        model: candidate.model,
-        registrationKey,
-        config: AmazonBedrock.decodeConfig(candidate.providerOptions),
-        client: {
-          authMode: connection.searchParams.get("authMode") === "bearer" ? "bearer" : "default",
-          ...(connection.searchParams.get("region") === null ? {} : { region: connection.searchParams.get("region")! }),
-          ...(connection.searchParams.get("profile") === null
-            ? {}
-            : { profile: connection.searchParams.get("profile")! }),
-          ...(connection.hostname === "default"
-            ? {}
-            : { endpoint: `${connection.protocol}//${connection.host}${connection.pathname}` }),
-        },
-      })
-    }
-    case "test":
-      return Deterministic.layer({
-        provider: candidate.providerConnection.provider,
-        model: candidate.model,
-        registrationKey,
-      })
-    default:
-      throw new Error(`Unsupported Baton provider protocol ${candidate.providerConnection.protocol}`)
-  }
-}
-
-const registrationsFrom = (layer: Layer.Layer<ModelRegistry.ModelRegistry>) =>
+const registrationsFrom = <E>(layer: Layer.Layer<ModelRegistry.ModelRegistry, E>) =>
   Effect.scoped(
     Layer.build(layer).pipe(
       Effect.flatMap((context) =>
@@ -214,13 +109,20 @@ const registrationsFrom = (layer: Layer.Layer<ModelRegistry.ModelRegistry>) =>
 const routedModel = (
   route: ModelSnapshot,
   override: Layer.Layer<ModelRegistry.ModelRegistry> | undefined,
-  credentialStore: ProviderCredentialStoreShape | undefined,
+  credentialStore: ConfigureOptions["credentialStore"],
+  openAiAccountAuth: ConfigureOptions["openAiAccountAuth"],
 ) =>
   Effect.gen(function* () {
     const available =
       override === undefined
         ? yield* Effect.forEach(route.candidates, (candidate) =>
-            registrationsFrom(Layer.orDie(candidateRegistryLayer(candidate, credentialStore))),
+            registrationsFrom(
+              CandidateRegistry.layer({
+                candidate,
+                ...(credentialStore === undefined ? {} : { credentialStore }),
+                ...(openAiAccountAuth === undefined ? {} : { openAiAccountAuth }),
+              }),
+            ).pipe(Effect.mapError((cause) => Errors.ExecutableRegistrationInvalid.make({ message: String(cause) }))),
           ).pipe(Effect.map((groups) => groups.flat()))
         : yield* registrationsFrom(override)
     const candidates = route.candidates.map((candidate) => {
@@ -255,22 +157,6 @@ interface AgentDefinition {
 }
 
 type AgentEnvironment = Layer.Layer<ModelRegistry.ModelRegistry>
-
-/**
- * Every conversational agent (root and children alike) carries the same explicit budget, so a long
- * subagent is governed by its pinned Compaction policy exactly like the main agent instead of dying
- * from the runtime fallback's 1,000,000 cumulative token cap after ~17 turns. The shared cap is
- * generous (10x the fallback) and symmetric for root and children; a route-configured tokenBudget
- * still narrows totalTokens explicitly.
- */
-const agentBudget = {
-  modelCalls: 64,
-  toolCalls: 256,
-  totalTokens: 10_000_000,
-  childRuns: 32,
-  handoffs: 32,
-  depth: 8,
-} as const
 
 const agentDefinition = (
   route: ModelSnapshot,
@@ -430,12 +316,8 @@ const unavailableKernelExecutor: Layer.Layer<ToolExecutor.ToolExecutor> = Layer.
   ToolExecutor.ToolExecutor.of({ execute: (request) => missingKernel(request.call.name) }),
 )
 
-export interface ConfigureOptionsWithCredentialStore extends ConfigureOptions {
-  readonly credentialStore?: ProviderCredentialStoreShape
-}
-
 export const configure = (
-  options: ConfigureOptionsWithCredentialStore,
+  options: ConfigureOptions,
 ): Effect.Effect<
   ConfiguredExecutable,
   ModelRoute.AvailabilitySemanticsMissing | Errors.ExecutableRegistrationInvalid
@@ -457,7 +339,7 @@ export const configure = (
     } as const
     const routed = Object.fromEntries(
       yield* Effect.forEach(Object.entries(routes), ([name, model]) =>
-        routedModel(model, options.modelServices, options.credentialStore).pipe(
+        routedModel(model, options.modelServices, options.credentialStore, options.openAiAccountAuth).pipe(
           Effect.map((value) => [name, value] as const),
         ),
       ),
@@ -721,11 +603,7 @@ export const configure = (
 
 const invalid = (cause: unknown) => Errors.ExecutableRegistrationInvalid.make({ message: String(cause) })
 
-export interface ResolverOptionsWithCredentialStore extends ResolverOptions {
-  readonly credentialStore?: ProviderCredentialStoreShape
-}
-
-export const makeResolver = (options: ResolverOptionsWithCredentialStore): ExecutableResolver.Interface =>
+export const makeResolver = (options: ResolverOptions): ExecutableResolver.Interface =>
   ExecutableResolver.ExecutableResolver.of({
     resolve: (input) =>
       Effect.gen(function* () {
@@ -741,6 +619,7 @@ export const makeResolver = (options: ResolverOptionsWithCredentialStore): Execu
           ...(options.skills === undefined ? {} : { skills: options.skills }),
           ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
           ...(options.credentialStore === undefined ? {} : { credentialStore: options.credentialStore }),
+          ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
           ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices(context.workspace) }),
           ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
         }).pipe(Effect.mapError(invalid))

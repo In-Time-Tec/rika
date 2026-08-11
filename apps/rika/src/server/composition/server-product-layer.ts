@@ -63,6 +63,7 @@ const createOperationLayerImpl = (
         global: globalSettings,
         workspace: workspaceSettings,
       })
+      const openAiAccountAuth = yield* ServerAuth.resolveOpenAiAccountAuth(authOperations)
       const effectiveConfigForWorkspace = (workspace: string) =>
         Effect.gen(function* () {
           const settings = yield* loadSettingsFile(workspacePaths(workspace).settings)
@@ -92,7 +93,11 @@ const createOperationLayerImpl = (
               ...(testModelScript === undefined ? {} : { script: testModelScript }),
               ...(testModelResponse === undefined ? {} : { response: testModelResponse }),
             }
-      const resolveRoute = workspaceExecutionRoute({ testModel, effectiveConfigForWorkspace })
+      const resolveRoute = workspaceExecutionRoute({
+        testModel,
+        effectiveConfigForWorkspace,
+        openAiAccountStatus: openAiAccountAuth.status,
+      })
       const resolveWorkspaceExecutionRoute = (
         mode: "low" | "medium" | "high" | "ultra",
         tuning: { readonly fastMode?: boolean } | undefined,
@@ -138,6 +143,7 @@ const createOperationLayerImpl = (
         harnessSnapshot,
         agentServices,
         credentialStore: ServerAuth.createProviderCredentialStoreLayer(options.database, options.profileIdentity),
+        openAiAccountAuth,
         ...(testModel === undefined ? {} : { testModel }),
       })
       const configAdapter = ServerConfiguration.productConfigAdapter(editor)

@@ -122,9 +122,16 @@ export const layer = (options: TimingOptions = {}) =>
               }
               return publicCredential(current.value)
             }
-            const response = yield* http.refresh(Redacted.make(current.value.refreshToken))
-            return yield* persist(response, current.value)
+            return yield* Effect.uninterruptibleMask((restore) =>
+              restore(http.refresh(Redacted.make(current.value.refreshToken))).pipe(
+                Effect.flatMap((response) => persist(response, current.value)),
+              ),
+            )
           }),
+        )
+      const exchangeAndPersist = (exchange: Effect.Effect<typeof Contract.TokenResponse.Type, Contract.AuthError>) =>
+        Effect.uninterruptibleMask((restore) =>
+          restore(exchange).pipe(Effect.flatMap((response) => store.serialized(persist(response)))),
         )
       const service: ServiceInterface = {
         loginBrowser: (redirect = Flow.configuration.redirectUri) =>
@@ -140,8 +147,9 @@ export const layer = (options: TimingOptions = {}) =>
                 message: "Authorization state did not match",
               })
             }
-            const response = yield* http.exchange({ code: result.code, verifier: pkce.verifier, redirectUri: redirect })
-            return yield* store.serialized(persist(response))
+            return yield* exchangeAndPersist(
+              http.exchange({ code: result.code, verifier: pkce.verifier, redirectUri: redirect }),
+            )
           }),
         loginDevice: Effect.gen(function* () {
           const start = yield* http.deviceStart
@@ -178,12 +186,13 @@ export const layer = (options: TimingOptions = {}) =>
               break
             }
           }
-          const response = yield* http.exchange({
-            code: Redacted.make(result.authorization_code),
-            verifier: Redacted.make(result.code_verifier),
-            redirectUri: Flow.configuration.deviceExchangeRedirect,
-          })
-          return yield* store.serialized(persist(response))
+          return yield* exchangeAndPersist(
+            http.exchange({
+              code: Redacted.make(result.authorization_code),
+              verifier: Redacted.make(result.code_verifier),
+              redirectUri: Flow.configuration.deviceExchangeRedirect,
+            }),
+          )
         }),
         status: Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis

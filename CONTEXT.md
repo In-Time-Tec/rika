@@ -11,7 +11,7 @@
 - **Agent:** an immutable Baton definition that configures the model/tool loop used by an Execution. It is not a durable identity, conversation, or the loop itself.
 - **Child Run:** a durable child Execution with narrowed instructions or capabilities. User-facing copy may say subagent.
 - **Mode:** a stable behavior profile that selects model routes and reasoning behavior.
-- **Provider:** a configured connection to a model service. Credentials come from the environment.
+- **Provider:** a configured connection to a model service. Credentials come from named environment variables or a profile-scoped account login; each admitted route pins the authentication kind and non-secret credential identity.
 - **Resolved Context:** the guidance, mentions, skills, memory, and Thread references selected for an Execution.
 - **Cell:** one `typescript` tool call and the TypeScript source it evaluates in the Session's kernel.
 - **Kernel:** the persistent Bun REPL process one Baton Session evaluates its cells in. Its namespace is working memory, never durable authority.

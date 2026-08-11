@@ -44,6 +44,49 @@ test("canonical route conversion preserves every branch and field", () => {
   expect(snapshot.agents.task.candidates[0]?.providerConnection).toEqual(route.main.candidates[0]?.providerConnection)
 })
 
+test("preserves the pinned OpenAI account identity and rejects incomplete account routes", () => {
+  const accountModel = (role: string) => ({
+    ...model(role),
+    candidates: model(role).candidates.map((candidate) => ({
+      ...candidate,
+      providerConnection: {
+        provider: "openai",
+        protocol: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        authentication: "account" as const,
+        credentialIdentity: "account-fingerprint",
+      },
+    })),
+  })
+  const route = {
+    version: 1 as const,
+    mode: "default",
+    compaction: { strategy: "default" as const, summaryPrompt: "Pinned summary prompt" },
+    main: accountModel("main"),
+    oracle: accountModel("oracle"),
+    title: accountModel("title"),
+    compactionSummary: accountModel("compaction"),
+    agents: Object.fromEntries(
+      ["librarian", "painter", "readThread", "review", "surgeon", "task"].map((role) => [role, accountModel(role)]),
+    ),
+  }
+  expect(toExecutionRouteSnapshot(route).main.candidates[0]?.providerConnection).toMatchObject({
+    authentication: "account",
+    credentialIdentity: "account-fingerprint",
+  })
+  const incomplete = {
+    ...route,
+    main: {
+      ...route.main,
+      candidates: route.main.candidates.map((candidate) => ({
+        ...candidate,
+        providerConnection: { ...candidate.providerConnection, credentialIdentity: undefined },
+      })),
+    },
+  }
+  expect(() => toExecutionRouteSnapshot(incomplete)).toThrow("Malformed OpenAI account provider connection")
+})
+
 test("malformed, adapter-shaped, and future route branches are rejected", () => {
   expect(() => toExecutionRouteSnapshot({ mode: "default", main: model("main") })).toThrow("Malformed execution route")
   expect(() => toExecutionRouteSnapshot({ version: 1, mode: "default", main: {}, oracle: model("oracle") })).toThrow(

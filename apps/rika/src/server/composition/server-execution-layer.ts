@@ -14,6 +14,7 @@ export const configuredBackendLayer = (options: {
   readonly harnessSnapshot?: BatonExecution.Options["harnessSnapshot"]
   readonly agentServices?: (workspace: string) => Layer.Layer<BatonExecution.AgentToolServices, never, never>
   readonly credentialStore?: Layer.Layer<BatonExecution.ProviderCredentialStore, never, never>
+  readonly openAiAccountAuth?: BatonExecution.Options["openAiAccountAuth"]
   readonly testModel?: { readonly script?: string; readonly response?: string }
 }) => {
   const backend = (): Layer.Layer<ExecutionGateway.Service, ExecutionGateway.StartTurnFailure> =>
@@ -24,6 +25,7 @@ export const configuredBackendLayer = (options: {
       ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
       ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices }),
       ...(options.credentialStore === undefined ? {} : { credentialStore: options.credentialStore }),
+      ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
       ...(options.testModel === undefined ? {} : { modelServices: ScriptedModel.layer(options.testModel) }),
     })
   // A Baton upgrade changes the runtime schema checksum, so an install carried across

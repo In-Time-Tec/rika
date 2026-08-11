@@ -1551,6 +1551,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "apps/rika/test/server-execution-route.test.ts",
+      "path": "apps/rika/test/server-execution-route.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "apps/rika/test/server-host-feed-overflow.test.ts",
       "path": "apps/rika/test/server-host-feed-overflow.test.ts",
       "workspace": "@rika/cli",
@@ -2639,6 +2649,7 @@
         "./server-operation-request",
         "./server-service",
         "./server-service-handshake",
+        "./subagent-policy",
         "./thread-operation",
         "./thread-query-service",
         "./thread-record",
@@ -2726,6 +2737,24 @@
       ]
     },
     {
+      "id": "packages/baton-execution/src/baton-agent-profile.ts",
+      "path": "packages/baton-execution/src/baton-agent-profile.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/baton-candidate-registry.ts",
+      "path": "packages/baton-execution/src/baton-candidate-registry.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/baton-execution/src/baton-cell-call-context.ts",
       "path": "packages/baton-execution/src/baton-cell-call-context.ts",
       "workspace": "@rika/baton-execution",
@@ -2809,6 +2838,15 @@
     {
       "id": "packages/baton-execution/src/baton-usage-accounting.ts",
       "path": "packages/baton-execution/src/baton-usage-accounting.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/openai-account-credentials.ts",
+      "path": "packages/baton-execution/src/openai-account-credentials.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -3160,6 +3198,26 @@
     {
       "id": "packages/baton-execution/test/baton-tree-projector.test.ts",
       "path": "packages/baton-execution/test/baton-tree-projector.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/baton-execution/test/openai-account-credentials.test.ts",
+      "path": "packages/baton-execution/test/openai-account-credentials.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/baton-execution/test/openai-account-route.test.ts",
+      "path": "packages/baton-execution/test/openai-account-route.test.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -6063,6 +6121,16 @@
       "kind": "source",
       "production": false,
       "publicExports": ["./review-intent"],
+      "testKind": "contract-test"
+    },
+    {
+      "id": "packages/product/src/execution/contract/subagent-policy.ts",
+      "path": "packages/product/src/execution/contract/subagent-policy.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": ["./subagent-policy"],
       "testKind": "contract-test"
     },
     {
@@ -13374,6 +13442,14 @@
       "production": true
     },
     {
+      "from": "apps/rika/src/server/composition/server-agent-port.ts",
+      "to": "packages/product/src/execution/contract/subagent-policy.ts",
+      "specifier": "@rika/product/subagent-policy",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "apps/rika/src/server/composition/server-agent-services.ts",
       "to": "apps/rika/src/server/composition/server-runtime-tools.ts",
       "specifier": "./server-runtime-tools",
@@ -13513,6 +13589,14 @@
       "from": "apps/rika/src/server/composition/server-auth-layer.ts",
       "to": "packages/extensions/src/skill/skill-registry.ts",
       "specifier": "@rika/extensions/skill-registry",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-auth-layer.ts",
+      "to": "packages/product/src/authentication/openai-auth-service.ts",
+      "specifier": "@rika/product/openai-auth-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -13681,6 +13765,22 @@
       "from": "apps/rika/src/server/composition/server-execution-route.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-execution-route.ts",
+      "to": "packages/configuration/src/settings/configuration-settings.ts",
+      "specifier": "@rika/configuration/configuration-settings",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-execution-route.ts",
+      "to": "packages/product/src/authentication/openai-auth-contract.ts",
+      "specifier": "@rika/product/openai-auth-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -18326,6 +18426,46 @@
       "production": false
     },
     {
+      "from": "apps/rika/test/server-execution-route.test.ts",
+      "to": "apps/rika/src/server/composition/server-execution-route.ts",
+      "specifier": "../src/server/composition/server-execution-route",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/server-execution-route.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/server-execution-route.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/server-execution-route.test.ts",
+      "to": "packages/configuration/src/settings/configuration-settings.ts",
+      "specifier": "@rika/configuration/configuration-settings",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/server-execution-route.test.ts",
+      "to": "packages/product/src/authentication/openai-auth-contract.ts",
+      "specifier": "@rika/product/openai-auth-contract",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "apps/rika/test/server-host-feed-overflow.test.ts",
       "to": "apps/rika/src/transport/host/server-host-feed-overflow.ts",
       "specifier": "../src/transport/host/server-host-feed-overflow",
@@ -20355,6 +20495,102 @@
       "dependencySection": "dependencies"
     },
     {
+      "from": "packages/baton-execution/src/baton-agent-profile.ts",
+      "to": "packages/coding-tools/src/catalog/agent-role-toolkits.ts",
+      "specifier": "@rika/coding-tools/agent-role-toolkits",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-agent-profile.ts",
+      "to": "packages/product/src/execution/contract/subagent-policy.ts",
+      "specifier": "@rika/product/subagent-policy",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-candidate-registry.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-candidate-registry.ts",
+      "to": "external:@batonfx/providers",
+      "specifier": "@batonfx/providers",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-candidate-registry.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-candidate-registry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-candidate-registry.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-candidate-registry.ts",
+      "to": "packages/baton-execution/src/baton-provider-http.ts",
+      "specifier": "./baton-provider-http",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-candidate-registry.ts",
+      "to": "packages/baton-execution/src/openai-account-credentials.ts",
+      "specifier": "./openai-account-credentials",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-candidate-registry.ts",
+      "to": "packages/product/src/authentication/openai-auth-service.ts",
+      "specifier": "@rika/product/openai-auth-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-candidate-registry.ts",
+      "to": "packages/product/src/authentication/provider-credential-store.ts",
+      "specifier": "@rika/product/provider-credential-store",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-candidate-registry.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/baton-execution/src/baton-cell-call-context.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
@@ -20502,6 +20738,14 @@
       "from": "packages/baton-execution/src/baton-execution.ts",
       "to": "packages/kernel/src/harness/execution-pins.ts",
       "specifier": "@rika/kernel/execution-pins",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-execution.ts",
+      "to": "packages/product/src/authentication/openai-auth-service.ts",
+      "specifier": "@rika/product/openai-auth-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -20692,6 +20936,22 @@
     },
     {
       "from": "packages/baton-execution/src/baton-route-options.ts",
+      "to": "packages/product/src/authentication/openai-auth-service.ts",
+      "specifier": "@rika/product/openai-auth-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-route-options.ts",
+      "to": "packages/product/src/authentication/provider-credential-store.ts",
+      "specifier": "@rika/product/provider-credential-store",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-route-options.ts",
       "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
       "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
@@ -20756,16 +21016,24 @@
     },
     {
       "from": "packages/baton-execution/src/baton-route.ts",
-      "to": "packages/baton-execution/src/baton-cell-call-context.ts",
-      "specifier": "./baton-cell-call-context",
+      "to": "packages/baton-execution/src/baton-agent-profile.ts",
+      "specifier": "./baton-agent-profile",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "packages/baton-execution/src/baton-route.ts",
-      "to": "packages/baton-execution/src/baton-provider-http.ts",
-      "specifier": "./baton-provider-http",
+      "to": "packages/baton-execution/src/baton-candidate-registry.ts",
+      "specifier": "./baton-candidate-registry",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-route.ts",
+      "to": "packages/baton-execution/src/baton-cell-call-context.ts",
+      "specifier": "./baton-cell-call-context",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -20782,14 +21050,6 @@
       "from": "packages/baton-execution/src/baton-route.ts",
       "to": "packages/baton-execution/src/baton-route-options.ts",
       "specifier": "./baton-route-options",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-route.ts",
-      "to": "packages/coding-tools/src/catalog/agent-role-toolkits.ts",
-      "specifier": "@rika/coding-tools/agent-role-toolkits",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -20822,14 +21082,6 @@
       "from": "packages/baton-execution/src/baton-route.ts",
       "to": "packages/kernel/src/kernel-profile-registration.ts",
       "specifier": "@rika/kernel/kernel-profile-registration",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-route.ts",
-      "to": "packages/product/src/authentication/provider-credential-store.ts",
-      "specifier": "@rika/product/provider-credential-store",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -20926,6 +21178,38 @@
       "from": "packages/baton-execution/src/baton-usage-accounting.ts",
       "to": "packages/product/src/execution/contract/execution-projection.ts",
       "specifier": "@rika/product/execution-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/openai-account-credentials.ts",
+      "to": "external:@batonfx/providers",
+      "specifier": "@batonfx/providers",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/openai-account-credentials.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/openai-account-credentials.ts",
+      "to": "packages/product/src/authentication/openai-auth-contract.ts",
+      "specifier": "@rika/product/openai-auth-contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/openai-account-credentials.ts",
+      "to": "packages/product/src/authentication/openai-auth-service.ts",
+      "specifier": "@rika/product/openai-auth-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -22350,6 +22634,150 @@
       "from": "packages/baton-execution/test/baton-tree-projector.test.ts",
       "to": "packages/transcript/src/ordering/transcript-unit-order.ts",
       "specifier": "@rika/transcript/transcript-unit-order",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-credentials.test.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-credentials.test.ts",
+      "to": "external:@batonfx/providers",
+      "specifier": "@batonfx/providers",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-credentials.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-credentials.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-credentials.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-credentials.test.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-credentials.test.ts",
+      "to": "packages/baton-execution/src/openai-account-credentials.ts",
+      "specifier": "../src/openai-account-credentials",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-credentials.test.ts",
+      "to": "packages/product/src/authentication/openai-auth-service.ts",
+      "specifier": "@rika/product/openai-auth-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-route.test.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-route.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-route.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-route.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-route.test.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-route.test.ts",
+      "to": "packages/baton-execution/src/baton-candidate-registry.ts",
+      "specifier": "../src/baton-candidate-registry",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-route.test.ts",
+      "to": "packages/baton-execution/src/baton-route.ts",
+      "specifier": "../src/baton-route",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-route.test.ts",
+      "to": "packages/configuration/src/settings/configuration-settings.ts",
+      "specifier": "@rika/configuration/configuration-settings",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-route.test.ts",
+      "to": "packages/product/src/authentication/openai-auth-service.ts",
+      "specifier": "@rika/product/openai-auth-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openai-account-route.test.ts",
+      "to": "packages/product/src/execution/service/execution-route-resolution.ts",
+      "specifier": "@rika/product/execution-route-resolution",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -27110,6 +27538,14 @@
       "from": "packages/kernel/src/binding/binding-surface-description.ts",
       "to": "packages/kernel/src/binding/binding-requirements.ts",
       "specifier": "./binding-requirements",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/kernel/src/binding/binding-surface-description.ts",
+      "to": "packages/product/src/execution/contract/subagent-policy.ts",
+      "specifier": "@rika/product/subagent-policy",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -34646,6 +35082,14 @@
       "from": "packages/product/src/execution/service/execution-route-resolution.ts",
       "to": "packages/product/src/execution/contract/model-registration-identity.ts",
       "specifier": "../contract/model-registration-identity",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution/service/execution-route-resolution.ts",
+      "to": "packages/product/src/execution/contract/provider-connection-snapshot.ts",
+      "specifier": "../contract/provider-connection-snapshot",
       "kind": "import",
       "relationship": "runtime",
       "production": true

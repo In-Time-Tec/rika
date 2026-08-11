@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Option, Schema } from "effect"
+import { Deferred, Effect, Fiber, Layer, Option, Schema } from "effect"
 import { Http, Store } from "./openai-auth-test-contract"
 import { Service } from "./openai-auth-test-service"
 import { dependencies, memoryStore, provideLayer, unusedHttp } from "./openai-auth-test-layers"
@@ -75,6 +75,45 @@ describe("OpenAI credential state", () => {
       expect(refreshes).toBe(1)
     }).pipe(provideLayer(dependencies(store.layer, http)))
   })
+
+  it.effect("finishes saving rotated refresh credentials when interrupted after the response", () =>
+    Effect.gen(function* () {
+      const original = disk()
+      const saveStarted = yield* Deferred.make<void>()
+      const allowSave = yield* Deferred.make<void>()
+      let saved = Option.none<typeof Contract.CredentialDisk.Type>()
+      const store = Layer.succeed(
+        Store,
+        Store.of({
+          load: Effect.succeed(Option.some(original)),
+          save: (next) =>
+            Deferred.succeed(saveStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(allowSave)),
+              Effect.andThen(
+                Effect.sync(() => {
+                  saved = Option.some(next)
+                }),
+              ),
+            ),
+          remove: Effect.succeed(false),
+          serialized: (effect) => effect,
+        }),
+      )
+      const http = Http.of({
+        ...unusedHttp,
+        refresh: () => Effect.succeed({ ...tokens(), refresh_token: "rotated-refresh-secret" }),
+      })
+      yield* Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild((yield* Service).refreshRejected(original.generation))
+        yield* Deferred.await(saveStarted)
+        const interruption = yield* Effect.forkChild(Fiber.interrupt(fiber))
+        yield* Effect.yieldNow
+        yield* Deferred.succeed(allowSave, undefined)
+        yield* Fiber.join(interruption)
+      }).pipe(provideLayer(dependencies(store, http)))
+      expect(Option.getOrThrow(saved).refreshToken).toBe("rotated-refresh-secret")
+    }),
+  )
 
   it.effect("rejects a refreshed different nested identity without overwriting credentials", () => {
     const original = disk()

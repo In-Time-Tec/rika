@@ -7,7 +7,8 @@ import {
   type InboxEntry,
 } from "@rika/kernel/agent-port"
 import { ArtifactStore } from "@rika/kernel/artifact-store"
-import { Effect, Layer } from "effect"
+import { maxSpawnedSubagentsPerExecution } from "@rika/product/subagent-policy"
+import { Effect, Layer, Semaphore } from "effect"
 import type { Prompt } from "effect/unstable/ai"
 
 const messageOf = (cause: unknown): string => {
@@ -188,6 +189,7 @@ const activityPreview = (event: RunEvent.RunEvent): string => {
  */
 const make: Effect.Effect<AgentPort["Service"], never, ArtifactStore> = Effect.gen(function* () {
   const artifacts = yield* ArtifactStore
+  const spawnAdmission = yield* Semaphore.make(1)
   /**
    * A Run's direct children, read from its TREE.
    *
@@ -221,6 +223,18 @@ const make: Effect.Effect<AgentPort["Service"], never, ArtifactStore> = Effect.g
                 ...(entry.outcome === undefined ? {} : { outcome: entry.outcome }),
               }),
             ),
+        ),
+        Effect.mapError(failed),
+      ),
+    )
+  const spawnedSubagents = (runId: string) =>
+    Effect.flatMap(ambientRuntime, (runtime) =>
+      rootOf(runtime, runId).pipe(
+        Effect.flatMap((rootRunId) => RunTree.inspect(rootRunId).pipe(Effect.provideService(Runtime.Runtime, runtime))),
+        Effect.map((inspection) =>
+          inspection.runs.filter(
+            (entry) => entry.invocationId !== undefined && ChildAdmission.admissionOf(entry.invocationId) !== undefined,
+          ),
         ),
         Effect.mapError(failed),
       ),
@@ -307,33 +321,39 @@ const make: Effect.Effect<AgentPort["Service"], never, ArtifactStore> = Effect.g
   }
   return AgentPort.of({
     spawn: (input) =>
-      Effect.flatMap(identity, (self) =>
-        Effect.flatMap(originFor(self, input.key), (origin) =>
-          Effect.flatMap(ambientRuntime, (runtime) =>
-            runtime
-              .spawn({
-                parentRunId: self.runId,
-                invocationId: ChildAdmission.invocationIdFor({
-                  toolCallId: self.toolCallId,
-                  key: input.key,
-                  origin,
-                }),
-                selection: input.profile,
-                prompt: input.prompt,
-                /**
-                 * The ordinal travels in the idempotency key as well as the invocation id. Two
-                 * spawns of one profile from one cell share the binding's admission key, so
-                 * without it Baton would read the second as a repeat of the first.
-                 */
-                idempotencyKey: `${input.key}#${origin.ordinal}`,
-                metadata: { productIntent: "cell-child", originOperation: self.toolCallId },
-              })
-              .pipe(
-                Effect.map((receipt) => ({ childRunId: receipt.runId, key: input.key, duplicate: receipt.duplicate })),
-                Effect.mapError(failed),
-              ),
-          ),
-        ),
+      spawnAdmission.withPermits(1)(
+        Effect.gen(function* () {
+          const self = yield* identity
+          const spawned = yield* spawnedSubagents(self.runId)
+          if (spawned.length >= maxSpawnedSubagentsPerExecution)
+            return yield* unavailable(
+              "bounded",
+              `This execution can spawn at most ${maxSpawnedSubagentsPerExecution} subagents`,
+            )
+          const origin = yield* originFor(self, input.key)
+          const runtime = yield* ambientRuntime
+          return yield* runtime
+            .spawn({
+              parentRunId: self.runId,
+              invocationId: ChildAdmission.invocationIdFor({
+                toolCallId: self.toolCallId,
+                key: input.key,
+                origin,
+              }),
+              selection: input.profile,
+              prompt: input.prompt,
+              idempotencyKey: `${input.key}#${origin.ordinal}`,
+              metadata: { productIntent: "cell-child", originOperation: self.toolCallId },
+            })
+            .pipe(
+              Effect.map((receipt) => ({
+                childRunId: receipt.runId,
+                key: input.key,
+                duplicate: receipt.duplicate,
+              })),
+              Effect.mapError(failed),
+            )
+        }),
       ),
     list: Effect.flatMap(identity, (self) => children(self.runId)),
     inspect: (childRunId) => Effect.flatMap(identity, (self) => ownedChild(self.runId, childRunId)),

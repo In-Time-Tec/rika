@@ -121,6 +121,16 @@ const validateConnection = (value: unknown): void => {
     ["provider", "protocol", "baseUrl", "authentication", "apiKeyEnvironment", "credentialIdentity"],
     "Unsupported provider connection field",
   )
+  if (
+    connection.authentication === "account" &&
+    (connection.provider !== "openai" ||
+      connection.protocol !== "openai" ||
+      typeof connection.credentialIdentity !== "string" ||
+      connection.credentialIdentity.length === 0 ||
+      connection.apiKeyEnvironment !== undefined)
+  ) {
+    throw new Error("Malformed OpenAI account provider connection")
+  }
 }
 
 const validateModel = (value: unknown, expectedRole: ModelRouteRole): void => {

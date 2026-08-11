@@ -7,6 +7,7 @@ import { Approval, Run, RunTree, Runtime } from "@batonfx/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import type { Status } from "@rika/product/execution-status"
 import { ProviderCredentialStore, type ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
+import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 export type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 export type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
 import { Cause, Context, Deferred, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
@@ -47,6 +48,7 @@ export interface Options {
   readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolServices, never, never>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry, never, never>
   readonly credentialStore?: Layer.Layer<ProviderCredentialStore, never, never>
+  readonly openAiAccountAuth?: OpenAiAuth.ServiceInterface
   readonly subscriberQueueCapacity?: number
 }
 
@@ -202,6 +204,7 @@ const make = (
             ...(options.skills === undefined ? {} : { skills: options.skills }),
             ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
             ...(credentialStore === undefined ? {} : { credentialStore }),
+            ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
             ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices(input.workspace) }),
             ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
           })
@@ -332,6 +335,7 @@ export const layer = (options: Options): Layer.Layer<ExecutionGateway.Service, E
           ...(options.skills === undefined ? {} : { skills: options.skills }),
           ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
           ...(credentialStore === undefined ? {} : { credentialStore }),
+          ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
           ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices }),
           ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
         }),

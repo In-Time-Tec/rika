@@ -4,6 +4,7 @@ import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import * as ConfigurationService from "@rika/configuration/configuration-service"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/product/product-operation-service"
+import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import * as ExtensionOperations from "@rika/product/extension-operation"
 import * as McpOAuthService from "@rika/extensions/mcp-oauth-service"
 import * as SkillRegistry from "@rika/extensions/skill-registry"
@@ -76,10 +77,16 @@ export const createExtensionLayer: {
 const createOpenAiAuthLayerImpl = (database: string, profileIdentity: string) =>
   OpenAiProviderAuth.createLayer(database, profileIdentity)
 
-export const createOpenAiAuthLayer: {
+const createOpenAiAuthLayer: {
   (profileIdentity: string): (database: string) => ReturnType<typeof createOpenAiAuthLayerImpl>
   (database: string, profileIdentity: string): ReturnType<typeof createOpenAiAuthLayerImpl>
 } = Function.dual(2, createOpenAiAuthLayerImpl)
+
+export const resolveOpenAiAccountAuth = (authOperations: Operation.AuthOperationOptions) =>
+  Layer.build(authOperations.layer).pipe(
+    Effect.map((context) => Context.get(context, OpenAiAuth.Service)),
+    Effect.mapError((error) => OperationProductError.make({ message: error.message })),
+  )
 
 const createOpenRouterAuthLayerImpl = (database: string, profileIdentity: string) =>
   OpenRouterProviderAuth.createLayer(database, profileIdentity)

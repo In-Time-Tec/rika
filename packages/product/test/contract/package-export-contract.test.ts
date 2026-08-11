@@ -99,6 +99,7 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "execution-status",
     "model-registration-identity",
     "provider-connection-snapshot",
+    "subagent-policy",
     "configuration-operation",
     "extension-operation",
     "interactive-operation",

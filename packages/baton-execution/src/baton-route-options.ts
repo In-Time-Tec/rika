@@ -6,6 +6,8 @@ import * as CellCallContext from "./baton-cell-call-context"
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
+import type * as OpenAiAuth from "@rika/product/openai-auth-service"
+import type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
 import { Context, Effect, Layer, Option } from "effect"
 import { Tool } from "effect/unstable/ai"
 
@@ -37,6 +39,8 @@ export interface ConfigureOptions {
   readonly harnessSnapshot?: HarnessState.HarnessState
   readonly agentServices?: Layer.Layer<AgentToolHandlers>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
+  readonly credentialStore?: ProviderCredentialStoreShape
+  readonly openAiAccountAuth?: OpenAiAuth.ServiceInterface
 }
 
 export interface ConfiguredExecutable {
@@ -55,4 +59,6 @@ export interface ResolverOptions {
   readonly harnessSnapshot?: HarnessState.HarnessState
   readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolHandlers>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
+  readonly credentialStore?: ProviderCredentialStoreShape
+  readonly openAiAccountAuth?: OpenAiAuth.ServiceInterface
 }

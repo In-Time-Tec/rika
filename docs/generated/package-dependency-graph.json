@@ -183,6 +183,7 @@
         "./server-operation-request",
         "./server-service",
         "./server-service-handshake",
+        "./subagent-policy",
         "./thread-operation",
         "./thread-query-service",
         "./thread-record",

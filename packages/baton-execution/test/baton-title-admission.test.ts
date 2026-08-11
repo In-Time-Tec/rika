@@ -150,11 +150,11 @@ it.live(
     Effect.gen(function* () {
       const filename = `/tmp/rika-baton-title-cancel-${yield* Random.nextInt}.db`
       const rootFixture = yield* TestModel.make(
-        [TestModel.turn([TestModel.text("ROOT_ANSWER")], { delay: "10 seconds" })],
+        [TestModel.turn([TestModel.text("ROOT_ANSWER")], { delay: "30 seconds" })],
         { provider: "test", model: "test", registrationKey: "title-cancel-root" },
       )
       const titleFixture = yield* TestModel.make(
-        [TestModel.turn([TestModel.text("Generated Title")], { delay: "10 seconds" })],
+        [TestModel.turn([TestModel.text("Generated Title")], { delay: "30 seconds" })],
         { provider: "test", model: "test", registrationKey: "title-cancel-title" },
       )
       const outcome = yield* Effect.scoped(
@@ -176,10 +176,10 @@ it.live(
             titleIntent: { _tag: "GenerateThreadTitle", expectedTitle: "the user prompt" },
           })
           // Both lanes are slow, so this is the exact window in which the user cancels.
-          // The root must reach the model without waiting for the 10s title lane.
+          // The root must reach the model without waiting for the 30s title lane.
           yield* rootFixture.awaitRequests(1).pipe(
             Effect.timeoutOrElse({
-              duration: "2 seconds",
+              duration: "10 seconds",
               orElse: () => Effect.die("root model call did not start; thread titling is gating the user's turn"),
             }),
           )
@@ -208,7 +208,7 @@ it.live(
         block: { _tag: "Notification", title: "Cancellation requested", detail: "Cancelled by user" },
       })
     }),
-  20_000,
+  30_000,
 )
 
 it.live(

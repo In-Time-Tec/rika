@@ -1,13 +1,13 @@
 import { expect, it } from "@effect/vitest"
 import { ToolContext } from "@batonfx/core"
-import { AgentDirectory, Runtime } from "@batonfx/runtime"
+import { AgentDirectory, ChildAdmission, Run, Runtime } from "@batonfx/runtime"
 import { AgentPort, ChildSettlementInboxEntry, type Interface as AgentPortInterface } from "@rika/kernel/agent-port"
 import * as ArtifactStore from "@rika/kernel/artifact-store"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Exit, Layer } from "effect"
 import { Prompt } from "effect/unstable/ai"
 import { runtimeAgentPortLayer } from "../src/server/composition/server-agent-port"
 
-const cellContext = (runId: string, toolCallId = "call-1") =>
+const cellContext = (runId: string, toolCallId = "call-1", attempt?: number) =>
   ToolContext.ToolContext.of({
     signal: new AbortController().signal,
     emit: () => Effect.void,
@@ -15,11 +15,12 @@ const cellContext = (runId: string, toolCallId = "call-1") =>
     runId,
     toolCallId,
     operationKey: "operation-1",
+    ...(attempt === undefined ? {} : { attempt }),
   })
 
-const runInspection = (runId: string, parentRunId?: string) => ({
+const runInspection = (runId: string, parentRunId?: string, status: Run.RunStatus = "running") => ({
   runId,
-  status: "running" as const,
+  status,
   executableRef: {} as never,
   executableManifest: {} as never,
   lastSequence: 0,
@@ -60,11 +61,12 @@ const withPort = <A, E>(
   use: (port: AgentPortInterface) => Effect.Effect<A, E>,
   runId = "run-self",
   toolCallId = "call-1",
+  attempt?: number,
 ) =>
   Effect.scoped(
     Effect.flatMap(Layer.build(runtimeAgentPortLayer.pipe(Layer.provide(artifacts))), (context) =>
       use(Context.get(context, AgentPort)).pipe(
-        Effect.provideService(ToolContext.ToolContext, cellContext(runId, toolCallId)),
+        Effect.provideService(ToolContext.ToolContext, cellContext(runId, toolCallId, attempt)),
         Effect.provideService(Runtime.Runtime, runtimeOf({ history: () => Effect.succeed([]), ...runtime })),
       ),
     ),
@@ -91,6 +93,193 @@ it.effect("reports Baton's duplicate admission rather than always claiming a fre
     )
     // A replayed cell must learn the child already existed; reporting `false` would spawn twice.
     expect(admitted).toEqual({ childRunId: "child-1", key: "k", duplicate: true })
+  }),
+)
+
+it.effect("atomically limits one execution tree to six model-authored child admissions", () =>
+  Effect.gen(function* () {
+    const children: Array<{
+      readonly run: ReturnType<typeof runInspection>
+      readonly parentRunId: string
+      readonly invocationId: string
+    }> = []
+    let spawnCalls = 0
+    const results = yield* withPort(
+      {
+        inspect: (runId) => Effect.succeed(runInspection(runId) as never),
+        inspectTree: () =>
+          Effect.succeed({
+            _tag: "Active",
+            rootRunId: "run-self",
+            cursor: "c",
+            runs: [...children],
+            usage: [],
+            compactions: [],
+            activeRunIds: children.map(({ run }) => run.runId),
+          } as never),
+        spawn: (input) =>
+          Effect.yieldNow.pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                spawnCalls = spawnCalls + 1
+                const runId = `child-${spawnCalls}`
+                children.push({
+                  run: runInspection(runId),
+                  parentRunId: input.parentRunId,
+                  invocationId: input.invocationId,
+                })
+                return { runId, messageId: `message-${spawnCalls}`, acceptedSequence: spawnCalls, duplicate: false }
+              }),
+            ),
+          ),
+      },
+      (value) =>
+        Effect.forEach(
+          Array.from({ length: 7 }, (_, index) => index),
+          (index) => value.spawn({ profile: "Task", prompt: `task-${index}`, key: `task-${index}` }).pipe(Effect.exit),
+          { concurrency: "unbounded" },
+        ),
+    )
+    expect(results.filter(Exit.isSuccess)).toHaveLength(6)
+    const rejected = results.filter(Exit.isFailure)
+    expect(rejected).toHaveLength(1)
+    expect(
+      Exit.isFailure(rejected[0]!) ? rejected[0].cause.reasons.find((reason) => reason._tag === "Fail") : undefined,
+    ).toMatchObject({
+      error: { _tag: "AgentDirectoryUnavailable", reason: "bounded", message: expect.stringContaining("6") },
+    })
+    expect(spawnCalls).toBe(6)
+    expect(children).toHaveLength(6)
+  }),
+)
+
+it.effect("rejects a fresh seventh same-profile spawn on a recovered attempt", () =>
+  Effect.gen(function* () {
+    const children = Array.from({ length: 6 }, (_, ordinal) => ({
+      run: runInspection(`child-${ordinal}`),
+      parentRunId: "run-self",
+      invocationId: ChildAdmission.invocationIdFor({
+        toolCallId: "call-recovered",
+        key: "Task#0",
+        origin: { operationKey: "call-recovered", ordinal },
+      }),
+    }))
+    let spawnCalls = 0
+    const result = yield* withPort(
+      {
+        inspect: (runId) => Effect.succeed(runInspection(runId) as never),
+        inspectTree: () =>
+          Effect.succeed({
+            _tag: "Active",
+            rootRunId: "run-self",
+            cursor: "c",
+            runs: children,
+            usage: [],
+            compactions: [],
+            activeRunIds: children.map(({ run }) => run.runId),
+          } as never),
+        spawn: () =>
+          Effect.sync(() => {
+            spawnCalls = spawnCalls + 1
+            return { runId: "unexpected", messageId: "unexpected", acceptedSequence: 1, duplicate: false }
+          }),
+      },
+      (value) => value.spawn({ profile: "Task", prompt: "fresh seventh", key: "Task#0" }).pipe(Effect.exit),
+      "run-self",
+      "call-recovered",
+      2,
+    )
+    expect(Exit.isFailure(result)).toBe(true)
+    if (Exit.isFailure(result))
+      expect(result.cause.reasons.find((reason) => reason._tag === "Fail")).toMatchObject({
+        error: { _tag: "AgentDirectoryUnavailable", reason: "bounded" },
+      })
+    expect(spawnCalls).toBe(0)
+  }),
+)
+
+it.effect("counts recursive child admissions but not internal title or review children", () =>
+  Effect.gen(function* () {
+    const codingInvocations = Array.from(
+      { length: 5 },
+      (_, index) => `child-admit:cell-${index}:operation-${index}#0:Task%230`,
+    )
+    const codingStatuses: ReadonlyArray<Run.RunStatus> = ["succeeded", "failed", "cancelled", "waiting", "running"]
+    const treeRuns: Array<{
+      readonly run: ReturnType<typeof runInspection>
+      readonly parentRunId: string
+      readonly invocationId: string
+    }> = [
+      { run: runInspection("title"), parentRunId: "root", invocationId: "rika.thread-title" },
+      { run: runInspection("review"), parentRunId: "root", invocationId: "review-group:correctness" },
+      ...codingInvocations.map((invocationId, index) => ({
+        run: runInspection(`coding-${index}`, undefined, codingStatuses[index]),
+        parentRunId: index === 0 ? "root" : `coding-${index - 1}`,
+        invocationId,
+      })),
+    ]
+    let spawnCalls = 0
+    const results = yield* withPort(
+      {
+        inspect: (runId) =>
+          Effect.succeed(runInspection(runId, runId === "nested-parent" ? "root" : undefined) as never),
+        inspectTree: () =>
+          Effect.succeed({
+            _tag: "Active",
+            rootRunId: "root",
+            cursor: "c",
+            runs: [...treeRuns],
+            usage: [],
+            compactions: [],
+            activeRunIds: treeRuns.filter(({ run }) => run.status === "running").map(({ run }) => run.runId),
+          } as never),
+        spawn: (input) =>
+          Effect.sync(() => {
+            spawnCalls = spawnCalls + 1
+            const runId = `new-${spawnCalls}`
+            treeRuns.push({
+              run: runInspection(runId),
+              parentRunId: input.parentRunId,
+              invocationId: input.invocationId,
+            })
+            return { runId, messageId: `m-${spawnCalls}`, acceptedSequence: spawnCalls, duplicate: false }
+          }),
+      },
+      (value) =>
+        Effect.all([
+          value.spawn({ profile: "Task", prompt: "sixth", key: "sixth" }).pipe(Effect.exit),
+          value.spawn({ profile: "Task", prompt: "seventh", key: "seventh" }).pipe(Effect.exit),
+        ]),
+      "nested-parent",
+    )
+    expect(Exit.isSuccess(results[0]!)).toBe(true)
+    expect(Exit.isFailure(results[1]!)).toBe(true)
+    if (Exit.isFailure(results[1]!))
+      expect(results[1].cause.reasons.find((reason) => reason._tag === "Fail")).toMatchObject({
+        error: { _tag: "AgentDirectoryUnavailable", reason: "bounded" },
+      })
+    expect(spawnCalls).toBe(1)
+
+    const fresh = yield* withPort(
+      {
+        inspect: (runId) => Effect.succeed(runInspection(runId) as never),
+        inspectTree: (rootRunId) =>
+          Effect.succeed({
+            _tag: "Active",
+            rootRunId,
+            cursor: "fresh",
+            runs: [],
+            usage: [],
+            compactions: [],
+            activeRunIds: [],
+          } as never),
+        spawn: () =>
+          Effect.succeed({ runId: "fresh-child", messageId: "fresh-message", acceptedSequence: 1, duplicate: false }),
+      },
+      (value) => value.spawn({ profile: "Task", prompt: "fresh tree", key: "fresh" }),
+      "fresh-root",
+    )
+    expect(fresh).toEqual({ childRunId: "fresh-child", key: "fresh", duplicate: false })
   }),
 )
 

@@ -128,6 +128,7 @@ it.effect("builds one exact closed executable with role-specific tool and servic
     for (const profile of Object.values(configured.profiles)) {
       expect(profile.manifest.budget.totalTokens).toBe(10_000_000)
       expect(profile.manifest.budget.modelCalls).toBeGreaterThan(0)
+      expect(profile.manifest.budget.childRuns).toBe(6)
     }
     for (const name of conversationalProfiles) {
       expect(configured.profiles[name]!.manifest.tools.map(({ name: toolName }) => toolName)).toEqual([CellTool.name])
