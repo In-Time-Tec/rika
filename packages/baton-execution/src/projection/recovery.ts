@@ -1,5 +1,5 @@
 import type { Block } from "@rika/product/execution-transcript-contract"
-import { optionalString, record, string } from "./baton-projector-values"
+import { optionalString, record, string } from "./values"
 
 type Cell = Extract<Block, { readonly _tag: "Cell" }>
 export type CellNotice = Cell["notices"][number]
@@ -18,8 +18,6 @@ export const eventNotice = (event: Readonly<Record<string, unknown>>): CellNotic
   switch (event._tag) {
     case "KernelStarting":
       return { kind: "starting", detail: "Starting the kernel." }
-    case "KernelReady":
-      return { kind: "ready", detail: `Kernel ready at profile ${optionalString(event.profileDigest)}.` }
     case "KernelRestarted":
       return {
         kind: "restarted",

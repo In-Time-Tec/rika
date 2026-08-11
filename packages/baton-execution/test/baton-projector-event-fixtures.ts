@@ -1,6 +1,6 @@
 import { RunTree, type RunEvent } from "@batonfx/runtime"
 import { DateTime, Function } from "effect"
-import { TreeProjector } from "../src/baton-tree-projector"
+import { TreeProjector } from "../src/projection/tree"
 
 let position = 0
 

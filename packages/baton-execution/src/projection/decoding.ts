@@ -1,7 +1,7 @@
 import { Function } from "effect"
 import type { RunEvent } from "@batonfx/runtime"
-import { bounded, record } from "./baton-projector-values"
-import { toolTextLimit } from "./baton-projector-values"
+import { bounded, record } from "./values"
+import { toolTextLimit } from "./values"
 
 export const encoded = (value: unknown): string => {
   if (typeof value === "string") return bounded(value, toolTextLimit)

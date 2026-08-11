@@ -1,8 +1,8 @@
 import type { RunEvent } from "@batonfx/runtime"
 import * as Projection from "@rika/product/execution-projection"
-import { type Node } from "./baton-projector-model"
-import { type AttemptStart, type ModelCallState } from "./baton-projector-persistence"
-import { add, occurredAt } from "./baton-projector-decoding"
+import { type Node } from "./projection/model"
+import { type AttemptStart, type ModelCallState } from "./projection/persistence"
+import { add, occurredAt } from "./projection/decoding"
 
 export interface UsageAccounting {
   readonly attemptStarts: Map<string, AttemptStart>

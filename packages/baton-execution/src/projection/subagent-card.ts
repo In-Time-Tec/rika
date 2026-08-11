@@ -1,11 +1,11 @@
 import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import type { Block, Unit } from "@rika/product/execution-transcript-contract"
 import { childOrder, unitOrder } from "@rika/product/execution-transcript-contract"
-import { type Card, type Node } from "./baton-projector-model"
-import { type ProjectorCore } from "./baton-projector-persistence"
-import { bounded, record, optionalString, string } from "./baton-projector-values"
-import { projectorNames, toolTextLimit } from "./baton-projector-values"
-import { promptText } from "./baton-projector-decoding"
+import { type Card, type Node } from "./model"
+import { type ProjectorCore } from "./persistence"
+import { bounded, record, optionalString, string } from "./values"
+import { projectorNames, toolTextLimit } from "./values"
+import { promptText } from "./decoding"
 
 export interface CellAttachment {
   readonly blockId: string

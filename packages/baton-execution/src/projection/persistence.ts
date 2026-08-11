@@ -1,5 +1,5 @@
 import * as Projection from "@rika/product/execution-projection"
-import type { Card, CellState, Node, ToolState } from "./baton-projector-model"
+import type { Card, CellState, Node, ToolState } from "./model"
 
 export interface AuthorizationState {
   readonly unitKey: string

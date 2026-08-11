@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "@effect/vitest"
 import { compareUnitOrder } from "@rika/product/execution-transcript-contract"
-import { TreeProjector } from "../src/baton-tree-projector"
+import { TreeProjector } from "../src/projection/tree"
 import { modelResponseContent, resetEventPosition, treeEvent } from "./baton-projector-event-fixtures"
 
 interface ProviderFragment {

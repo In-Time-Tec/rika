@@ -1,10 +1,10 @@
 import * as Projection from "@rika/product/execution-projection"
 import type { Block, Unit } from "@rika/product/execution-transcript-contract"
 import { Schema } from "effect"
-import { type Card, type Node } from "./baton-projector-model"
-import { type AuthorizationState, type PersistedProjector, type ProjectorCore } from "./baton-projector-persistence"
-import { compactNode } from "./baton-projector-nodes"
-import type { UsageAccounting } from "./baton-usage-accounting"
+import { type Card, type Node } from "./model"
+import { type AuthorizationState, type PersistedProjector, type ProjectorCore } from "./persistence"
+import { compactNode } from "./nodes"
+import type { UsageAccounting } from "../baton-usage-accounting"
 
 export interface ProjectorCheckpointCodec {
   readonly serialize: () => string

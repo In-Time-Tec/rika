@@ -1,7 +1,7 @@
 import type { Unit } from "@rika/product/execution-transcript-contract"
-import { type Node } from "./baton-projector-model"
-import { type AuthorizationState, type ProjectorCore } from "./baton-projector-persistence"
-import { bounded } from "./baton-projector-values"
+import { type Node } from "./model"
+import { type AuthorizationState, type ProjectorCore } from "./persistence"
+import { bounded } from "./values"
 
 export interface AuthorizationProjection {
   readonly putAuthorization: (

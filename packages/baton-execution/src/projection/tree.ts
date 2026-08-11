@@ -3,28 +3,28 @@ import * as Projection from "@rika/product/execution-projection"
 import * as UnitOrder from "@rika/product/execution-transcript-contract"
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import { Function } from "effect"
-import { completeTool } from "./baton-tool-projection"
-import { makeAuthorizationProjection } from "./baton-authorization-projection"
-import { cellToolName, makeCellProjection } from "./baton-cell-projection"
-import { makeDiagnosticProjection } from "./baton-diagnostic-projection"
-import { makeSubagentCardProjection } from "./baton-subagent-card-projection"
-import { semanticTreeEvent, type ModelResponseCommitted, type SemanticTreeEvent } from "./baton-semantic-run-event"
-import { makeToolUnitProjection } from "./baton-tool-unit-projection"
-import { makeProjectorCheckpointCodec } from "./baton-projector-checkpoint"
-import { makeUsageAccounting } from "./baton-usage-accounting"
-import { type Card, type Node, type Projector } from "./baton-projector-model"
+import { completeTool } from "./tool"
+import { makeAuthorizationProjection } from "./authorization"
+import { cellToolName, makeCellProjection } from "./cell"
+import { makeDiagnosticProjection } from "./diagnostic"
+import { makeSubagentCardProjection } from "./subagent-card"
+import { makeSemanticResponseProjection, semanticTreeEvent, type SemanticTreeEvent } from "./semantic-response"
+import { makeToolUnitProjection } from "./tool-unit"
+import { makeProjectorCheckpointCodec } from "./checkpoint"
+import { makeUsageAccounting } from "../baton-usage-accounting"
+import { type Card, type Node, type Projector } from "./model"
 import {
   type AuthorizationState,
   type ModelCallState,
   type PersistedProjector,
   type ProjectorCore,
-} from "./baton-projector-persistence"
-import { boundedInsert, subagentCardStatus } from "./baton-projector-nodes"
-import { bounded, boundedHead, optionalString, record, string } from "./baton-projector-values"
-import { projectorNames, textLimit, toolTextLimit } from "./baton-projector-values"
+} from "./persistence"
+import { boundedInsert, subagentCardStatus } from "./nodes"
+import { bounded, boundedHead, optionalString, record, string } from "./values"
+import { projectorNames, textLimit, toolTextLimit } from "./values"
 
-import { scopedId } from "./baton-projector-decoding"
-import { encoded, providerCostNanoUsd, token } from "./baton-projector-decoding"
+import { scopedId } from "./decoding"
+import { encoded, providerCostNanoUsd, token } from "./decoding"
 
 export type { Projector }
 
@@ -168,6 +168,25 @@ const make = (
     unit,
   })
 
+  const semanticResponse = makeSemanticResponseProjection({
+    localId,
+    put,
+    unit,
+    openCell,
+    cardFor,
+    groupCards,
+    removeTool: (node, rawId) => remove(toolState(node, rawId).key),
+    putTool,
+    notice,
+    error,
+    beginOrderedResponse: () => {
+      semanticOrderPart = 0
+    },
+    endOrderedResponse: () => {
+      semanticOrderPart = undefined
+    },
+  })
+
   const nodeFor = (input: SemanticTreeEvent): Node => {
     const current = nodes.get(input.runId)
     if (current !== undefined) return current
@@ -206,93 +225,6 @@ const make = (
     if (node.parentRawRunId === undefined) core.rootStatus = status
   }
 
-  const putCompletedText = (
-    node: Node,
-    event: ModelResponseCommitted,
-    contentIndex: number,
-    kind: "assistant" | "reasoning",
-    text: string,
-  ) => {
-    if (node.hidden || text.length === 0) return
-    const chunks = Array.from({ length: Math.ceil(text.length / textLimit) }, (_, index) =>
-      text.slice(index * textLimit, (index + 1) * textLimit),
-    )
-    for (const [chunkIndex, chunk] of chunks.entries()) {
-      const key = localId(kind, node.publicId, node.phase, event.operationKey, contentIndex, chunkIndex)
-      put(
-        unit(
-          node,
-          key,
-          kind === "assistant"
-            ? { _tag: "Entry", role: "assistant", text: chunk }
-            : { _tag: "Block", block: { _tag: "Reasoning", text: chunk } },
-        ),
-      )
-    }
-  }
-
-  const applyModelResponse = (node: Node, event: ModelResponseCommitted) => {
-    semanticOrderPart = 0
-    try {
-      for (const [contentIndex, part] of event.response.content.entries()) {
-        switch (part.type) {
-          case "text":
-            putCompletedText(node, event, contentIndex, "assistant", part.text)
-            break
-          case "reasoning":
-            putCompletedText(node, event, contentIndex, "reasoning", part.text)
-            break
-          case "tool-call":
-            if (part.name === cellToolName) openCell(node, part.id, string(record(part.params).code, ""))
-            else if (part.name === projectorNames.runChild) {
-              const input = record(part.params)
-              cardFor(node, part.id, string(input.selection, "Subagent"), optionalString(input.prompt))
-              remove(toolState(node, part.id).key)
-            } else if (part.name === projectorNames.startChildGroup) {
-              groupCards(node, part.id, part.params)
-              remove(toolState(node, part.id).key)
-            } else if (part.name === projectorNames.awaitChildGroup) remove(toolState(node, part.id).key)
-            else putTool(node, part.id, part.name, encoded(part.params))
-            break
-          case "file":
-            notice(
-              node,
-              "file",
-              "Model attached a file",
-              "A model-generated file is available.",
-              `${event.operationKey}:${contentIndex}`,
-            )
-            break
-          case "source":
-            notice(
-              node,
-              "source",
-              "Model cited a source",
-              "A model source was recorded.",
-              `${event.operationKey}:${contentIndex}`,
-            )
-            break
-          case "error":
-            error(
-              node,
-              "model-error",
-              "Model response error",
-              String(part.error),
-              `${event.operationKey}:${contentIndex}`,
-            )
-            break
-          case "tool-approval-request":
-          case "response-metadata":
-          case "finish":
-          case "tool-result":
-            break
-        }
-      }
-    } finally {
-      semanticOrderPart = undefined
-    }
-  }
-
   const applyRunEvent = (treeEvent: SemanticTreeEvent) => {
     const event = treeEvent.event
     const node = nodeFor(treeEvent)
@@ -317,7 +249,7 @@ const make = (
         node.phase += 1
         return
       case "ModelResponseCommitted":
-        return applyModelResponse(node, event)
+        return semanticResponse.apply(node, event)
       case "ToolExecutionStarted":
         if (event.call.name === cellToolName)
           return openCell(node, event.call.id, string(record(event.call.params).code, ""))

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { Block } from "@rika/product/execution-transcript-contract"
-import { TreeProjector } from "../src/baton-tree-projector"
+import { TreeProjector } from "../src/projection/tree"
 import { block, modelResponse, resetEventPosition, treeEvent } from "./baton-projector-event-fixtures"
 
 type Cell = Extract<Block, { readonly _tag: "Cell" }>
@@ -252,6 +252,23 @@ describe("Baton cell projection", () => {
       _tag: "Block",
       block: expect.objectContaining({ title: "Kernel restarted" }),
     })
+  })
+
+  it("does not surface kernel starting or ready as cell notices", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-cell-no-kernel-noise", "quiet")
+    projector.apply(started("cell-8", "const keep = 1"))
+    // A fresh kernel boot (idle-restart or session start) used to attach a
+    // "Kernel ready at profile <digest>." notice to the open cell; the profile
+    // digest is unactionable and the state that matters is carried by the
+    // restored/lost/restarted notices, which are asserted separately.
+    const change = projector.apply(
+      progress("cell-8", { _tag: "KernelStarting", cellId: "cell-8", sequence: 0, epoch: 1 }),
+    )
+    projector.apply(progress("cell-8", { _tag: "KernelReady", cellId: "cell-8", sequence: 1, epoch: 1 }))
+    projector.apply(completed("cell-8", "const keep = 1", { value: "1", stdout: "", stderr: "" }, false))
+    expect(cellOf(change)?.notices).toEqual([{ kind: "starting", detail: "Starting the kernel." }])
+    expect(cellOf(change)?.epoch).toBe(1)
   })
 
   it("bounds streamed output and authored source", () => {

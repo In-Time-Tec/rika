@@ -13,7 +13,7 @@ import { Cause, Context, Deferred, Effect, Layer, Option, Schedule, Schema, Stre
 import type { AgentToolHandlers, KernelOptions } from "./baton-route-options"
 import { configure, makeResolver } from "./baton-route"
 import * as PreviewAdapter from "./baton-preview-adapter"
-import { TreeProjector, titleInvocationId } from "./baton-tree-projector"
+import { TreeProjector, titleInvocationId } from "./projection/tree"
 
 export type AgentToolServices = AgentToolHandlers
 

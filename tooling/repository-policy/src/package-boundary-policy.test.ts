@@ -128,6 +128,18 @@ describe("repository policy", () => {
       expect.objectContaining({ rule: "basename", severity: "error" }),
     )
   })
+
+  test("allows single-word basenames inside a naming directory", () => {
+    expect(checkSourceBasename("packages/kernel/src/binding/agents.ts")).toBeUndefined()
+    expect(checkSourceBasename("packages/baton-execution/src/projection/cell.ts")).toBeUndefined()
+  })
+
+  test("flags a basename that echoes its enclosing directory", () => {
+    expect(checkSourceBasename("packages/kernel/src/binding/binding.ts")).toEqual(
+      expect.objectContaining({ rule: "basename-echo", severity: "error" }),
+    )
+    expect(checkSourceBasename("packages/kernel/src/binding/agents-binding.ts")).toBeUndefined()
+  })
 })
 
 describe("source imports", () => {

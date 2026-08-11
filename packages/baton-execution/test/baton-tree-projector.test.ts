@@ -1,6 +1,6 @@
 import type { RunTree } from "@batonfx/runtime"
 import { describe, expect, it } from "@effect/vitest"
-import { TreeProjector } from "../src/baton-tree-projector"
+import { TreeProjector } from "../src/projection/tree"
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
 import {
   assistantOf,
