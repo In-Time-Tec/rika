@@ -206,7 +206,7 @@ const agentDefinition = (
   return { agent: Agent.close(agent, environment), pinned }
 }
 
-const rootChildNames = ["Title", "Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
+const rootChildNames = ["Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
 const taskSpecialistNames = ["Oracle", "Librarian", "Painter", "ReadThread", "Surgeon"] as const
 
 type RoleName = "Root" | "Title" | "Oracle" | "Librarian" | "Painter" | "ReadThread" | "Review" | "Surgeon" | "Task"
@@ -500,6 +500,10 @@ export const configure = (
     const nestedTaskEntries = taskProfiles.slice(1).map((profile) => agentEntry(profile.pinned))
     const entries = [agentEntry(root.pinned), ...childEntries, ...nestedTaskEntries]
     const executable = ExecutableManifest.make({ root: root.pinned.pin, entries })
+    const titleExecutable = ExecutableManifest.make({
+      root: profiles.Title.pinned.pin,
+      entries: [agentEntry(profiles.Title.pinned)],
+    })
     const registrationMap = new Map<string, ExecutableRegistration.ExecutableRegistration>()
     for (const model of [
       routes.Root,
@@ -560,10 +564,18 @@ export const configure = (
         ? Errors.ExecutableRegistrationInvalid.make({ message: `unregistered executable pin: ${pin}` })
         : Effect.succeed(registration)
     })
+    const titleRegistrations = yield* Effect.forEach(ExecutableRegistration.requiredPins(titleExecutable), (pin) => {
+      const registration = registrationMap.get(pin)
+      return registration === undefined
+        ? Errors.ExecutableRegistrationInvalid.make({ message: `unregistered title executable pin: ${pin}` })
+        : Effect.succeed(registration)
+    })
     return {
       kernelProfile,
       executable,
+      titleExecutable,
       registrations,
+      titleRegistrations,
       resolverEntries: [
         {
           executable,
@@ -624,7 +636,7 @@ export const makeResolver = (options: ResolverOptions): ExecutableResolver.Inter
           ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
         }).pipe(Effect.mapError(invalid))
         yield* Registration.verify({
-          expected: configured.registrations,
+          expected: [...configured.registrations, ...configured.titleRegistrations],
           actual: input.registrations,
           required: ExecutableRegistration.requiredPinsForActiveExecutable({
             ref: input.ref,

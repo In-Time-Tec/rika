@@ -18,7 +18,9 @@ const conversationalProfiles = ["Oracle", "Librarian", "Painter", "ReadThread", 
 type Configured = Effect.Success<ReturnType<typeof configure>>
 
 const agentEntries = (configured: Configured) =>
-  configured.executable.manifest.entries.flatMap((entry) => (entry._tag === "Agent" ? [entry] : []))
+  [...configured.executable.manifest.entries, ...configured.titleExecutable.manifest.entries].flatMap((entry) =>
+    entry._tag === "Agent" ? [entry] : [],
+  )
 
 const profileNameOf = (entry: ReturnType<typeof agentEntries>[number]) => entry.manifest.name.replace("rika-", "")
 
@@ -82,7 +84,7 @@ it.effect("resolves complete ordered model candidates deterministically", () =>
   }),
 )
 
-it.effect("builds one exact closed executable with role-specific tool and service pins", () =>
+it.effect("builds exact closed root and title executables with role-specific tool and service pins", () =>
   Effect.gen(function* () {
     const route = testExecutionRoute()
     const executionRoute = {
@@ -120,7 +122,6 @@ it.effect("builds one exact closed executable with role-specific tool and servic
       "Review",
       "Surgeon",
       "Task",
-      "Title",
     ])
     const rootToolNames = rootEntry?._tag === "Agent" ? rootEntry.manifest.tools.map(({ name }) => name) : []
     expect(rootToolNames).toEqual([CellTool.name])
@@ -169,7 +170,7 @@ it.effect("builds one exact closed executable with role-specific tool and servic
     expect(() =>
       ExecutableManifest.validateRef(configured.executable.ref, configured.executable.manifest),
     ).not.toThrow()
-    const encodedRegistrations = encodeRegistrations(configured.registrations)
+    const encodedRegistrations = encodeRegistrations([...configured.registrations, ...configured.titleRegistrations])
     for (const credential of credentialValues) expect(encodedRegistrations).not.toContain(credential)
 
     expect(
@@ -180,6 +181,10 @@ it.effect("builds one exact closed executable with role-specific tool and servic
     const registrationPins = new Set(configured.registrations.map(({ pin }) => pin))
     expect(registrationPins).toEqual(ExecutableRegistration.requiredPins(configured.executable))
     yield* ExecutableRegistration.validate(configured.executable, configured.registrations)
+    expect(new Set(configured.titleRegistrations.map(({ pin }) => pin))).toEqual(
+      ExecutableRegistration.requiredPins(configured.titleExecutable),
+    )
+    yield* ExecutableRegistration.validate(configured.titleExecutable, configured.titleRegistrations)
     expect(
       configured.registrations
         .filter(({ codec }) => codec === "rika-tool")
@@ -576,7 +581,6 @@ it.effect("keeps parent-relative child selection authority pinned after the cell
       "Review",
       "Surgeon",
       "Task",
-      "Title",
     ])
     expect(configured.profiles.Task!.manifest.children.map(({ selection }) => selection)).toEqual([
       "Librarian",
@@ -636,7 +640,7 @@ it.effect("keeps recursive Task authority available through Baton's exact depth 
         expect(task.manifest.children.find(({ selection }) => selection === "Task")?.agent).toBe(taskPins[index + 1])
       }
     }
-    expect(configured.executable.manifest.entries).toHaveLength(16)
+    expect(configured.executable.manifest.entries).toHaveLength(15)
     expect(() =>
       ExecutableManifest.validateRef(configured.executable.ref, configured.executable.manifest),
     ).not.toThrow()
@@ -665,6 +669,10 @@ it.effect("pins discovered skills into every conversational profile and register
     }
     expect(registrationPins).toEqual(ExecutableRegistration.requiredPins(configured.executable))
     yield* ExecutableRegistration.validate(configured.executable, configured.registrations)
+    expect(new Set(configured.titleRegistrations.map(({ pin }) => pin))).toEqual(
+      ExecutableRegistration.requiredPins(configured.titleExecutable),
+    )
+    yield* ExecutableRegistration.validate(configured.titleExecutable, configured.titleRegistrations)
   }),
 )
 

@@ -45,7 +45,9 @@ export interface ConfigureOptions {
 
 export interface ConfiguredExecutable {
   readonly executable: ExecutableManifest.PinnedExecutable
+  readonly titleExecutable: ExecutableManifest.PinnedExecutable
   readonly registrations: ReadonlyArray<ExecutableRegistration.ExecutableRegistration>
+  readonly titleRegistrations: ReadonlyArray<ExecutableRegistration.ExecutableRegistration>
   readonly resolverEntries: ReadonlyArray<ExecutableResolver.StaticAgentExecutable>
   readonly profiles: Readonly<Record<string, AgentManifest.PinnedAgent>>
   readonly kernelProfile: KernelProfile.KernelProfile

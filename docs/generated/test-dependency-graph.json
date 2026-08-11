@@ -4803,6 +4803,14 @@
     },
     {
       "from": "apps/rika/test/client-main-cancel.proc.test.ts",
+      "to": "external:url",
+      "specifier": "url",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/client-main-cancel.proc.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

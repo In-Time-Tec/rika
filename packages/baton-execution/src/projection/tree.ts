@@ -1,4 +1,4 @@
-import { ChildAdmission, type RunTree } from "@batonfx/runtime"
+import { ChildAdmission, type Run, type RunTree } from "@batonfx/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import * as UnitOrder from "@rika/product/execution-transcript-contract"
 import type { Unit } from "@rika/product/execution-transcript-contract"
@@ -33,6 +33,7 @@ const make = (
   prompt: string,
   resume?: Projection.Checkpoint,
   baselineUnits: ReadonlyArray<Unit> = [],
+  titleExpected = false,
 ): Projector => {
   const localId = (family: string, ...parts: ReadonlyArray<string | number>): string =>
     scopedId(family, turnId, ...parts)
@@ -67,13 +68,15 @@ const make = (
   let removed = new Set<string>()
   let batchKeys = new Set<string>()
   let semanticOrderPart: number | undefined
+  let titleSettled = !titleExpected
 
   const projectionState = (): Projection.ProjectionState => ({
     status: core.rootStatus,
     usage: {
       ...structuredClone(usage.usage()),
       sourceComplete:
-        core.rootStatus === "completed" || core.rootStatus === "failed" || core.rootStatus === "cancelled",
+        titleSettled &&
+        (core.rootStatus === "completed" || core.rootStatus === "failed" || core.rootStatus === "cancelled"),
       contextPending: usage.contextPending(),
       active: usage.activeTime(),
     },
@@ -599,6 +602,73 @@ const make = (
     }
   }
 
+  const applyTitle = (
+    text: string | undefined,
+    titleUsage: ReadonlyArray<Run.RawUsageFact>,
+  ): Projection.Patch | undefined => {
+    const checkpoint = core.checkpoint
+    if (checkpoint === undefined) throw new RangeError("A root event must be projected before its title")
+    const before = JSON.stringify(usage.usage())
+    const settlementChanged = !titleSettled
+    titleSettled = true
+    const titleNode: Node = {
+      rawRunId: `${turnId}:title`,
+      publicId: "title",
+      hidden: true,
+      tools: new Map(),
+      cells: new Map(),
+      phase: 0,
+      status: "completed",
+      lifecycle: "terminal",
+      started: true,
+    }
+    for (const fact of titleUsage) {
+      const key = localId("usage", "title", fact.modelAttemptId)
+      if (fact._tag === "Completed")
+        recordAttempt({
+          key,
+          node: titleNode,
+          modelCallId: fact.modelCallId,
+          inputTotal: token(fact.usage.inputTokens.total),
+          inputUncached: token(fact.usage.inputTokens.uncached),
+          inputCacheRead: token(fact.usage.inputTokens.cacheRead),
+          inputCacheWrite: token(fact.usage.inputTokens.cacheWrite),
+          outputTotal: token(fact.usage.outputTokens.total),
+          outputText: token(fact.usage.outputTokens.text),
+          outputReasoning: token(fact.usage.outputTokens.reasoning),
+          costNanoUsd: providerCostNanoUsd(fact),
+        })
+      else
+        recordAttempt({
+          key,
+          node: titleNode,
+          modelCallId: fact.modelCallId,
+          inputTotal: token(fact.providerUsage.inputTokens),
+          outputTotal: token(fact.providerUsage.outputTokens),
+          failedProviderTotal: token(fact.providerUsage.totalTokens),
+          costNanoUsd: providerCostNanoUsd(fact),
+        })
+    }
+    const changedTitle = text !== undefined && core.title?.text !== text
+    if (!settlementChanged && !changedTitle && JSON.stringify(usage.usage()) === before) return undefined
+    changed = new Map()
+    removed = new Set()
+    batchKeys = new Set(units.keys())
+    const baseRevision = core.revision
+    core.revision += 1
+    if (text !== undefined) core.title = { text }
+    core.checkpoint = { ...checkpoint, state: serialize() }
+    return {
+      _tag: "ProjectionPatch",
+      baseRevision,
+      revision: core.revision,
+      checkpoint: core.checkpoint,
+      upsert: [],
+      remove: [],
+      state: projectionState(),
+    }
+  }
+
   return {
     snapshot: () => {
       const materialized = [...units.values()].toSorted((left, right) =>
@@ -615,6 +685,7 @@ const make = (
     },
     apply: (input) => applyAll([input]),
     applyAll: (inputs) => applyAll(inputs),
+    applyTitle,
   }
 }
 export interface AuthorizationTarget {

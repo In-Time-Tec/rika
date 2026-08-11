@@ -92,11 +92,7 @@ test(
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
-          script: [
-            model.text("LATE_QUEUE_HEAD", 20_000),
-            model.text("QUEUED_DONE"),
-            model.text("QUEUE_SETTLEMENT_ACKNOWLEDGED"),
-          ],
+          script: [model.text("LATE_QUEUE_HEAD", 20_000), model.text("QUEUED_DONE")],
         })
         yield* Effect.promise(() => app.type("Hold the queue head."))
         app.pressEnter()
@@ -106,8 +102,8 @@ test(
         yield* app.waitFrame("Queued follow-up prompt.")
         yield* app.waitModelRequests(1)
         app.pressKey("c", { ctrl: true })
-        yield* app.waitFrame("QUEUED_DONE")
-        const promoted = yield* app.waitFrame("QUEUE_SETTLEMENT_ACKNOWLEDGED")
+        const promoted = yield* app.waitFrame("QUEUED_DONE")
+        yield* app.settled
         expect(promoted).not.toContain("LATE_QUEUE_HEAD")
         expect(promoted).not.toContain("\u2298")
         expect(promoted).not.toContain("Execution failed")
