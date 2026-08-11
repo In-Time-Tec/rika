@@ -9,7 +9,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Deferred, Effect, Layer, Ref, Stream } from "effect"
 
 import { executionRoute } from "../support/product-test-current-state"
-import { productLayer, provideLayer } from "../support/operation-layer-harness"
+import { executionSessionLifecycleLayerTest, productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
 import {
   backend,
@@ -27,6 +27,7 @@ describe("Operation", () => {
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const dispatch = (event: InteractiveEvent) => runSync(Ref.update(events, (all) => [...all, event]))
       const layer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: ThreadRepository.memoryLayer(),
         turnRepositoryLayer: TurnRepository.memoryLayer([
           {
@@ -124,6 +125,7 @@ describe("Operation", () => {
       }).pipe(
         provideLayer(
           productLayer({
+            executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             backendLayer: Layer.succeed(ExecutionGateway.Service, interruptBackend),
@@ -180,6 +182,7 @@ describe("Operation", () => {
         },
       ])
       const layer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: ThreadRepository.memoryLayer([thread]),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionGateway.Service, hostedBackend),
@@ -306,6 +309,7 @@ describe("Operation", () => {
       }).pipe(
         provideLayer(
           productLayer({
+            executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
             repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             backendLayer: Layer.succeed(ExecutionGateway.Service, controlBackend),

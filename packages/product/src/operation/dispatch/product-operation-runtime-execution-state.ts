@@ -79,7 +79,6 @@ export interface ProductOperationExecutionState extends ProductOperationExecutio
   readonly rootTurnOwner: RootTurnOwnerInterface
   readonly extensionService: ExecutionExtensionsExecutionExtensionInterface | undefined
   readonly deleteThread: (threadId: ThreadId) => Effect.Effect<void, Error>
-  readonly reconcileThreadDeletions: Effect.Effect<void, never>
   readonly acquiredDependencies: Layer.Layer<
     | import("@rika/product/thread-repository").Service
     | import("@rika/product/turn-repository").Service
@@ -161,6 +160,7 @@ export const buildProductOperationExecutionState = (
       rootTurns: rootTurnOwner,
       turnMutationAdmission,
     })
+    yield* threadDeletion.reconcile
     const threadRepository = Context.get(dependencyContext, ThreadRepository.Service)
     const requireAdmission = Effect.fn("ProductOperation.requireThreadAdmission")(function* (threadId: ThreadId) {
       const thread = yield* threadRepository
@@ -239,7 +239,6 @@ export const buildProductOperationExecutionState = (
       rootTurnOwner,
       extensionService,
       deleteThread: threadDeletion.request,
-      reconcileThreadDeletions: threadDeletion.reconcile,
       acquiredDependencies,
       withExecutionAdmission,
       replacementAdmission,

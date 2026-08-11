@@ -224,6 +224,7 @@ export const start = () => {
           const loadProductEffect: Effect.Effect<Operation.Interface, ProductOperation.OperationUnavailable, never> =
             acquireProduct
           const loadProduct = yield* Effect.cached(loadProductEffect)
+          yield* loadProduct.pipe(Effect.mapError((error) => startupError("startup-failed", error)))
           return Operation.Service.of({
             hasActiveExecutionWork: Ref.get(productLoaded).pipe(
               Effect.flatMap((loaded) =>

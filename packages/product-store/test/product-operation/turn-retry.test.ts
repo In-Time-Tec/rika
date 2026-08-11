@@ -12,7 +12,7 @@ import { unitOrder } from "@rika/transcript/transcript-unit-order"
 import { Effect, Layer, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
-import { productLayer, provideLayer } from "../support/operation-layer-harness"
+import { executionSessionLifecycleLayerTest, productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
 import { backend, projectionSnapshot } from "../support/operation-execution-fixtures"
 import { threadLineage } from "../support/operation-selection-fixtures"
@@ -102,6 +102,7 @@ describe("turn retry", () => {
         },
       })
       const layer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),

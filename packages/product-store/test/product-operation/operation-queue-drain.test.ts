@@ -11,7 +11,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Deferred, Effect, Layer, Ref, Stream } from "effect"
 import * as Scope from "effect/Scope"
 
-import { productLayer, provideLayer } from "../support/operation-layer-harness"
+import { executionSessionLifecycleLayerTest, productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
 import { backend, projectionSnapshot } from "../support/operation-execution-fixtures"
 import { threadLineage } from "../support/operation-selection-fixtures"
@@ -85,6 +85,7 @@ describe("Operation queue drain", () => {
             : backend.watchTurn(link),
       })
       const layer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionGateway.Service, failingBackend),
@@ -140,6 +141,7 @@ describe("Operation queue drain", () => {
         },
       })
       const layer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionGateway.Service, failingBackend),

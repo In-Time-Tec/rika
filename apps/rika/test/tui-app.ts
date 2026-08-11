@@ -185,6 +185,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     writeTerminalTitle: (sequence) => terminalTitles.push(sequence.slice(4, -1)),
   })
   const operationLayer = productLayer({
+    executionSessionLifecycleLayer: executionBackendLayer,
     repositoryLayer: repositories,
     turnRepositoryLayer: repositories,
     transcriptRepositoryLayer: repositories,

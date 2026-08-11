@@ -4,7 +4,7 @@ import * as SettingsDecoder from "@rika/configuration/configuration-settings"
 import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as ConfigOperations from "@rika/product/configuration-operation"
-import { productLayer, Service } from "@rika/product/product-operation-service"
+import { executionSessionLifecycleLayerTest, productLayer, Service } from "./product-operation-test-layer"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -126,6 +126,7 @@ const operationLayer = (
     Layer.provide(BunServices.layer),
   )
   return productLayer({
+    executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
     repositoryLayer,
     turnRepositoryLayer,
     transcriptRepositoryLayer,

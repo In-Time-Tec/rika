@@ -10,7 +10,7 @@ import { Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
 
 import { executionRoute } from "../support/product-test-current-state"
-import { productLayer, provideLayer } from "../support/operation-layer-harness"
+import { executionSessionLifecycleLayerTest, productLayer, provideLayer } from "../support/operation-layer-harness"
 import { backend } from "../support/operation-execution-fixtures"
 
 import { turnProvenance, threadLineage } from "../support/operation-selection-fixtures"
@@ -49,6 +49,7 @@ describe("Operation", () => {
       }).pipe(
         provideLayer(
           productLayer({
+            executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
             repositoryLayer: ThreadRepository.memoryLayer([mentioned]),
             turnRepositoryLayer: TurnRepository.memoryLayer([
               {
@@ -92,6 +93,7 @@ describe("Operation", () => {
       const layer = Layer.merge(
         TestConsole.layer,
         productLayer({
+          executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
           repositoryLayer: ThreadRepository.memoryLayer([thread]),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
@@ -115,6 +117,7 @@ describe("Operation", () => {
       const modes = yield* Ref.make<ReadonlyArray<string>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const layer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: ThreadRepository.memoryLayer(),
         turnRepositoryLayer: TurnRepository.memoryLayer(),
         backendLayer: Layer.succeed(ExecutionGateway.Service, backend),

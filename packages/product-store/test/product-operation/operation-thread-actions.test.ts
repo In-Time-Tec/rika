@@ -13,6 +13,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Console, Effect, Layer, Ref, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 const projectionVersion = 2
+import { executionSessionLifecycleLayerTest } from "../support/operation-layer-harness"
 
 import { provideLayer } from "../support/product-test-layer"
 
@@ -74,6 +75,7 @@ describe("Operation thread actions", () => {
       const layer = Layer.merge(
         TestConsole.layer,
         productLayer({
+          executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
           repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
           turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
           backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
@@ -126,6 +128,7 @@ describe("Operation thread actions", () => {
       }).pipe(provideLayer(layer))
 
       const emptyLayer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: ThreadRepository.memoryLayer(),
         turnRepositoryLayer: TurnRepository.memoryLayer(),
         backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
@@ -180,6 +183,7 @@ describe("Operation thread actions", () => {
       const next = (ref: Ref.Ref<ReadonlyArray<string>>) =>
         Ref.modify(ref, (ids) => [ids[0] ?? "fallback", ids.slice(1)] as const)
       const layer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
@@ -258,6 +262,7 @@ describe("Operation thread actions", () => {
       })
       const turnIds = yield* Ref.make<ReadonlyArray<string>>(["fork-agent", "fork-shell"])
       const layer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
@@ -323,6 +328,7 @@ describe("Operation thread actions", () => {
       })
       yield* transcripts.replaceUnits(runningShell, recordedShellProjection(runningShell).units)
       const layer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),

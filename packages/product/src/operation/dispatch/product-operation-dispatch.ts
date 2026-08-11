@@ -146,7 +146,6 @@ export const productLayer = <
         staleQueuedTurnsError,
         queuedTurnPromoteMaxAgeMs,
       }).pipe(Effect.mapError((error) => operationError(String(error))))
-      yield* state.reconcileThreadDeletions
       const schedule = yield* makeProductOperationSchedule({
         options,
         ownerScope,

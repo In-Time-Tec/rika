@@ -14,10 +14,11 @@ import * as WebSearch from "@rika/coding-tools/web-search-service"
 import { Config, Context, Deferred, Effect, FileSystem, Layer, Path, Stream } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import {
+  executionSessionLifecycleLayerTest,
   productLayer,
   Service,
-  type Interface as OperationServiceInterface,
-} from "@rika/product/product-operation-service"
+  type OperationServiceInterface,
+} from "./product-operation-test-layer"
 
 type RepositoryContext = Context.Context<
   ThreadRepository.Service | TurnRepository.Service | TranscriptRepository.Service
@@ -66,6 +67,7 @@ export const startShellOperation = Effect.fn("ShellSession.startOperation")(func
       }),
   })
   const operationLayer: Layer.Layer<Service, never, never> = productLayer({
+    executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
     repositoryLayer,
     turnRepositoryLayer,
     transcriptRepositoryLayer,

@@ -14,7 +14,7 @@ import { unitOrder } from "@rika/transcript/transcript-unit-order"
 import { Clock, Context, Effect, Layer, Stream } from "effect"
 
 import { executionRoute } from "../support/product-test-current-state"
-import { productLayer, provideLayer } from "../support/operation-layer-harness"
+import { executionSessionLifecycleLayerTest, productLayer, provideLayer } from "../support/operation-layer-harness"
 import { threadLineage } from "../support/operation-selection-fixtures"
 
 const thread: Thread.Thread = {
@@ -124,6 +124,7 @@ const durableState = Effect.gen(function* () {
   const transcriptContext = yield* Layer.build(transcriptLayer)
   const process = (backend: ExecutionGateway.Interface, nextTurnId: Turn.TurnId) =>
     productLayer({
+      executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
       repositoryLayer: threadLayer,
       turnRepositoryLayer: turnLayer,
       threadSummaryRepositoryLayer: Layer.succeedContext(summaryContext),

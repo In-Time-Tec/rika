@@ -12,7 +12,7 @@ import * as ExecutionProjection from "@rika/product/execution-projection"
 const encodeChanges = Schema.encodeSync(Schema.fromJsonString(Schema.Array(ExecutionProjection.Change)))
 
 import { executionRoute } from "../support/product-test-current-state"
-import { productLayer, provideLayer } from "../support/operation-layer-harness"
+import { executionSessionLifecycleLayerTest, productLayer, provideLayer } from "../support/operation-layer-harness"
 import { backend } from "../support/operation-execution-fixtures"
 
 import { turnProvenance, threadLineage } from "../support/operation-selection-fixtures"
@@ -36,6 +36,7 @@ describe("Operation", () => {
       const layer = Layer.mergeAll(
         TestConsole.layer,
         productLayer({
+          executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
           repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
           turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
           backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
@@ -100,6 +101,7 @@ describe("Operation", () => {
     }).pipe(
       provideLayer(
         productLayer({
+          executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
@@ -127,6 +129,7 @@ describe("Operation", () => {
     }).pipe(
       provideLayer(
         productLayer({
+          executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
@@ -167,6 +170,7 @@ describe("Operation", () => {
       ])
       const starts = yield* Ref.make(0)
       const operationLayer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(
@@ -220,6 +224,7 @@ describe("Operation", () => {
     }).pipe(
       provideLayer(
         productLayer({
+          executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           backendLayer: Layer.succeed(

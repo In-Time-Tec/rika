@@ -22,10 +22,30 @@ export const lazyBackendLayer = <E, R, ROut>(backendLayer: Layer.Layer<Execution
                   lifecycle._tag === "Some"
                     ? lifecycle.value
                     : ExecutionSessionLifecycle.Service.of({
-                        requestCancellation: () => Effect.void,
-                        awaitTerminal: () => Effect.void,
-                        closeKernel: () => Effect.void,
-                        dropKernelState: () => Effect.void,
+                        requestCancellation: () =>
+                          Effect.fail(
+                            ExecutionSessionLifecycle.Unavailable.make({
+                              message: "The execution backend does not provide session lifecycle cleanup",
+                            }),
+                          ),
+                        awaitTerminal: () =>
+                          Effect.fail(
+                            ExecutionSessionLifecycle.Unavailable.make({
+                              message: "The execution backend does not provide session lifecycle cleanup",
+                            }),
+                          ),
+                        closeKernel: () =>
+                          Effect.fail(
+                            ExecutionSessionLifecycle.Unavailable.make({
+                              message: "The execution backend does not provide session lifecycle cleanup",
+                            }),
+                          ),
+                        dropKernelState: () =>
+                          Effect.fail(
+                            ExecutionSessionLifecycle.Unavailable.make({
+                              message: "The execution backend does not provide session lifecycle cleanup",
+                            }),
+                          ),
                       }),
               }
             }),

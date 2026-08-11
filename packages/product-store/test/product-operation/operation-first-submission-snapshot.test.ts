@@ -8,7 +8,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Effect, Layer, Ref } from "effect"
 
-import { productLayer, provideLayer } from "../support/operation-layer-harness"
+import { executionSessionLifecycleLayerTest, productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
 import { backend } from "../support/operation-execution-fixtures"
 
@@ -23,6 +23,7 @@ describe("Operation", () => {
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const dispatch = (event: InteractiveEvent) => runSync(Ref.update(events, (all) => [...all, event]))
       const layer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: ThreadRepository.memoryLayer(),
         turnRepositoryLayer: TurnRepository.memoryLayer(),
         backendLayer: Layer.succeed(ExecutionGateway.Service, backend),

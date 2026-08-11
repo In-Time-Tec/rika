@@ -74,10 +74,7 @@ export const buildProductOperationDependencies = <
     )
     const dependencyContext = yield* Layer.buildWithScope(dependencies, ownerScope)
     const backendContext = yield* Layer.buildWithScope(
-      Layer.merge(
-        options.backendLayer,
-        options.executionSessionLifecycleLayer ?? ExecutionSessionLifecycle.layerTest(),
-      ),
+      Layer.merge(options.backendLayer, options.executionSessionLifecycleLayer),
       ownerScope,
     )
     return {

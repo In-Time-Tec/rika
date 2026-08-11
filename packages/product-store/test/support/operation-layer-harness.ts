@@ -1,3 +1,4 @@
+import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import { productLayer as makeProductLayer } from "@rika/product/product-operation-service"
 import * as ProductStoreSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
@@ -29,3 +30,5 @@ export const provideLayer =
         return yield* Effect.provide(effect, context)
       }),
     )
+
+export const executionSessionLifecycleLayerTest = ExecutionSessionLifecycle.layerTest

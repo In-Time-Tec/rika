@@ -1,7 +1,12 @@
 import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import { Context, Effect, Layer, Stream } from "effect"
+import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
+import * as RootTurnOwner from "@rika/product/root-turn-owner"
+import * as Thread from "@rika/product/thread-record"
+import * as ThreadDeletion from "@rika/product/thread-deletion"
+import * as ThreadRepository from "@rika/product/thread-repository"
+import { Context, Effect, Layer, Semaphore, Stream } from "effect"
 import { lazyBackendLayer } from "../src/server/composition/lazy-execution-backend"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 
@@ -45,6 +50,49 @@ it.effect("delegates the five execution operations through the deferred backend"
       yield* Stream.runDrain(backend.watchTurn(link))
       expect(yield* backend.inspectTurn(link)).toEqual({ status: "running" })
       expect(calls).toEqual(["start", "cancel", "steer", "approve", "deny", "watch", "inspect"])
+    }),
+  ),
+)
+
+it.effect("keeps deletion tombstoned when a gateway-only backend lacks session lifecycle", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const gatewayOnly = ExecutionGateway.layerTest()
+      const context = yield* Layer.build(lazyBackendLayer(gatewayOnly))
+      const sessions = Context.get(context, ExecutionSessionLifecycle.Service)
+      const threadId = Thread.ThreadId.make("thread-without-lifecycle")
+      let physicalThreadExists = true
+      let tombstoneExists = false
+      const threads = {
+        requestDeletion: () =>
+          Effect.sync(() => {
+            tombstoneExists = true
+          }),
+        pendingDeletions: Effect.succeed([]),
+        completeDeletion: () =>
+          Effect.sync(() => {
+            physicalThreadExists = false
+            tombstoneExists = false
+          }),
+      } as unknown as ThreadRepository.Interface
+      const rootTurns = {
+        quiesceThread: () => Effect.void,
+      } as unknown as RootTurnOwner.Interface
+      const deletion = ThreadDeletion.make({
+        threads,
+        sessions,
+        rootTurns,
+        turnMutationAdmission: yield* Semaphore.make(1),
+      })
+
+      const failure = yield* Effect.flip(deletion.request(threadId))
+
+      expect(failure).toMatchObject({
+        _tag: "ExecutionSessionLifecycleUnavailable",
+        message: "The execution backend does not provide session lifecycle cleanup",
+      })
+      expect(physicalThreadExists).toBe(true)
+      expect(tombstoneExists).toBe(true)
     }),
   ),
 )
