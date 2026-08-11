@@ -1039,6 +1039,16 @@
       "testKind": "tui-test"
     },
     {
+      "id": "apps/rika/test/app-usage.tui.test.ts",
+      "path": "apps/rika/test/app-usage.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
       "id": "apps/rika/test/app.tui.test.ts",
       "path": "apps/rika/test/app.tui.test.ts",
       "workspace": "@rika/cli",
@@ -1379,6 +1389,26 @@
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/live-model-activity-queued.tui.test.ts",
+      "path": "apps/rika/test/live-model-activity-queued.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
+      "id": "apps/rika/test/live-model-activity.tui.test.ts",
+      "path": "apps/rika/test/live-model-activity.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
     },
     {
       "id": "apps/rika/test/logging-process.test.ts",
@@ -2726,6 +2756,7 @@
         "./terminal-session",
         "./terminal-state",
         "./terminal-state-reducer",
+        "./terminal-submission-state",
         "./terminal-timeline-bounds",
         "./terminal-transcript-presentation",
         "./transcript-viewport"
@@ -3150,6 +3181,16 @@
     {
       "id": "packages/baton-execution/test/baton-semantic-response-projection.test.ts",
       "path": "packages/baton-execution/test/baton-semantic-response-projection.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/baton-execution/test/baton-session-settlement-isolation.test.ts",
+      "path": "packages/baton-execution/test/baton-session-settlement-isolation.test.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -8641,7 +8682,7 @@
       "package": "@rika/terminal",
       "kind": "source",
       "production": true,
-      "publicExports": []
+      "publicExports": ["./terminal-submission-state"]
     },
     {
       "id": "packages/terminal/src/state/model/terminal-submitted-draft.ts",
@@ -11930,6 +11971,14 @@
       "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
       "to": "packages/terminal/src/state/model/terminal-state.ts",
       "specifier": "@rika/terminal/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
+      "to": "packages/terminal/src/state/model/terminal-submission-state.ts",
+      "specifier": "@rika/terminal/terminal-submission-state",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -16199,6 +16248,38 @@
       "production": false
     },
     {
+      "from": "apps/rika/test/app-usage.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-usage.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-usage.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-usage.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "apps/rika/test/app.tui.test.ts",
       "to": "apps/rika/test/tui-app-model.ts",
       "specifier": "./tui-app-model",
@@ -16530,6 +16611,14 @@
       "from": "apps/rika/test/client-main-cancel.proc.test.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/client-main-cancel.proc.test.ts",
+      "to": "external:url",
+      "specifier": "url",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -17794,6 +17883,70 @@
       "from": "apps/rika/test/lazy-backend.test.ts",
       "to": "packages/product/src/thread/repository/thread-repository.ts",
       "specifier": "@rika/product/thread-repository",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/live-model-activity-queued.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/live-model-activity-queued.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/live-model-activity-queued.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/live-model-activity-queued.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/live-model-activity.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/live-model-activity.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/live-model-activity.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/live-model-activity.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -22503,6 +22656,46 @@
       "from": "packages/baton-execution/test/baton-semantic-response-projection.test.ts",
       "to": "packages/product/src/execution/contract/execution-transcript-contract.ts",
       "specifier": "@rika/product/execution-transcript-contract",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-session-settlement-isolation.test.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-session-settlement-isolation.test.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-session-settlement-isolation.test.ts",
+      "to": "external:@batonfx/test",
+      "specifier": "@batonfx/test",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-session-settlement-isolation.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-session-settlement-isolation.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -31436,6 +31629,14 @@
       "production": false
     },
     {
+      "from": "packages/product-store/test/product-database.test.ts",
+      "to": "packages/product-store/src/database/product-schema.ts",
+      "specifier": "../src/database/product-schema",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product-store/test/product-operation/operation-execution-reconciliation.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -34096,6 +34297,14 @@
       "to": "packages/product/src/thread/queue/root-turn-owner.ts",
       "specifier": "@rika/product/root-turn-owner",
       "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/thread-deletion-saga.test.ts",
+      "to": "packages/product/src/thread/repository/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
+      "kind": "dynamic-import",
       "relationship": "test",
       "production": false
     },
@@ -39493,6 +39702,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-submission-stages.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-submission-stages.ts",
       "to": "packages/product/src/execution/contract/execution-projection.ts",
       "specifier": "@rika/product/execution-projection",
       "kind": "import",
@@ -40853,6 +41070,14 @@
     },
     {
       "from": "packages/product/src/thread/lifecycle/thread-deletion.ts",
+      "to": "packages/product/src/thread/model/thread-result.ts",
+      "specifier": "@rika/product/thread-result",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/thread/lifecycle/thread-deletion.ts",
       "to": "packages/product/src/thread/queue/root-turn-owner.ts",
       "specifier": "../queue/root-turn-owner",
       "kind": "import",
@@ -40863,6 +41088,14 @@
       "from": "packages/product/src/thread/lifecycle/thread-deletion.ts",
       "to": "packages/product/src/thread/repository/thread-repository.ts",
       "specifier": "@rika/product/thread-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/thread/lifecycle/thread-deletion.ts",
+      "to": "packages/product/src/thread/repository/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -47887,6 +48120,14 @@
       "from": "packages/terminal/src/state/model/terminal-submission-state.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/model/terminal-submission-state.ts",
+      "to": "packages/terminal/src/state/model/terminal-composer-paste.ts",
+      "specifier": "./terminal-composer-paste",
       "kind": "import",
       "relationship": "runtime",
       "production": true

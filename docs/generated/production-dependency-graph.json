@@ -24478,6 +24478,14 @@
     },
     {
       "from": "packages/product/src/thread/lifecycle/thread-deletion.ts",
+      "to": "packages/product/src/thread/model/thread-result.ts",
+      "specifier": "@rika/product/thread-result",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/thread/lifecycle/thread-deletion.ts",
       "to": "packages/product/src/thread/queue/root-turn-owner.ts",
       "specifier": "../queue/root-turn-owner",
       "kind": "import",
@@ -24488,6 +24496,14 @@
       "from": "packages/product/src/thread/lifecycle/thread-deletion.ts",
       "to": "packages/product/src/thread/repository/thread-repository.ts",
       "specifier": "@rika/product/thread-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/thread/lifecycle/thread-deletion.ts",
+      "to": "packages/product/src/thread/repository/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true

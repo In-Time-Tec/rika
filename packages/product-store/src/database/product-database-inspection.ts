@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { additions, schemaFingerprint, schemaObjects as productSchemaObjects } from "./product-schema"
+import { additions, knownObjectShapes, schemaFingerprint, schemaObjects as productSchemaObjects } from "./product-schema"
 import { ProductDatabaseError } from "./product-database-layer"
 
 const SchemaObject = Schema.Struct({
@@ -41,18 +41,27 @@ export const validateKnown = (state: Effect.Success<ReturnType<typeof inspectDat
   Effect.gen(function* () {
     if (state.objects.length === 0) return "fresh" as const
     const actual = new Set(state.objects.map((object) => `${object.type}:${object.name}`))
+    const unexpected = [...actual].filter((key) => !productSchemaObjects.includes(key))
+    if (unexpected.length > 0) return yield* fail(incompatible)
     const missing = productSchemaObjects.filter((key) => !actual.has(key))
     /**
      * A data root outlives the version that made it. A database missing only objects a later release
-     * added is upgradable; anything else differs in a way this cannot reason about.
+     * added is upgradable, but only when the rest matches an exact released predecessor shape; the
+     * stored fingerprint is part of that proof, so unrelated drift is refused instead of silently
+     * rewritten by the upgrade.
      */
-    if (missing.length > 0 && missing.every((key) => additions.some((addition) => addition.name === key)))
+    if (missing.length > 0) {
+      if (!missing.every((key) => additions.some((addition) => addition.name === key)))
+        return yield* fail(incompatible)
+      const upgradable = knownObjectShapes.some(
+        (shape) =>
+          shape.objects.length === actual.size &&
+          shape.objects.every((key) => actual.has(key)) &&
+          state.fingerprint === schemaFingerprint(state.objects),
+      )
+      if (!upgradable) return yield* fail(incompatible)
       return "upgradable" as const
-    if (
-      actual.size !== productSchemaObjects.length ||
-      missing.length > 0 ||
-      state.fingerprint !== schemaFingerprint(state.objects)
-    )
-      return yield* fail(incompatible)
+    }
+    if (state.fingerprint !== schemaFingerprint(state.objects)) return yield* fail(incompatible)
     return "current" as const
   })

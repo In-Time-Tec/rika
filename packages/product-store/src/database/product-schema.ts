@@ -397,10 +397,12 @@ export const schemaObjects: ReadonlyArray<string> = [
  */
 export const additions: ReadonlyArray<{
   readonly name: string
+  readonly since: string
   readonly apply: (sql: SqlClient) => Effect.Effect<unknown, SqlError>
 }> = [
   {
     name: "table:rika_thread_deletion_outbox",
+    since: "0.5.7",
     apply: (sql) => sql`CREATE TABLE rika_thread_deletion_outbox (
     thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
     requested_at INTEGER NOT NULL
@@ -408,6 +410,7 @@ export const additions: ReadonlyArray<{
   },
   {
     name: "trigger:rika_tombstoned_thread_turn_insert",
+    since: "0.5.7",
     apply: (sql) => sql`CREATE TRIGGER rika_tombstoned_thread_turn_insert
     BEFORE INSERT ON rika_turns
     WHEN EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = NEW.thread_id) BEGIN
@@ -416,6 +419,7 @@ export const additions: ReadonlyArray<{
   },
   {
     name: "table:rika_goals",
+    since: "0.5.6",
     apply: (sql) => sql`CREATE TABLE rika_goals (
     thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
     objective TEXT NOT NULL CHECK (length(objective) > 0 AND length(objective) <= 4096),
@@ -433,3 +437,13 @@ export const additions: ReadonlyArray<{
   )`,
   },
 ]
+export const knownObjectShapes: ReadonlyArray<{
+  readonly version: string
+  readonly objects: ReadonlyArray<string>
+}> = [...new Set(additions.map((addition) => addition.since))].map((version) => ({
+  version,
+  objects: schemaObjects.filter(
+    (key) => !additions.some((addition) => addition.since >= version && addition.name === key),
+  ),
+}))
+

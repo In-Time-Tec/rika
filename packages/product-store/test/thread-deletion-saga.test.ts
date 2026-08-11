@@ -25,8 +25,10 @@ it.effect("keeps a failed cleanup tombstoned and retries the exact cleanup seque
     const rootTurns = {
       quiesceThread: () => Effect.sync(() => calls.push("quiesce")).pipe(Effect.asVoid),
     } as unknown as RootTurnOwner.Interface
+    const turns = { list: () => Effect.succeed([]) } as unknown as import("@rika/product/turn-repository").Interface
     const saga = ThreadDeletion.make({
       threads: repository,
+      turns,
       sessions,
       rootTurns,
       turnMutationAdmission: yield* Semaphore.make(1),
@@ -45,5 +47,57 @@ it.effect("keeps a failed cleanup tombstoned and retries the exact cleanup seque
     expect((yield* repository.create({ id: threadId, workspace: "/work", title: "Reused", now: 3 })).title).toBe(
       "Reused",
     )
+  }),
+)
+
+it.effect("cancels and awaits isolated title-run sessions before completing deletion, without kernel cleanup for them", () =>
+  Effect.gen(function* () {
+    const repository = yield* ThreadRepository.makeMemory()
+    const threadId = Thread.ThreadId.make("thread-title")
+    yield* repository.create({ id: threadId, workspace: "/work", title: "Thread", now: 1 })
+    const calls: Array<string> = []
+    const sessions = ExecutionSessionLifecycle.Service.of({
+      requestCancellation: (input) =>
+        Effect.sync(() => calls.push(`cancel:${input.sessionId}`)).pipe(Effect.asVoid),
+      awaitTerminal: (input) =>
+        Effect.sync(() => calls.push(`terminal:${input.sessionId}`)).pipe(Effect.asVoid),
+      closeKernel: (input) =>
+        Effect.sync(() => calls.push(`close:${input.sessionId}`)).pipe(Effect.asVoid),
+      dropKernelState: (input) =>
+        Effect.sync(() => calls.push(`drop:${input.sessionId}`)).pipe(Effect.asVoid),
+    })
+    const rootTurns = {
+      quiesceThread: () => Effect.sync(() => calls.push("quiesce")).pipe(Effect.asVoid),
+    } as unknown as RootTurnOwner.Interface
+    const turns = {
+      list: () =>
+        Effect.succeed([
+          {
+            _tag: "AgentExecution",
+            id: "turn-1",
+            threadId: String(threadId),
+            executionLink: { runId: "run-1", titleRunId: "run-1:title", turnId: "turn-1", threadId: String(threadId) },
+          },
+          { _tag: "RecordedShell", id: "turn-2", threadId: String(threadId), executionLink: undefined },
+        ]),
+    } as unknown as import("@rika/product/turn-repository").Interface
+    const saga = ThreadDeletion.make({
+      threads: repository,
+      turns,
+      sessions,
+      rootTurns,
+      turnMutationAdmission: yield* Semaphore.make(1),
+    })
+    yield* saga.request(threadId)
+    expect(calls).toEqual([
+      "quiesce",
+      "cancel:thread-title",
+      "cancel:run-1:title",
+      "terminal:run-1:title",
+      "terminal:thread-title",
+      "close:thread-title",
+      "drop:thread-title",
+    ])
+    expect(yield* repository.pendingDeletions).toEqual([])
   }),
 )

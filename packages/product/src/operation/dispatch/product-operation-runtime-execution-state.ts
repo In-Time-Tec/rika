@@ -156,6 +156,7 @@ export const buildProductOperationExecutionState = (
     } = foundation
     const threadDeletion = ThreadDeletion.make({
       threads: Context.get(dependencyContext, ThreadRepository.Service),
+      turns: Context.get(dependencyContext, TurnRepository.Service),
       sessions: executionSessionLifecycle,
       rootTurns: rootTurnOwner,
       turnMutationAdmission,
