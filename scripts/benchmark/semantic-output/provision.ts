@@ -79,6 +79,12 @@ const copyBenchmark = (repositoryRoot: string, sourceRoot: string): void => {
     HostFiles.copy(HostFiles.join(benchmarkSource, relative), HostFiles.join(benchmarkDestination, relative))
 }
 
+const removeBenchmarkOverlay = (sourceRoot: string): void => {
+  const benchmarkDestination = HostFiles.join(sourceRoot, "scripts", "benchmark")
+  for (const relative of benchmarkFiles) HostFiles.remove(HostFiles.join(benchmarkDestination, relative))
+  HostFiles.remove(HostFiles.join(sourceRoot, ".semantic-output-identity.json"))
+}
+
 type RunCommand = typeof run
 
 export const install = (input: {
@@ -177,6 +183,9 @@ export const setup = (input: {
     run(["git", "rev-parse", "v0.5.3^{commit}"], repositoryRoot).trim()
   )
     throw new Error("baseline source worktree is not detached at v0.5.3")
+  removeBenchmarkOverlay(sourceOld)
+  if (run(["git", "status", "--short"], sourceOld).trim().length > 0)
+    throw new Error("baseline source worktree is not clean before installing the benchmark overlay")
 
   const evidence = releaseInventory(candidateRelease)
   const baselineIdentity = {
