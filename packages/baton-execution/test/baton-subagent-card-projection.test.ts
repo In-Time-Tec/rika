@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { TreeProjector } from "../src/baton-tree-projector"
-import { block, modelPart, resetEventPosition, treeEvent } from "./baton-projector-event-fixtures"
+import { block, modelResponse, resetEventPosition, treeEvent } from "./baton-projector-event-fixtures"
 
 describe("Baton subagent card projection", () => {
   it("shows a run_child prompt immediately, nests child output, and treats completion as settlement only", () => {
@@ -8,7 +8,7 @@ describe("Baton subagent card projection", () => {
     const projector = TreeProjector.make("turn-one", "delegate this")
     projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
     const requested = projector.apply(
-      modelPart("raw-root-run", {
+      modelResponse("raw-root-run", {
         type: "tool-call",
         id: "provider-call-1",
         name: "run_child",
@@ -45,9 +45,9 @@ describe("Baton subagent card projection", () => {
       ),
     )
     const childText = projector.apply(
-      modelPart(
+      modelResponse(
         "raw-child-run",
-        { type: "text-delta", id: "text", delta: "Child result" },
+        { type: "text", text: "Child result", metadata: {} },
         { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
       ),
     )
@@ -107,7 +107,7 @@ describe("Baton subagent card projection", () => {
       prompt: `Inspect lane ${index}`,
     }))
     const patch = projector.apply(
-      modelPart("raw-root-run", {
+      modelResponse("raw-root-run", {
         type: "tool-call",
         id: "group-call",
         name: "start_child_group",
@@ -140,7 +140,7 @@ describe("Baton subagent card projection", () => {
     const projector = TreeProjector.make("turn-early", "delegate this")
     projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
     projector.apply(
-      modelPart("raw-root-run", {
+      modelResponse("raw-root-run", {
         type: "tool-call",
         id: "provider-call-1",
         name: "run_child",
@@ -157,9 +157,9 @@ describe("Baton subagent card projection", () => {
       ),
     )
     projector.apply(
-      modelPart(
+      modelResponse(
         "raw-child-run",
-        { type: "text-delta", id: "child-text", delta: "child report" },
+        { type: "text", text: "child report", metadata: {} },
         { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
       ),
     )
@@ -191,7 +191,7 @@ describe("Baton subagent card projection", () => {
     const projector = TreeProjector.make("turn-resume", "delegate this")
     projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
     projector.apply(
-      modelPart("raw-root-run", {
+      modelResponse("raw-root-run", {
         type: "tool-call",
         id: "provider-call-1",
         name: "run_child",
@@ -224,9 +224,9 @@ describe("Baton subagent card projection", () => {
     const settled = projector.snapshot()
     const resumed = TreeProjector.make("turn-resume", "delegate this", settled.checkpoint, settled.units)
     resumed.apply(
-      modelPart(
+      modelResponse(
         "raw-child-run",
-        { type: "text-delta", id: "late-text", delta: "late child report" },
+        { type: "text", text: "late child report", metadata: {} },
         { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
       ),
     )

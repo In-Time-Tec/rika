@@ -54,24 +54,58 @@ export const treeEvent: {
   ): (runId: string) => RunTree.TreeEvent
 } = Function.dual((args) => typeof args[0] === "string", treeEventImpl)
 
-const modelPartImpl = (runId: string, part: unknown, options: TreeEventOptions = {}): RunTree.TreeEvent =>
+const modelResponseImpl = (runId: string, part: unknown, options: TreeEventOptions = {}): RunTree.TreeEvent => {
+  const operationKey = `model-operation-${position + 1}`
+  return treeEventImpl(
+    runId,
+    {
+      _tag: "ModelResponseCommitted",
+      turn: 0,
+      operationKey,
+      modelCallId: `model-call-${position + 1}`,
+      modelAttemptId: `model-attempt-${position + 1}`,
+      attempt: 0,
+      response: { content: [part] },
+      digest: `digest-${position + 1}`,
+    } as never,
+    options,
+  )
+}
+
+export const modelResponse: {
+  (runId: string, part: unknown, options?: TreeEventOptions): RunTree.TreeEvent
+  (part: unknown, options?: TreeEventOptions): (runId: string) => RunTree.TreeEvent
+} = Function.dual((args) => typeof args[0] === "string", modelResponseImpl)
+
+const modelResponseContentImpl = (
+  runId: string,
+  operationKey: string,
+  content: ReadonlyArray<unknown>,
+  options: TreeEventOptions = {},
+): RunTree.TreeEvent =>
   treeEventImpl(
     runId,
     {
-      _tag: "ModelPart",
+      _tag: "ModelResponseCommitted",
       turn: 0,
-      modelCallId: "model-call",
-      modelAttemptId: "model-attempt",
+      operationKey,
+      modelCallId: `${operationKey}:call`,
+      modelAttemptId: `${operationKey}:attempt`,
       attempt: 0,
-      part,
+      response: { content },
+      digest: `${operationKey}:digest`,
     } as never,
     options,
   )
 
-export const modelPart: {
-  (runId: string, part: unknown, options?: TreeEventOptions): RunTree.TreeEvent
-  (part: unknown, options?: TreeEventOptions): (runId: string) => RunTree.TreeEvent
-} = Function.dual((args) => typeof args[0] === "string", modelPartImpl)
+export const modelResponseContent: {
+  (runId: string, operationKey: string, content: ReadonlyArray<unknown>, options?: TreeEventOptions): RunTree.TreeEvent
+  (
+    operationKey: string,
+    content: ReadonlyArray<unknown>,
+    options?: TreeEventOptions,
+  ): (runId: string) => RunTree.TreeEvent
+} = Function.dual((args) => Array.isArray(args[2]), modelResponseContentImpl)
 
 export const assistantOf = (projector: ReturnType<typeof TreeProjector.make>) =>
   projector.snapshot().units.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant")

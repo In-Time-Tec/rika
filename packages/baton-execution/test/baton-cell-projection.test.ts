@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { Block } from "@rika/product/execution-transcript-contract"
 import { TreeProjector } from "../src/baton-tree-projector"
-import { block, modelPart, resetEventPosition, treeEvent } from "./baton-projector-event-fixtures"
+import { block, modelResponse, resetEventPosition, treeEvent } from "./baton-projector-event-fixtures"
 
 type Cell = Extract<Block, { readonly _tag: "Cell" }>
 type Change = ReturnType<ReturnType<typeof TreeProjector.make>["apply"]>
@@ -365,16 +365,23 @@ describe("Baton cell projection", () => {
     expect(block(change, "ImageAttachment")).toBeUndefined()
   })
 
-  it("streams the authored source as partial tool input arrives", () => {
+  it("projects the complete authored source from a committed tool call", () => {
     resetEventPosition()
-    const projector = TreeProjector.make("turn-cell-partial", "partial")
-    projector.apply(modelPart("raw-root-run", { type: "tool-params-start", id: "cell-12", name: "typescript" }))
-    projector.apply(modelPart("raw-root-run", { type: "tool-params-delta", id: "cell-12", delta: '{"code":"const a' }))
-    const partial = cellOf(
-      projector.apply(modelPart("raw-root-run", { type: "tool-params-delta", id: "cell-12", delta: ' = 1"' })),
+    const projector = TreeProjector.make("turn-cell-source", "source")
+    const projected = cellOf(
+      projector.apply(
+        modelResponse("raw-root-run", {
+          type: "tool-call",
+          id: "cell-12",
+          name: "typescript",
+          params: { code: "const a = 1" },
+          providerExecuted: false,
+          metadata: {},
+        }),
+      ),
     )
-    expect(partial).toMatchObject({ status: "running", summary: "const a = 1" })
-    expect(partial?.source.text).toBe("const a = 1")
+    expect(projected).toMatchObject({ status: "running", summary: "const a = 1" })
+    expect(projected?.source.text).toBe("const a = 1")
   })
 
   it("cancels a still-running cell when the run settles", () => {

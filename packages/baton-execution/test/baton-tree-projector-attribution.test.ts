@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { TreeProjector } from "../src/baton-tree-projector"
-import { modelPart, resetEventPosition, treeEvent } from "./baton-projector-event-fixtures"
+import { modelResponse, resetEventPosition, treeEvent } from "./baton-projector-event-fixtures"
 
 describe("Baton tree projector parent attribution", () => {
   it("attributes a child unit to its subagent card when the child streams before ChildLinked", () => {
@@ -8,7 +8,7 @@ describe("Baton tree projector parent attribution", () => {
     const projector = TreeProjector.make("turn-early", "delegate this")
     projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
     projector.apply(
-      modelPart("raw-root-run", {
+      modelResponse("raw-root-run", {
         type: "tool-call",
         id: "provider-call-1",
         name: "run_child",
@@ -25,9 +25,9 @@ describe("Baton tree projector parent attribution", () => {
       ),
     )
     projector.apply(
-      modelPart(
+      modelResponse(
         "raw-child-run",
-        { type: "text-delta", id: "child-text", delta: "child report" },
+        { type: "text", text: "child report", metadata: {} },
         { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
       ),
     )
@@ -59,7 +59,7 @@ describe("Baton tree projector parent attribution", () => {
     const projector = TreeProjector.make("turn-resume", "delegate this")
     projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
     projector.apply(
-      modelPart("raw-root-run", {
+      modelResponse("raw-root-run", {
         type: "tool-call",
         id: "provider-call-1",
         name: "run_child",
@@ -92,9 +92,9 @@ describe("Baton tree projector parent attribution", () => {
     const settled = projector.snapshot()
     const resumed = TreeProjector.make("turn-resume", "delegate this", settled.checkpoint, settled.units)
     resumed.apply(
-      modelPart(
+      modelResponse(
         "raw-child-run",
-        { type: "text-delta", id: "late-text", delta: "late child report" },
+        { type: "text", text: "late child report", metadata: {} },
         { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
       ),
     )
