@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { ModelRegistry } from "@batonfx/core"
+import { ModelRegistry, Response as AiResponse } from "@batonfx/core"
 import { TestModel } from "@batonfx/test"
 import { Database } from "bun:sqlite"
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
@@ -99,7 +99,16 @@ it.live(
       })
       // The title lane is slow: if titling gated the root, the root could not answer first.
       const titleFixture = yield* TestModel.make(
-        [TestModel.turn([TestModel.text("Generated Title")], { delay: "3 seconds" })],
+        [
+          TestModel.turn([TestModel.text("Generated Title")], {
+            delay: "3 seconds",
+            usage: AiResponse.Usage.make({
+              inputTokens: { total: 5, uncached: 5, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 3, text: 3, reasoning: undefined },
+            }),
+          }),
+          TestModel.turn([TestModel.text("Generated Title")]),
+        ],
         { provider: "test", model: "test", registrationKey: "title-nonblocking-title" },
       )
       const { link, changes } = yield* Effect.scoped(
@@ -128,18 +137,73 @@ it.live(
       )
 
       const rootEvents = readTreeEvents(filename, link.runId).filter((row) => row.runId === link.runId)
-      const rootAttemptStarted = rootEvents.findIndex((row) => row.event._tag === "RunAttemptStarted")
-      const childLinked = rootEvents.findIndex((row) => row.event._tag === "ChildLinked")
-      // The defect: with titling admitted as an initial child, Baton withheld RunAttemptStarted
-      // until the title child settled, so the root never ran and the user prompt was never sent.
-      expect(rootAttemptStarted).toBeGreaterThanOrEqual(0)
-      expect(rootAttemptStarted).toBeLessThan(childLinked)
+      expect(rootEvents.some((row) => row.event._tag === "RunAttemptStarted")).toBe(true)
+      expect(rootEvents.some((row) => row.event._tag === "ChildLinked")).toBe(false)
 
+      expect(link.titleRunId).toBe(`${link.runId}:title`)
+      const rootCompletedBeforeTitle = changes.find(
+        (change) => change.state.status === "completed" && change.state.title === undefined,
+      )
+      expect(rootCompletedBeforeTitle?.state.usage.sourceComplete).toBe(false)
       const last = changes.at(-1)
       expect(last?.state.status).toBe("completed")
       expect(last?.state.title?.text).toBe("Generated Title")
+      expect(last?.state.usage.sourceComplete).toBe(true)
+      expect(last?.state.usage.tokens).toEqual(
+        expect.objectContaining({
+          total: 8,
+          input: expect.objectContaining({ total: 5 }),
+          output: expect.objectContaining({ total: 3 }),
+        }),
+      )
       const units = changes.flatMap((change) => (change._tag === "ProjectionSnapshot" ? change.units : change.upsert))
       expect(assistantText(units)).toContain("ROOT_ANSWER")
+    }),
+  20_000,
+)
+
+it.live(
+  "projects a completed title while the root turn is still running",
+  () =>
+    Effect.gen(function* () {
+      const filename = `/tmp/rika-baton-title-first-${yield* Random.nextInt}.db`
+      const rootFixture = yield* TestModel.make(
+        [TestModel.turn([TestModel.text("ROOT_ANSWER")], { delay: "3 seconds" })],
+        { provider: "test", model: "test", registrationKey: "title-first-root" },
+      )
+      const titleFixture = yield* TestModel.make([TestModel.turn([TestModel.text("Generated Title")])], {
+        provider: "test",
+        model: "test",
+        registrationKey: "title-first-title",
+      })
+      const changes = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(
+            testLayer({
+              filename,
+              modelServices: registryLayer(rootFixture, titleFixture),
+              agentServices: () => agentServices,
+            }),
+          )
+          const gateway = Context.get(context, ExecutionGateway.Service)
+          const receipt = yield* gateway.startTurn({
+            threadId: "thread-title-first",
+            turnId: "turn-title-first",
+            workspace: "/workspace",
+            prompt: "keep the root running",
+            executionRoute: routeWithIdentity("title-first-root", "title-first-title"),
+            titleIntent: { _tag: "GenerateThreadTitle", expectedTitle: "keep the root running" },
+          })
+          return projectionChanges([...(yield* gateway.watchTurn(receipt).pipe(Stream.runCollect))])
+        }),
+      )
+
+      const titleWhileRunning = changes.find(
+        (change) => change.state.title?.text === "Generated Title" && change.state.status === "running",
+      )
+      expect(titleWhileRunning?.state.usage.sourceComplete).toBe(false)
+      expect(changes.at(-1)?.state.status).toBe("completed")
+      expect(changes.at(-1)?.state.usage.sourceComplete).toBe(true)
     }),
   20_000,
 )
@@ -150,11 +214,11 @@ it.live(
     Effect.gen(function* () {
       const filename = `/tmp/rika-baton-title-cancel-${yield* Random.nextInt}.db`
       const rootFixture = yield* TestModel.make(
-        [TestModel.turn([TestModel.text("ROOT_ANSWER")], { delay: "30 seconds" })],
+        [TestModel.turn([TestModel.text("ROOT_ANSWER")], { delay: "10 seconds" })],
         { provider: "test", model: "test", registrationKey: "title-cancel-root" },
       )
       const titleFixture = yield* TestModel.make(
-        [TestModel.turn([TestModel.text("Generated Title")], { delay: "30 seconds" })],
+        [TestModel.turn([TestModel.text("Generated Title")], { delay: "10 seconds" })],
         { provider: "test", model: "test", registrationKey: "title-cancel-title" },
       )
       const outcome = yield* Effect.scoped(
@@ -208,11 +272,108 @@ it.live(
         block: { _tag: "Notification", title: "Cancellation requested", detail: "Cancelled by user" },
       })
     }),
-  30_000,
+  45_000,
 )
 
 it.live(
-  "re-admits the same turn after a restart without duplicating the title child",
+  "keeps a completed title out of the next root model request",
+  () =>
+    Effect.gen(function* () {
+      const filename = `/tmp/rika-baton-title-isolation-${yield* Random.nextInt}.db`
+      const rootFixture = yield* TestModel.make(
+        [
+          TestModel.turn([TestModel.text("FIRST_ANSWER")]),
+          TestModel.turn([TestModel.text("SECOND_ANSWER")]),
+          TestModel.turn([TestModel.text("UNUSED_ANSWER")]),
+        ],
+        { provider: "test", model: "test", registrationKey: "title-isolation-root" },
+      )
+      const titleFixture = yield* TestModel.make([TestModel.turn([TestModel.text("Generated Title")])], {
+        provider: "test",
+        model: "test",
+        registrationKey: "title-isolation-title",
+      })
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(
+            testLayer({
+              filename,
+              modelServices: registryLayer(rootFixture, titleFixture),
+              agentServices: () => agentServices,
+            }),
+          )
+          const gateway = Context.get(context, ExecutionGateway.Service)
+          const route = routeWithIdentity("title-isolation-root", "title-isolation-title")
+          const first = yield* gateway.startTurn({
+            threadId: "thread-title-isolation",
+            turnId: "turn-title-isolation-first",
+            workspace: "/workspace",
+            prompt: "first request",
+            executionRoute: route,
+            titleIntent: { _tag: "GenerateThreadTitle", expectedTitle: "first request" },
+          })
+          yield* gateway.watchTurn(first).pipe(Stream.runDrain)
+          const second = yield* gateway.startTurn({
+            threadId: "thread-title-isolation",
+            turnId: "turn-title-isolation-second",
+            workspace: "/workspace",
+            prompt: "second request",
+            executionRoute: route,
+          })
+          yield* gateway.watchTurn(second).pipe(Stream.runDrain)
+        }),
+      )
+      const requests = yield* rootFixture.requests
+      expect(requests).toHaveLength(2)
+      const secondPrompt = promptText(requests[1]?.prompt)
+      expect(secondPrompt).toContain("second request")
+      expect(secondPrompt).not.toContain("Child run")
+      expect(secondPrompt).not.toContain("Generated Title")
+    }),
+  20_000,
+)
+
+it.live(
+  "settles the projection when a recorded title run is unavailable",
+  () =>
+    Effect.gen(function* () {
+      const filename = `/tmp/rika-baton-title-missing-${yield* Random.nextInt}.db`
+      const rootFixture = yield* TestModel.make([TestModel.turn([TestModel.text("ROOT_ANSWER")])], {
+        provider: "test",
+        model: "test",
+        registrationKey: "title-missing-root",
+      })
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(
+            testLayer({
+              filename,
+              modelServices: registryLayer(rootFixture),
+              agentServices: () => agentServices,
+            }),
+          )
+          const gateway = Context.get(context, ExecutionGateway.Service)
+          const receipt = yield* gateway.startTurn({
+            threadId: "thread-title-missing",
+            turnId: "turn-title-missing",
+            workspace: "/workspace",
+            prompt: "title run disappeared",
+            executionRoute: routeWithIdentity("title-missing-root", "title-missing-title"),
+          })
+          const changes = projectionChanges([
+            ...(yield* gateway.watchTurn({ ...receipt, titleRunId: "missing-title-run" }).pipe(Stream.runCollect)),
+          ])
+          expect(changes.at(-1)?.state.status).toBe("completed")
+          expect(changes.at(-1)?.state.title).toBeUndefined()
+          expect(changes.at(-1)?.state.usage.sourceComplete).toBe(true)
+        }),
+      )
+    }),
+  20_000,
+)
+
+it.live(
+  "re-admits the same turn after a restart without duplicating the title run",
   () =>
     Effect.gen(function* () {
       const filename = `/tmp/rika-baton-title-restart-${yield* Random.nextInt}.db`
@@ -245,13 +406,25 @@ it.live(
         })
       })
       const first = yield* Effect.scoped(start())
-      // A restart replays the same admission; spawn is keyed by idempotencyKey and must not fork a second title.
       const second = yield* Effect.scoped(start())
 
       expect(second.runId).toBe(first.runId)
-      const linked = readTreeEvents(filename, first.runId).filter((row) => row.event._tag === "ChildLinked")
-      expect(linked.length).toBe(1)
-      expect(linked[0]?.event.invocationId).toBe("rika.thread-title")
+      const database = new Database(filename, { readonly: true })
+      const titleRuns = database
+        .query<
+          { run_id: string; parent_run_id: string | null },
+          [string]
+        >("SELECT run_id, parent_run_id FROM baton_runs WHERE run_id = ?")
+        .all(`${first.runId}:title`)
+      const accepted = database
+        .query<
+          { count: number },
+          [string]
+        >("SELECT COUNT(*) AS count FROM baton_run_events WHERE run_id = ? AND json_extract(event_json, '$._tag') = 'RunAccepted'")
+        .get(`${first.runId}:title`)
+      database.close()
+      expect(titleRuns).toEqual([{ run_id: `${first.runId}:title`, parent_run_id: null }])
+      expect(accepted?.count).toBe(1)
     }),
   20_000,
 )

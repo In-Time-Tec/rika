@@ -14,7 +14,7 @@ import { Cause, Context, Deferred, Effect, Layer, Option, Schedule, Schema, Stre
 import type { AgentToolHandlers, KernelOptions } from "./baton-route-options"
 import { configure, makeResolver } from "./baton-route"
 import * as PreviewAdapter from "./baton-preview-adapter"
-import { TreeProjector, titleInvocationId } from "./projection/tree"
+import { TreeProjector } from "./projection/tree"
 
 export type AgentToolServices = AgentToolHandlers
 
@@ -57,6 +57,7 @@ const message = (cause: unknown) => {
   const encoded = JSON.stringify(cause)
   return encoded === undefined || encoded === "{}" ? String(cause) : encoded
 }
+const titleRunId = (rootRunId: string) => `${rootRunId}:title`
 const isApprovalResponseFailure = Schema.is(ExecutionGateway.ApprovalResponseFailure)
 
 const approvalFailure = (cause: unknown): ExecutionGateway.ApprovalResponseFailure => {
@@ -239,11 +240,13 @@ const make = (
                   ],
                 }),
           })
+          const derivedTitleRunId = titleRunId(receipt.runId)
           if (input.titleIntent !== undefined)
-            yield* runtime.spawn({
-              parentRunId: receipt.runId,
-              invocationId: titleInvocationId,
-              selection: "Title",
+            yield* runtime.start({
+              runId: derivedTitleRunId,
+              executable: configured.titleExecutable,
+              registrations: configured.titleRegistrations,
+              sessionId: derivedTitleRunId,
               prompt: `Generate a title for this request:\n\n${input.prompt}`,
               idempotencyKey: `${input.turnId}:title`,
               metadata: {
@@ -253,17 +256,25 @@ const make = (
                 expectedTitle: input.titleIntent.expectedTitle,
               },
             })
-          return { runId: receipt.runId, turnId: input.turnId, threadId: input.threadId }
+          return {
+            runId: receipt.runId,
+            ...(input.titleIntent === undefined ? {} : { titleRunId: derivedTitleRunId }),
+            turnId: input.turnId,
+            threadId: input.threadId,
+          }
         }).pipe(Effect.mapError((cause) => ExecutionGateway.StartTurnFailure.make({ message: message(cause) }))),
       cancelTurn: (link, reason) =>
-        runtime.cancel({ runId: link.runId, reason }).pipe(
-          // Interrupting a replayPolicy:"never" operation parks the Run in `needs-resolution`,
-          // where it can make no further progress on its own. Resolve it so the Run reaches its
-          // terminal state instead of stranding the turn. Retried until the Run settles because
-          // the park is recorded asynchronously by the worker that owned the interrupted operation.
-          Effect.andThen(awaitSettledCancellation(link.runId, reason)),
-          Effect.mapError((cause) => ExecutionGateway.CancelTurnFailure.make({ message: message(cause) })),
-        ),
+        Effect.all(
+          [
+            runtime
+              .cancel({ runId: link.runId, reason })
+              .pipe(Effect.andThen(awaitSettledCancellation(link.runId, reason))),
+            link.titleRunId === undefined
+              ? Effect.void
+              : runtime.cancel({ runId: link.titleRunId, reason }).pipe(Effect.ignore),
+          ],
+          { concurrency: 2, discard: true },
+        ).pipe(Effect.mapError((cause) => ExecutionGateway.CancelTurnFailure.make({ message: message(cause) }))),
       steerTurn: (link, input) =>
         runtime
           .steer({ runId: link.runId, idempotencyKey: input.idempotencyKey, prompt: input.text })
@@ -273,17 +284,70 @@ const make = (
       watchTurn: (link, input) => {
         let projector: ReturnType<typeof TreeProjector.make>
         try {
-          projector = TreeProjector.make(link.turnId, input?.prompt ?? "", input?.checkpoint, input?.units ?? [])
+          projector = TreeProjector.make(
+            link.turnId,
+            input?.prompt ?? "",
+            input?.checkpoint,
+            input?.units ?? [],
+            link.titleRunId !== undefined,
+          )
         } catch (cause) {
           return Stream.fail(ExecutionGateway.WatchTurnFailure.make({ message: message(cause) }))
         }
-        const projections = RunTree.watch({
+        const rootEvents = RunTree.watch({
           rootRunId: link.runId,
           settlement: "root-blocked",
           ...(input?.checkpoint === undefined ? {} : { cursor: RunTree.TreeCursor.make(input.checkpoint.cursor) }),
         }).pipe(
           Stream.provideService(Runtime.Runtime, runtime),
-          Stream.map(projector.apply),
+          Stream.map((event) => ({ _tag: "root" as const, event })),
+        )
+        const titleId = link.titleRunId
+        const titleEvents =
+          titleId === undefined
+            ? Stream.empty
+            : runtime.events({ runId: titleId }).pipe(
+                Stream.filter(
+                  (event) =>
+                    event._tag === "RunCompleted" || event._tag === "RunFailed" || event._tag === "RunCancelled",
+                ),
+                Stream.take(1),
+                Stream.mapEffect(() => runtime.snapshot(titleId)),
+                Stream.map((snapshot) => ({ _tag: "title" as const, snapshot })),
+                Stream.catchTag("@batonfx/runtime/RunNotFound", () =>
+                  Stream.succeed({ _tag: "title" as const, snapshot: undefined }),
+                ),
+              )
+        let pendingTitle: Run.RunSnapshot | null | undefined
+        let rootProjected = input?.checkpoint !== undefined
+        const projections = Stream.merge(rootEvents, titleEvents).pipe(
+          Stream.map((event) => {
+            if (event._tag === "title") {
+              if (!rootProjected && pendingTitle === undefined) {
+                pendingTitle = event.snapshot ?? null
+                return []
+              }
+              if (event.snapshot === undefined) return [projector.applyTitle(undefined, [])]
+              const outcome = event.snapshot.outcome
+              const text = outcome?._tag === "Succeeded" && "text" in outcome.result ? outcome.result.text : undefined
+              return [projector.applyTitle(text, event.snapshot.usage)]
+            }
+            rootProjected = true
+            const patches: Array<ReturnType<typeof projector.apply> | undefined> = [projector.apply(event.event)]
+            if (pendingTitle !== undefined) {
+              const snapshot = pendingTitle
+              pendingTitle = undefined
+              if (snapshot === null) patches.push(projector.applyTitle(undefined, []))
+              else {
+                const outcome = snapshot.outcome
+                const text = outcome?._tag === "Succeeded" && "text" in outcome.result ? outcome.result.text : undefined
+                patches.push(projector.applyTitle(text, snapshot.usage))
+              }
+            }
+            return patches
+          }),
+          Stream.flatMap(Stream.fromIterable),
+          Stream.filter((patch): patch is NonNullable<typeof patch> => patch !== undefined),
           Stream.mapError((cause) => ExecutionGateway.WatchTurnFailure.make({ message: message(cause) })),
         )
         const durable =

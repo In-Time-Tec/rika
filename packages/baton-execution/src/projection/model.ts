@@ -1,4 +1,4 @@
-import type { RunTree } from "@batonfx/runtime"
+import type { Run, RunTree } from "@batonfx/runtime"
 import * as Projection from "@rika/product/execution-projection"
 
 export interface ToolState {
@@ -47,4 +47,8 @@ export interface Projector {
   readonly snapshot: () => Projection.Snapshot
   readonly apply: (input: RunTree.TreeEvent) => Projection.Patch
   readonly applyAll: (inputs: ReadonlyArray<RunTree.TreeEvent>) => Projection.Patch
+  readonly applyTitle: (
+    text: string | undefined,
+    usage: ReadonlyArray<Run.RawUsageFact>,
+  ) => Projection.Patch | undefined
 }
