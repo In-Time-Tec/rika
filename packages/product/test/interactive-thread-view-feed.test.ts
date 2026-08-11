@@ -616,4 +616,44 @@ describe("interactive ThreadView feed", () => {
     for (const entry of snapshot.turns.flatMap((value) => value.units))
       if (entry.parentId !== undefined) expect(parents.has(entry.parentId)).toBe(true)
   })
+
+  it("passes selected tentative previews without revising the durable ThreadView", () => {
+    const feed = makeThreadViewFeed(() => 1)
+    feed.publish({
+      _tag: "SelectionLoaded",
+      selectionEpoch: 1,
+      activitySequence: 0,
+      thread,
+      entries: [],
+      hasOlder: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 0,
+      queue: [],
+      activeTurn: turn,
+    })
+    const before = feed.current()
+    const event = {
+      _tag: "ExecutionModelPreviewed" as const,
+      threadId,
+      turnId,
+      preview: {
+        _tag: "ModelPreviewed" as const,
+        key: {
+          runId: "run",
+          attemptFence: 2,
+          turn: 3,
+          modelCallId: "call",
+          modelAttemptId: "attempt",
+          attempt: 4,
+        },
+        revision: 5,
+        text: "tentative",
+        reasoning: "thinking",
+        truncated: false,
+      },
+    }
+    expect(feed.publish(event)).toEqual([event])
+    expect(feed.current()).toBe(before)
+    expect(feed.publish({ ...event, threadId: Thread.ThreadId.make("other") })).toEqual([])
+  })
 })

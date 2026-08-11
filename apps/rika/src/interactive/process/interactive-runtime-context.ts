@@ -6,6 +6,7 @@ import type { Model } from "@rika/terminal/terminal-state"
 import type { PathTarget } from "@rika/terminal/terminal-transcript-presentation"
 import type * as Turn from "@rika/product/turn-record"
 import type * as ThreadView from "@rika/product/thread-view"
+import type { Overlay as ModelPreviewOverlay } from "../controller/interactive-model-preview"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Deferred, Effect, Fiber, SubscriptionRef } from "effect"
 import type { TuiLifecycle } from "./process-interrupt"
@@ -14,13 +15,12 @@ import type { InteractiveTuiOptions } from "./interactive-process-loop"
 export interface InteractiveLoop {
   model: Model
   threadView: ThreadView.ThreadViewSnapshot | undefined
+  modelPreview: ModelPreviewOverlay | undefined
   requestedThreadId: string | undefined
   workingFrame: string | undefined
   renderer: Effect.Success<ReturnType<typeof createTui>> | undefined
   initialization: Fiber.Fiber<void, never> | undefined
   closed: boolean
-  applyingFeedBatch: boolean
-  feedPreserveAnchor: boolean
   replayTurns: Map<string, Turn.Turn>
   projectionRevisions: Map<string, number>
   appliedDeltas: Set<string>
@@ -45,7 +45,6 @@ export interface InteractiveRuntimeContext {
   readonly fork: (effect: Effect.Effect<void, never, never>) => Fiber.Fiber<void, never>
   readonly renderTimer: (effect: Effect.Effect<void, never, never>) => Fiber.Fiber<void, never>
   readonly previewTimer: (effect: Effect.Effect<void, never, never>) => Fiber.Fiber<void, never>
-  readonly feedTimer: (effect: Effect.Effect<void, never, never>) => Fiber.Fiber<void, never>
   readonly session: InteractiveSession.InteractiveSession
   readonly options: InteractiveTuiOptions
   readonly recoverSession: <R>(

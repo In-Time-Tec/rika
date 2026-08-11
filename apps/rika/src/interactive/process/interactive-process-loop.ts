@@ -38,22 +38,18 @@ export const interactiveTui =
       const previewTimer = yield* FiberHandle.makeRuntime<never, never, void>().pipe(
         Effect.provideService(Scope.Scope, appScope),
       )
-      const feedTimer = yield* FiberHandle.makeRuntime<never, never, void>().pipe(
-        Effect.provideService(Scope.Scope, appScope),
-      )
       const lifecycle = yield* SubscriptionRef.make<TuiLifecycle>({ _tag: "Running" })
       const resolvedModeRoutes = options.modeRoutes?.()
       return yield* Effect.callback<void, ProductOperation.OperationUnavailable>((resume) => {
         const loop: InteractiveLoop = {
           model: initial(input.workspace ?? process.cwd(), input.mode ?? "medium"),
           threadView: undefined,
+          modelPreview: undefined,
           requestedThreadId: input.threadId,
           workingFrame: undefined as string | undefined,
           renderer: undefined as Effect.Success<ReturnType<typeof createTui>> | undefined,
           initialization: undefined as Fiber.Fiber<void, never> | undefined,
           closed: false,
-          applyingFeedBatch: false,
-          feedPreserveAnchor: false,
           replayTurns: new Map<string, Turn.Turn>(),
           projectionRevisions: new Map<string, number>(),
           appliedDeltas: new Set<string>(),
@@ -93,7 +89,6 @@ export const interactiveTui =
             ),
           )
         const render = (immediate = false) => {
-          if (loop.applyingFeedBatch) return
           if (loop.renderer === undefined || loop.renderSuppressed) return
           if (immediate) {
             renderTimer(Effect.void)
@@ -111,7 +106,6 @@ export const interactiveTui =
           fork,
           renderTimer,
           previewTimer,
-          feedTimer,
           session,
           options,
           recoverSession,
@@ -132,10 +126,8 @@ export const interactiveTui =
           consumePendingAction,
           requestSelectionResync,
         } = runtime
-        const { feedBatcher } = makeEventRouter({
+        const { dispatch } = makeEventRouter({
           loop,
-          feedTimer,
-          session,
           refreshTerminalTitle,
           render,
           requestSelectionResync,
@@ -148,7 +140,6 @@ export const interactiveTui =
           fork,
           renderTimer,
           previewTimer,
-          feedTimer,
           run,
           close,
           refreshTerminalTitle,
@@ -159,7 +150,7 @@ export const interactiveTui =
           consumePendingAction,
           loadChangedFiles,
           adapter,
-          feedBatcher,
+          dispatch,
           watchChangedFiles,
           suspend,
           startSelection,

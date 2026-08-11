@@ -2,6 +2,7 @@ import * as Thread from "@rika/product/thread-record"
 import * as ThreadSummary from "@rika/product/thread-summary"
 import * as ThreadView from "@rika/product/thread-view"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionGateway from "../../execution/contract/execution-gateway"
 import { Schema } from "effect"
 import { Failure } from "../operation-failure"
 
@@ -10,6 +11,12 @@ export const InteractiveEventSchema = Schema.Union([
   Schema.Struct({ _tag: Schema.tag("ThreadViewPatch"), patch: ThreadView.ThreadViewPatch }),
   ThreadView.ResyncRequired,
   Schema.Struct({ _tag: Schema.tag("ThreadsListed"), threads: Schema.Array(ThreadSummary.ThreadSummary) }),
+  Schema.Struct({
+    _tag: Schema.tag("ExecutionModelPreviewed"),
+    threadId: Thread.ThreadId,
+    turnId: Turn.TurnId,
+    preview: ExecutionGateway.ModelPreviewed,
+  }),
   Schema.Struct({
     _tag: Schema.tag("ContextDiagnostics"),
     threadId: Thread.ThreadId,

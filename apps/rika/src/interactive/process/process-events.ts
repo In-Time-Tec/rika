@@ -4,23 +4,36 @@ import { Clock, Effect, Schema } from "effect"
 import { selectedThreadMetadata, update } from "@rika/terminal/terminal-state-reducer"
 import * as InteractiveController from "../controller/interactive-controller"
 import * as ThreadSelection from "../controller/terminal-thread-selection"
-import { makeFeedFrameBatcher } from "../controller/interactive-frame-batch"
 import type { InteractiveRuntimeContext } from "./interactive-runtime-context"
 
-type Runtime = Pick<InteractiveRuntimeContext, "loop" | "feedTimer" | "session" | "render"> & {
+type Runtime = Pick<InteractiveRuntimeContext, "loop" | "render"> & {
   readonly refreshTerminalTitle: () => void
   readonly requestSelectionResync: (threadId: string) => void
 }
 
 export const makeEventRouter = (runtime: Runtime) => {
-  const { loop, feedTimer, refreshTerminalTitle, render, requestSelectionResync } = runtime
+  const { loop, refreshTerminalTitle, render, requestSelectionResync } = runtime
+  const clearModelPreview = (turnId?: string) => {
+    const cleared = InteractiveController.clearPreview(
+      {
+        model: loop.model,
+        ...(loop.threadView === undefined ? {} : { view: loop.threadView }),
+        ...(loop.modelPreview === undefined ? {} : { modelPreview: loop.modelPreview }),
+      },
+      turnId,
+    )
+    loop.model = cleared.model
+    loop.threadView = cleared.view
+    loop.modelPreview = cleared.modelPreview
+  }
   const dispatch = (event: InteractiveEvent.InteractiveEvent) => {
     if (loop.closed) return
     if (
       event._tag === "ThreadViewSnapshot" ||
       event._tag === "ThreadViewPatch" ||
       event._tag === "ResyncRequired" ||
-      event._tag === "ThreadRefolding"
+      event._tag === "ThreadRefolding" ||
+      event._tag === "ExecutionModelPreviewed"
     ) {
       if (
         event._tag === "ThreadViewSnapshot" &&
@@ -34,11 +47,13 @@ export const makeEventRouter = (runtime: Runtime) => {
         {
           model: loop.model,
           ...(loop.threadView === undefined ? {} : { view: loop.threadView }),
+          ...(loop.modelPreview === undefined ? {} : { modelPreview: loop.modelPreview }),
         },
         event,
       )
       loop.model = controlled.state.model
       loop.threadView = controlled.state.view
+      loop.modelPreview = controlled.state.modelPreview
       if (event._tag === "ThreadViewSnapshot") {
         loop.requestedThreadId = String(event.snapshot.thread.id)
         loop.model = update(loop.model, { _tag: "ThreadOpenCompleted" })
@@ -49,10 +64,8 @@ export const makeEventRouter = (runtime: Runtime) => {
         const threadId = event._tag === "ResyncRequired" ? String(event.threadId) : loop.model.currentThreadId
         if (threadId !== undefined) requestSelectionResync(threadId)
       }
-      if (controlled.preserveAnchor) {
-        if (loop.applyingFeedBatch) loop.feedPreserveAnchor = true
-        else loop.renderer?.surface.update(loop.model, true)
-      } else render(event._tag === "ResyncRequired")
+      if (controlled.preserveAnchor) loop.renderer?.surface.update(loop.model, true)
+      else render(event._tag === "ResyncRequired")
       if (!loop.model.busy && loop.model.activeTurnId === undefined && loop.model.activity === undefined)
         loop.submittedSinceIdle = false
       return
@@ -82,12 +95,14 @@ export const makeEventRouter = (runtime: Runtime) => {
       })
     } else if (event._tag === "ExecutionControlled") {
       if (event.threadId !== undefined && loop.model.currentThreadId !== event.threadId) return
-      if (event.action === "cancelled")
+      if (event.action === "cancelled") {
+        clearModelPreview(event.turnId)
         loop.model = update(loop.model, {
           _tag: "ExecutionCancelled",
           ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
           ...(event.agentResponseArrived === undefined ? {} : { agentResponseArrived: event.agentResponseArrived }),
         })
+      }
       if (
         event.action === "steered" &&
         event.turnId !== undefined &&
@@ -139,6 +154,7 @@ export const makeEventRouter = (runtime: Runtime) => {
       })
     } else if (event._tag === "ExecutionFailed") {
       if (event.threadId !== undefined && loop.model.currentThreadId !== event.threadId) return
+      clearModelPreview(event.turnId)
       loop.model = update(loop.model, {
         _tag: "ExecutionFailed",
         ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
@@ -188,23 +204,5 @@ export const makeEventRouter = (runtime: Runtime) => {
         event._tag === "ExecutionControlled",
     )
   }
-  const feedBatcher = makeFeedFrameBatcher<InteractiveEvent.InteractiveEvent>({
-    schedule: (flush) => {
-      feedTimer(Effect.sleep("16 millis").pipe(Effect.andThen(Effect.sync(flush))))
-    },
-    apply: (events) => {
-      loop.applyingFeedBatch = true
-      try {
-        for (const event of events) dispatch(event)
-      } finally {
-        loop.applyingFeedBatch = false
-      }
-    },
-    render: () => {
-      if (loop.renderer !== undefined && !loop.renderSuppressed)
-        loop.renderer.surface.update(loop.model, loop.feedPreserveAnchor)
-      loop.feedPreserveAnchor = false
-    },
-  })
-  return { dispatch, feedBatcher }
+  return { dispatch }
 }

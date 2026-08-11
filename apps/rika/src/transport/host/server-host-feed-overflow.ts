@@ -113,6 +113,7 @@ const rememberView = (state: State, event: ViewEvent) => {
 }
 
 const rememberImpl = (state: State, event: Event) => {
+  if (event._tag === "ExecutionModelPreviewed") return
   if (state.degraded !== undefined) {
     state.degraded = recovery(event)
     return

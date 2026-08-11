@@ -481,4 +481,39 @@ describe("Rika Server protocol", () => {
       }),
     ).toThrow()
   })
+
+  it("round-trips the full bounded tentative preview identity and revision", () => {
+    const message = {
+      _tag: "interactive-feed-event" as const,
+      connectionId: "connection",
+      requestId: "request",
+      sessionId: "session",
+      feedGeneration: "feed",
+      sequence: 1,
+      event: {
+        _tag: "ExecutionModelPreviewed" as const,
+        threadId: "thread",
+        turnId: "turn",
+        preview: {
+          _tag: "ModelPreviewed" as const,
+          key: {
+            runId: "run",
+            attemptFence: 2,
+            turn: 3,
+            modelCallId: "call",
+            modelAttemptId: "attempt",
+            attempt: 4,
+          },
+          revision: 5,
+          text: "tentative",
+          reasoning: "thinking",
+          truncated: false,
+        },
+      },
+    }
+    const decoded = Schema.decodeUnknownSync(ServerService.ServerMessage)(message)
+    expect(
+      Schema.decodeUnknownSync(ServerService.ServerMessage)(Schema.encodeSync(ServerService.ServerMessage)(decoded)),
+    ).toEqual(decoded)
+  })
 })

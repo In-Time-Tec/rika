@@ -2,7 +2,6 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Schema } from "effect"
 import { provideLayer } from "./product-test-layer"
 import { InteractiveEventSchema } from "../src/operation/interactive/interactive-event"
-import * as FeedOverflow from "../src/operation/interactive/interactive-feed-overflow"
 import * as RuntimeFeedOverflow from "../src/operation/interactive/interactive-runtime-feed-overflow"
 import { GoalService, layer as goalServiceLayer } from "../src/thread/goal/goal-service"
 import * as GoalRepository from "../src/thread/repository/goal-repository"
@@ -32,22 +31,6 @@ describe("the Goal indicator is fed live server state", () => {
 
   it("is critical, so goal state is never silently dropped under feed backpressure", () => {
     expect(RuntimeFeedOverflow.isCritical(goalChanged)).toBe(true)
-  })
-
-  it("coalesces per Thread, so a burst of goal updates costs one slot", () => {
-    const state = FeedOverflow.make()
-    FeedOverflow.remember(state, goalChanged)
-    FeedOverflow.remember(state, { ...goalChanged, goal: { ...goalChanged.goal, objective: "second" } })
-    const events = FeedOverflow.events(state).filter((event) => event._tag === "GoalChanged")
-    expect(events).toHaveLength(1)
-    expect(events[0]).toMatchObject({ goal: { objective: "second" } })
-  })
-
-  it("keeps one Thread's goal out of another Thread's indicator", () => {
-    const state = FeedOverflow.make()
-    FeedOverflow.remember(state, goalChanged)
-    FeedOverflow.remember(state, { ...goalChanged, threadId: "thread-b" })
-    expect(FeedOverflow.events(state).filter((event) => event._tag === "GoalChanged")).toHaveLength(2)
   })
 
   it.effect("reports the goal a Thread actually has, and nothing for a Thread without one", () =>

@@ -5,6 +5,7 @@ import { applyRootUnits } from "@rika/terminal/terminal-transcript-presentation"
 import type { Model, ThreadItem } from "@rika/terminal/terminal-state"
 import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
 import type { State, TranscriptEvent, Update } from "./interactive-controller"
+import * as ModelPreview from "./interactive-model-preview"
 
 const unchanged = (state: State): Update => ({ state, preserveAnchor: false })
 
@@ -40,7 +41,7 @@ const clearTimeline = (model: Model): Model => ({
   eventCursor: undefined,
 })
 
-const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot): Model => {
+const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot, modelPreview?: ModelPreview.Overlay): Model => {
   const active = snapshot.turns.find(
     (entry) =>
       entry.turn.status === "accepted" ||
@@ -74,6 +75,8 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot): Model =
     threadPreview: { _tag: "Idle" },
   }
   for (const entry of snapshot.turns) next = applyRootUnits(next, String(entry.turn.id), entry.units)
+  const previewUnits = ModelPreview.units(modelPreview, snapshot)
+  if (previewUnits.length > 0) next = applyRootUnits(next, String(previewUnits[0]!.turnId), previewUnits)
   if (active === undefined && model.activeTurnId !== undefined) {
     const settled = snapshot.turns.find((entry) => String(entry.turn.id) === model.activeTurnId)?.turn
     if (settled?.status === "completed") next = updateModel(next, { _tag: "ExecutionCompleted", turnId: settled.id })
@@ -157,6 +160,24 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
       },
       preserveAnchor: false,
     }
+  if (event._tag === "ExecutionModelPreviewed") {
+    if (state.view === undefined || event.threadId !== state.view.thread.id) return unchanged(state)
+    const turn = state.view.turns.find((candidate) => candidate.turn.id === event.turnId)
+    if (
+      turn === undefined ||
+      (turn.turn.status !== "accepted" &&
+        turn.turn.status !== "running" &&
+        turn.turn.status !== "cancelling" &&
+        turn.turn.status !== "waiting")
+    )
+      return unchanged(state)
+    const modelPreview = ModelPreview.replace(state.modelPreview, String(event.turnId), event.preview)
+    if (modelPreview === state.modelPreview) return unchanged(state)
+    return {
+      state: { ...state, modelPreview, model: project(state.model, state.view, modelPreview) },
+      preserveAnchor: false,
+    }
+  }
   if (event._tag === "ResyncRequired")
     return {
       state,
@@ -167,11 +188,13 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
   if (event._tag === "ThreadViewSnapshot") {
     const sameThread = state.view?.thread.id === event.snapshot.thread.id
     if (sameThread && state.view !== undefined && event.snapshot.revision < state.view.revision) return unchanged(state)
+    const modelPreview = ModelPreview.reconcile(state.modelPreview, event.snapshot)
     return {
       state: {
         ...state,
         view: event.snapshot,
-        model: project(state.model, event.snapshot),
+        modelPreview,
+        model: project(state.model, event.snapshot, modelPreview),
       },
       preserveAnchor: sameThread,
     }
@@ -185,11 +208,31 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
       resync: true,
       rejection: applied.failure._tag === "ThreadViewForeignThread" ? "thread" : "revision",
     }
+  const modelPreview = ModelPreview.reconcile(state.modelPreview, applied.success)
   return {
-    state: { ...state, view: applied.success, model: project(state.model, applied.success) },
+    state: {
+      ...state,
+      view: applied.success,
+      modelPreview,
+      model: project(state.model, applied.success, modelPreview),
+    },
     preserveAnchor: false,
   }
 }
+
+const clearPreviewStateImpl = (state: State, turnId: string | undefined): State => {
+  if (state.modelPreview === undefined || (turnId !== undefined && state.modelPreview.turnId !== turnId)) return state
+  return {
+    ...state,
+    modelPreview: undefined,
+    model: state.view === undefined ? state.model : project(state.model, state.view),
+  }
+}
+
+export const clearPreviewState: {
+  (turnId: string | undefined): (state: State) => State
+  (state: State, turnId: string | undefined): State
+} = Function.dual(2, clearPreviewStateImpl)
 
 export const updateState: {
   (arg0: State, arg1: TranscriptEvent): Update

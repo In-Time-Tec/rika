@@ -1,5 +1,4 @@
 import * as InteractiveFeed from "@rika/product/server-interactive-feed"
-import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as ProductOperation from "@rika/product/product-operation"
 import { create as createTui } from "@rika/terminal/opentui-surface"
 import { execute, type Adapter } from "@rika/terminal/terminal-session"
@@ -21,7 +20,7 @@ type StartupContext = InteractiveInputContext & {
   readonly consumePendingAction: () => void
   readonly loadChangedFiles: InteractiveInputContext["loadChangedFiles"]
   readonly adapter: Adapter
-  readonly feedBatcher: { readonly offer: (event: InteractiveEvent.InteractiveEvent) => void }
+  readonly dispatch: Parameters<InteractiveInputContext["session"]["events"]>[0]
   readonly watchChangedFiles: InteractiveInputContext["loadChangedFiles"]
   readonly suspend: () => void
   readonly startSelection: (
@@ -38,7 +37,6 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
     fork,
     renderTimer,
     previewTimer,
-    feedTimer,
     run,
     close,
     refreshTerminalTitle,
@@ -49,7 +47,7 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
     consumePendingAction,
     loadChangedFiles,
     adapter,
-    feedBatcher,
+    dispatch,
     watchChangedFiles,
     suspend,
     startSelection,
@@ -66,7 +64,6 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
           fork,
           renderTimer,
           previewTimer,
-          feedTimer,
           close,
           refreshTerminalTitle,
           openPath,
@@ -97,7 +94,7 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
           created.surface.update(loop.model)
           run(Effect.logInfo("tui.renderer.started"))
           if (loop.closed) return
-          run(session.events(feedBatcher.offer))
+          run(session.events(dispatch))
           run(watchChangedFiles)
           run(
             workspaceGlob(loop.model.workspace, "**/*", 10_000).pipe(
