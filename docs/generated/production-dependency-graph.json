@@ -1954,6 +1954,7 @@
         "./terminal-session",
         "./terminal-state",
         "./terminal-state-reducer",
+        "./terminal-submission-state",
         "./terminal-timeline-bounds",
         "./terminal-transcript-presentation",
         "./transcript-viewport"
@@ -6150,7 +6151,7 @@
       "package": "@rika/terminal",
       "kind": "source",
       "production": true,
-      "publicExports": []
+      "publicExports": ["./terminal-submission-state"]
     },
     {
       "id": "packages/terminal/src/state/model/terminal-submitted-draft.ts",
@@ -7904,6 +7905,14 @@
       "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
       "to": "packages/terminal/src/state/model/terminal-state.ts",
       "specifier": "@rika/terminal/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
+      "to": "packages/terminal/src/state/model/terminal-submission-state.ts",
+      "specifier": "@rika/terminal/terminal-submission-state",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -29946,6 +29955,14 @@
       "from": "packages/terminal/src/state/model/terminal-submission-state.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/model/terminal-submission-state.ts",
+      "to": "packages/terminal/src/state/model/terminal-composer-paste.ts",
+      "specifier": "./terminal-composer-paste",
       "kind": "import",
       "relationship": "runtime",
       "production": true
