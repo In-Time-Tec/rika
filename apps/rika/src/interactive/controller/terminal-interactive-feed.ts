@@ -5,6 +5,7 @@ import { applyRootUnits } from "@rika/terminal/terminal-transcript-presentation"
 import type { Model, ThreadItem } from "@rika/terminal/terminal-state"
 import { streamActivity } from "@rika/terminal/terminal-message"
 import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
+import { overlayPendingSubmissions } from "@rika/terminal/terminal-submission-state"
 import type { State, TranscriptEvent, Update } from "./interactive-controller"
 import * as ModelPreview from "./interactive-model-preview"
 
@@ -87,6 +88,8 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot, modelPre
   for (const entry of snapshot.turns) next = applyRootUnits(next, String(entry.turn.id), entry.units)
   const previewUnits = ModelPreview.units(modelPreview, snapshot)
   if (previewUnits.length > 0) next = applyRootUnits(next, String(previewUnits[0]!.turnId), previewUnits)
+  if (model.currentThreadId === undefined || model.currentThreadId === String(snapshot.thread.id))
+    next = overlayPendingSubmissions(next, model)
   if (active === undefined && model.activeTurnId !== undefined) {
     const settled = snapshot.turns.find((entry) => String(entry.turn.id) === model.activeTurnId)?.turn
     if (settled?.status === "completed") next = updateModel(next, { _tag: "ExecutionCompleted", turnId: settled.id })

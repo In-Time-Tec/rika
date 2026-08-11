@@ -149,6 +149,7 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "terminal-session",
     "terminal-state",
     "terminal-state-reducer",
+    "terminal-submission-state",
     "terminal-timeline-bounds",
     "terminal-transcript-presentation",
     "transcript-viewport",
