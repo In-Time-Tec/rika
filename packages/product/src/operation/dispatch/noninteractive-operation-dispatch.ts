@@ -49,9 +49,10 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
     ) {
       const clock = yield* Clock.Clock
       const startedAt = clock.currentTimeMillisUnsafe()
-      const changes = new Array<ExecutionProjection.Change>()
+      const streamChanges =
+        input._tag === "Run" && input.streamJson ? new Array<ExecutionProjection.Change>() : undefined
       const applyChange = (change: ExecutionProjection.Change) => {
-        changes.push(change)
+        streamChanges?.push(change)
         dependencies.publishInteractiveActivity(0, {
           _tag: "ExecutionProjectionChanged",
           threadId: turn.threadId,
@@ -131,7 +132,7 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
             }),
           )
       yield* dependencies.setTurnStatus(turn.id, result.status, completedAt)
-      return { result, changes, units: result.units }
+      return { result, streamChanges, units: result.units }
     })
     const drainRunQueue = Effect.fn("ProductOperation.drainRunQueue")(function* () {
       while (true) {
@@ -250,7 +251,9 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
     const completed = yield* runTurnWithRetry()
     yield* drainRunQueue()
     if (input._tag === "Run" && input.streamJson) {
-      yield* Effect.forEach(completed.changes, (change) => Console.log(JSON.stringify(change)), { discard: true })
+      yield* Effect.forEach(completed.streamChanges ?? [], (change) => Console.log(JSON.stringify(change)), {
+        discard: true,
+      })
       return
     }
     const ordered = completed.units.toSorted((left, right) => compareUnitOrder(left.order, right.order))
