@@ -1707,14 +1707,14 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/test/server-transport-reconnect.test.ts",
-      "path": "apps/rika/test/server-transport-reconnect.test.ts",
+      "id": "apps/rika/test/server-transport-reconnect.proc.test.ts",
+      "path": "apps/rika/test/server-transport-reconnect.proc.test.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
       "production": false,
       "publicExports": [],
-      "testKind": "unit-test"
+      "testKind": "process-test"
     },
     {
       "id": "apps/rika/test/server-transport-runtime.ts",
@@ -19304,7 +19304,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/test/server-transport-reconnect.test.ts",
+      "from": "apps/rika/test/server-transport-reconnect.proc.test.ts",
       "to": "apps/rika/test/server-process-exit.ts",
       "specifier": "./server-process-exit",
       "kind": "import",
@@ -19312,7 +19312,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/server-transport-reconnect.test.ts",
+      "from": "apps/rika/test/server-transport-reconnect.proc.test.ts",
       "to": "apps/rika/test/server-transport-files.ts",
       "specifier": "./server-transport-files",
       "kind": "import",
@@ -19320,7 +19320,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/server-transport-reconnect.test.ts",
+      "from": "apps/rika/test/server-transport-reconnect.proc.test.ts",
       "to": "apps/rika/test/server-transport-process.ts",
       "specifier": "./server-transport-process",
       "kind": "import",
@@ -19328,7 +19328,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/server-transport-reconnect.test.ts",
+      "from": "apps/rika/test/server-transport-reconnect.proc.test.ts",
       "to": "apps/rika/test/server-transport-runtime.ts",
       "specifier": "./server-transport-runtime",
       "kind": "import",
@@ -19336,7 +19336,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/server-transport-reconnect.test.ts",
+      "from": "apps/rika/test/server-transport-reconnect.proc.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -19344,7 +19344,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/server-transport-reconnect.test.ts",
+      "from": "apps/rika/test/server-transport-reconnect.proc.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -21064,6 +21064,14 @@
       "from": "packages/baton-execution/src/baton-execution.ts",
       "to": "packages/product/src/execution/contract/execution-status.ts",
       "specifier": "@rika/product/execution-status",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-preview-adapter.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
       "kind": "import",
       "relationship": "runtime",
       "production": true

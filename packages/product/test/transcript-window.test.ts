@@ -308,7 +308,7 @@ it.effect("assembles pages newest-first so the byte cap retains the newest tail 
         page: () => Effect.succeed(pages[pageIndex++]!),
       },
       transcripts: {
-        get: () => Effect.succeed(undefined),
+        get: () => Effect.void,
         usage: () => Effect.succeed({ usage: { ...ExecutionProjection.emptyUsageState(), sourceComplete: true } }),
       },
       encodeJson: (value) => JSON.stringify(value),

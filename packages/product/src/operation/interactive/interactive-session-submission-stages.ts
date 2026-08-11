@@ -213,13 +213,23 @@ const executeInteractiveSubmissionImpl = (
           change,
         })
       }
-      const publishPreview = (preview: ExecutionGateway.ModelPreviewed) => {
-        emitEvent(input, dispatch, {
-          _tag: "ExecutionModelPreviewed",
-          threadId: thread.id,
-          turnId: current.id,
-          preview,
-        })
+      const publishPreview = (event: ExecutionGateway.ModelPreviewed | ExecutionGateway.ModelPreviewCleared) => {
+        if (event._tag === "ModelPreviewCleared")
+          emitEvent(input, dispatch, {
+            _tag: "ExecutionModelPreviewCleared",
+            threadId: thread.id,
+            turnId: current.id,
+            runId: event.runId,
+            attemptFence: event.attemptFence,
+            generation: event.generation,
+          })
+        else
+          emitEvent(input, dispatch, {
+            _tag: "ExecutionModelPreviewed",
+            threadId: thread.id,
+            turnId: current.id,
+            preview: event,
+          })
       }
       const outcome = yield* Effect.exit(
         Effect.gen(function* () {

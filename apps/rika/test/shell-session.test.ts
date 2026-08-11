@@ -166,7 +166,8 @@ test("drives bypassed recorded and incognito shell commands through Operation an
         event._tag === "ThreadViewPatch" ||
         event._tag === "ResyncRequired" ||
         event._tag === "ThreadRefolding" ||
-        event._tag === "ExecutionModelPreviewed"
+        event._tag === "ExecutionModelPreviewed" ||
+        event._tag === "ExecutionModelPreviewCleared"
       ) {
         controller = InteractiveController.update({ ...controller, model }, event).state
         model = controller.model

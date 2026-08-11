@@ -27,3 +27,11 @@ export const ModelPreviewed = Schema.Struct({
   ),
 )
 export type ModelPreviewed = typeof ModelPreviewed.Type
+
+export const ModelPreviewCleared = Schema.Struct({
+  _tag: Schema.tag("ModelPreviewCleared"),
+  runId: Schema.String,
+  attemptFence: Schema.Int,
+  generation: Schema.Int,
+})
+export type ModelPreviewCleared = typeof ModelPreviewCleared.Type

@@ -1,25 +1,9 @@
+import { ModelPreview as RuntimeModelPreview } from "@batonfx/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import { Stream } from "effect"
 
-export interface RuntimeModelPreview {
-  readonly runId: string
-  readonly attemptFence: number
-  readonly turn: number
-  readonly modelCallId: string
-  readonly modelAttemptId: string
-  readonly attempt: number
-  readonly revision: number
-  readonly text: string
-  readonly reasoning: string
-  readonly truncated: boolean
-}
-
-export interface PreviewRuntime {
-  readonly previews: (input: { readonly runId: string }) => Stream.Stream<RuntimeModelPreview>
-}
-
-export const modelPreviewed = (preview: RuntimeModelPreview): ExecutionGateway.ModelPreviewed => {
+export const modelPreviewed = (preview: RuntimeModelPreview.ModelPreview): ExecutionGateway.ModelPreviewed => {
   const text = preview.text.slice(0, ExecutionGateway.ModelPreviewMaxCharacters)
   const reasoning = preview.reasoning.slice(0, ExecutionGateway.ModelPreviewMaxCharacters - text.length)
   return {
@@ -38,6 +22,15 @@ export const modelPreviewed = (preview: RuntimeModelPreview): ExecutionGateway.M
     truncated: preview.truncated || text.length < preview.text.length || reasoning.length < preview.reasoning.length,
   }
 }
+
+export const modelPreviewCleared = (
+  frame: RuntimeModelPreview.PreviewCleared,
+): ExecutionGateway.ModelPreviewCleared => ({
+  _tag: "ModelPreviewCleared",
+  runId: frame.runId,
+  attemptFence: frame.attemptFence,
+  generation: frame.generation,
+})
 
 export const previewIdentity = (preview: ExecutionGateway.ModelPreviewed): string =>
   JSON.stringify([
@@ -63,6 +56,10 @@ export const replacePreview = (input: {
 
 export const merge = <E>(input: {
   readonly projections: Stream.Stream<ExecutionProjection.Change, E>
-  readonly previews: Stream.Stream<RuntimeModelPreview>
+  readonly previews: Stream.Stream<RuntimeModelPreview.PreviewFrame>
 }): Stream.Stream<ExecutionGateway.WatchEvent, E> =>
-  Stream.merge(input.projections, Stream.map(input.previews, modelPreviewed), { haltStrategy: "left" })
+  Stream.merge(
+    input.projections,
+    Stream.map(input.previews, (frame) => ("_tag" in frame ? modelPreviewCleared(frame) : modelPreviewed(frame))),
+    { haltStrategy: "left" },
+  )

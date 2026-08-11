@@ -184,10 +184,36 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
         turn.turn.status !== "waiting")
     )
       return unchanged(state)
-    const modelPreview = ModelPreview.replace(state.modelPreview, state.view, String(event.turnId), event.preview)
+    const retired = state.modelPreviewRetired ?? []
+    const modelPreview = ModelPreview.replace(
+      state.modelPreview,
+      state.view,
+      String(event.turnId),
+      event.preview,
+      retired,
+    )
     if (modelPreview === state.modelPreview) return unchanged(state)
     return {
       state: { ...state, modelPreview, model: project(state.model, state.view, modelPreview) },
+      preserveAnchor: false,
+    }
+  }
+  if (event._tag === "ExecutionModelPreviewCleared") {
+    if (state.view === undefined || event.threadId !== state.view.thread.id) return unchanged(state)
+    const retired = state.modelPreviewRetired ?? []
+    const nextRetired =
+      state.modelPreview !== undefined && String(state.modelPreview.turnId) === String(event.turnId)
+        ? ModelPreview.retireIdentity(retired, state.modelPreview.identity)
+        : retired
+    const modelPreview = ModelPreview.clearOverlay(state.modelPreview, String(event.turnId))
+    if (modelPreview === state.modelPreview && nextRetired === retired) return unchanged(state)
+    return {
+      state: {
+        ...state,
+        modelPreview,
+        ...(nextRetired === retired ? {} : { modelPreviewRetired: nextRetired }),
+        model: project(state.model, state.view, modelPreview),
+      },
       preserveAnchor: false,
     }
   }
@@ -202,11 +228,17 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
     const sameThread = state.view?.thread.id === event.snapshot.thread.id
     if (sameThread && state.view !== undefined && event.snapshot.revision < state.view.revision) return unchanged(state)
     const modelPreview = ModelPreview.reconcile(state.modelPreview, event.snapshot)
+    const retired = state.modelPreviewRetired ?? []
+    const nextRetired =
+      modelPreview === undefined && state.modelPreview !== undefined
+        ? ModelPreview.retireIdentity(retired, state.modelPreview.identity)
+        : retired
     return {
       state: {
         ...state,
         view: event.snapshot,
         modelPreview,
+        ...(nextRetired === retired ? {} : { modelPreviewRetired: nextRetired }),
         model: project(state.model, event.snapshot, modelPreview),
       },
       preserveAnchor: sameThread,
@@ -222,11 +254,17 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
       rejection: applied.failure._tag === "ThreadViewForeignThread" ? "thread" : "revision",
     }
   const modelPreview = ModelPreview.reconcile(state.modelPreview, applied.success)
+  const retired = state.modelPreviewRetired ?? []
+  const nextRetired =
+    modelPreview === undefined && state.modelPreview !== undefined
+      ? ModelPreview.retireIdentity(retired, state.modelPreview.identity)
+      : retired
   return {
     state: {
       ...state,
       view: applied.success,
       modelPreview,
+      ...(nextRetired === retired ? {} : { modelPreviewRetired: nextRetired }),
       model: project(state.model, applied.success, modelPreview),
     },
     preserveAnchor: false,

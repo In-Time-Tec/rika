@@ -12870,6 +12870,14 @@
     },
     {
       "from": "packages/baton-execution/src/baton-preview-adapter.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-preview-adapter.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",

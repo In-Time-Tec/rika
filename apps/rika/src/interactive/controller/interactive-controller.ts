@@ -12,12 +12,14 @@ export type TranscriptEvent = Extract<
   | { readonly _tag: "ResyncRequired" }
   | { readonly _tag: "ThreadRefolding" }
   | { readonly _tag: "ExecutionModelPreviewed" }
+  | { readonly _tag: "ExecutionModelPreviewCleared" }
 >
 
 export interface State {
   readonly model: Model
   readonly view?: ThreadView.ThreadViewSnapshot
   readonly modelPreview?: ModelPreviewOverlay | undefined
+  readonly modelPreviewRetired?: ReadonlyArray<string> | undefined
 }
 
 export interface Update {

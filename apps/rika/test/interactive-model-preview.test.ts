@@ -414,15 +414,21 @@ describe("tentative model preview overlay", () => {
     const firstView = withUnits(firstUnits)
     const secondView = withUnits(secondUnits)
     const firstPreview = preview(1, "first").preview
-    const firstOverlay = ModelPreview.replace(undefined, firstView, String(turnId), firstPreview)!
+    const firstOverlay = ModelPreview.replace(undefined, firstView, String(turnId), firstPreview, [])!
     expect(firstOverlay.baselineAuthoritativeUnitKeys.size).toBe(firstUnits.length)
     expect(firstOverlay.baselineAuthoritativeUnitKeys.size).toBeLessThan(firstView.turns[0]!.units.length)
 
-    const revised = ModelPreview.replace(firstOverlay, firstView, String(turnId), {
-      ...firstPreview,
-      revision: 2,
-      text: "first revised",
-    })!
+    const revised = ModelPreview.replace(
+      firstOverlay,
+      firstView,
+      String(turnId),
+      {
+        ...firstPreview,
+        revision: 2,
+        text: "first revised",
+      },
+      [],
+    )!
     expect(revised.baselineAuthoritativeUnitKeys).toBe(firstOverlay.baselineAuthoritativeUnitKeys)
 
     const nextPreview = preview(1, "second", {
@@ -432,7 +438,7 @@ describe("tentative model preview overlay", () => {
       modelAttemptId: "attempt-2",
       attempt: 2,
     }).preview
-    const nextOverlay = ModelPreview.replace(revised, secondView, String(turnId), nextPreview)!
+    const nextOverlay = ModelPreview.replace(revised, secondView, String(turnId), nextPreview, [])!
     expect(nextOverlay.baselineAuthoritativeUnitKeys).toEqual(new Set(secondUnits.map((unit) => unit.key)))
     expect(nextOverlay.baselineAuthoritativeUnitKeys.size).toBe(secondUnits.length)
     expect(firstUnits.some((unit) => nextOverlay.baselineAuthoritativeUnitKeys.has(unit.key))).toBe(false)
@@ -487,6 +493,108 @@ describe("tentative model preview overlay", () => {
     const cleared = InteractiveController.clearPreview(state, String(turnId))
     expect(cleared.modelPreview).toBeUndefined()
     expect(ids(cleared).some((id) => id.startsWith("tentative:"))).toBe(false)
+  })
+
+  it("clears the overlay on a Baton clear tombstone and rejects the retired preview afterwards", () => {
+    let state = InteractiveController.update(loaded(), preview(1, "tentative answer")).state
+    expect(state.modelPreview).toBeDefined()
+    state = InteractiveController.update(state, {
+      _tag: "ExecutionModelPreviewCleared",
+      threadId: turn.threadId,
+      turnId,
+      runId: "run-1",
+      attemptFence: 1,
+      generation: 2,
+    }).state
+    expect(state.modelPreview).toBeUndefined()
+    // A late stale frame for the retired attempt must not resurrect the overlay.
+    state = InteractiveController.update(state, preview(1, "stale answer")).state
+    expect(state.modelPreview).toBeUndefined()
+  })
+
+  it("clears the overlay when durable authoritative units arrive and rejects the retired preview afterwards", () => {
+    let state = InteractiveController.update(loaded(), preview(1, "tentative answer", {}, "tentative thought")).state
+    expect(state.modelPreview).toBeDefined()
+    const patch: ThreadView.ThreadViewPatch = {
+      threadId: turn.threadId,
+      baseRevision: state.view!.revision,
+      revision: state.view!.revision + 1,
+      upsert: [
+        {
+          key: "durable-answer",
+          turnId: String(turnId),
+          order: [{ sequence: 0, part: 0, key: "durable-answer" }],
+          revision: 1,
+          content: { _tag: "Entry", role: "assistant", text: "durable answer" },
+        },
+      ],
+      remove: [],
+      turnChanges: [],
+      header: {
+        thread: state.view!.thread,
+        source: state.view!.source,
+        pending: state.view!.pending,
+        hasOlder: state.view!.hasOlder,
+        hasNewer: state.view!.hasNewer,
+        usage: state.view!.usage,
+      },
+    }
+    state = InteractiveController.update(state, { _tag: "ThreadViewPatch", patch }).state
+    expect(state.modelPreview).toBeUndefined()
+    state = InteractiveController.update(state, preview(1, "stale answer")).state
+    expect(state.modelPreview).toBeUndefined()
+  })
+
+  it("allows a fresh second model call in the same turn after a durable clear", () => {
+    let state = InteractiveController.update(loaded(), preview(1, "first answer")).state
+    const patch: ThreadView.ThreadViewPatch = {
+      threadId: turn.threadId,
+      baseRevision: state.view!.revision,
+      revision: state.view!.revision + 1,
+      upsert: [
+        {
+          key: "first-tool",
+          turnId: String(turnId),
+          order: [{ sequence: 0, part: 0, key: "first-tool" }],
+          revision: 1,
+          content: {
+            _tag: "Block",
+            block: {
+              _tag: "ToolCall",
+              id: "first-tool",
+              name: "read",
+              input: "{}",
+              status: "complete",
+              presentation: {
+                family: "explore",
+                action: "read",
+                activeLabel: "Reading",
+                completeLabel: "Read",
+              },
+              detail: "file.ts",
+              files: [],
+            },
+          },
+        },
+      ],
+      remove: [],
+      turnChanges: [],
+      header: {
+        thread: state.view!.thread,
+        source: state.view!.source,
+        pending: state.view!.pending,
+        hasOlder: state.view!.hasOlder,
+        hasNewer: state.view!.hasNewer,
+        usage: state.view!.usage,
+      },
+    }
+    state = InteractiveController.update(state, { _tag: "ThreadViewPatch", patch }).state
+    expect(state.modelPreview).toBeUndefined()
+    state = InteractiveController.update(
+      state,
+      preview(1, "second answer", { turn: 1, modelCallId: "call-2", modelAttemptId: "attempt-2", attempt: 2 }),
+    ).state
+    expect(state.modelPreview?.preview.text).toBe("second answer")
   })
 
   it.effect(

@@ -63,13 +63,23 @@ export const watchRootTurn = (input: {
         change,
       })
     }
-    const publishPreview = (preview: ExecutionGateway.ModelPreviewed) => {
-      input.dispatch({
-        _tag: "ExecutionModelPreviewed",
-        threadId: turn.threadId,
-        turnId: turn.id,
-        preview,
-      })
+    const publishPreview = (event: ExecutionGateway.ModelPreviewed | ExecutionGateway.ModelPreviewCleared) => {
+      if (event._tag === "ModelPreviewCleared")
+        input.dispatch({
+          _tag: "ExecutionModelPreviewCleared",
+          threadId: turn.threadId,
+          turnId: turn.id,
+          runId: event.runId,
+          attemptFence: event.attemptFence,
+          generation: event.generation,
+        })
+      else
+        input.dispatch({
+          _tag: "ExecutionModelPreviewed",
+          threadId: turn.threadId,
+          turnId: turn.id,
+          preview: event,
+        })
     }
     const result = yield* input.owner.watchTurn(turn.id, publishChange, publishPreview)
     if (turn.status !== result.status) yield* input.setTurnStatus(turn.id, result.status, yield* input.now)

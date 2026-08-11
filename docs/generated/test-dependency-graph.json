@@ -663,14 +663,14 @@
       "testKind": "process-test"
     },
     {
-      "id": "apps/rika/test/server-transport-reconnect.test.ts",
-      "path": "apps/rika/test/server-transport-reconnect.test.ts",
+      "id": "apps/rika/test/server-transport-reconnect.proc.test.ts",
+      "path": "apps/rika/test/server-transport-reconnect.proc.test.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
       "production": false,
       "publicExports": [],
-      "testKind": "unit-test"
+      "testKind": "process-test"
     },
     {
       "id": "apps/rika/test/server-transport.proc.test.ts",
@@ -6162,7 +6162,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/server-transport-reconnect.test.ts",
+      "from": "apps/rika/test/server-transport-reconnect.proc.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -6170,7 +6170,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/server-transport-reconnect.test.ts",
+      "from": "apps/rika/test/server-transport-reconnect.proc.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

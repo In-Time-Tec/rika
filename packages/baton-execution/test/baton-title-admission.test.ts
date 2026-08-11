@@ -78,8 +78,10 @@ const promptText = (prompt: { readonly content?: ReadonlyArray<unknown> } | unde
     })
     .join("\n")
 
-const projectionChanges = (events: ReadonlyArray<ExecutionGateway.ModelPreviewed | Change>): ReadonlyArray<Change> =>
-  events.filter((event): event is Change => event._tag !== "ModelPreviewed")
+const projectionChanges = (
+  events: ReadonlyArray<ExecutionGateway.ModelPreviewed | ExecutionGateway.ModelPreviewCleared | Change>,
+): ReadonlyArray<Change> =>
+  events.filter((event): event is Change => event._tag !== "ModelPreviewed" && event._tag !== "ModelPreviewCleared")
 
 const assistantText = (units: ReadonlyArray<{ readonly content: unknown }>) =>
   units.flatMap((unit) => {

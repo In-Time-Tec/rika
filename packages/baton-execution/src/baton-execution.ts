@@ -357,7 +357,7 @@ const make = (
           input?.checkpoint === undefined
             ? Stream.concat(Stream.succeed(projector.snapshot()), projections)
             : projections
-        const previews = (runtime as typeof runtime & PreviewAdapter.PreviewRuntime).previews({ runId: link.runId })
+        const previews = runtime.previews({ runId: link.runId })
         return PreviewAdapter.merge({ projections: durable, previews })
       },
       inspectTurn: (link) =>

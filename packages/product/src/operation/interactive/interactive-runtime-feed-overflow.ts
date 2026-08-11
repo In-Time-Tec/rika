@@ -56,6 +56,7 @@ export const isCritical = (event: InteractiveEvent): boolean => {
       return true
     case "TurnRetryScheduled":
     case "ExecutionModelPreviewed":
+    case "ExecutionModelPreviewCleared":
       return false
     case "ThreadsListed":
     case "ThreadRefolding":

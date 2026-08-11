@@ -106,7 +106,9 @@ export const initialTranscriptWindow = (input: {
         truncated = true
         break
       }
-      for (const entry of turnEntries) entries.push(entry)
+      // entriesFor returns chronological units; the window accumulates newest-first so the byte
+      // cap retains the newest tail, then the whole list is reversed for chronological output.
+      for (const entry of [...turnEntries].reverse()) entries.push(entry)
       bytes += turnBytes
     }
     entries.reverse()

@@ -33,7 +33,8 @@ export const makeEventRouter = (runtime: Runtime) => {
       event._tag === "ThreadViewPatch" ||
       event._tag === "ResyncRequired" ||
       event._tag === "ThreadRefolding" ||
-      event._tag === "ExecutionModelPreviewed"
+      event._tag === "ExecutionModelPreviewed" ||
+      event._tag === "ExecutionModelPreviewCleared"
     ) {
       if (
         event._tag === "ThreadViewSnapshot" &&

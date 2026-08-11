@@ -32,7 +32,7 @@ export interface Interface {
   readonly watchTurn: (
     turnId: Turn.TurnId,
     onChange?: (change: ExecutionProjection.Change) => void,
-    onPreview?: (preview: ExecutionGateway.ModelPreviewed) => void,
+    onPreview?: (event: ExecutionGateway.ModelPreviewed | ExecutionGateway.ModelPreviewCleared) => void,
   ) => Effect.Effect<
     ExecutionProjection.Result,
     ExecutionGateway.WatchTurnFailure | TurnRepository.RepositoryError | TranscriptRepository.RepositoryError
@@ -162,7 +162,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           })
           .pipe(
             Stream.runForEach((event) =>
-              event._tag === "ModelPreviewed"
+              event._tag === "ModelPreviewed" || event._tag === "ModelPreviewCleared"
                 ? Effect.sync(() => onPreview?.(event))
                 : Effect.gen(function* () {
                     const committed = yield* transcripts.commitProjection(turn, event)

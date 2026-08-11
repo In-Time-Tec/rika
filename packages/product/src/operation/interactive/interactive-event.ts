@@ -18,6 +18,14 @@ export const InteractiveEventSchema = Schema.Union([
     preview: ExecutionGateway.ModelPreviewed,
   }),
   Schema.Struct({
+    _tag: Schema.tag("ExecutionModelPreviewCleared"),
+    threadId: Thread.ThreadId,
+    turnId: Turn.TurnId,
+    runId: Schema.String,
+    attemptFence: Schema.Int,
+    generation: Schema.Int,
+  }),
+  Schema.Struct({
     _tag: Schema.tag("ContextDiagnostics"),
     threadId: Thread.ThreadId,
     turnId: Turn.TurnId,

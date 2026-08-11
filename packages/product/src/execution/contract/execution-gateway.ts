@@ -1,7 +1,7 @@
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { Checkpoint, type Change } from "./execution-projection"
 import type { Status } from "./execution-status"
-import type { ModelPreviewed } from "./model-previewed"
+import type { ModelPreviewCleared, ModelPreviewed } from "./model-previewed"
 import { AuthorizationResponse, ExecutionLink, StartTurn } from "./execution-gateway-request"
 import {
   ApprovalResponseFailure,
@@ -17,7 +17,7 @@ export * from "./execution-gateway-failure"
 export * from "./execution-gateway-request"
 export * from "./model-previewed"
 
-export type WatchEvent = Change | ModelPreviewed
+export type WatchEvent = Change | ModelPreviewed | ModelPreviewCleared
 
 export interface Interface {
   readonly startTurn: (input: StartTurn) => Effect.Effect<ExecutionLink, StartTurnFailure>

@@ -5,7 +5,6 @@ import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import { Function } from "effect"
 
 const maximumCharacters = ExecutionGateway.ModelPreviewMaxCharacters
-const retiredIdentityCapacity = 16
 
 export interface Overlay {
   readonly turnId: string
@@ -15,7 +14,7 @@ export interface Overlay {
   readonly retiredIdentities: ReadonlyArray<string>
 }
 
-const identity = (preview: ExecutionGateway.ModelPreviewed): string =>
+const previewIdentity = (preview: ExecutionGateway.ModelPreviewed): string =>
   JSON.stringify([
     preview.key.runId,
     preview.key.attemptFence,
@@ -30,6 +29,21 @@ const compareAttempt = (left: ExecutionGateway.ModelPreviewed, right: ExecutionG
   if (left.key.turn !== right.key.turn) return left.key.turn - right.key.turn
   return left.key.attempt - right.key.attempt
 }
+
+const retiredIdentityCapacity = 64
+
+export const retireIdentity: {
+  (value: string): (retired: ReadonlyArray<string>) => ReadonlyArray<string>
+  (retired: ReadonlyArray<string>, value: string): ReadonlyArray<string>
+} = Function.dual(2, (retired: ReadonlyArray<string>, value: string): ReadonlyArray<string> => {
+  if (retired.includes(value)) return retired
+  return [value, ...retired].slice(0, retiredIdentityCapacity)
+})
+
+export const isRetired: {
+  (value: string): (retired: ReadonlyArray<string>) => boolean
+  (retired: ReadonlyArray<string>, value: string): boolean
+} = Function.dual(2, (retired: ReadonlyArray<string>, value: string): boolean => retired.includes(value))
 
 const bounded = (preview: ExecutionGateway.ModelPreviewed): ExecutionGateway.ModelPreviewed => {
   const text = preview.text.slice(0, maximumCharacters)
@@ -64,10 +78,12 @@ const replaceImpl = (
   view: ThreadView.ThreadViewSnapshot,
   turnId: string,
   incoming: ExecutionGateway.ModelPreviewed,
+  retired: ReadonlyArray<string> = [],
 ): Overlay | undefined => {
   const preview = bounded(incoming)
-  const nextIdentity = identity(preview)
-  if (current === undefined || current.turnId !== turnId)
+  const nextIdentity = previewIdentity(preview)
+  if (current === undefined || current.turnId !== turnId) {
+    if (isRetired(retired, nextIdentity)) return current
     return {
       turnId,
       preview,
@@ -75,6 +91,7 @@ const replaceImpl = (
       baselineAuthoritativeUnitKeys: authoritativeUnitKeys(view, turnId),
       retiredIdentities: [],
     }
+  }
   if (current.retiredIdentities.includes(nextIdentity)) return current
   if (current.identity === nextIdentity)
     return preview.revision <= current.preview.revision ? current : { ...current, preview }
@@ -93,14 +110,16 @@ export const replace: {
     view: ThreadView.ThreadViewSnapshot,
     turnId: string,
     incoming: ExecutionGateway.ModelPreviewed,
+    retired: ReadonlyArray<string>,
   ): (current: Overlay | undefined) => Overlay | undefined
   (
     current: Overlay | undefined,
     view: ThreadView.ThreadViewSnapshot,
     turnId: string,
     incoming: ExecutionGateway.ModelPreviewed,
+    retired: ReadonlyArray<string>,
   ): Overlay | undefined
-} = Function.dual(4, replaceImpl)
+} = Function.dual(5, replaceImpl)
 
 const terminal = (status: ThreadView.ThreadViewTurnRecord["status"]): boolean =>
   status === "completed" || status === "failed" || status === "cancelled"
@@ -156,3 +175,10 @@ export const units: {
   (view: ThreadView.ThreadViewSnapshot): (overlay: Overlay | undefined) => ReadonlyArray<TranscriptUnit.Unit>
   (overlay: Overlay | undefined, view: ThreadView.ThreadViewSnapshot): ReadonlyArray<TranscriptUnit.Unit>
 } = Function.dual(2, unitsImpl)
+
+export const clearOverlay: {
+  (turnId: string): (overlay: Overlay | undefined) => Overlay | undefined
+  (overlay: Overlay | undefined, turnId: string): Overlay | undefined
+} = Function.dual(2, (overlay: Overlay | undefined, turnId: string): Overlay | undefined =>
+  overlay === undefined || overlay.turnId !== turnId ? overlay : undefined,
+)

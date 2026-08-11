@@ -161,13 +161,23 @@ export const promotePendingTurns = (input: {
             change,
           })
         }
-        const publishPreview = (preview: ExecutionGateway.ModelPreviewed) => {
-          input.emit(input.dispatch, {
-            _tag: "ExecutionModelPreviewed",
-            threadId: input.thread.id,
-            turnId: turn.id,
-            preview,
-          })
+        const publishPreview = (event: ExecutionGateway.ModelPreviewed | ExecutionGateway.ModelPreviewCleared) => {
+          if (event._tag === "ModelPreviewCleared")
+            input.emit(input.dispatch, {
+              _tag: "ExecutionModelPreviewCleared",
+              threadId: input.thread.id,
+              turnId: turn.id,
+              runId: event.runId,
+              attemptFence: event.attemptFence,
+              generation: event.generation,
+            })
+          else
+            input.emit(input.dispatch, {
+              _tag: "ExecutionModelPreviewed",
+              threadId: input.thread.id,
+              turnId: turn.id,
+              preview: event,
+            })
         }
         const result = yield* input.owner.watchTurn(turn.id, publish, publishPreview)
         if (result.status === "failed") {
@@ -232,13 +242,23 @@ export const promotePendingTurns = (input: {
               change,
             })
           }
-          const publishPreview = (preview: ExecutionGateway.ModelPreviewed) => {
-            input.emit(input.dispatch, {
-              _tag: "ExecutionModelPreviewed",
-              threadId: input.thread.id,
-              turnId: promoted.id,
-              preview,
-            })
+          const publishPreview = (event: ExecutionGateway.ModelPreviewed | ExecutionGateway.ModelPreviewCleared) => {
+            if (event._tag === "ModelPreviewCleared")
+              input.emit(input.dispatch, {
+                _tag: "ExecutionModelPreviewCleared",
+                threadId: input.thread.id,
+                turnId: promoted.id,
+                runId: event.runId,
+                attemptFence: event.attemptFence,
+                generation: event.generation,
+              })
+            else
+              input.emit(input.dispatch, {
+                _tag: "ExecutionModelPreviewed",
+                threadId: input.thread.id,
+                turnId: promoted.id,
+                preview: event,
+              })
           }
           const result = yield* input.owner.watchTurn(promoted.id, publish, publishPreview)
           return result
