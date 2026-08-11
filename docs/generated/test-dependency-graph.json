@@ -4240,6 +4240,15 @@
       "testKind": "unit-test"
     },
     {
+      "id": "test/benchmark/semantic-output-benchmark.test.ts",
+      "path": "test/benchmark/semantic-output-benchmark.test.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "test/command-entrypoint.test.ts",
       "path": "test/command-entrypoint.test.ts",
       "workspace": "root",
@@ -11656,6 +11665,22 @@
     },
     {
       "from": "test/benchmark/performance-metric-policy.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/benchmark/semantic-output-benchmark.test.ts",
+      "to": "external:bun:sqlite",
+      "specifier": "bun:sqlite",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/benchmark/semantic-output-benchmark.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

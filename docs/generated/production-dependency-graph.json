@@ -6763,6 +6763,102 @@
       "publicExports": []
     },
     {
+      "id": "scripts/benchmark/semantic-output-benchmark.ts",
+      "path": "scripts/benchmark/semantic-output-benchmark.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/benchmark/semantic-output-worker.ts",
+      "path": "scripts/benchmark/semantic-output-worker.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/benchmark/semantic-output/cli-options.ts",
+      "path": "scripts/benchmark/semantic-output/cli-options.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/benchmark/semantic-output/comparison.ts",
+      "path": "scripts/benchmark/semantic-output/comparison.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/benchmark/semantic-output/contract.ts",
+      "path": "scripts/benchmark/semantic-output/contract.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/benchmark/semantic-output/database-evidence.ts",
+      "path": "scripts/benchmark/semantic-output/database-evidence.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/benchmark/semantic-output/host-files.ts",
+      "path": "scripts/benchmark/semantic-output/host-files.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/benchmark/semantic-output/isolation.ts",
+      "path": "scripts/benchmark/semantic-output/isolation.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/benchmark/semantic-output/plan.ts",
+      "path": "scripts/benchmark/semantic-output/plan.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/benchmark/semantic-output/process-tree.ts",
+      "path": "scripts/benchmark/semantic-output/process-tree.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/benchmark/semantic-output/provision.ts",
+      "path": "scripts/benchmark/semantic-output/provision.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/benchmark/semantic-output/workload.ts",
+      "path": "scripts/benchmark/semantic-output/workload.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "scripts/benchmark/warm-server-benchmark.ts",
       "path": "scripts/benchmark/warm-server-benchmark.ts",
       "workspace": "root",
@@ -31926,6 +32022,238 @@
       "from": "scripts/benchmark/populated-root-seed.ts",
       "to": "packages/product/src/thread/model/turn-record.ts",
       "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-benchmark.ts",
+      "to": "scripts/benchmark/semantic-output/cli-options.ts",
+      "specifier": "./semantic-output/cli-options",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-benchmark.ts",
+      "to": "scripts/benchmark/semantic-output/comparison.ts",
+      "specifier": "./semantic-output/comparison",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-benchmark.ts",
+      "to": "scripts/benchmark/semantic-output/contract.ts",
+      "specifier": "./semantic-output/contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-benchmark.ts",
+      "to": "scripts/benchmark/semantic-output/host-files.ts",
+      "specifier": "./semantic-output/host-files",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-benchmark.ts",
+      "to": "scripts/benchmark/semantic-output/isolation.ts",
+      "specifier": "./semantic-output/isolation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-benchmark.ts",
+      "to": "scripts/benchmark/semantic-output/plan.ts",
+      "specifier": "./semantic-output/plan",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-benchmark.ts",
+      "to": "scripts/benchmark/semantic-output/provision.ts",
+      "specifier": "./semantic-output/provision",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-worker.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-worker.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-worker.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-worker.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-worker.ts",
+      "to": "scripts/benchmark/semantic-output/contract.ts",
+      "specifier": "./semantic-output/contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-worker.ts",
+      "to": "scripts/benchmark/semantic-output/database-evidence.ts",
+      "specifier": "./semantic-output/database-evidence",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-worker.ts",
+      "to": "scripts/benchmark/semantic-output/host-files.ts",
+      "specifier": "./semantic-output/host-files",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-worker.ts",
+      "to": "scripts/benchmark/semantic-output/isolation.ts",
+      "specifier": "./semantic-output/isolation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-worker.ts",
+      "to": "scripts/benchmark/semantic-output/process-tree.ts",
+      "specifier": "./semantic-output/process-tree",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-worker.ts",
+      "to": "scripts/benchmark/semantic-output/workload.ts",
+      "specifier": "./semantic-output/workload",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/comparison.ts",
+      "to": "scripts/benchmark/benchmark-statistics.ts",
+      "specifier": "../benchmark-statistics",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/comparison.ts",
+      "to": "scripts/benchmark/semantic-output/contract.ts",
+      "specifier": "./contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/comparison.ts",
+      "to": "scripts/benchmark/semantic-output/workload.ts",
+      "specifier": "./workload",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/database-evidence.ts",
+      "to": "external:bun:sqlite",
+      "specifier": "bun:sqlite",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/database-evidence.ts",
+      "to": "scripts/benchmark/semantic-output/contract.ts",
+      "specifier": "./contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/isolation.ts",
+      "to": "scripts/benchmark/semantic-output/host-files.ts",
+      "specifier": "./host-files",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/plan.ts",
+      "to": "scripts/benchmark/semantic-output/contract.ts",
+      "specifier": "./contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/plan.ts",
+      "to": "scripts/benchmark/semantic-output/host-files.ts",
+      "specifier": "./host-files",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/provision.ts",
+      "to": "scripts/benchmark/semantic-output/host-files.ts",
+      "specifier": "./host-files",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/provision.ts",
+      "to": "scripts/release/local-baton-package-verification.ts",
+      "specifier": "../../release/local-baton-package-verification",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/provision.ts",
+      "to": "scripts/release/local-baton-smoke.ts",
+      "specifier": "../../release/local-baton-smoke",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/workload.ts",
+      "to": "scripts/benchmark/semantic-output/contract.ts",
+      "specifier": "./contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
