@@ -63,6 +63,7 @@ const releaseInventory = (directory: string): Evidence => {
 
 const benchmarkFiles = [
   "semantic-output-worker.ts",
+  "semantic-output/worker-cli.ts",
   "semantic-output/contract.ts",
   "semantic-output/workload.ts",
   "semantic-output/process-tree.ts",
@@ -78,9 +79,23 @@ const copyBenchmark = (repositoryRoot: string, sourceRoot: string): void => {
     HostFiles.copy(HostFiles.join(benchmarkSource, relative), HostFiles.join(benchmarkDestination, relative))
 }
 
-const install = (root: string): void => {
-  run(["bun", "install", "--linker=isolated"], root, {
-    BUN_INSTALL_CACHE_DIR: HostFiles.join(root, ".bun-install-cache"),
+type RunCommand = typeof run
+
+export const install = (input: {
+  readonly sourceRoot: string
+  readonly cacheDirectory: string
+  readonly execute?: RunCommand
+}): void => {
+  const source = HostFiles.resolve(input.sourceRoot)
+  const cache = HostFiles.resolve(input.cacheDirectory)
+  const execute = input.execute ?? run
+  if (cache === source || cache.startsWith(`${source}/`))
+    throw new Error("Bun install cache must be outside the provisioned source root")
+  HostFiles.remove(HostFiles.join(source, ".bun-install-cache"))
+  HostFiles.remove(cache)
+  HostFiles.mkdir(cache)
+  execute(["bun", "install", "--linker=isolated"], source, {
+    BUN_INSTALL_CACHE_DIR: cache,
     NODE_OPTIONS: "",
     NODE_PATH: "",
   })
@@ -151,16 +166,19 @@ export const setup = (input: {
   const output = HostFiles.resolve(input.output)
   const candidateRelease = HostFiles.resolve(input.candidateRelease)
   const sourceOld = HostFiles.join(output, "sources", "rika-v0.5.3")
+  const sourceNew = HostFiles.join(output, "sources", "rika-current")
+  const baselineInstallCache = HostFiles.join(output, "install-cache", "baseline")
+  const candidateInstallCache = HostFiles.join(output, "install-cache", "candidate")
   HostFiles.mkdir(HostFiles.dirname(sourceOld))
   if (!HostFiles.exists(HostFiles.join(sourceOld, ".git")))
     run(["git", "worktree", "add", "--detach", sourceOld, "v0.5.3"], repositoryRoot)
   if (
-    run(["git", "rev-parse", "HEAD"], sourceOld).trim() !== run(["git", "rev-parse", "v0.5.3^{commit}"], repositoryRoot).trim()
+    run(["git", "rev-parse", "HEAD"], sourceOld).trim() !==
+    run(["git", "rev-parse", "v0.5.3^{commit}"], repositoryRoot).trim()
   )
     throw new Error("baseline source worktree is not detached at v0.5.3")
 
   const evidence = releaseInventory(candidateRelease)
-  const sourceNew = HostFiles.join(output, "sources", "rika-current")
   const baselineIdentity = {
     source: "baseline",
     sourceKind: "detached-rika-source",
@@ -179,7 +197,7 @@ export const setup = (input: {
     HostFiles.join(sourceOld, ".semantic-output-identity.json"),
     `${JSON.stringify(baselineIdentity, null, 2)}\n`,
   )
-  install(sourceOld)
+  install({ sourceRoot: sourceOld, cacheDirectory: baselineInstallCache })
 
   copyCurrentSource(repositoryRoot, sourceNew)
   pinCandidateTarballs(sourceNew, candidateRelease)
@@ -188,7 +206,7 @@ export const setup = (input: {
     HostFiles.join(sourceNew, ".semantic-output-identity.json"),
     `${JSON.stringify(candidateIdentity, null, 2)}\n`,
   )
-  install(sourceNew)
+  install({ sourceRoot: sourceNew, cacheDirectory: candidateInstallCache })
   verifyCandidateLock(sourceNew)
 
   return {
@@ -198,6 +216,8 @@ export const setup = (input: {
     candidateIdentity: HostFiles.join(sourceNew, ".semantic-output-identity.json"),
     sourceOld,
     sourceNew,
+    baselineInstallCache,
+    candidateInstallCache,
     candidatePackages: evidence.packages.length,
   }
 }

@@ -6851,6 +6851,14 @@
       "publicExports": []
     },
     {
+      "id": "scripts/benchmark/semantic-output/worker-cli.ts",
+      "path": "scripts/benchmark/semantic-output/worker-cli.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "scripts/benchmark/semantic-output/workload.ts",
       "path": "scripts/benchmark/semantic-output/workload.ts",
       "workspace": "root",
@@ -32028,6 +32036,38 @@
     },
     {
       "from": "scripts/benchmark/semantic-output-benchmark.ts",
+      "to": "external:@effect/platform-bun/BunRuntime",
+      "specifier": "@effect/platform-bun/BunRuntime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-benchmark.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-benchmark.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-benchmark.ts",
+      "to": "external:effect/unstable/cli",
+      "specifier": "effect/unstable/cli",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-benchmark.ts",
       "to": "scripts/benchmark/semantic-output/cli-options.ts",
       "specifier": "./semantic-output/cli-options",
       "kind": "import",
@@ -32100,6 +32140,22 @@
     },
     {
       "from": "scripts/benchmark/semantic-output-worker.ts",
+      "to": "external:@effect/platform-bun/BunRuntime",
+      "specifier": "@effect/platform-bun/BunRuntime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-worker.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-worker.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -32110,6 +32166,14 @@
       "from": "scripts/benchmark/semantic-output-worker.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-worker.ts",
+      "to": "external:effect/unstable/cli",
+      "specifier": "effect/unstable/cli",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -32156,8 +32220,32 @@
     },
     {
       "from": "scripts/benchmark/semantic-output-worker.ts",
+      "to": "scripts/benchmark/semantic-output/worker-cli.ts",
+      "specifier": "./semantic-output/worker-cli",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output-worker.ts",
       "to": "scripts/benchmark/semantic-output/workload.ts",
       "specifier": "./semantic-output/workload",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/cli-options.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/cli-options.ts",
+      "to": "external:effect/unstable/cli",
+      "specifier": "effect/unstable/cli",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -32246,6 +32334,30 @@
       "from": "scripts/benchmark/semantic-output/provision.ts",
       "to": "scripts/release/local-baton-smoke.ts",
       "specifier": "../../release/local-baton-smoke",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/worker-cli.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/worker-cli.ts",
+      "to": "external:effect/unstable/cli",
+      "specifier": "effect/unstable/cli",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/semantic-output/worker-cli.ts",
+      "to": "scripts/benchmark/semantic-output/contract.ts",
+      "specifier": "./contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true

@@ -1,6 +1,9 @@
+import * as BunServices from "@effect/platform-bun/BunServices"
 import { Database } from "bun:sqlite"
+import { Effect } from "effect"
+import { Command } from "effect/unstable/cli"
 import { afterEach, describe, expect, it } from "vitest"
-import { parse as parseCli } from "../../scripts/benchmark/semantic-output/cli-options"
+import { makeCommand, type Options } from "../../scripts/benchmark/semantic-output/cli-options"
 import { aggregate, compare } from "../../scripts/benchmark/semantic-output/comparison"
 import type { Case, Sample, Source } from "../../scripts/benchmark/semantic-output/contract"
 import {
@@ -13,6 +16,8 @@ import { HostFiles } from "../../scripts/benchmark/semantic-output/host-files"
 import { assertSafe, make as makeIsolation } from "../../scripts/benchmark/semantic-output/isolation"
 import { create as createPlan } from "../../scripts/benchmark/semantic-output/plan"
 import { parse as parseProcessTable, rssBytes } from "../../scripts/benchmark/semantic-output/process-tree"
+import { install } from "../../scripts/benchmark/semantic-output/provision"
+import { makeWorkerCommand, type WorkerOptions } from "../../scripts/benchmark/semantic-output/worker-cli"
 import {
   describe as describeWorkload,
   fragments,
@@ -220,12 +225,160 @@ describe("isolation and CLI planning", () => {
       ["baseline", 3, false],
       ["candidate", 3, false],
     ])
-    expect(parseCli(["run", "--output", "/benchmark", "--candidate-baton-release", "/release"])).toMatchObject({
-      command: "run",
-      samples: 3,
-      baselineTag: "v0.5.3",
-      baselineBatonVersion: "0.20.2",
-    })
-    expect(() => parseCli(["run", "--output", "/benchmark", "--samples", "2"])).toThrow()
+  })
+})
+
+const runCli = (command: Parameters<typeof Command.runWith>[0], arguments_: ReadonlyArray<string>) =>
+  Effect.runPromise(Command.runWith(command, { version: "0.0.0" })(arguments_).pipe(Effect.provide(BunServices.layer)))
+
+describe("semantic output CLI", () => {
+  it("routes the documented plan, setup, run, and compare commands through typed Effect CLI inputs", async () => {
+    const received: Array<Options> = []
+    const command = makeCommand((options) => Effect.sync(() => received.push(options)).pipe(Effect.asVoid))
+
+    await runCli(command, ["plan", "--output", "/plan"])
+    await runCli(command, ["setup", "--output", "/setup", "--candidate-baton-release", "/release"])
+    await runCli(command, ["run", "--output", "/run", "--candidate-baton-release", "/release", "--samples", "5"])
+    await runCli(command, [
+      "compare",
+      "--output",
+      "/compare",
+      "--baseline",
+      "/baseline.json",
+      "--candidate",
+      "/candidate.json",
+    ])
+
+    expect(received).toEqual([
+      {
+        command: "plan",
+        output: "/plan",
+        samples: 3,
+        baselineTag: "v0.5.3",
+        baselineBatonVersion: "0.20.2",
+      },
+      {
+        command: "setup",
+        output: "/setup",
+        samples: 3,
+        candidateBatonRelease: "/release",
+        baselineTag: "v0.5.3",
+        baselineBatonVersion: "0.20.2",
+      },
+      {
+        command: "run",
+        output: "/run",
+        samples: 5,
+        candidateBatonRelease: "/release",
+        baselineTag: "v0.5.3",
+        baselineBatonVersion: "0.20.2",
+      },
+      {
+        command: "compare",
+        output: "/compare",
+        samples: 3,
+        baseline: "/baseline.json",
+        candidate: "/candidate.json",
+        baselineTag: "v0.5.3",
+        baselineBatonVersion: "0.20.2",
+      },
+    ])
+    await expect(
+      runCli(command, ["run", "--output", "/run", "--candidate-baton-release", "/release", "--samples", "2"]),
+    ).rejects.toThrow()
+  })
+
+  it("preserves the worker option contract and decodes typed values", async () => {
+    const received: Array<WorkerOptions> = []
+    const command = makeWorkerCommand((options) => Effect.sync(() => received.push(options)).pipe(Effect.asVoid))
+
+    await runCli(command, [
+      "--source",
+      "candidate",
+      "--case",
+      "alternating-empty",
+      "--sample",
+      "7",
+      "--warmup",
+      "false",
+      "--root",
+      "/isolated",
+      "--identity",
+      "/identity.json",
+    ])
+    await runCli(command, [
+      "--source",
+      "baseline",
+      "--case",
+      "one",
+      "--sample",
+      "0",
+      "--warmup",
+      "true",
+      "--root",
+      "/warmup",
+      "--identity",
+      "/baseline-identity.json",
+    ])
+
+    expect(received).toEqual([
+      {
+        source: "candidate",
+        case: "alternating-empty",
+        sample: 7,
+        warmup: false,
+        root: "/isolated",
+        identity: "/identity.json",
+      },
+      {
+        source: "baseline",
+        case: "one",
+        sample: 0,
+        warmup: true,
+        root: "/warmup",
+        identity: "/baseline-identity.json",
+      },
+    ])
+  })
+})
+
+describe("benchmark provisioning install isolation", () => {
+  it("passes a clean sibling Bun cache to install and rejects source-local caches", () => {
+    const root = temp()
+    const source = HostFiles.join(root, "sources", "rika-current")
+    const cache = HostFiles.join(root, "install-cache", "candidate")
+    HostFiles.mkdir(source)
+    HostFiles.mkdir(cache)
+    HostFiles.write(HostFiles.join(source, ".bun-install-cache", "legacy"), "old")
+    HostFiles.write(HostFiles.join(cache, "stale"), "old")
+    const calls: Array<{
+      readonly command: ReadonlyArray<string>
+      readonly cwd: string
+      readonly environment: Readonly<Record<string, string>>
+    }> = []
+
+    const execute = (command: ReadonlyArray<string>, cwd: string, environment = {}) => {
+      calls.push({ command, cwd, environment })
+      return ""
+    }
+    install({ sourceRoot: source, cacheDirectory: cache, execute })
+
+    expect(calls).toEqual([
+      {
+        command: ["bun", "install", "--linker=isolated"],
+        cwd: source,
+        environment: { BUN_INSTALL_CACHE_DIR: cache, NODE_OPTIONS: "", NODE_PATH: "" },
+      },
+    ])
+    expect(HostFiles.exists(HostFiles.join(source, ".bun-install-cache"))).toBe(false)
+    expect(HostFiles.exists(HostFiles.join(cache, "stale"))).toBe(false)
+    expect(cache.startsWith(`${source}/`)).toBe(false)
+    expect(() =>
+      install({
+        sourceRoot: source,
+        cacheDirectory: HostFiles.join(source, ".bun-install-cache"),
+        execute,
+      }),
+    ).toThrow("outside the provisioned source root")
   })
 })

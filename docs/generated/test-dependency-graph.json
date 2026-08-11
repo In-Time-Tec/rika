@@ -11673,8 +11673,32 @@
     },
     {
       "from": "test/benchmark/semantic-output-benchmark.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/benchmark/semantic-output-benchmark.test.ts",
       "to": "external:bun:sqlite",
       "specifier": "bun:sqlite",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/benchmark/semantic-output-benchmark.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/benchmark/semantic-output-benchmark.test.ts",
+      "to": "external:effect/unstable/cli",
+      "specifier": "effect/unstable/cli",
       "kind": "import",
       "relationship": "test",
       "production": false

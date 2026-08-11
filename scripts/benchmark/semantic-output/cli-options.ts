@@ -1,3 +1,6 @@
+import { Effect, Schema } from "effect"
+import { Command, Flag } from "effect/unstable/cli"
+
 export interface Options {
   readonly command: "plan" | "setup" | "run" | "compare"
   readonly output: string
@@ -9,33 +12,38 @@ export interface Options {
   readonly candidate?: string
 }
 
-const value = (arguments_: ReadonlyArray<string>, name: string): string | undefined => {
-  const index = arguments_.indexOf(name)
-  return index < 0 ? undefined : arguments_[index + 1]
-}
+export type Handler<E = never, R = never> = (options: Options) => Effect.Effect<void, E, R>
 
-export const parse = (arguments_: ReadonlyArray<string>): Options => {
-  const command = arguments_[0]
-  if (command !== "plan" && command !== "setup" && command !== "run" && command !== "compare")
-    throw new Error("expected plan, setup, run, or compare")
-  const output = value(arguments_, "--output")
-  if (output === undefined) throw new Error("--output is required")
-  const samplesText = value(arguments_, "--samples") ?? "3"
-  const samples = Number(samplesText)
-  if (!Number.isInteger(samples) || samples < 3) throw new Error("--samples must be an integer of at least 3")
-  const candidateBatonRelease = value(arguments_, "--candidate-baton-release")
-  if ((command === "setup" || command === "run") && candidateBatonRelease === undefined)
-    throw new Error("--candidate-baton-release is required")
-  const baseline = value(arguments_, "--baseline")
-  const candidate = value(arguments_, "--candidate")
-  return {
-    command,
-    output,
-    samples,
-    baselineTag: "v0.5.3",
-    baselineBatonVersion: "0.20.2",
-    ...(candidateBatonRelease === undefined ? {} : { candidateBatonRelease }),
-    ...(baseline === undefined ? {} : { baseline }),
-    ...(candidate === undefined ? {} : { candidate }),
-  }
-}
+const samples = Flag.integer("samples").pipe(
+  Flag.withSchema(Schema.Int.check(Schema.isGreaterThanOrEqualTo(3))),
+  Flag.withDefault(3),
+)
+const output = Flag.string("output")
+const baseline = { baselineTag: "v0.5.3", baselineBatonVersion: "0.20.2" } as const
+
+export const makeCommand = <E, R>(handler: Handler<E, R>) =>
+  Command.make("semantic-output-benchmark").pipe(
+    Command.withSubcommands([
+      Command.make("plan", { output, samples }, (options) => handler({ command: "plan", ...options, ...baseline })),
+      Command.make(
+        "setup",
+        { output, samples, candidateBatonRelease: Flag.string("candidate-baton-release") },
+        (options) => handler({ command: "setup", ...options, ...baseline }),
+      ),
+      Command.make(
+        "run",
+        { output, samples, candidateBatonRelease: Flag.string("candidate-baton-release") },
+        (options) => handler({ command: "run", ...options, ...baseline }),
+      ),
+      Command.make(
+        "compare",
+        {
+          output,
+          samples,
+          baseline: Flag.string("baseline"),
+          candidate: Flag.string("candidate"),
+        },
+        (options) => handler({ command: "compare", ...options, ...baseline }),
+      ),
+    ]),
+  )
