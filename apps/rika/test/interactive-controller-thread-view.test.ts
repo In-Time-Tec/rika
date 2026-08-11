@@ -266,6 +266,59 @@ describe("interactive ThreadView controller", () => {
     })
   })
 
+  it("keeps an echoed submission visible across projection, admission, and turn start", () => {
+    const initial = state()
+    const typed = { ...initial, model: { ...initial.model, input: "hello", cursor: 5 } }
+    const submitted = reduceModel(typed.model, { _tag: "Submitted", submissionId: "submission-1" })
+    const echo = (model: ViewState.Model) =>
+      model.entries.filter((entry) => entry.role === "user" && entry.text === "hello").length
+    expect(echo(submitted)).toBe(1)
+
+    // The created-thread snapshot arrives before the turn exists. Rebuilding the timeline from the
+    // authoritative view must not erase the echoed submission.
+    const loaded = InteractiveController.update(
+      { ...typed, model: submitted },
+      { _tag: "ThreadViewSnapshot", snapshot: snapshot() },
+    )
+    expect(loaded.resync).toBeUndefined()
+    expect(echo(loaded.state.model)).toBe(1)
+
+    // A header-only patch (ThreadTitled between submit and admission) must also keep it.
+    const headerOnly = InteractiveController.update(loaded.state, {
+      _tag: "ThreadViewPatch",
+      patch: patch({
+        header: {
+          thread: { ...snapshot().thread, title: "Renamed" },
+          source: { projectionVersion: 1 },
+          pending: [],
+          hasOlder: false,
+          hasNewer: false,
+          usage: snapshot().usage,
+        },
+      }),
+    })
+    expect(headerOnly.resync).toBeUndefined()
+    expect(echo(headerOnly.state.model)).toBe(1)
+
+    // Admission binds the draft; the echo stays until the durable prompt unit arrives.
+    const admitted = reduceModel(headerOnly.state.model, {
+      _tag: "SubmissionAdmitted",
+      turnId: "turn",
+      status: "active",
+      submissionId: "submission-1",
+    })
+    expect(echo(admitted)).toBe(1)
+
+    // TurnStarted seeds the authoritative prompt unit; the overlay must not duplicate it.
+    const started = reduceModel(admitted, {
+      _tag: "TurnStarted",
+      turnId: "turn",
+      prompt: "hello",
+      submissionId: "submission-1",
+    })
+    expect(echo(started)).toBe(1)
+  })
+
   it("never returns to the welcome state after a submit while the created-thread snapshot arrives", () => {
     const welcome = (model: ViewState.Model) => model.entries.length === 0 && model.blocks.length === 0
     const initial = state()
