@@ -78,6 +78,8 @@ export const initialTranscriptWindow = (input: {
   readonly fail: (message: string) => Effect.Effect<never, OperationError, never>
 }) =>
   Effect.gen(function* () {
+    // Pages arrive newest-first with turns ascending inside each page. Assemble the window
+    // newest-first so the byte cap retains the newest tail, then emit chronological output.
     const turns: Array<Turn> = []
     let hasOlder = false
     let cursor: TurnPageCursor | undefined
@@ -86,7 +88,7 @@ export const initialTranscriptWindow = (input: {
         ...(cursor === undefined ? {} : { before: cursor }),
         limit: 50,
       })
-      for (const turn of turnPage.turns) turns.push(turn)
+      turns.push(...turnPage.turns.toReversed())
       hasOlder = turnPage.hasOlder
       if (!hasOlder) break
       cursor = turnPage.oldestCursor
@@ -95,7 +97,7 @@ export const initialTranscriptWindow = (input: {
     const entries: Array<TranscriptPage.Entry> = []
     let bytes = 0
     let truncated = false
-    for (const turn of turns.toReversed()) {
+    for (const turn of turns) {
       if (turn.status === "queued") continue
       const turnEntries = yield* entriesFor(turn, input.transcripts, input.fail)
       if (turnEntries.length === 0) continue
@@ -107,6 +109,7 @@ export const initialTranscriptWindow = (input: {
       for (const entry of turnEntries) entries.push(entry)
       bytes += turnBytes
     }
+    entries.reverse()
     let oldestCursor: TranscriptPage.PageCursor | undefined = transcriptCursorFor(entries[0])
     if (truncated) {
       const bounded = boundTranscriptEntries(entries, input.encodeJson)
