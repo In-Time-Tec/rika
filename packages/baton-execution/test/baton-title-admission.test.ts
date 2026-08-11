@@ -5,6 +5,7 @@ import { Database } from "bun:sqlite"
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
+import type { Change } from "@rika/product/execution-projection"
 import { Context, Effect, Layer, Random, Stream } from "effect"
 import type { Tool, Toolkit } from "effect/unstable/ai"
 import { layer } from "../src/baton-execution"
@@ -77,6 +78,9 @@ const promptText = (prompt: { readonly content?: ReadonlyArray<unknown> } | unde
     })
     .join("\n")
 
+const projectionChanges = (events: ReadonlyArray<ExecutionGateway.ModelPreviewed | Change>): ReadonlyArray<Change> =>
+  events.filter((event): event is Change => event._tag !== "ModelPreviewed")
+
 const assistantText = (units: ReadonlyArray<{ readonly content: unknown }>) =>
   units.flatMap((unit) => {
     const content = unit.content as { _tag?: string; role?: string; text?: string }
@@ -116,7 +120,10 @@ it.live(
             executionRoute: routeWithIdentity("title-nonblocking-root", "title-nonblocking-title"),
             titleIntent: { _tag: "GenerateThreadTitle", expectedTitle: "answer immediately" },
           })
-          return { link: receipt, changes: [...(yield* gateway.watchTurn(receipt).pipe(Stream.runCollect))] }
+          return {
+            link: receipt,
+            changes: projectionChanges([...(yield* gateway.watchTurn(receipt).pipe(Stream.runCollect))]),
+          }
         }),
       )
 
@@ -179,7 +186,7 @@ it.live(
           const rootRequests = yield* rootFixture.requests
           yield* gateway.cancelTurn(receipt, "Cancelled by user")
           const inspected = yield* gateway.inspectTurn(receipt)
-          const changes = [...(yield* gateway.watchTurn(receipt).pipe(Stream.runCollect))]
+          const changes = projectionChanges([...(yield* gateway.watchTurn(receipt).pipe(Stream.runCollect))])
           return { rootRequests, inspected, changes }
         }),
       )

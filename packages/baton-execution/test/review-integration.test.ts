@@ -3,6 +3,7 @@ import { TestModel } from "@batonfx/test"
 import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
+import type { Change } from "@rika/product/execution-projection"
 import { reviewIntent } from "@rika/product/review-policy"
 import { Database } from "bun:sqlite"
 import { randomUUID } from "node:crypto"
@@ -10,6 +11,9 @@ import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { layer } from "../src/baton-execution"
 
 const fanOutJoin = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
+
+const projectionChanges = (events: ReadonlyArray<ExecutionGateway.ModelPreviewed | Change>): ReadonlyArray<Change> =>
+  events.filter((event): event is Change => event._tag !== "ModelPreviewed")
 
 const testLayer = (filename: string, fixture: TestModel.Fixture) =>
   layer({
@@ -45,7 +49,7 @@ it.live(
           const link = yield* gateway.startTurn(input(route))
           const duplicate = yield* gateway.startTurn(input(route))
           const events = yield* gateway.watchTurn(link).pipe(Stream.runCollect)
-          return { link, duplicate, events: [...events] }
+          return { link, duplicate, events: projectionChanges([...events]) }
         }),
       )
       const database = new Database(filename)

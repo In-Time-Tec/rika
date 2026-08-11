@@ -13,6 +13,7 @@ import { Cause, Context, Deferred, Effect, Layer, Option, Schedule, Schema, Stre
 import type { AgentToolHandlers, KernelOptions } from "./baton-route-options"
 import { configure, makeResolver } from "./baton-route"
 import { batchProjectionEvents } from "./baton-projection-batching"
+import * as PreviewAdapter from "./baton-preview-adapter"
 import { TreeProjector, titleInvocationId } from "./baton-tree-projector"
 
 export type AgentToolServices = AgentToolHandlers
@@ -274,7 +275,7 @@ const make = (
         } catch (cause) {
           return Stream.fail(ExecutionGateway.WatchTurnFailure.make({ message: message(cause) }))
         }
-        const events = RunTree.watch({
+        const projections = RunTree.watch({
           rootRunId: link.runId,
           settlement: "root-blocked",
           ...(input?.checkpoint === undefined ? {} : { cursor: RunTree.TreeCursor.make(input.checkpoint.cursor) }),
@@ -284,7 +285,12 @@ const make = (
           Stream.map(projector.applyAll),
           Stream.mapError((cause) => ExecutionGateway.WatchTurnFailure.make({ message: message(cause) })),
         )
-        return input?.checkpoint === undefined ? Stream.concat(Stream.succeed(projector.snapshot()), events) : events
+        const durable =
+          input?.checkpoint === undefined
+            ? Stream.concat(Stream.succeed(projector.snapshot()), projections)
+            : projections
+        const previews = (runtime as typeof runtime & PreviewAdapter.PreviewRuntime).previews({ runId: link.runId })
+        return PreviewAdapter.merge({ projections: durable, previews })
       },
       inspectTurn: (link) =>
         RunTree.inspect(link.runId).pipe(
