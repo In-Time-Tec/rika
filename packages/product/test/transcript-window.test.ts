@@ -242,7 +242,7 @@ it.effect("pages every Turn page and delivers the full timeline oldest-first wit
         page: (threadId, options) => {
           if (options?.before === undefined)
             return Effect.succeed({
-              turns: [newest, middle],
+              turns: [middle, newest],
               hasOlder: true,
               oldestCursor: { createdAt: middle.createdAt, id: middle.id },
               newestCursor: { createdAt: newest.createdAt, id: newest.id },
@@ -271,5 +271,59 @@ it.effect("pages every Turn page and delivers the full timeline oldest-first wit
     expect(window.hasOlder).toBe(false)
     expect(window.oldestCursor).toMatchObject({ createdAt: 1 })
     expect(window.newestCursor).toMatchObject({ createdAt: 3 })
+  }),
+)
+
+it.effect("assembles pages newest-first so the byte cap retains the newest tail in chronological output", () =>
+  Effect.gen(function* () {
+    const total = 120
+    const makeTurn = (createdAt: number): Turn.RecordedShellTurn => ({
+      _tag: "RecordedShell",
+      id: Turn.TurnId.make(`shell-${createdAt}`),
+      threadId: thread.id,
+      prompt: `$ echo ${createdAt}`,
+      command: `echo ${createdAt}`,
+      status: "completed",
+      result: { text: `${createdAt}`.repeat(200_000), truncated: false, exitCode: 0 },
+      author: { _tag: "Human" },
+      lineage: { _tag: "Original" },
+      createdAt,
+      updatedAt: createdAt,
+    })
+    const all = Array.from({ length: total }, (_, index) => makeTurn(index + 1))
+    const pageSize = 50
+    const pages: Array<{ turns: Array<Turn.Turn>; hasOlder: boolean; oldestCursor: Turn.TurnId }> = []
+    for (let end = total; end > 0; end -= pageSize) {
+      const start = Math.max(1, end - pageSize + 1)
+      pages.push({
+        turns: all.slice(start - 1, end),
+        hasOlder: start > 1,
+        oldestCursor: all[start - 1]!.id,
+      })
+    }
+    let pageIndex = 0
+    const window = yield* initialTranscriptWindow({
+      state: makeSelectionState(thread, 1),
+      turns: {
+        page: () => Effect.succeed(pages[pageIndex++]!),
+      },
+      transcripts: {
+        get: () => Effect.succeed(undefined),
+        usage: () => Effect.succeed({ usage: { ...ExecutionProjection.emptyUsageState(), sourceComplete: true } }),
+      },
+      encodeJson: (value) => JSON.stringify(value),
+      fail: (message) => Effect.die(message),
+    })
+    // Chronological ascending output that retains the newest turns only.
+    const firstId = window.entries[0]?.turn.id
+    const lastId = window.entries.at(-1)?.turn.id
+    expect(String(lastId)).toBe("shell-120")
+    expect(window.hasOlder).toBe(true)
+    const ordered = window.entries.map((entry) => entry.turn.createdAt)
+    expect([...ordered].toSorted((a, b) => a - b)).toEqual(ordered)
+    // The retained window is the newest tail (turn 120 present, turn 1 absent).
+    expect(window.entries.some((entry) => String(entry.turn.id) === "shell-1")).toBe(false)
+    expect(window.entries.length).toBeGreaterThanOrEqual(2)
+    expect(firstId).toBeDefined()
   }),
 )
