@@ -155,4 +155,8 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
   showToast(message: string, color?: ColorInput): void {
     this.toastController.show(message, color)
   }
+  showQuitConfirmation(visible: boolean): void {
+    this.quitConfirmationBox.visible = visible
+    this.renderer.requestRender()
+  }
 }

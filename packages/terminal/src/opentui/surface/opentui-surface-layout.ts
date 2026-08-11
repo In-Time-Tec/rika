@@ -174,6 +174,8 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       contentColumnWidth(previousModel) !== contentColumnWidth(model)
     if (goalChanged) this.renderGoalLabel(model)
     this.workspaceLabel.right = sidebarWidth + 2
+    this.quitConfirmationBox.bottom = renderedInputHeight + 1
+    this.quitConfirmationBox.width = Math.max(1, Math.min(24, model.width - 4))
     const workspaceChanged =
       previousModel === undefined ||
       previousModel.workspace !== model.workspace ||

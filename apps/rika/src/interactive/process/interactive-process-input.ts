@@ -10,6 +10,7 @@ import { pasteClipboardPng, pastedImagePath, persistPastedImage } from "./proces
 type InputContext = Omit<InteractiveInputContext, "options" | "resume">
 
 export const createInputHandlers = (context: InputContext): Partial<Parameters<typeof createTui>[0]> => {
+  let quitConfirmationVisible = false
   const {
     loop,
     session,
@@ -120,7 +121,19 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
     },
     key: (key) => {
       if (key.ctrl && key.name === "c" && !loop.model.busy) {
-        close()
+        if (quitConfirmationVisible) {
+          close()
+          return
+        }
+        quitConfirmationVisible = true
+        loop.renderer?.surface.showQuitConfirmation(true)
+        return
+      }
+      if (quitConfirmationVisible) {
+        if (key.name === "escape") {
+          quitConfirmationVisible = false
+          loop.renderer?.surface.showQuitConfirmation(false)
+        }
         return
       }
       if (key.ctrl && key.name === "g") {

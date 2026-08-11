@@ -52,9 +52,7 @@ test(
         yield* Effect.promise(() => app.type(" again"))
         app.pressEnter()
         yield* app.waitFrame("RESTORED_PROMPT_SENT")
-        yield* app.settled
-        app.close()
-        yield* app.done
+        yield* app.quit
       }),
     ),
   tuiTestTimeout,

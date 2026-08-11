@@ -3,8 +3,12 @@ import {
   ScrollBarRenderable,
   ScrollBoxRenderable,
   CliRenderEvents,
+  StyledText,
   TextRenderable,
   SystemClock,
+  bold,
+  dim,
+  fg,
   type CliRenderer,
   type MouseEvent,
   createCliRenderer,
@@ -292,6 +296,36 @@ export class Surface extends SurfaceLifecycle {
     })
     this.toast = new TextRenderable(renderer, { content: "", fg: toOpenColor(colors.text) })
     this.toastBox.add(this.toast)
+    this.quitConfirmationBox = new BoxRenderable(renderer, {
+      visible: false,
+      position: "absolute",
+      right: 2,
+      bottom: spacing.inputHeight + 1,
+      width: 24,
+      height: 4,
+      zIndex: 40,
+      border: true,
+      borderStyle: "rounded",
+      borderColor: toOpenColor(colors.text),
+      focusedBorderColor: toOpenColor(colors.text),
+      backgroundColor: toOpenColor(colors.surface),
+      paddingLeft: 1,
+      paddingRight: 1,
+      overflow: "hidden",
+      title: " Ctrl+C then ",
+      titleColor: toOpenColor(colors.amber),
+      titleAlignment: "left",
+    })
+    this.quitConfirmation = new TextRenderable(renderer, {
+      content: new StyledText([
+        bold(fg(toOpenColor(colors.blue))("Ctrl+C")),
+        fg(toOpenColor(colors.text))(" Quit\n"),
+        bold(fg(toOpenColor(colors.blue))("Esc")),
+        dim(fg(toOpenColor(colors.text))(" cancel")),
+      ]),
+      selectable: false,
+    })
+    this.quitConfirmationBox.add(this.quitConfirmation)
     this.paletteBox = new BoxRenderable(renderer, {
       visible: false,
       position: "absolute",
@@ -468,6 +502,7 @@ export class Surface extends SurfaceLifecycle {
     renderer.root.add(this.overlayHintOne)
     renderer.root.add(this.overlayHintTwo)
     renderer.root.add(this.toastBox)
+    renderer.root.add(this.quitConfirmationBox)
     this.paletteBox.onMouseScroll = (event) => {
       if (this.model?.threadSwitcher.open !== true || event.scroll === undefined) return
       event.stopPropagation()

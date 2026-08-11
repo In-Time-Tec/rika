@@ -445,8 +445,8 @@ it.effect("constructs the render tree and forwards key and resize events", () =>
     const callbacks = handlers()
     const { surface } = yield* createScoped(callbacks)
 
-    expect(opentui.rootChildren.length).toBeGreaterThanOrEqual(9)
-    expect(opentui.rootChildren.slice(-9)).toEqual([
+    expect(opentui.rootChildren.length).toBeGreaterThanOrEqual(10)
+    expect(opentui.rootChildren.slice(-10)).toEqual([
       surface.main,
       surface.modeLabel,
       surface.statusLabel,
@@ -456,6 +456,7 @@ it.effect("constructs the render tree and forwards key and resize events", () =>
       surface.overlayHintOne,
       surface.overlayHintTwo,
       surface.toastBox,
+      surface.quitConfirmationBox,
     ])
     expect(opentui.boxChildren).toContain(surface.input)
     expect(opentui.boxChildren).toContain(surface.palette)
