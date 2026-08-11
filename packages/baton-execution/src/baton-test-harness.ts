@@ -87,10 +87,18 @@ export const step = {
     TestModel.turn([TestModel.text(value)], delayMillis === undefined ? {} : { delay: `${delayMillis} millis` }),
   turn: (
     parts: ReadonlyArray<Part>,
-    options: { readonly delayMillis?: number; readonly inputTokens?: number; readonly outputTokens?: number } = {},
+    options: {
+      readonly delayMillis?: number
+      readonly streamPartDelayMillis?: number
+      readonly inputTokens?: number
+      readonly outputTokens?: number
+    } = {},
   ): Step =>
     TestModel.turn(parts, {
       ...(options.delayMillis === undefined ? {} : { delay: `${options.delayMillis} millis` }),
+      ...(options.streamPartDelayMillis === undefined
+        ? {}
+        : { streamPartDelay: `${options.streamPartDelayMillis} millis` }),
       ...(options.inputTokens === undefined && options.outputTokens === undefined ? {} : { usage: usage(options) }),
     }),
   part: (value: string): Part => TestModel.text(value),

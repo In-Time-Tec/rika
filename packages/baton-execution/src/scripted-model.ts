@@ -22,16 +22,19 @@ const Turn = Schema.Union([
   Schema.Struct({
     parts: Schema.NonEmptyArray(Part),
     delayMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+    streamPartDelayMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
     usage: Schema.optionalKey(Usage),
   }),
   Schema.Struct({
     object: Schema.Unknown,
     delayMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+    streamPartDelayMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
     usage: Schema.optionalKey(Usage),
   }),
   Schema.Struct({
     failure: Schema.String,
     delayMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+    streamPartDelayMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
     usage: Schema.optionalKey(Usage),
   }),
 ])
@@ -41,8 +44,9 @@ const Script = Schema.NonEmptyArray(Turn)
 const steps = Effect.fn("BatonExecution.scriptedModelSteps")(function* (json: string) {
   const script = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Script))(json)
   return script.map((turn) => {
-    const options = {
+    const options: TestModel.StepOptions = {
       ...(turn.delayMs === undefined ? {} : { delay: turn.delayMs }),
+      ...(turn.streamPartDelayMs === undefined ? {} : { streamPartDelay: `${turn.streamPartDelayMs} millis` }),
       ...(turn.usage === undefined
         ? {}
         : {
