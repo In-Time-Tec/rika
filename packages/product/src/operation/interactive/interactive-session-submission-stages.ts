@@ -3,6 +3,7 @@ import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionRequest from "@rika/product/execution-request"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import { Cause, Clock, Duration, Effect, Exit, Ref } from "effect"
@@ -212,6 +213,14 @@ const executeInteractiveSubmissionImpl = (
           change,
         })
       }
+      const publishPreview = (preview: ExecutionGateway.ModelPreviewed) => {
+        emitEvent(input, dispatch, {
+          _tag: "ExecutionModelPreviewed",
+          threadId: thread.id,
+          turnId: current.id,
+          preview,
+        })
+      }
       const outcome = yield* Effect.exit(
         Effect.gen(function* () {
           const prepared = yield* prepareExecution(current, thread.workspace)
@@ -247,7 +256,7 @@ const executeInteractiveSubmissionImpl = (
             executionRoute: current.executionRoute,
             ...(titleIntent === undefined ? {} : { titleIntent }),
           })
-          return yield* rootTurnOwner.watchTurn(current.id, publish)
+          return yield* rootTurnOwner.watchTurn(current.id, publish, publishPreview)
         }),
       )
       const decision = yield* settleInteractiveSubmission(input, {

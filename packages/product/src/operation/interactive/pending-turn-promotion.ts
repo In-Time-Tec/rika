@@ -161,7 +161,15 @@ export const promotePendingTurns = (input: {
             change,
           })
         }
-        const result = yield* input.owner.watchTurn(turn.id, publish)
+        const publishPreview = (preview: ExecutionGateway.ModelPreviewed) => {
+          input.emit(input.dispatch, {
+            _tag: "ExecutionModelPreviewed",
+            threadId: input.thread.id,
+            turnId: turn.id,
+            preview,
+          })
+        }
+        const result = yield* input.owner.watchTurn(turn.id, publish, publishPreview)
         if (result.status === "failed") {
           const failure = turnFailure(result.units)
           const retryable = failure?.retryable ?? false
@@ -224,7 +232,15 @@ export const promotePendingTurns = (input: {
               change,
             })
           }
-          const result = yield* input.owner.watchTurn(promoted.id, publish)
+          const publishPreview = (preview: ExecutionGateway.ModelPreviewed) => {
+            input.emit(input.dispatch, {
+              _tag: "ExecutionModelPreviewed",
+              threadId: input.thread.id,
+              turnId: promoted.id,
+              preview,
+            })
+          }
+          const result = yield* input.owner.watchTurn(promoted.id, publish, publishPreview)
           return result
         }).pipe(
           Effect.map((value) => ({ _tag: "Success" as const, value })),
