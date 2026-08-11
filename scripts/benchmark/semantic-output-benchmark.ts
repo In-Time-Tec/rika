@@ -41,6 +41,7 @@ const execute = (options: Options): void => {
     return
   }
 
+  HostFiles.remove(HostFiles.join(outputRoot, "runs"))
   const samples: Array<Sample> = []
   for (const run of plan) {
     const consumer = run.source === "baseline" ? provisioned.baselineConsumer : provisioned.candidateConsumer
