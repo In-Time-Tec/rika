@@ -3,14 +3,24 @@ import { Function, Result } from "effect"
 import { maxInMemoryTranscriptUnits, trimTranscriptTimeline } from "@rika/terminal/terminal-timeline-bounds"
 import { applyRootUnits } from "@rika/terminal/terminal-transcript-presentation"
 import type { Model, ThreadItem } from "@rika/terminal/terminal-state"
+import { streamActivity } from "@rika/terminal/terminal-message"
 import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
 import type { State, TranscriptEvent, Update } from "./interactive-controller"
 import * as ModelPreview from "./interactive-model-preview"
 
 const unchanged = (state: State): Update => ({ state, preserveAnchor: false })
 
-const activeUnitActivity = (entry: ThreadView.ThreadViewTurn | undefined): Model["activity"] => {
+const activeUnitActivity = (
+  entry: ThreadView.ThreadViewTurn | undefined,
+  modelPreview: ModelPreview.Overlay | undefined,
+): Model["activity"] => {
   if (entry === undefined) return undefined
+  if (modelPreview?.turnId === String(entry.turn.id)) {
+    if (modelPreview.preview.text.length > 0)
+      return streamActivity(undefined, "Streaming", modelPreview.preview.text, undefined)
+    if (modelPreview.preview.reasoning.length > 0)
+      return streamActivity(undefined, "Thinking", modelPreview.preview.reasoning, undefined)
+  }
   let subagents = 0
   let tools = 0
   for (const unit of entry.units) {
@@ -56,7 +66,7 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot, modelPre
     currentThreadTitle: snapshot.thread.title,
     activeTurnId: active === undefined ? undefined : String(active.turn.id),
     busy: active !== undefined,
-    activity: activeUnitActivity(active),
+    activity: activeUnitActivity(active, modelPreview),
     editingTurnId: editing ? model.editingTurnId : undefined,
     editReturn: editing ? model.editReturn : undefined,
     queue: snapshot.pending.map((item) => ({ id: item.id, prompt: item.prompt })),

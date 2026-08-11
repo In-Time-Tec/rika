@@ -11,7 +11,7 @@ import * as ThreadView from "@rika/product/thread-view"
 import * as Turn from "@rika/product/turn-record"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TerminalState from "@rika/terminal/terminal-state"
-import type { TranscriptItem } from "@rika/terminal/terminal-message"
+import { formatActivity, type TranscriptItem } from "@rika/terminal/terminal-message"
 import * as ModelPreview from "../src/interactive/controller/interactive-model-preview"
 
 const threadId = Thread.ThreadId.make("thread")
@@ -190,6 +190,20 @@ const applyPatch = (state: InteractiveController.State, options: PatchOptions): 
 }
 
 describe("tentative model preview overlay", () => {
+  it("reports cumulative reasoning and answer previews as thinking and streaming activity", () => {
+    let state = InteractiveController.update(loaded(), preview(1, "", {}, "12345678")).state
+    expect(state.model.activity).toEqual({ _tag: "Thinking", bytes: 8 })
+    expect(formatActivity(state.model.activity)).toBe("Thinking 2 tok")
+
+    state = InteractiveController.update(state, preview(2, "123456789012", {}, "12345678")).state
+    expect(state.model.activity).toEqual({ _tag: "Streaming", bytes: 12 })
+    expect(formatActivity(state.model.activity)).toBe("Streaming 3 tok")
+
+    state = InteractiveController.update(state, preview(3, "1234567890123456", {}, "12345678")).state
+    expect(state.model.activity).toEqual({ _tag: "Streaming", bytes: 16 })
+    expect(formatActivity(state.model.activity)).toBe("Streaming 4 tok")
+  })
+
   it("keeps ten thousand cumulative revisions to two bounded native transcript units", () => {
     let state = loaded()
     for (let revision = 1; revision <= 10_000; revision += 1)

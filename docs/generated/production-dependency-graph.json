@@ -7866,6 +7866,14 @@
     },
     {
       "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
+      "to": "packages/terminal/src/state/model/terminal-message.ts",
+      "specifier": "@rika/terminal/terminal-message",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
       "to": "packages/terminal/src/state/model/terminal-state.ts",
       "specifier": "@rika/terminal/terminal-state",
       "kind": "import",
