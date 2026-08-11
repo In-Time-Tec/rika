@@ -5401,15 +5401,6 @@
       "publicExports": []
     },
     {
-      "id": "packages/terminal/src/opentui/surface/opentui-focus-controller.ts",
-      "path": "packages/terminal/src/opentui/surface/opentui-focus-controller.ts",
-      "workspace": "@rika/terminal",
-      "package": "@rika/terminal",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
       "id": "packages/terminal/src/opentui/surface/opentui-goal-controller.ts",
       "path": "packages/terminal/src/opentui/surface/opentui-goal-controller.ts",
       "workspace": "@rika/terminal",
@@ -26749,14 +26740,6 @@
       "production": true
     },
     {
-      "from": "packages/terminal/src/opentui/surface/opentui-focus-controller.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
       "from": "packages/terminal/src/opentui/surface/opentui-goal-controller.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",
@@ -27560,14 +27543,6 @@
       "from": "packages/terminal/src/opentui/surface/opentui-surface-overlay.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-composer-region.ts",
       "specifier": "./opentui-composer-region",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface-overlay.ts",
-      "to": "packages/terminal/src/opentui/surface/opentui-focus-controller.ts",
-      "specifier": "./opentui-focus-controller",
       "kind": "import",
       "relationship": "runtime",
       "production": true

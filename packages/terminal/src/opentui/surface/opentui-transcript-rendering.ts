@@ -13,7 +13,6 @@ import type { TranscriptRangeBundle, TranscriptUnitCacheEntry } from "../renderi
 import type { TranscriptRenderableDescriptor } from "./opentui-surface-transcript-types"
 
 export abstract class SurfaceTranscriptRendering extends SurfaceState {
-  protected abstract restoreFocusedCursor(): void
   protected clearTranscriptChildren(): void {
     this.welcomeController.clear()
     for (const child of this.transcriptChildren) {
@@ -137,7 +136,6 @@ export abstract class SurfaceTranscriptRendering extends SurfaceState {
                 if (column >= start && column < end) {
                   event.stopPropagation()
                   this.handlers.openPath?.(target)
-                  this.restoreFocusedCursor()
                   return
                 }
                 offset = text.indexOf(label, offset + label.length)
@@ -145,7 +143,6 @@ export abstract class SurfaceTranscriptRendering extends SurfaceState {
             }
         }
         descriptor.onMouseDown?.(event)
-        this.restoreFocusedCursor()
       }
       const existing = this.transcriptRecords.get(descriptor.key)
       if (existing !== undefined) {

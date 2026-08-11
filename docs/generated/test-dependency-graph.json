@@ -4041,16 +4041,6 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/terminal/test/opentui-focus-controller.test.ts",
-      "path": "packages/terminal/test/opentui-focus-controller.test.ts",
-      "workspace": "@rika/terminal",
-      "package": "@rika/terminal",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
       "id": "packages/terminal/test/pasted-text.test.ts",
       "path": "packages/terminal/test/pasted-text.test.ts",
       "workspace": "@rika/terminal",
@@ -11813,14 +11803,6 @@
     },
     {
       "from": "packages/terminal/test/mode-toggle.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/opentui-focus-controller.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

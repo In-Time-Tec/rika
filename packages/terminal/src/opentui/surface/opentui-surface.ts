@@ -117,6 +117,8 @@ export class Surface extends SurfaceLifecycle {
       },
       onMouseScroll: (event) => this.handleTranscriptWheel(event),
     })
+    this.transcriptScroll.focusable = false
+    this.transcriptScroll.verticalScrollBar.focusable = false
     this.transcriptScroll.verticalScrollBar.visible = false
     this.transcriptScroll.onPositionChanged = () => {
       if (this.transcriptBandRefreshing) return
@@ -144,6 +146,7 @@ export class Surface extends SurfaceLifecycle {
         this.queueTranscriptScroll(() => this.reportTranscriptScroll())
       },
     })
+    this.transcriptScrollbar.focusable = false
     this.queueBox = new BoxRenderable(renderer, {
       border: true,
       borderStyle: "rounded",
@@ -424,6 +427,8 @@ export class Surface extends SurfaceLifecycle {
       verticalScrollbarOptions: { marginRight: 1 },
       onMouseScroll: () => this.defer(() => this.refreshSidebarWindow()),
     })
+    this.changedFilesBox.focusable = false
+    this.changedFilesBox.verticalScrollBar.focusable = false
     this.changedFilesBox.onWindowChanged = () => this.refreshSidebarWindow()
     this.changedFilesText = new TextRenderable(renderer, {
       content: "",
@@ -433,7 +438,6 @@ export class Surface extends SurfaceLifecycle {
     })
     this.changedFilesBox.add(this.changedFilesText)
     this.initializeSidebar()
-    this.initializeFocus()
     this.initializeToast()
     this.changedFilesBox.verticalScrollBar.on?.("change", () => {
       this.changedFilesBox.syncVirtualScroll()

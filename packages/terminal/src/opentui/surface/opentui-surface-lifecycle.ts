@@ -120,7 +120,6 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
       transcriptLayout.contentLeft,
       transcriptLayout.contentWidth,
       transcriptLayout.renderedInputHeight,
-      transcriptLayout.threadSidebarVisible,
     )
     this.renderer.requestRender()
   }
@@ -132,7 +131,6 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
     this.goalController.release()
     if (this.loaderController.publishedFrame !== undefined) this.publishWorkingFrame(undefined)
     this.scrollGeneration += 1
-    this.focusController.release()
     if (this.transcriptPositionFrame !== undefined)
       this.renderer.off(CliRenderEvents.FRAME, this.transcriptPositionFrame)
     this.transcriptPositionFrame = undefined
@@ -146,7 +144,8 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
     this.cancelTimer(this.junkTimer)
     this.junkTimer = undefined
     this.junkBuffer = []
-    this.focusEditor(undefined)
+    this.composerEditor.blur()
+    this.overlayEditor.blur()
     this.pointerController.composerDrag = undefined
     this.pointerController.sidebarDrag = undefined
     this.setPointerShape("default")

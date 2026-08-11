@@ -87,14 +87,71 @@ test("uses OpenTUI's native cursor position with a blinking block style", () =>
 
         surface.update({ ...base, modePicker: { open: true, selected: 0 } })
         yield* openTui(() => setup.flush())
-        expect(setup.renderer.getCursorState().visible).toBe(false)
+        expect(setup.renderer.currentFocusedEditor).toBe(surface.composerEditor)
+        expect(setup.renderer.getCursorState().visible).toBe(true)
+
+        surface.update({ ...base, contextDetailsOpen: true })
+        yield* openTui(() => setup.flush())
+        expect(setup.renderer.currentFocusedEditor).toBe(surface.composerEditor)
+        expect(setup.renderer.getCursorState().visible).toBe(true)
 
         surface.update({
           ...base,
           threadSidebar: { open: true, focused: true, selected: 0, scrollTop: 0 },
         })
         yield* openTui(() => setup.flush())
-        expect(setup.renderer.getCursorState().visible).toBe(false)
+        expect(setup.renderer.currentFocusedEditor).toBe(surface.composerEditor)
+        expect(setup.renderer.getCursorState().visible).toBe(true)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+test("keeps focus on the model-owned input when other regions are clicked", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { animate: false })
+      const base = { ...initial("/work", "high"), width: 100, height: 30, input: "draft", cursor: 5 }
+      try {
+        surface.update(base)
+        yield* openTui(() => setup.flush())
+        expect(setup.renderer.currentFocusedEditor).toBe(surface.composerEditor)
+
+        yield* openTui(() => setup.mockMouse.click(2, 2))
+        yield* openTui(() => setup.flush())
+        expect(setup.renderer.currentFocusedEditor).toBe(surface.composerEditor)
+        expect(setup.renderer.getCursorState().visible).toBe(true)
+
+        const palette = {
+          ...base,
+          paletteOpen: true,
+          palette: { open: true, query: "mode", selected: 0 },
+        }
+        surface.update(palette)
+        yield* openTui(() => setup.flush())
+        expect(setup.renderer.currentFocusedEditor).toBe(surface.overlayEditor)
+
+        surface.update({ ...palette, modePicker: { open: true, selected: 0 } })
+        yield* openTui(() => setup.flush())
+        expect(surface.paletteBox.title).toBe(" Command Palette ")
+        expect(setup.renderer.currentFocusedEditor).toBe(surface.overlayEditor)
+
+        yield* openTui(() => setup.mockMouse.click(surface.composerEditor.x, surface.composerEditor.y))
+        yield* openTui(() => setup.flush())
+        expect(setup.renderer.currentFocusedEditor).toBe(surface.overlayEditor)
+
+        surface.update({
+          ...palette,
+          threadSwitcher: { ...base.threadSwitcher, open: true, query: "cursor" },
+        })
+        yield* openTui(() => setup.flush())
+        expect(setup.renderer.currentFocusedEditor).toBe(surface.overlayEditor)
+
+        surface.update(base)
+        yield* openTui(() => setup.flush())
+        expect(setup.renderer.currentFocusedEditor).toBe(surface.composerEditor)
       } finally {
         surface.destroy()
         setup.renderer.destroy()
