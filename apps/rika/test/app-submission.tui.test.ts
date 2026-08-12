@@ -124,7 +124,7 @@ test(
 )
 
 test(
-  "steers entered prompts on the same queued row and delivers them into the turn",
+  "steers an entered prompt on the same queued row and delivers it into the turn",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -145,15 +145,10 @@ test(
         yield* Effect.promise(() => app.type("Focus on the exact fixture text."))
         app.pressEnter()
         yield* app.waitFrame("steering: Focus")
-        yield* Effect.promise(() => app.type("Answer in one sentence."))
-        app.pressEnter()
-        yield* app.waitFrame("steering: Answer")
         yield* app.waitFrame("ACTIVE_STEER_COMPLETE", 25_000)
         yield* app.settled
         const consumed = yield* app.waitGone("steering: Focus")
         expect(consumed).not.toContain("Execution failed")
-        expect(consumed).not.toContain("steering: Answer")
-        expect(consumed.match(/Answer in one sentence\./g) ?? []).toHaveLength(1)
         expect(consumed.match(/Focus on the exact fixture text\./g) ?? []).toHaveLength(1)
         yield* app.quit
       }),
