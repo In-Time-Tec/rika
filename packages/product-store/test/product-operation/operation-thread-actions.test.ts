@@ -10,9 +10,9 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
+import { projectionVersion } from "@rika/product/execution-projection"
 import { Console, Effect, Layer, Ref, Stream } from "effect"
 import { TestConsole } from "effect/testing"
-const projectionVersion = 2
 import { executionSessionLifecycleLayerTest } from "../support/operation-layer-harness"
 
 import { provideLayer } from "../support/product-test-layer"

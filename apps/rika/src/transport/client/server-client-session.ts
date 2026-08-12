@@ -95,8 +95,9 @@ export const makeInteractiveSession = (options: SessionOptions): InteractiveSess
       }),
     editQueued: (turnId, prompt) => invoke({ _tag: "EditQueued", turnId, prompt }),
     dequeue: (turnId) => invoke({ _tag: "Dequeue", turnId }),
-    steerQueued: (turnId, text) => invoke({ _tag: "SteerQueued", turnId, text }),
-    steer: (text, turnId) => invoke({ _tag: "Steer", text, ...(turnId === undefined ? {} : { turnId }) }),
+    steerQueued: (turnId, text, requestId) => invoke({ _tag: "SteerQueued", turnId, text, requestId }),
+    steer: (text, requestId, turnId) =>
+      invoke({ _tag: "Steer", text, requestId, ...(turnId === undefined ? {} : { turnId }) }),
     approveAuthorization: (turnId, authorizationId) =>
       invoke({ _tag: "ApproveAuthorization", turnId, authorizationId }),
     denyAuthorization: (turnId, authorizationId) => invoke({ _tag: "DenyAuthorization", turnId, authorizationId }),

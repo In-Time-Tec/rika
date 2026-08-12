@@ -20,6 +20,7 @@ export interface KeyboardPickerContext {
 const reduceKeyboardPickerImpl = (
   model: Model,
   key: Key,
+  steeringRequestId: string | undefined,
   update: (model: Model, message: Message) => Model,
   context: KeyboardPickerContext,
 ): Model | undefined => {
@@ -157,17 +158,29 @@ const reduceKeyboardPickerImpl = (
   if (key.ctrl && key.name === "c" && !model.cancelPending && model.busy)
     return { ...model, activity: { _tag: "Waiting" }, cancelPending: model.busy, pendingAction: { _tag: "Cancel" } }
   if (key.ctrl && key.name === "s" && model.busy && !model.cancelPending && model.input.length > 0) {
+    if (steeringRequestId === undefined) return model
     const steerText = expandPastedText(model.input, model.pastedText)
     return {
       ...model,
       pendingAction: {
         _tag: "Steer",
         prompt: steerText,
+        requestId: steeringRequestId,
         ...(model.activeTurnId === undefined ? {} : { turnId: model.activeTurnId }),
       },
       ...(model.activeTurnId === undefined
         ? {}
-        : { pendingSteering: [...model.pendingSteering, { turnId: model.activeTurnId, text: steerText }] }),
+        : {
+            steeringRequests: [
+              ...model.steeringRequests,
+              {
+                requestId: steeringRequestId,
+                turnId: model.activeTurnId,
+                text: steerText,
+                origin: "composer",
+              },
+            ],
+          }),
       input: "",
       cursor: 0,
     }
@@ -318,11 +331,13 @@ export const reduceKeyboardPicker: {
     arg1: Parameters<typeof reduceKeyboardPickerImpl>[1],
     arg2: Parameters<typeof reduceKeyboardPickerImpl>[2],
     arg3: Parameters<typeof reduceKeyboardPickerImpl>[3],
+    arg4: Parameters<typeof reduceKeyboardPickerImpl>[4],
   ): (arg0: Parameters<typeof reduceKeyboardPickerImpl>[0]) => ReturnType<typeof reduceKeyboardPickerImpl>
   (
     arg0: Parameters<typeof reduceKeyboardPickerImpl>[0],
     arg1: Parameters<typeof reduceKeyboardPickerImpl>[1],
     arg2: Parameters<typeof reduceKeyboardPickerImpl>[2],
     arg3: Parameters<typeof reduceKeyboardPickerImpl>[3],
+    arg4: Parameters<typeof reduceKeyboardPickerImpl>[4],
   ): ReturnType<typeof reduceKeyboardPickerImpl>
-} = Function.dual(4, reduceKeyboardPickerImpl)
+} = Function.dual(5, reduceKeyboardPickerImpl)

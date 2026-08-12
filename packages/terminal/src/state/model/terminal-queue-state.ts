@@ -5,26 +5,6 @@ import type { QueueItem } from "./terminal-queue-item"
 
 export * from "./terminal-submitted-draft"
 
-const settleSteeringImpl = (
-  model: Model,
-  turnId: string | undefined,
-): { readonly pendingSteering: ReadonlyArray<Model["pendingSteering"][number]>; readonly restoredInput?: string } => {
-  const matching = model.pendingSteering.filter((row) => turnId === undefined || row.turnId === turnId)
-  const pendingSteering = model.pendingSteering.filter((row) => !matching.includes(row))
-  if (matching.length === 0 || model.input.length > 0) return { pendingSteering }
-  return { pendingSteering, restoredInput: matching.map((row) => row.text).join("\n") }
-}
-
-export const settleSteering: {
-  (
-    arg1: Parameters<typeof settleSteeringImpl>[1],
-  ): (arg0: Parameters<typeof settleSteeringImpl>[0]) => ReturnType<typeof settleSteeringImpl>
-  (
-    arg0: Parameters<typeof settleSteeringImpl>[0],
-    arg1: Parameters<typeof settleSteeringImpl>[1],
-  ): ReturnType<typeof settleSteeringImpl>
-} = Function.dual(2, settleSteeringImpl)
-
 const validQueueSelectionImpl = (current: string | undefined, queue: ReadonlyArray<QueueItem>): string | undefined =>
   current !== undefined && queue.some((item) => item.id === current) ? current : undefined
 const exitEditWhenRemoved = (model: Model, queue: ReadonlyArray<QueueItem>): Partial<Model> => {

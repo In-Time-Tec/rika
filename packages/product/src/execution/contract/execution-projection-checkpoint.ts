@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export const projectionVersion = 2 as const
+export const projectionVersion = 4 as const
 
 export const limits = {
   snapshotUnits: 120,

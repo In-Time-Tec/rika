@@ -1,16 +1,15 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import type { SqlError } from "effect/unstable/sql/SqlError"
-import { QueueFull, QueuedTurnUnavailable, RepositoryError } from "@rika/product/turn-repository"
+import { QueueFull, RepositoryError } from "@rika/product/turn-repository"
 import type { Interface } from "@rika/product/turn-repository"
 import type { AgentExecutionTurn } from "@rika/product/turn-record"
 import { decodeAgent, decodeQueueState } from "./turn-row-codec"
-import { queuedTurnUnavailable, repositoryError, submissionError, takeQueuedError } from "./turn-memory-errors"
+import { repositoryError, submissionError } from "./turn-memory-errors"
 type QueueSnapshot = Effect.Success<ReturnType<Interface["readQueue"]>>
 type QueueClaim = Parameters<Interface["finishQueuedClaim"]>[0]
 type QueueClaimFinish = Effect.Success<ReturnType<Interface["finishQueuedClaim"]>>
 type QueueItemChange = Effect.Success<ReturnType<Interface["dequeue"]>>
-type QueuedTurnTake = Effect.Success<ReturnType<Interface["takeQueued"]>>
 
 export const makeTurnSqliteQueue = (
   sql: SqlClient,
@@ -22,7 +21,6 @@ export const makeTurnSqliteQueue = (
   | "releaseQueuedClaim"
   | "resetQueueClaims"
   | "editQueued"
-  | "takeQueued"
   | "dequeue"
   | "requeueAccepted"
 > => ({
@@ -146,37 +144,6 @@ export const makeTurnSqliteQueue = (
       )
       .pipe(Effect.mapError(repositoryError))
   }),
-  takeQueued: Effect.fn("TurnRepository.takeQueued")(function* (id): Effect.fn.Return<
-    QueuedTurnTake,
-    RepositoryError | QueuedTurnUnavailable
-  > {
-    return yield* sql
-      .withTransaction(
-        Effect.gen(function* () {
-          const rows =
-            yield* sql`DELETE FROM rika_turns WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status = 'queued' RETURNING *`
-          if (rows[0] === undefined) return yield* queuedTurnUnavailable(id)
-          const turn = yield* decodeAgent(rows[0])
-          const queueRows = yield* sql`UPDATE rika_thread_queue_state
-          SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0)
-          WHERE thread_id = ${turn.threadId}
-          RETURNING *`
-          if (queueRows[0] === undefined) return yield* repositoryError(`Queue state ${turn.threadId} does not exist`)
-          const state = yield* decodeQueueState(queueRows[0])
-          return {
-            turn,
-            queue: {
-              threadId: turn.threadId,
-              revision: state.revision,
-              queuedCount: state.queued_count,
-              becameNonempty: false,
-              change: { _tag: "Removed" as const, turnId: turn.id },
-            },
-          }
-        }),
-      )
-      .pipe(Effect.mapError(takeQueuedError))
-  }),
   dequeue: Effect.fn("TurnRepository.dequeue")(function* (id): Effect.fn.Return<QueueItemChange, RepositoryError> {
     return yield* sql
       .withTransaction(
@@ -221,17 +188,21 @@ export const makeTurnSqliteQueue = (
           yield* sql`INSERT INTO rika_thread_queue_state (thread_id) VALUES (${current.threadId}) ON CONFLICT (thread_id) DO NOTHING`
           const queueRows = yield* sql`UPDATE rika_thread_queue_state
           SET revision = revision + 1, queued_count = queued_count + 1
-          WHERE thread_id = ${current.threadId} AND queued_count < ${queueCapacity}
+          WHERE thread_id = ${current.threadId}
+            AND queued_count + (SELECT COUNT(*) FROM rika_turn_steering_outbox WHERE thread_id = ${current.threadId} AND source_turn_id IS NOT NULL AND status = 'pending') < ${queueCapacity}
           RETURNING *`
           if (queueRows[0] === undefined) {
             const stateRows = yield* sql`SELECT * FROM rika_thread_queue_state WHERE thread_id = ${current.threadId}`
             if (stateRows[0] === undefined)
               return yield* repositoryError(`Queue state ${current.threadId} does not exist`)
             const state = yield* decodeQueueState(stateRows[0])
+            const reservations =
+              yield* sql`SELECT COUNT(*) AS count FROM rika_turn_steering_outbox WHERE thread_id = ${current.threadId} AND source_turn_id IS NOT NULL AND status = 'pending'`
             return yield* QueueFull.make({
               threadId: current.threadId,
               capacity: queueCapacity,
-              count: state.queued_count,
+              count:
+                state.queued_count + Number((reservations[0] as { readonly count?: unknown } | undefined)?.count ?? 0),
             })
           }
           const updatedRows = yield* sql`UPDATE rika_turns SET status = 'queued', updated_at = ${now}

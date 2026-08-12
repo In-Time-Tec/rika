@@ -1,4 +1,5 @@
 import * as ThreadView from "@rika/product/thread-view"
+import { steeringUnitKeyPrefix } from "@rika/product/execution-projection"
 import { Function, Result } from "effect"
 import { maxInMemoryTranscriptUnits, trimTranscriptTimeline } from "@rika/terminal/terminal-timeline-bounds"
 import { applyRootUnits, applyTurnDelta } from "@rika/terminal/terminal-transcript-presentation"
@@ -58,6 +59,23 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot, modelPre
       entry.turn.status === "waiting",
   )
   const editing = model.editingTurnId !== undefined && snapshot.pending.some((item) => item.id === model.editingTurnId)
+  const authoritativeSteering = snapshot.turns.flatMap((entry) =>
+    (entry.pendingSteering ?? []).map((steering) => ({
+      ...steering,
+      turnId: String(entry.turn.id),
+    })),
+  )
+  const authoritativeRequestIds = new Set(authoritativeSteering.map((steering) => steering.requestId))
+  const settledRequestIds = new Set(
+    snapshot.turns.flatMap((entry) => (entry.settledSteering ?? []).map((steering) => steering.requestId)),
+  )
+  const unitKeys = new Set(snapshot.turns.flatMap((entry) => entry.units.map((unit) => unit.key)))
+  const steeringRequests = model.steeringRequests.filter(
+    (request) =>
+      !authoritativeRequestIds.has(request.requestId) &&
+      !settledRequestIds.has(request.requestId) &&
+      ![...unitKeys].some((key) => key.startsWith(`${steeringUnitKeyPrefix(request.turnId, request.requestId)}:`)),
+  )
   let next: Model = {
     ...clearTimeline(model),
     currentThreadId: String(snapshot.thread.id),
@@ -65,6 +83,8 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot, modelPre
     activeTurnId: active === undefined ? undefined : String(active.turn.id),
     busy: active !== undefined,
     activity: activeUnitActivity(active, modelPreview),
+    pendingSteering: authoritativeSteering,
+    steeringRequests,
     editingTurnId: editing ? model.editingTurnId : undefined,
     editReturn: editing ? model.editReturn : undefined,
     queue: snapshot.pending.map((item) => ({ id: item.id, prompt: item.prompt })),

@@ -30,8 +30,3 @@ export interface QueueClaim {
 export type QueueClaimFinish =
   | { readonly _tag: "Transitioned"; readonly turn: AgentExecutionTurn; readonly queue: QueueItemChange }
   | { readonly _tag: "Unavailable" }
-
-export interface QueuedTurnTake {
-  readonly turn: AgentExecutionTurn
-  readonly queue: QueueItemChange
-}

@@ -1551,6 +1551,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/baton-execution/test/baton-steering-projection.test.ts",
+      "path": "packages/baton-execution/test/baton-steering-projection.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/baton-execution/test/baton-subagent-card-projection.test.ts",
       "path": "packages/baton-execution/test/baton-subagent-card-projection.test.ts",
       "workspace": "@rika/baton-execution",
@@ -2551,6 +2561,16 @@
       "testKind": "integration-test"
     },
     {
+      "id": "packages/product-store/test/turn-repository-steering-admission.test.ts",
+      "path": "packages/product-store/test/turn-repository-steering-admission.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/product/src/execution/contract/execution-compaction-prompt.ts",
       "path": "packages/product/src/execution/contract/execution-compaction-prompt.ts",
       "workspace": "@rika/product",
@@ -2588,6 +2608,16 @@
       "kind": "source",
       "production": false,
       "publicExports": ["./execution-gateway"],
+      "testKind": "contract-test"
+    },
+    {
+      "id": "packages/product/src/execution/contract/execution-pending-steering.ts",
+      "path": "packages/product/src/execution/contract/execution-pending-steering.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
       "testKind": "contract-test"
     },
     {
@@ -2668,6 +2698,16 @@
       "kind": "source",
       "production": false,
       "publicExports": ["./execution-status"],
+      "testKind": "contract-test"
+    },
+    {
+      "id": "packages/product/src/execution/contract/execution-steering.ts",
+      "path": "packages/product/src/execution/contract/execution-steering.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
       "testKind": "contract-test"
     },
     {
@@ -2903,6 +2943,16 @@
     {
       "id": "packages/product/test/interactive-command.test.ts",
       "path": "packages/product/test/interactive-command.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/interactive-control.test.ts",
+      "path": "packages/product/test/interactive-control.test.ts",
       "workspace": "@rika/product",
       "package": "@rika/product",
       "kind": "source",
@@ -6768,6 +6818,30 @@
       "production": false
     },
     {
+      "from": "packages/baton-execution/test/baton-steering-projection.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-steering-projection.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-steering-projection.test.ts",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "@rika/product/execution-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/baton-execution/test/baton-subagent-card-projection.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -8737,6 +8811,14 @@
     },
     {
       "from": "packages/product-store/test/product-operation/operation-session-controls.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-session-controls.test.ts",
       "to": "packages/product/src/execution/contract/execution-gateway.ts",
       "specifier": "@rika/product/execution-gateway",
       "kind": "import",
@@ -8771,6 +8853,14 @@
       "from": "packages/product-store/test/product-operation/operation-thread-actions.test.ts",
       "to": "packages/product/src/execution/contract/execution-gateway.ts",
       "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-thread-actions.test.ts",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "@rika/product/execution-projection",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -9448,6 +9538,54 @@
       "production": false
     },
     {
+      "from": "packages/product-store/test/turn-repository-steering-admission.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/turn-repository-steering-admission.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/turn-repository-steering-admission.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/turn-repository-steering-admission.test.ts",
+      "to": "external:effect/unstable/sql/SqlClient",
+      "specifier": "effect/unstable/sql/SqlClient",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/turn-repository-steering-admission.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/turn-repository-steering-admission.test.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product/src/execution/contract/execution-gateway-failure.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -9537,8 +9675,32 @@
     },
     {
       "from": "packages/product/src/execution/contract/execution-gateway.ts",
+      "to": "packages/product/src/execution/contract/execution-steering.ts",
+      "specifier": "./execution-steering",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-gateway.ts",
       "to": "packages/product/src/execution/contract/model-preview.ts",
       "specifier": "./model-preview",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-pending-steering.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-pending-steering.ts",
+      "to": "packages/product/src/execution/contract/execution-steering.ts",
+      "specifier": "./execution-steering",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -9585,8 +9747,24 @@
     },
     {
       "from": "packages/product/src/execution/contract/execution-projection-state.ts",
+      "to": "packages/product/src/execution/contract/execution-pending-steering.ts",
+      "specifier": "./execution-pending-steering",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-projection-state.ts",
       "to": "packages/product/src/execution/contract/execution-usage-state.ts",
       "specifier": "./execution-usage-state",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-projection.ts",
+      "to": "packages/product/src/execution/contract/execution-pending-steering.ts",
+      "specifier": "./execution-pending-steering",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -9611,6 +9789,14 @@
       "from": "packages/product/src/execution/contract/execution-projection.ts",
       "to": "packages/product/src/execution/contract/execution-projection-state.ts",
       "specifier": "./execution-projection-state",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-projection.ts",
+      "to": "packages/product/src/execution/contract/execution-steering.ts",
+      "specifier": "./execution-steering",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -9689,6 +9875,14 @@
     },
     {
       "from": "packages/product/src/execution/contract/execution-status.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-steering.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -10067,6 +10261,38 @@
       "from": "packages/product/test/interactive-command.test.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-control.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-control.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-control.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-control.test.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
       "relationship": "test",
       "production": false

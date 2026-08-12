@@ -21,8 +21,8 @@ export interface InteractiveSession {
   ) => Effect.Effect<void, OperationUnavailable>
   readonly editQueued: (turnId: string, prompt: string) => Effect.Effect<void, OperationUnavailable>
   readonly dequeue: (turnId: string) => Effect.Effect<void, OperationUnavailable>
-  readonly steerQueued: (turnId: string, text: string) => Effect.Effect<void, OperationUnavailable>
-  readonly steer: (text: string, targetTurnId?: string) => Effect.Effect<void, OperationUnavailable>
+  readonly steerQueued: (turnId: string, text: string, requestId: string) => Effect.Effect<void, OperationUnavailable>
+  readonly steer: (text: string, requestId: string, targetTurnId?: string) => Effect.Effect<void, OperationUnavailable>
   readonly approveAuthorization: (turnId: string, authorizationId: string) => Effect.Effect<void, OperationUnavailable>
   readonly denyAuthorization: (turnId: string, authorizationId: string) => Effect.Effect<void, OperationUnavailable>
   readonly interruptAndSend: (prompt: string) => Effect.Effect<void, OperationUnavailable>

@@ -2,23 +2,18 @@ import type { Run, RunTree } from "@batonfx/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import * as UnitOrder from "@rika/product/execution-transcript-contract"
 import type { Unit } from "@rika/product/execution-transcript-contract"
-import { Function } from "effect"
 import { completeTool } from "./tool"
 import { makeAuthorizationProjection } from "./authorization"
 import { cellToolName, makeCellProjection } from "./cell"
 import { makeDiagnosticProjection } from "./diagnostic"
 import { makeSubagentCardProjection } from "./subagent-card"
 import { makeSemanticResponseProjection, semanticTreeEvent, type SemanticTreeEvent } from "./semantic-response"
+import { makeSteeringProjection } from "./steering"
 import { makeToolUnitProjection } from "./tool-unit"
-import { makeProjectorCheckpointCodec } from "./checkpoint"
+import { authorizationTarget, makeProjectorCheckpointCodec } from "./checkpoint"
 import { makeUsageAccounting } from "../baton-usage-accounting"
 import { type Card, type Node, type Projector } from "./model"
-import {
-  type AuthorizationState,
-  type ModelCallState,
-  type PersistedProjector,
-  type ProjectorCore,
-} from "./persistence"
+import { type AuthorizationState, type ModelCallState, type ProjectorCore } from "./persistence"
 import { boundedInsert, subagentCardStatus } from "./nodes"
 import { bounded, boundedHead, optionalString, record, string } from "./values"
 import { projectorNames, textLimit, toolTextLimit } from "./values"
@@ -72,7 +67,7 @@ const make = (
       active: usage.activeTime(),
     },
     ...(core.title === undefined ? {} : { title: core.title }),
-    steering: { steeringMessages: core.steeringMessages, followUpMessages: core.followUpMessages },
+    steering: steering.summary(core.steeringMessages, core.followUpMessages),
   })
 
   const put = (unit: Unit) => {
@@ -117,6 +112,8 @@ const make = (
       content,
     }
   }
+
+  const steering = makeSteeringProjection({ turnId, put, unit })
 
   const { notice, error, modelFailureError, executionFailureError } = makeDiagnosticProjection({
     turnId,
@@ -307,6 +304,12 @@ const make = (
       case "ApprovalRequested":
         putAuthorization(node, event.request.approvalId, event.request)
         return
+      case "SteeringAccepted":
+        return steering.accept(treeEvent.runId, event)
+      case "SteeringConsumed":
+        return steering.consume(treeEvent.runId, event, node)
+      case "SteeringDiscarded":
+        return steering.discard(treeEvent.runId, event)
       case "SteeringDrained":
         if (event.queue === "steering") core.steeringMessages += event.count
         else core.followUpMessages += event.count
@@ -534,6 +537,8 @@ const make = (
     cardsByInvocation,
     cardsByChild,
     authorizations,
+    pendingSteering: steering.pending,
+    settledSteering: steering.settled,
     localId,
     toolBlock,
     cellBlock,
@@ -685,45 +690,6 @@ const make = (
     applyTitle,
   }
 }
-export interface AuthorizationTarget {
-  readonly runId: string
-  readonly approvalId: string
-}
-
-/** Gateway-private resolution from an opaque persisted projector checkpoint. */
-const authorizationTargetImpl = (
-  checkpoint: Projection.Checkpoint,
-  authorizationId: string,
-): AuthorizationTarget | undefined => {
-  if (checkpoint.version !== Projection.projectionVersion) return undefined
-  try {
-    const parsed = JSON.parse(checkpoint.state) as Partial<PersistedProjector>
-    if (!Array.isArray(parsed.authorizations)) return undefined
-    for (const candidate of parsed.authorizations) {
-      if (!Array.isArray(candidate) || candidate.length !== 2) continue
-      const value = candidate[1] as Partial<AuthorizationState>
-      if (
-        value.authorizationId === authorizationId &&
-        typeof value.rawRunId === "string" &&
-        typeof value.approvalId === "string"
-      )
-        return { runId: value.rawRunId, approvalId: value.approvalId }
-    }
-    return undefined
-  } catch {
-    return undefined
-  }
-}
-
-export const authorizationTarget: {
-  (
-    arg0: Parameters<typeof authorizationTargetImpl>[0],
-    arg1: Parameters<typeof authorizationTargetImpl>[1],
-  ): ReturnType<typeof authorizationTargetImpl>
-  (
-    arg1: Parameters<typeof authorizationTargetImpl>[1],
-  ): (arg0: Parameters<typeof authorizationTargetImpl>[0]) => ReturnType<typeof authorizationTargetImpl>
-} = Function.dual(2, authorizationTargetImpl)
 
 export const TreeProjector = { make, authorizationTarget }
 export const titleInvocationId = projectorNames.titleInvocationId

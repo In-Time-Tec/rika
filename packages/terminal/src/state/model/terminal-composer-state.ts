@@ -14,12 +14,6 @@ export interface ComposerDraft {
   readonly attachments: ReadonlyArray<ComposerAttachment>
 }
 
-export interface PendingSteering {
-  readonly turnId: string
-  readonly text: string
-  readonly sequence?: number
-}
-
 export type PromptSubmission =
   | { readonly _tag: "Prompt"; readonly prompt: string }
   | { readonly _tag: "Shell"; readonly command: string; readonly incognito: boolean }

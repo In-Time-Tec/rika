@@ -4,7 +4,6 @@ import * as ExecutionStatus from "@rika/product/execution-status"
 import { AgentExecutionTurn } from "@rika/product/turn-record"
 import { QueueFull, RepositoryError } from "@rika/product/turn-repository"
 import type { Interface } from "@rika/product/turn-repository"
-import { queuedTurnUnavailable } from "./turn-memory-errors"
 import { clone } from "./turn-memory-state"
 import { queueState, withQueueState } from "./turn-memory-queue-state"
 import type { MemoryState, MemoryRequeueResult } from "./turn-memory-state"
@@ -25,7 +24,6 @@ export const makeTurnMemoryQueue = ({
   | "releaseQueuedClaim"
   | "resetQueueClaims"
   | "editQueued"
-  | "takeQueued"
   | "dequeue"
   | "requeueAccepted"
 > => ({
@@ -150,32 +148,6 @@ export const makeTurnMemoryQueue = ({
     if (result === undefined) return yield* RepositoryError.make({ message: `Turn ${id} is not queued` })
     return result
   }),
-  takeQueued: Effect.fn("TurnRepository.takeQueued")(function* (id) {
-    const result = yield* modifyState((current) => {
-      const turn = current.turns.get(id)
-      if (turn === undefined || turn.status !== "queued") return [undefined, current]
-      const turns = new Map(current.turns)
-      turns.delete(id)
-      const claims = new Map(current.claims)
-      claims.delete(id)
-      const previousQueue = queueState(current, turn.threadId)
-      const nextQueue = {
-        ...previousQueue,
-        revision: previousQueue.revision + 1,
-        queuedCount: Math.max(0, previousQueue.queuedCount - 1),
-      }
-      const queue: QueueItemChange = {
-        threadId: turn.threadId,
-        revision: nextQueue.revision,
-        queuedCount: nextQueue.queuedCount,
-        becameNonempty: false,
-        change: { _tag: "Removed", turnId: id },
-      }
-      return [{ turn: clone(turn), queue }, withQueueState({ ...current, turns, claims }, turn.threadId, nextQueue)]
-    })
-    if (result === undefined) return yield* queuedTurnUnavailable(id)
-    return result
-  }),
   dequeue: Effect.fn("TurnRepository.dequeue")(function* (id) {
     const result = yield* modifyState((current) => {
       const turn = current.turns.get(id)
@@ -215,14 +187,17 @@ export const makeTurnMemoryQueue = ({
       )
       if (hasOtherActive) return [{ _tag: "Unavailable" as const }, current]
       const previousQueue = queueState(current, turn.threadId)
-      if (previousQueue.queuedCount >= queueCapacity)
+      const reserved = [...current.steeringAdmissions.values()].filter(
+        (admission) => admission.source?.threadId === turn.threadId && admission.outcome._tag === "Pending",
+      ).length
+      if (previousQueue.queuedCount + reserved >= queueCapacity)
         return [
           {
             _tag: "Full" as const,
             error: QueueFull.make({
               threadId: turn.threadId,
               capacity: queueCapacity,
-              count: previousQueue.queuedCount,
+              count: previousQueue.queuedCount + reserved,
             }),
           },
           current,

@@ -1,7 +1,6 @@
 import { Function } from "effect"
 import type { Model } from "./terminal-state"
 import type { TranscriptItem } from "./terminal-transcript-state"
-import { expandPastedText } from "./terminal-composer-paste"
 
 type SubmissionItem = TranscriptItem & {
   readonly submissionId?: string
@@ -139,31 +138,30 @@ export const settleProvisionalUserEntry: {
   ): ReturnType<typeof settleProvisionalUserEntryImpl>
 } = Function.dual(3, settleProvisionalUserEntryImpl)
 
-/**
- * A server ThreadView snapshot/patch rebuilds the transcript from authoritative units. Pending local
- * submissions have no authoritative unit until admission and TurnStarted, so every rebuild must
- * re-overlay their provisional rows and queue items; otherwise an unrelated header-only patch makes
- * an echoed prompt disappear until the durable prompt unit arrives.
- */
 export const overlayPendingSubmissions: {
   (arg0: Model, arg1: Model): Model
   (arg1: Model): (arg0: Model) => Model
 } = Function.dual(2, (model: Model, previous: Model): Model => {
-  let next = model
-  const queue = [...next.queue]
+  const entries = [...model.entries]
+  const items = [...(model.items as ReadonlyArray<SubmissionItem>)]
+  for (const item of previous.items as ReadonlyArray<SubmissionItem>) {
+    if (item._tag !== "Entry" || item.provisional !== true) continue
+    if (items.some((candidate) => itemMatches(candidate, item))) continue
+    const entry = previous.entries[item.index]
+    if (entry === undefined) continue
+    const index = entries.length
+    entries.push(entry)
+    items.push({ ...item, index })
+  }
+  const queue = [...model.queue]
   for (const item of previous.queue) {
     if (item.provisional === true && !queue.some((candidate) => candidate.id === item.id)) queue.push(item)
   }
-  for (const draft of previous.submittedDrafts) {
-    const bound = draft.turnId !== undefined
-    const authoritative = bound && next.entries.some((entry) => entry.role === "user" && entry.turnId === draft.turnId)
-    if (authoritative) continue
-    next = appendProvisionalUserEntry(next, expandPastedText(draft.input, draft.attachments), draft.submissionId)
-  }
-  if (queue.length === next.queue.length) return next
   return {
-    ...next,
+    ...model,
+    entries,
+    items,
     queue,
-    queueSelection: queue.some((item) => item.id === next.queueSelection) ? next.queueSelection : queue.at(-1)?.id,
+    queueSelection: queue.some((item) => item.id === model.queueSelection) ? model.queueSelection : queue.at(-1)?.id,
   }
 })

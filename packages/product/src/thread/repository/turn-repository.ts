@@ -4,14 +4,8 @@ import { AgentExecutionTurn, Turn, TurnId } from "@rika/product/turn-record"
 import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/thread-result"
 import type { CreateInput } from "./turn-repository-contract"
 import type { PageOptions, PageResult } from "./turn-repository-pagination"
-import type {
-  QueueClaim,
-  QueueClaimFinish,
-  QueueItemChange,
-  QueueSnapshot,
-  QueuedTurnTake,
-  Submission,
-} from "./turn-repository-queue"
+import type { QueuedSteeringAdmissionPreparation, SteeringAdmission } from "./turn-repository-steering"
+import type { QueueClaim, QueueClaimFinish, QueueItemChange, QueueSnapshot, Submission } from "./turn-repository-queue"
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("TurnRepositoryError", {
   message: Schema.String,
@@ -75,7 +69,34 @@ export interface Interface {
     prompt: string,
     now: number,
   ) => Effect.Effect<AgentExecutionTurn & { readonly queue: QueueItemChange }, RepositoryError>
-  readonly takeQueued: (id: TurnId) => Effect.Effect<QueuedTurnTake, RepositoryError | QueuedTurnUnavailable>
+  readonly prepareSteeringAdmission: (
+    target: import("@rika/product/execution-gateway").ExecutionLink,
+    input: import("@rika/product/execution-gateway").SteeringInput,
+    pendingRequestIds: ReadonlyArray<string>,
+    now: number,
+  ) => Effect.Effect<SteeringAdmission, RepositoryError>
+  readonly prepareQueuedSteeringAdmission: (
+    source: TurnId,
+    target: import("@rika/product/execution-gateway").ExecutionLink,
+    input: import("@rika/product/execution-gateway").SteeringInput,
+    pendingRequestIds: ReadonlyArray<string>,
+    now: number,
+  ) => Effect.Effect<QueuedSteeringAdmissionPreparation, RepositoryError | QueuedTurnUnavailable>
+  readonly listSteeringAdmissions: Effect.Effect<ReadonlyArray<SteeringAdmission>, RepositoryError>
+  readonly acceptSteeringAdmission: (
+    requestId: string,
+    receipt: import("@rika/product/execution-gateway").SteeringReceipt,
+  ) => Effect.Effect<SteeringAdmission, RepositoryError>
+  readonly rejectSteeringAdmission: (
+    requestId: string,
+    failure: import("@rika/product/execution-gateway").SteeringFailure,
+  ) => Effect.Effect<SteeringAdmission, RepositoryError>
+  readonly completeSteeringAdmission: (
+    requestId: string,
+    target: import("@rika/product/execution-gateway").ExecutionLink,
+    receipt: import("@rika/product/execution-gateway").SteeringReceipt,
+  ) => Effect.Effect<void, RepositoryError>
+  readonly completeRejectedSteeringAdmission: (requestId: string) => Effect.Effect<boolean, RepositoryError>
   readonly dequeue: (id: TurnId) => Effect.Effect<QueueItemChange, RepositoryError>
   readonly requeueAccepted: (
     id: TurnId,

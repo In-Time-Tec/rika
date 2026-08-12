@@ -33,6 +33,20 @@ it.layer(BunServices.layer)("product database", (test) => {
               String((row as { readonly name: unknown }).name),
             ),
           ).toEqual(["turn_id", "start_input_json", "prepared_at"])
+          expect(names).toContain("rika_turn_steering_outbox")
+          expect(
+            (yield* sql`PRAGMA table_info(rika_turn_steering_outbox)`).map((row) =>
+              String((row as { readonly name: unknown }).name),
+            ),
+          ).toEqual([
+            "request_id",
+            "target_turn_id",
+            "source_turn_id",
+            "thread_id",
+            "admission_json",
+            "status",
+            "prepared_at",
+          ])
           expect(names).toContain("rika_transcript_units")
           expect(names).toContain("rika_transcript_checkpoints")
           expect(names).not.toContain("rika_transcript_execution_checkpoints")
@@ -149,7 +163,7 @@ it.layer(BunServices.layer)("product database", (test) => {
     ),
   )
 
-  test.effect("brings a database made by an earlier Rika up to the current schema", () =>
+  test.effect("brings a database made before durable steering admission up to the current schema", () =>
     Effect.scoped(
       Effect.gen(function* () {
         // A data root outlives the version that made it, so a release that adds a table has to bring
@@ -160,6 +174,7 @@ it.layer(BunServices.layer)("product database", (test) => {
         const built = yield* Layer.build(layer(filename))
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
+          yield* sql`DROP TABLE rika_turn_steering_outbox`
           yield* sql`DROP TRIGGER rika_tombstoned_thread_turn_insert`
           yield* sql`DROP TABLE rika_thread_deletion_outbox`
           yield* sql`DROP TABLE rika_goals`
@@ -173,28 +188,25 @@ it.layer(BunServices.layer)("product database", (test) => {
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
           const rows =
-            yield* sql`SELECT name FROM sqlite_schema WHERE name IN ('rika_goals', 'rika_thread_deletion_outbox', 'rika_tombstoned_thread_turn_insert')`
-          expect(rows).toHaveLength(3)
+            yield* sql`SELECT name FROM sqlite_schema WHERE name IN ('rika_goals', 'rika_thread_deletion_outbox', 'rika_tombstoned_thread_turn_insert', 'rika_turn_steering_outbox')`
+          expect(rows).toHaveLength(4)
         }).pipe(Effect.provide(reopened))
       }),
     ),
   )
 
-  test.effect("upgrades the exact released predecessor schema with its data and identity, and refuses drift", () =>
+  test.effect("upgrades the exact schema before durable steering admission and refuses drift", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem
         const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-product-database-predecessor-" })
         const filename = `${directory}/rika.db`
 
-        // Build the current schema, then carve it back to the released v0.5.6 predecessor shape by
-        // dropping this release's additions and restoring the stored identity to that shape.
         yield* Effect.scoped(Layer.build(layer(filename)))
         const client = yield* Layer.build(SqliteClient.layer({ filename }))
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
-          yield* sql`DROP TRIGGER rika_tombstoned_thread_turn_insert`
-          yield* sql`DROP TABLE rika_thread_deletion_outbox`
+          yield* sql`DROP TABLE rika_turn_steering_outbox`
           const objects = yield* sql`SELECT type, name, tbl_name AS table_name, sql
             FROM sqlite_schema
             WHERE type IN ('table', 'index', 'trigger', 'view') AND name NOT LIKE 'sqlite_%'
@@ -210,9 +222,8 @@ it.layer(BunServices.layer)("product database", (test) => {
         const reopened = yield* Layer.build(layer(filename))
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
-          const names =
-            yield* sql`SELECT name FROM sqlite_schema WHERE name LIKE 'rika_thread_deletion_outbox' OR name LIKE 'rika_tombstoned_thread_turn_insert'`
-          expect(names).toHaveLength(2)
+          const names = yield* sql`SELECT name FROM sqlite_schema WHERE name = 'rika_turn_steering_outbox'`
+          expect(names).toHaveLength(1)
           const rows = yield* sql`SELECT workspace FROM rika_threads WHERE id = 't1'`
           expect(rows).toEqual([{ workspace: "/preserved" }])
         }).pipe(Effect.provide(reopened))
@@ -223,8 +234,7 @@ it.layer(BunServices.layer)("product database", (test) => {
         const driftedClient = yield* Layer.build(SqliteClient.layer({ filename: drifted }))
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
-          yield* sql`DROP TRIGGER rika_tombstoned_thread_turn_insert`
-          yield* sql`DROP TABLE rika_thread_deletion_outbox`
+          yield* sql`DROP TABLE rika_turn_steering_outbox`
           const objects = yield* sql`SELECT type, name, tbl_name AS table_name, sql
             FROM sqlite_schema
             WHERE type IN ('table', 'index', 'trigger', 'view') AND name NOT LIKE 'sqlite_%'

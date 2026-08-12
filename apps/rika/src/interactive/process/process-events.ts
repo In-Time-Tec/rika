@@ -109,25 +109,12 @@ export const makeEventRouter = (runtime: Runtime) => {
           ...(event.agentResponseArrived === undefined ? {} : { agentResponseArrived: event.agentResponseArrived }),
         })
       }
-      if (
-        event.action === "steered" &&
-        event.turnId !== undefined &&
-        event.steeringSequence !== undefined &&
-        event.steeringText !== undefined
-      )
-        loop.model = update(loop.model, {
-          _tag: "SteeringAccepted",
-          turnId: event.turnId,
-          sequence: event.steeringSequence,
-          text: event.steeringText,
-        })
     } else if (event._tag === "ExecutionControlFailed") {
       if (event.threadId !== undefined && loop.model.currentThreadId !== event.threadId) return
-      if (event.action === "steer" && event.turnId !== undefined && event.steeringText !== undefined)
+      if (event.action === "steer" && event.steeringRequestId !== undefined)
         loop.model = update(loop.model, {
           _tag: "SteeringFailed",
-          turnId: event.turnId,
-          text: event.steeringText,
+          requestId: event.steeringRequestId,
           message: event.failure.message,
         })
       if (event.action === "cancel")

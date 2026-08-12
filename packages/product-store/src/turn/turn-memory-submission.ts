@@ -11,6 +11,11 @@ import type { Interface } from "@rika/product/turn-repository"
 
 type QueueItemChange = Effect.Success<ReturnType<Interface["dequeue"]>>
 
+const reservedQueueSlots = (state: MemoryState, threadId: AgentExecutionTurn["threadId"]): number =>
+  [...state.steeringAdmissions.values()].filter(
+    (admission) => admission.source?.threadId === threadId && admission.outcome._tag === "Pending",
+  ).length
+
 export const makeTurnMemorySubmission = ({
   modifyState,
 }: TurnMemoryContext): Pick<Interface, "createForSubmission" | "copy"> => ({
@@ -24,14 +29,15 @@ export const makeTurnMemorySubmission = ({
           ExecutionStatus.occupiesQueue(turn.status),
       )
       const previousQueue = queueState(current, input.threadId)
-      if (active && previousQueue.queuedCount >= input.queueCapacity)
+      const occupiedQueueSlots = previousQueue.queuedCount + reservedQueueSlots(current, input.threadId)
+      if (active && occupiedQueueSlots >= input.queueCapacity)
         return [
           {
             _tag: "Full" as const,
             error: QueueFull.make({
               threadId: input.threadId,
               capacity: input.queueCapacity,
-              count: previousQueue.queuedCount,
+              count: occupiedQueueSlots,
             }),
           },
           current,
@@ -74,14 +80,15 @@ export const makeTurnMemorySubmission = ({
     const result = yield* modifyState((current): readonly [MemorySubmissionResult, MemoryState] => {
       if (current.turns.has(turn.id)) return [{ _tag: "Duplicate" as const }, current]
       const previousQueue = queueState(current, turn.threadId)
-      if (turn.status === "queued" && previousQueue.queuedCount >= queueCapacity)
+      const occupiedQueueSlots = previousQueue.queuedCount + reservedQueueSlots(current, turn.threadId)
+      if (turn.status === "queued" && occupiedQueueSlots >= queueCapacity)
         return [
           {
             _tag: "Full" as const,
             error: QueueFull.make({
               threadId: turn.threadId,
               capacity: queueCapacity,
-              count: previousQueue.queuedCount,
+              count: occupiedQueueSlots,
             }),
           },
           current,

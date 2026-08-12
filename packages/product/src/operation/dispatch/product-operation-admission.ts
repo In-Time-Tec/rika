@@ -39,7 +39,10 @@ export const makeProductOperationAdmission = (input: ProductOperationAdmissionIn
     steerTurn: (link, steering) =>
       withExecutionAdmission(
         rawBackend.steerTurn(link, steering),
-        ExecutionGateway.SteeringFailure.make({ message: "Server replacement has closed execution admission" }),
+        ExecutionGateway.SteeringFailure.make({
+          kind: "unknown",
+          message: "Server replacement has closed execution admission",
+        }),
       ),
     approveTurn: (link, approval) =>
       withExecutionAdmission(

@@ -17,7 +17,7 @@ test("dispatches every session action and reports absent optional callbacks", ()
     { _tag: "Quit" },
     { _tag: "EditQueued", id: "one", prompt: "b" },
     { _tag: "Dequeue", id: "two" },
-    { _tag: "Steer", prompt: "c" },
+    { _tag: "Steer", prompt: "c", requestId: "request-c" },
     { _tag: "InterruptAndSend", prompt: "d" },
     { _tag: "Cancel" },
     { _tag: "SelectThread", id: "t" },

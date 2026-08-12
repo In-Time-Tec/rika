@@ -51,7 +51,7 @@ const reduceKeyboardImpl = (
       }
       const prelude = reduceKeyboardPrelude(model, key, update)
       if (prelude !== undefined) return prelude
-      const picker = reduceKeyboardPicker(model, key, update, {
+      const picker = reduceKeyboardPicker(model, key, message.steeringRequestId, update, {
         insert,
         erase,
         lastCharacterLength,
@@ -153,14 +153,23 @@ const reduceKeyboardImpl = (
               },
               selected.prompt,
             )
-          if (key.name === "return" && model.activeTurnId !== undefined)
+          if (key.name === "return" && model.activeTurnId !== undefined && message.steeringRequestId !== undefined)
             return {
               ...model,
-              pendingSteering: [...model.pendingSteering, { turnId: model.activeTurnId, text: selected.prompt }],
+              steeringRequests: [
+                ...model.steeringRequests,
+                {
+                  requestId: message.steeringRequestId,
+                  turnId: model.activeTurnId,
+                  text: selected.prompt,
+                  origin: "queue",
+                },
+              ],
               pendingAction: {
                 _tag: "SteerQueued",
                 id: selected.id,
                 prompt: selected.prompt,
+                requestId: message.steeringRequestId,
               },
             }
           if (key.name === "backspace") return { ...model, pendingAction: { _tag: "Dequeue", id: selected.id } }

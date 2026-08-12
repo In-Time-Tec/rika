@@ -19,8 +19,8 @@ export type Action =
     }
   | { readonly _tag: "EditQueued"; readonly id: string; readonly prompt: string }
   | { readonly _tag: "Dequeue"; readonly id: string }
-  | { readonly _tag: "SteerQueued"; readonly id: string; readonly prompt: string }
-  | { readonly _tag: "Steer"; readonly prompt: string; readonly turnId?: string }
+  | { readonly _tag: "SteerQueued"; readonly id: string; readonly prompt: string; readonly requestId: string }
+  | { readonly _tag: "Steer"; readonly prompt: string; readonly requestId: string; readonly turnId?: string }
   | { readonly _tag: "ApproveAuthorization"; readonly turnId: string; readonly authorizationId: string }
   | { readonly _tag: "DenyAuthorization"; readonly turnId: string; readonly authorizationId: string }
   | { readonly _tag: "InterruptAndSend"; readonly prompt: string }
@@ -39,8 +39,8 @@ export interface Adapter {
   readonly quit: () => void
   readonly editQueued?: (id: string, prompt: string) => void
   readonly dequeue?: (id: string) => void
-  readonly steerQueued?: (id: string, prompt: string) => void
-  readonly steer?: (prompt: string, turnId?: string) => void
+  readonly steerQueued?: (id: string, prompt: string, requestId: string) => void
+  readonly steer?: (prompt: string, requestId: string, turnId?: string) => void
   readonly approveAuthorization?: (turnId: string, authorizationId: string) => void
   readonly denyAuthorization?: (turnId: string, authorizationId: string) => void
   readonly interruptAndSend?: (prompt: string) => void
@@ -68,10 +68,10 @@ export const execute: {
       adapter.dequeue?.(action.id)
       return adapter.dequeue !== undefined
     case "SteerQueued":
-      adapter.steerQueued?.(action.id, action.prompt)
+      adapter.steerQueued?.(action.id, action.prompt, action.requestId)
       return adapter.steerQueued !== undefined
     case "Steer":
-      adapter.steer?.(action.prompt, action.turnId)
+      adapter.steer?.(action.prompt, action.requestId, action.turnId)
       return adapter.steer !== undefined
     case "ApproveAuthorization":
       adapter.approveAuthorization?.(action.turnId, action.authorizationId)

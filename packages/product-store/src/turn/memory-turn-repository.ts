@@ -7,6 +7,7 @@ import { AgentExecutionTurn, Turn } from "@rika/product/turn-record"
 import { clone, cursorFor, pageSize } from "./turn-memory-state"
 import { makeTurnMemoryLifecycle } from "./turn-memory-lifecycle"
 import { makeTurnMemoryAdmission } from "./turn-memory-admission"
+import { makeTurnMemorySteeringAdmission } from "./turn-memory-steering-admission"
 import { makeTurnMemoryQueue } from "./turn-memory-queue"
 import { makeTurnMemoryState } from "./turn-memory-state-operations"
 import { makeTurnMemorySubmission } from "./turn-memory-submission"
@@ -23,6 +24,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
       ...makeTurnMemorySubmission(context),
       ...makeTurnMemoryQueue(context),
       ...makeTurnMemoryAdmission(context),
+      ...makeTurnMemorySteeringAdmission(context),
       ...makeTurnMemoryLifecycle(context),
       createRecordedShell: Effect.fn("TurnRepository.createRecordedShell")(function* (turn) {
         const result = yield* shellCoordinator.writeRecordedShell(undefined, turn, () =>

@@ -1,10 +1,49 @@
 import * as Projection from "@rika/product/execution-projection"
 import type { Block, Unit } from "@rika/product/execution-transcript-contract"
-import { Schema } from "effect"
+import { Function, Schema } from "effect"
 import { type Card, type Node } from "./model"
 import { type AuthorizationState, type PersistedProjector, type ProjectorCore } from "./persistence"
 import { compactNode } from "./nodes"
 import type { UsageAccounting } from "../baton-usage-accounting"
+
+export interface AuthorizationTarget {
+  readonly runId: string
+  readonly approvalId: string
+}
+
+const authorizationTargetImpl = (
+  checkpoint: Projection.Checkpoint,
+  authorizationId: string,
+): AuthorizationTarget | undefined => {
+  if (checkpoint.version !== Projection.projectionVersion) return undefined
+  try {
+    const parsed = JSON.parse(checkpoint.state) as Partial<PersistedProjector>
+    if (!Array.isArray(parsed.authorizations)) return undefined
+    for (const candidate of parsed.authorizations) {
+      if (!Array.isArray(candidate) || candidate.length !== 2) continue
+      const value = candidate[1] as Partial<AuthorizationState>
+      if (
+        value.authorizationId === authorizationId &&
+        typeof value.rawRunId === "string" &&
+        typeof value.approvalId === "string"
+      )
+        return { runId: value.rawRunId, approvalId: value.approvalId }
+    }
+    return undefined
+  } catch {
+    return undefined
+  }
+}
+
+export const authorizationTarget: {
+  (
+    arg0: Parameters<typeof authorizationTargetImpl>[0],
+    arg1: Parameters<typeof authorizationTargetImpl>[1],
+  ): ReturnType<typeof authorizationTargetImpl>
+  (
+    arg1: Parameters<typeof authorizationTargetImpl>[1],
+  ): (arg0: Parameters<typeof authorizationTargetImpl>[0]) => ReturnType<typeof authorizationTargetImpl>
+} = Function.dual(2, authorizationTargetImpl)
 
 export interface ProjectorCheckpointCodec {
   readonly serialize: () => string
@@ -21,6 +60,8 @@ export interface ProjectorCheckpointInput {
   readonly cardsByInvocation: Map<string, Card>
   readonly cardsByChild: Map<string, Card>
   readonly authorizations: Map<string, AuthorizationState>
+  readonly pendingSteering: Map<string, Projection.PendingSteering>
+  readonly settledSteering: Map<string, Projection.SteeringDisposition>
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
   readonly toolBlock: (node: Node, rawId: string) => Extract<Block, { readonly _tag: "ToolCall" }> | undefined
   readonly cellBlock: (node: Node, rawId: string) => Extract<Block, { readonly _tag: "Cell" }> | undefined
@@ -37,6 +78,8 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
     cardsByInvocation,
     cardsByChild,
     authorizations,
+    pendingSteering,
+    settledSteering,
     localId,
     toolBlock,
     cellBlock,
@@ -119,6 +162,8 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
       ...(core.title === undefined ? {} : { title: core.title }),
       steeringMessages: core.steeringMessages,
       followUpMessages: core.followUpMessages,
+      pendingSteering: [...pendingSteering.values()],
+      settledSteering: [...settledSteering.values()],
       ...usage.persist(),
       nodes: compact.nodes,
       cards: compact.cards,
@@ -143,6 +188,8 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
       !Array.isArray(parsed.settledAttemptKeys) ||
       !Array.isArray(parsed.modelCalls) ||
       !Array.isArray(parsed.authorizations) ||
+      !Schema.is(Schema.Array(Projection.PendingSteering))(parsed.pendingSteering) ||
+      !Schema.is(Schema.Array(Projection.SteeringDisposition))(parsed.settledSteering) ||
       typeof parsed.activeAvailable !== "boolean" ||
       !Number.isSafeInteger(parsed.activeDepth) ||
       typeof parsed.activeAccumulatedMillis !== "number" ||
@@ -212,6 +259,10 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
     }
     authorizations.clear()
     for (const [key, value] of parsed.authorizations) authorizations.set(key, value)
+    pendingSteering.clear()
+    for (const value of parsed.pendingSteering) pendingSteering.set(`${value.runId}\u0000${value.entryId}`, value)
+    settledSteering.clear()
+    for (const value of parsed.settledSteering) settledSteering.set(`${value.runId}\u0000${value.entryId}`, value)
     core.checkpoint = resumeCheckpoint
   }
 

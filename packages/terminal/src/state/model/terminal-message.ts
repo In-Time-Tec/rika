@@ -23,7 +23,7 @@ type UiEvent = {
 }
 
 type Message =
-  | { readonly _tag: "KeyPressed"; readonly key: Key }
+  | { readonly _tag: "KeyPressed"; readonly key: Key; readonly steeringRequestId?: string }
   | { readonly _tag: "ContextDetailsToggled" }
   | { readonly _tag: "ModeSelectorOpened" }
   | { readonly _tag: "ModeTurned"; readonly offset: number }
@@ -48,14 +48,7 @@ type Message =
     }
   | { readonly _tag: "SubmissionRejected"; readonly message: string; readonly submissionId?: string }
   | { readonly _tag: "TurnStarted"; readonly turnId: string; readonly prompt: string; readonly submissionId?: string }
-  | {
-      readonly _tag: "SteeringAccepted"
-      readonly turnId: string
-      readonly sequence: number
-      readonly text: string
-    }
-  | { readonly _tag: "SteeringDelivered"; readonly turnId: string; readonly sequences: ReadonlyArray<number> }
-  | { readonly _tag: "SteeringFailed"; readonly turnId: string; readonly text: string; readonly message: string }
+  | { readonly _tag: "SteeringFailed"; readonly requestId: string; readonly message: string }
   | { readonly _tag: "CancelFailed"; readonly turnId?: string; readonly message: string }
   | { readonly _tag: "AssistantStreamed"; readonly id?: string; readonly turnId?: string; readonly text: string }
   | { readonly _tag: "AssistantCompleted"; readonly id?: string; readonly turnId?: string; readonly text: string }

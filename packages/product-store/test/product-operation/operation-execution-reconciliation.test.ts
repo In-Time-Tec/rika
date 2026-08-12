@@ -33,7 +33,7 @@ const makeBackend = (status: { readonly _tag: "unavailable" } | { readonly _tag:
       startTurn: (input) =>
         Effect.succeed({ runId: `started-${input.turnId}`, turnId: input.turnId, threadId: input.threadId }),
       cancelTurn: () => Ref.update(cancelCount, (count) => count + 1),
-      steerTurn: () => Effect.void,
+      steerTurn: () => Effect.succeed({ entryId: "test-steering", sequence: 0 }),
       approveTurn: () => Effect.void,
       denyTurn: () => Effect.void,
       watchTurn: () => Stream.empty,

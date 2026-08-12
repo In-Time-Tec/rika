@@ -133,6 +133,7 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "thread-summary-repository",
     "transcript-repository",
     "turn-repository",
+    "turn-repository-steering",
     "thread-query-service",
   ],
   "@rika/product-store": [

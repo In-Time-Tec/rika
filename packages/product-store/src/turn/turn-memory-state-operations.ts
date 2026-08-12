@@ -32,6 +32,7 @@ export const makeTurnMemoryState = (initial: ReadonlyArray<Turn>) =>
     const state = yield* Ref.make<MemoryState>({
       turns: initialTurns,
       executionAdmissions: new Map(),
+      steeringAdmissions: new Map(),
       queues: initialQueues,
       claims: new Map(),
       nextClaimToken: 1,

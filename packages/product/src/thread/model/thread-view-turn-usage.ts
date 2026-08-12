@@ -21,5 +21,15 @@ export const ThreadViewTurn = Schema.Struct({
   units: Schema.Array(TranscriptUnit.Unit),
   projectionRevision: NonNegativeRevision,
   usage: ExecutionProjection.UsageState,
+  pendingSteering: Schema.optionalKey(
+    Schema.Array(ExecutionProjection.PendingSteering).check(
+      Schema.isMaxLength(ExecutionProjection.PendingSteeringMaxEntries),
+    ),
+  ),
+  settledSteering: Schema.optionalKey(
+    Schema.Array(ExecutionProjection.SteeringDisposition).check(
+      Schema.isMaxLength(ExecutionProjection.PendingSteeringMaxEntries),
+    ),
+  ),
 })
 export type ThreadViewTurn = typeof ThreadViewTurn.Type

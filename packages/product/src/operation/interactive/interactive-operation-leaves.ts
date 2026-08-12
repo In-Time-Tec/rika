@@ -105,7 +105,7 @@ export const executeShellCommand = Effect.fn("ProductOperation.executeShellComma
   let result = yield* tools.run({
     _tag: "Shell",
     command: "sh",
-    args: ["-lc", command],
+    args: ["-c", command],
     waitMillis: 10_000,
   })
   while (true) {

@@ -16,6 +16,7 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
     loop,
     session,
     run,
+    nextSteeringRequestId,
     previewTimer,
     close,
     refreshTerminalTitle,
@@ -157,7 +158,19 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       const prompt = submitting ? loop.model.input : undefined
       const parts = prompt === undefined ? undefined : promptParts(prompt, loop.model.pastedText)
       const submittedPrompt = prompt === undefined ? undefined : expandPastedText(prompt, loop.model.pastedText)
-      loop.model = update(loop.model, { _tag: "KeyPressed", key })
+      const steeringRequestId =
+        (key.ctrl && key.name === "s" && loop.model.busy && loop.model.input.length > 0) ||
+        (key.name === "return" &&
+          loop.model.activeTurnId !== undefined &&
+          loop.model.input.length === 0 &&
+          loop.model.queueSelection !== undefined)
+          ? nextSteeringRequestId()
+          : undefined
+      loop.model = update(loop.model, {
+        _tag: "KeyPressed",
+        key,
+        ...(steeringRequestId === undefined ? {} : { steeringRequestId }),
+      })
       if (submitting)
         loop.model = update(loop.model, {
           _tag: "Submitted",
