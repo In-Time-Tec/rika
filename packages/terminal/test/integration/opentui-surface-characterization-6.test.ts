@@ -475,7 +475,7 @@ test("defers the scrollbar detach report instead of reporting inside onChange", 
         // must be queued, not run synchronously inside onChange (no re-entrant update).
         surface.transcriptScrollbar.scrollPosition = 3
         expect(scrolls).toEqual([])
-        for (let attempt = 0; attempt < 5 && scrolls.length === 0; attempt += 1) yield* openTui(() => setup.flush())
+        for (let attempt = 0; attempt < 20 && scrolls.length === 0; attempt += 1) yield* Effect.yieldNow
         expect(scrolls.length).toBeGreaterThan(0)
         expect(model.scrollFollow).toBe(false)
       } finally {
