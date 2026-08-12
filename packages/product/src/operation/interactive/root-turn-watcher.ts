@@ -63,9 +63,9 @@ export const watchRootTurn = (input: {
         change,
       })
     }
-    const publishPreview = (preview: ExecutionGateway.ModelPreviewed) => {
+    const publishPreview = (preview: ExecutionGateway.ModelPreviewEvent) => {
       input.dispatch({
-        _tag: "ExecutionModelPreviewed",
+        _tag: "ExecutionModelPreviewChanged",
         threadId: turn.threadId,
         turnId: turn.id,
         preview,

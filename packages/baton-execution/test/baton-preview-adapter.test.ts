@@ -1,19 +1,19 @@
 import * as ExecutionProjection from "@rika/product/execution-projection"
+import type * as Runtime from "@batonfx/runtime"
 import { expect, it } from "@effect/vitest"
 import { Deferred, Effect, Ref, Stream } from "effect"
-import { merge, modelPreviewed, previewIdentity, replacePreview } from "../src/baton-preview-adapter"
+import { merge, modelPreviewEvent } from "../src/baton-preview-adapter"
 
-const runtimePreview = (overrides: Partial<Parameters<typeof modelPreviewed>[0]> = {}) => ({
+const runtimePreview = (overrides: Partial<Runtime.ModelPreview.Frame> = {}): Runtime.ModelPreview.Frame => ({
+  _tag: "ModelPreview" as const,
   runId: "run-1",
   attemptFence: 7,
   turn: 2,
   modelCallId: "call-1",
   modelAttemptId: "attempt-1",
   attempt: 3,
-  revision: 1,
-  text: "hel",
-  reasoning: "why",
-  truncated: false,
+  sequence: 0,
+  changes: [{ channel: "text" as const, offset: 0, delta: "hel" }] as const,
   ...overrides,
 })
 
@@ -29,49 +29,13 @@ const completed: ExecutionProjection.Change = {
   },
 }
 
-it("maps every runtime identity field without adding durable projection coordinates", () => {
-  const preview = modelPreviewed(runtimePreview())
-  expect(preview).toEqual({
-    _tag: "ModelPreviewed",
-    key: {
-      runId: "run-1",
-      attemptFence: 7,
-      turn: 2,
-      modelCallId: "call-1",
-      modelAttemptId: "attempt-1",
-      attempt: 3,
-    },
-    revision: 1,
-    text: "hel",
-    reasoning: "why",
-    truncated: false,
-  })
+it("passes released append frames through without adding durable projection coordinates", () => {
+  const runtime = runtimePreview()
+  const preview = modelPreviewEvent(runtime)
+  expect(preview).toBe(runtime)
   expect(Object.hasOwn(preview, "cursor")).toBe(false)
   expect(Object.hasOwn(preview, "checkpoint")).toBe(false)
   expect(Object.hasOwn(preview, "projectionRevision")).toBe(false)
-
-  const bounded = modelPreviewed(runtimePreview({ text: "x".repeat(5_000), reasoning: "y".repeat(5_000) }))
-  expect(bounded.text.length + bounded.reasoning.length).toBe(4_096)
-  expect(bounded.truncated).toBe(true)
-})
-
-it("replaces cumulative text by identity while retaining distinct old attempts", () => {
-  const hel = modelPreviewed(runtimePreview())
-  const hello = modelPreviewed(runtimePreview({ revision: 2, text: "hello" }))
-  const stale = modelPreviewed(runtimePreview({ revision: 1, text: "h" }))
-  const retried = modelPreviewed(
-    runtimePreview({ attemptFence: 8, modelAttemptId: "attempt-2", attempt: 4, revision: 1, text: "again" }),
-  )
-  const first = replacePreview({ current: new Map(), preview: hel })
-  const replaced = replacePreview({ current: first, preview: hello })
-  const unchanged = replacePreview({ current: replaced, preview: stale })
-  const retained = replacePreview({ current: unchanged, preview: retried })
-
-  expect(replaced.size).toBe(1)
-  expect(replaced.get(previewIdentity(hel))?.text).toBe("hello")
-  expect(unchanged).toBe(replaced)
-  expect(retained.size).toBe(2)
-  expect(previewIdentity(retried)).not.toBe(previewIdentity(hello))
 })
 
 it.effect("ends and interrupts previews when the durable projection watch ends", () =>

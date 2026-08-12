@@ -36,10 +36,10 @@ export type InteractiveEvent =
       readonly change: ExecutionProjection.Change
     }
   | {
-      readonly _tag: "ExecutionModelPreviewed"
+      readonly _tag: "ExecutionModelPreviewChanged"
       readonly threadId: Thread.ThreadId
       readonly turnId: Turn.TurnId
-      readonly preview: ExecutionGateway.ModelPreviewed
+      readonly preview: ExecutionGateway.ModelPreviewEvent
     }
   | {
       readonly _tag: "ExecutionProjectionResyncRequired"
@@ -204,10 +204,10 @@ export const InteractiveEventSchema = Schema.Union([
     change: ExecutionProjection.Change,
   }),
   Schema.Struct({
-    _tag: Schema.tag("ExecutionModelPreviewed"),
+    _tag: Schema.tag("ExecutionModelPreviewChanged"),
     threadId: Thread.ThreadId,
     turnId: Turn.TurnId,
-    preview: ExecutionGateway.ModelPreviewed,
+    preview: ExecutionGateway.ModelPreviewEvent,
   }),
   Schema.Struct({
     _tag: Schema.tag("ExecutionProjectionResyncRequired"),

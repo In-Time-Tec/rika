@@ -6,28 +6,24 @@ import * as Overflow from "../src/operation/interactive/interactive-runtime-feed
 const threadId = Thread.ThreadId.make("thread")
 const turnId = Turn.TurnId.make("turn")
 const preview = (revision: number) => ({
-  _tag: "ExecutionModelPreviewed" as const,
+  _tag: "ExecutionModelPreviewChanged" as const,
   threadId,
   turnId,
   preview: {
-    _tag: "ModelPreviewed" as const,
-    key: {
-      runId: "run",
-      attemptFence: 1,
-      turn: 0,
-      modelCallId: "call",
-      modelAttemptId: "attempt",
-      attempt: 0,
-    },
-    revision,
-    text: String(revision),
-    reasoning: "",
-    truncated: false,
+    _tag: "ModelPreview" as const,
+    runId: "run",
+    attemptFence: 1,
+    turn: 0,
+    modelCallId: "call",
+    modelAttemptId: "attempt",
+    attempt: 0,
+    sequence: revision,
+    changes: [{ channel: "text" as const, offset: revision, delta: String(revision) }] as const,
   },
 })
 
 describe("interactive runtime preview overflow", () => {
-  it("drops ten thousand tentative previews without consuming control recovery capacity", () => {
+  it("coalesces ten thousand tentative previews to one scoped invalidation", () => {
     const state = Overflow.make()
     for (let revision = 1; revision <= 10_000; revision += 1) Overflow.remember(state, preview(revision))
     Overflow.remember(state, {
@@ -40,6 +36,10 @@ describe("interactive runtime preview overflow", () => {
     expect(state.criticalOverflowed).toBe(false)
     expect(Overflow.events(state, 1, "overflow")).toEqual([
       { _tag: "ExecutionControlled", selectionEpoch: 1, threadId, turnId, action: "cancelled" },
+      {
+        ...preview(10_000),
+        preview: { _tag: "ModelPreviewCleared", runId: "run", attemptFence: 1, generation: 0 },
+      },
     ])
   })
 })

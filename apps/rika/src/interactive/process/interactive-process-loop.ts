@@ -41,6 +41,7 @@ export const interactiveTui =
       const lifecycle = yield* SubscriptionRef.make<TuiLifecycle>({ _tag: "Running" })
       const resolvedModeRoutes = options.modeRoutes?.()
       return yield* Effect.callback<void, ProductOperation.OperationUnavailable>((resume) => {
+        let renderPending = false
         const loop: InteractiveLoop = {
           model: initial(input.workspace ?? process.cwd(), input.mode ?? "medium"),
           threadView: undefined,
@@ -91,13 +92,21 @@ export const interactiveTui =
         const render = (immediate = false) => {
           if (loop.renderer === undefined || loop.renderSuppressed) return
           if (immediate) {
+            renderPending = false
             renderTimer(Effect.void)
             loop.renderer.surface.update(loop.model)
             return
           }
+          if (renderPending) return
+          renderPending = true
           renderTimer(
             Effect.sleep("16 millis").pipe(
-              Effect.andThen(Effect.sync(() => loop.renderer?.surface.update(loop.model))),
+              Effect.andThen(
+                Effect.sync(() => {
+                  renderPending = false
+                  loop.renderer?.surface.update(loop.model)
+                }),
+              ),
             ),
           )
         }

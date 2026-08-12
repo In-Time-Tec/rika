@@ -12,10 +12,10 @@ export const InteractiveEventSchema = Schema.Union([
   ThreadView.ResyncRequired,
   Schema.Struct({ _tag: Schema.tag("ThreadsListed"), threads: Schema.Array(ThreadSummary.ThreadSummary) }),
   Schema.Struct({
-    _tag: Schema.tag("ExecutionModelPreviewed"),
+    _tag: Schema.tag("ExecutionModelPreviewChanged"),
     threadId: Thread.ThreadId,
     turnId: Turn.TurnId,
-    preview: ExecutionGateway.ModelPreviewed,
+    preview: ExecutionGateway.ModelPreviewEvent,
   }),
   Schema.Struct({
     _tag: Schema.tag("ContextDiagnostics"),

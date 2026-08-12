@@ -1,7 +1,9 @@
 import {
   StyledText,
   TextRenderable,
+  dim,
   fg,
+  italic,
   type BoxRenderable,
   type CliRenderer,
   type MouseEvent,
@@ -18,13 +20,16 @@ import { escapePathTarget } from "../../presentation/transcript/transcript-tool-
 import type { PathTarget } from "../../presentation/transcript/transcript-tool-detail-types"
 import type { TranscriptUnit } from "../../presentation/transcript/transcript-tool-types"
 import { colors } from "../../presentation/terminal/terminal-theme"
-import { boundedTranscriptModel } from "../rendering/opentui-render-transcript-window"
+import { terminalSafeText } from "../../presentation/terminal/terminal-safe-text"
+import { boundedTranscriptModel, transcriptWrapWidth } from "../rendering/opentui-render-transcript-window"
 import {
   transcriptUnitRevision,
+  type TentativeTranscriptLayout,
   type TranscriptRangeBundle,
   type TranscriptUnitCacheEntry,
 } from "../rendering/opentui-render-transcript-revision"
 import { transcriptUnitBuilder } from "../rendering/opentui-render-unit"
+import { wrapTextToWidth } from "../rendering/opentui-render-window"
 import { splitStyledLines } from "../rendering/opentui-transcript-styled-lines"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import type { Model } from "../../state/model/terminal-state"
@@ -94,6 +99,61 @@ const buildTranscriptUnitBundles = (
     appendBands(range, rangeIndex, "body", styledLines.slice(headerEnd + 1, range.end + 1), headerEnd + 1)
   }
   return { revision, bundles }
+}
+
+const buildTentativeTranscriptUnitBundles = (
+  key: string,
+  text: string,
+  width: number,
+  tone: TentativeTranscriptLayout["tone"],
+  revision: string,
+  cached: TranscriptUnitCacheEntry | undefined,
+): TranscriptUnitCacheEntry => {
+  const previous = cached?.tentative
+  const layout: TentativeTranscriptLayout =
+    previous === undefined || previous.width !== width || previous.tone !== tone || previous.sourceLength > text.length
+      ? { width, tone, sourceLength: 0, pending: "", pendingSource: "", bands: [[]], stableContent: [] }
+      : previous
+  const sourceDelta = text.slice(layout.sourceLength)
+  if (sourceDelta.length > 0) {
+    let source = layout.pendingSource + sourceDelta
+    const trailing = source.charCodeAt(source.length - 1)
+    const deferTrailing = source.endsWith("\r") || (trailing >= 0xd800 && trailing <= 0xdbff)
+    layout.pendingSource = deferTrailing ? source.slice(-1) : ""
+    if (deferTrailing) source = source.slice(0, -1)
+    const rows = wrapTextToWidth(layout.pending + terminalSafeText(source), width)
+    for (const row of rows.slice(0, -1)) {
+      const band = layout.bands.at(-1)!
+      band.push(row)
+      if (band.length === transcriptRenderableBandRows) layout.bands.push([])
+    }
+    layout.pending = rows.at(-1) ?? ""
+    layout.sourceLength = text.length
+  }
+  const content = (value: string): StyledText =>
+    new StyledText([tone === "reasoning" ? dim(italic(fg(colors.text)(value))) : fg(colors.text)(value)])
+  const bundles: Array<TranscriptRangeBundle> = []
+  for (const [index, band] of layout.bands.entries()) {
+    const tail = index === layout.bands.length - 1
+    const rows = tail ? [...band, layout.pending] : band
+    if (rows.length === 0) continue
+    const value = rows.join("\n")
+    const styled = tail ? content(value) : (layout.stableContent[index] ??= content(value))
+    const bandKey = index === 0 ? `${key}:body` : `${key}:body:${index * transcriptRenderableBandRows}`
+    bundles.push({
+      key: bandKey,
+      rows: rows.length,
+      descriptors: [
+        {
+          key: bandKey,
+          revision: tail ? `${revision}#${index}` : `${key}:${width}:${index}`,
+          content: styled,
+          selectable: false,
+        },
+      ],
+    })
+  }
+  return { revision, bundles, tentative: layout }
 }
 
 interface ReconcileTranscriptRenderablesOptions {
@@ -290,10 +350,29 @@ export const projectTranscriptRows = (options: ProjectTranscriptRowsOptions) => 
     const unitKey = transcriptUnitId(boundedModel, unit)
     const revision = transcriptUnitRevision(boundedModel, unit, unitKey, expandedSet)
     const cached = options.unitCache.get(unitKey)
-    const entry =
-      cached !== undefined && cached.revision === revision
-        ? cached
-        : buildTranscriptUnitBundles(builder, unit, revision, options.spinnerGlyph, options.onToggle)
+    let tentative: { readonly text: string; readonly tone: "answer" | "reasoning" } | undefined
+    if (unitKey.startsWith("entry:tentative:") && unit.kind === "entry")
+      tentative = { text: boundedModel.entries[unit.entry]?.text ?? "", tone: "answer" }
+    if (unitKey.startsWith("block:tentative:") && unit.kind === "reasoning")
+      tentative = {
+        text:
+          (boundedModel.blocks[unit.block] as { readonly _tag?: string; readonly text?: string } | undefined)?.text ??
+          "",
+        tone: "reasoning",
+      }
+    let entry: TranscriptUnitCacheEntry
+    if (cached !== undefined && cached.revision === revision) entry = cached
+    else if (tentative === undefined)
+      entry = buildTranscriptUnitBundles(builder, unit, revision, options.spinnerGlyph, options.onToggle)
+    else
+      entry = buildTentativeTranscriptUnitBundles(
+        unitKey,
+        tentative.text,
+        transcriptWrapWidth(boundedModel.width),
+        tentative.tone,
+        revision,
+        cached,
+      )
     unitCache.set(unitKey, entry)
     for (const [index, bundle] of entry.bundles.entries())
       orderedBundles.push({

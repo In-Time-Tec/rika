@@ -6,33 +6,35 @@ import * as Overflow from "../src/transport/host/server-host-feed-overflow"
 const threadId = Thread.ThreadId.make("thread")
 const turnId = Turn.TurnId.make("turn")
 const preview = (revision: number) => ({
-  _tag: "ExecutionModelPreviewed" as const,
+  _tag: "ExecutionModelPreviewChanged" as const,
   threadId,
   turnId,
   preview: {
-    _tag: "ModelPreviewed" as const,
-    key: {
-      runId: "run",
-      attemptFence: 1,
-      turn: 0,
-      modelCallId: "call",
-      modelAttemptId: "attempt",
-      attempt: 0,
-    },
-    revision,
-    text: String(revision),
-    reasoning: "",
-    truncated: false,
+    _tag: "ModelPreview" as const,
+    runId: "run",
+    attemptFence: 1,
+    turn: 0,
+    modelCallId: "call",
+    modelAttemptId: "attempt",
+    attempt: 0,
+    sequence: revision,
+    changes: [{ channel: "text" as const, offset: revision, delta: String(revision) }] as const,
   },
 })
 
 describe("server host preview overflow", () => {
-  it("drops preview storms while retaining control outcomes", () => {
+  it("coalesces preview storms to one scoped invalidation while retaining control outcomes", () => {
     const state = Overflow.make()
     for (let revision = 1; revision <= 10_000; revision += 1) Overflow.remember(state, preview(revision))
     const controlled = { _tag: "ExecutionControlled" as const, threadId, turnId, action: "cancelled" as const }
     Overflow.remember(state, controlled)
     expect(state.degraded).toBeUndefined()
-    expect(Overflow.events(state)).toEqual([controlled])
+    expect(Overflow.events(state)).toEqual([
+      controlled,
+      {
+        ...preview(10_000),
+        preview: { _tag: "ModelPreviewCleared", runId: "run", attemptFence: 1, generation: 0 },
+      },
+    ])
   })
 })

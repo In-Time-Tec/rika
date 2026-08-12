@@ -121,7 +121,18 @@ export interface TranscriptRangeBundle {
   readonly descriptors: ReadonlyArray<TranscriptRenderableDescriptor>
 }
 
+export interface TentativeTranscriptLayout {
+  readonly width: number
+  readonly tone: "answer" | "reasoning"
+  sourceLength: number
+  pending: string
+  pendingSource: string
+  readonly bands: Array<Array<string>>
+  readonly stableContent: Array<StyledText | undefined>
+}
+
 export interface TranscriptUnitCacheEntry {
   readonly revision: string
   readonly bundles: ReadonlyArray<TranscriptRangeBundle>
+  readonly tentative?: TentativeTranscriptLayout
 }

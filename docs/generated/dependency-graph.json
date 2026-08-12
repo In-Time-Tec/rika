@@ -6197,8 +6197,8 @@
       "testKind": "contract-test"
     },
     {
-      "id": "packages/product/src/execution/contract/model-previewed.ts",
-      "path": "packages/product/src/execution/contract/model-previewed.ts",
+      "id": "packages/product/src/execution/contract/model-preview.ts",
+      "path": "packages/product/src/execution/contract/model-preview.ts",
       "workspace": "@rika/product",
       "package": "@rika/product",
       "kind": "source",
@@ -8311,6 +8311,15 @@
     {
       "id": "packages/terminal/src/presentation/terminal/terminal-relative-time.ts",
       "path": "packages/terminal/src/presentation/terminal/terminal-relative-time.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/terminal/src/presentation/terminal/terminal-safe-text.ts",
+      "path": "packages/terminal/src/presentation/terminal/terminal-safe-text.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -12002,14 +12011,6 @@
       "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
       "to": "packages/terminal/src/presentation/transcript/terminal-transcript-presentation.ts",
       "specifier": "@rika/terminal/terminal-transcript-presentation",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
-      "to": "packages/terminal/src/state/model/terminal-message.ts",
-      "specifier": "@rika/terminal/terminal-message",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -17704,14 +17705,6 @@
     },
     {
       "from": "apps/rika/test/interactive-model-preview.test.ts",
-      "to": "apps/rika/src/interactive/controller/interactive-model-preview.ts",
-      "specifier": "../src/interactive/controller/interactive-model-preview",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/interactive-model-preview.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -21165,6 +21158,14 @@
     },
     {
       "from": "packages/baton-execution/src/baton-preview-adapter.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-preview-adapter.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -22423,6 +22424,14 @@
       "from": "packages/baton-execution/test/baton-model-effort.test.ts",
       "to": "packages/product/src/execution/service/execution-route-resolution.ts",
       "specifier": "@rika/product/execution-route-resolution",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-preview-adapter.test.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -35397,8 +35406,8 @@
     },
     {
       "from": "packages/product/src/execution/contract/execution-gateway.ts",
-      "to": "packages/product/src/execution/contract/model-previewed.ts",
-      "specifier": "./model-previewed",
+      "to": "packages/product/src/execution/contract/model-preview.ts",
+      "specifier": "./model-preview",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -35628,7 +35637,7 @@
       "production": false
     },
     {
-      "from": "packages/product/src/execution/contract/model-previewed.ts",
+      "from": "packages/product/src/execution/contract/model-preview.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -44844,6 +44853,14 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/opentui/rendering/terminal-text-adapter.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-safe-text.ts",
+      "specifier": "../../presentation/terminal/terminal-safe-text",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/opentui/surface/opentui-composer-region.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",
@@ -46541,6 +46558,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/opentui/rendering/opentui-render-window.ts",
+      "specifier": "../rendering/opentui-render-window",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
       "to": "packages/terminal/src/opentui/rendering/opentui-transcript-styled-lines.ts",
       "specifier": "../rendering/opentui-transcript-styled-lines",
       "kind": "import",
@@ -46559,6 +46584,14 @@
       "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-surface-transcript-types.ts",
       "specifier": "./opentui-surface-transcript-types",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-safe-text.ts",
+      "specifier": "../../presentation/terminal/terminal-safe-text",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -46855,6 +46888,14 @@
       "from": "packages/terminal/src/presentation/markdown/markdown-renderer.ts",
       "to": "packages/terminal/src/presentation/markdown/syntax-highlighter.ts",
       "specifier": "./syntax-highlighter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/markdown/markdown-renderer.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-safe-text.ts",
+      "specifier": "../terminal/terminal-safe-text",
       "kind": "import",
       "relationship": "runtime",
       "production": true

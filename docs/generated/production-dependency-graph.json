@@ -5788,6 +5788,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/terminal/src/presentation/terminal/terminal-safe-text.ts",
+      "path": "packages/terminal/src/presentation/terminal/terminal-safe-text.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
       "path": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
       "workspace": "@rika/terminal",
@@ -7937,14 +7946,6 @@
       "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
       "to": "packages/terminal/src/presentation/transcript/terminal-transcript-presentation.ts",
       "specifier": "@rika/terminal/terminal-transcript-presentation",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
-      "to": "packages/terminal/src/state/model/terminal-message.ts",
-      "specifier": "@rika/terminal/terminal-message",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12891,6 +12892,14 @@
       "from": "packages/baton-execution/src/baton-execution.ts",
       "to": "packages/product/src/authentication/provider-credential-store.ts",
       "specifier": "@rika/product/provider-credential-store",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-preview-adapter.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -26696,6 +26705,14 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/opentui/rendering/terminal-text-adapter.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-safe-text.ts",
+      "specifier": "../../presentation/terminal/terminal-safe-text",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/opentui/surface/opentui-composer-region.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",
@@ -28393,6 +28410,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/opentui/rendering/opentui-render-window.ts",
+      "specifier": "../rendering/opentui-render-window",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
       "to": "packages/terminal/src/opentui/rendering/opentui-transcript-styled-lines.ts",
       "specifier": "../rendering/opentui-transcript-styled-lines",
       "kind": "import",
@@ -28411,6 +28436,14 @@
       "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-surface-transcript-types.ts",
       "specifier": "./opentui-surface-transcript-types",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-safe-text.ts",
+      "specifier": "../../presentation/terminal/terminal-safe-text",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -28707,6 +28740,14 @@
       "from": "packages/terminal/src/presentation/markdown/markdown-renderer.ts",
       "to": "packages/terminal/src/presentation/markdown/syntax-highlighter.ts",
       "specifier": "./syntax-highlighter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/markdown/markdown-renderer.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-safe-text.ts",
+      "specifier": "../terminal/terminal-safe-text",
       "kind": "import",
       "relationship": "runtime",
       "production": true

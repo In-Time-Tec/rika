@@ -2721,8 +2721,8 @@
       "testKind": "contract-test"
     },
     {
-      "id": "packages/product/src/execution/contract/model-previewed.ts",
-      "path": "packages/product/src/execution/contract/model-previewed.ts",
+      "id": "packages/product/src/execution/contract/model-preview.ts",
+      "path": "packages/product/src/execution/contract/model-preview.ts",
       "workspace": "@rika/product",
       "package": "@rika/product",
       "kind": "source",
@@ -6583,6 +6583,14 @@
     },
     {
       "from": "packages/baton-execution/test/baton-preview-adapter.test.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-preview-adapter.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -9623,8 +9631,8 @@
     },
     {
       "from": "packages/product/src/execution/contract/execution-gateway.ts",
-      "to": "packages/product/src/execution/contract/model-previewed.ts",
-      "specifier": "./model-previewed",
+      "to": "packages/product/src/execution/contract/model-preview.ts",
+      "specifier": "./model-preview",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -9806,7 +9814,7 @@
       "production": false
     },
     {
-      "from": "packages/product/src/execution/contract/model-previewed.ts",
+      "from": "packages/product/src/execution/contract/model-preview.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",

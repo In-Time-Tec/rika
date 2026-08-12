@@ -12,8 +12,8 @@ import { layer } from "../src/baton-execution"
 
 const fanOutJoin = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
 
-const projectionChanges = (events: ReadonlyArray<ExecutionGateway.ModelPreviewed | Change>): ReadonlyArray<Change> =>
-  events.filter((event): event is Change => event._tag !== "ModelPreviewed")
+const projectionChanges = (events: ReadonlyArray<ExecutionGateway.ModelPreviewEvent | Change>): ReadonlyArray<Change> =>
+  events.filter((event): event is Change => event._tag !== "ModelPreview" && event._tag !== "ModelPreviewCleared")
 
 const testLayer = (filename: string, fixture: TestModel.Fixture) =>
   layer({

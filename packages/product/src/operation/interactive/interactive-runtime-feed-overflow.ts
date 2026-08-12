@@ -10,6 +10,10 @@ export interface State {
   readonly critical: Array<InteractiveEvent>
   readonly settlements: Map<string, Extract<InteractiveEvent, { readonly _tag: "TurnSettled" }>>
   readonly refolds: Map<string, Extract<InteractiveEvent, { readonly _tag: "ThreadRefolding" }>>
+  readonly previewInvalidations: Map<
+    string,
+    Extract<InteractiveEvent, { readonly _tag: "ExecutionModelPreviewChanged" }>
+  >
   criticalOverflowed: boolean
   activated?: Extract<InteractiveEvent, { readonly _tag: "ThreadActivated" }>
   summaries?: Extract<InteractiveEvent, { readonly _tag: "ThreadsListed" }>
@@ -21,6 +25,7 @@ export const make = (): State => ({
   critical: [],
   settlements: new Map(),
   refolds: new Map(),
+  previewInvalidations: new Map(),
   criticalOverflowed: false,
 })
 
@@ -56,7 +61,7 @@ export const isCritical = (event: InteractiveEvent): boolean => {
     case "TurnSettled":
       return true
     case "TurnRetryScheduled":
-    case "ExecutionModelPreviewed":
+    case "ExecutionModelPreviewChanged":
       return false
     case "ThreadsListed":
     case "ThreadRefolding":
@@ -82,7 +87,23 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
   if (state.criticalOverflowed) return
   const id = threadId(event)
   switch (event._tag) {
-    case "ExecutionModelPreviewed":
+    case "ExecutionModelPreviewChanged":
+      if (
+        !state.previewInvalidations.has(`${event.threadId}:${event.turnId}`) &&
+        state.previewInvalidations.size >= capacity
+      ) {
+        state.criticalOverflowed = true
+        return
+      }
+      state.previewInvalidations.set(`${event.threadId}:${event.turnId}`, {
+        ...event,
+        preview: {
+          _tag: "ModelPreviewCleared",
+          runId: event.preview.runId,
+          attemptFence: event.preview.attemptFence,
+          generation: event.preview._tag === "ModelPreviewCleared" ? event.preview.generation : 0,
+        },
+      })
       return
     case "ExecutionProjectionChanged":
     case "ExecutionProjectionResyncRequired":
@@ -134,6 +155,7 @@ const eventsImpl = (state: State, selectionEpoch: number, reason: string): Reado
     ...[...state.settlements.values()].toSorted((left, right) => left.activitySequence - right.activitySequence),
   )
   recovered.push(...state.refolds.values())
+  recovered.push(...state.previewInvalidations.values())
   for (const id of state.transcriptThreadIds)
     recovered.push({
       _tag: "ExecutionProjectionResyncRequired",

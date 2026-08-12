@@ -14,10 +14,16 @@ export interface State {
   readonly views: Map<string, ViewEvent>
   readonly latest: Map<string, Event>
   readonly critical: Array<Event>
+  readonly previewInvalidations: Map<string, Extract<Event, { readonly _tag: "ExecutionModelPreviewChanged" }>>
   degraded?: Event
 }
 
-export const make = (): State => ({ views: new Map(), latest: new Map(), critical: [] })
+export const make = (): State => ({
+  views: new Map(),
+  latest: new Map(),
+  critical: [],
+  previewInvalidations: new Map(),
+})
 
 const resync = (event: Extract<Event, { readonly _tag: "ThreadViewPatch" }>): ViewEvent =>
   ThreadView.ResyncRequired.make({
@@ -79,6 +85,7 @@ const degrade = (state: State, event: Event) => {
   state.views.clear()
   state.latest.clear()
   state.critical.length = 0
+  state.previewInvalidations.clear()
   state.degraded = recovery(event)
 }
 
@@ -113,7 +120,23 @@ const rememberView = (state: State, event: ViewEvent) => {
 }
 
 const rememberImpl = (state: State, event: Event) => {
-  if (event._tag === "ExecutionModelPreviewed") return
+  if (event._tag === "ExecutionModelPreviewChanged") {
+    if (state.degraded !== undefined) return
+    const invalidation: Extract<Event, { readonly _tag: "ExecutionModelPreviewChanged" }> = {
+      ...event,
+      preview: {
+        _tag: "ModelPreviewCleared",
+        runId: event.preview.runId,
+        attemptFence: event.preview.attemptFence,
+        generation: event.preview._tag === "ModelPreviewCleared" ? event.preview.generation : 0,
+      },
+    }
+    const key = `${event.threadId}:${event.turnId}`
+    if (!state.previewInvalidations.has(key) && state.previewInvalidations.size >= capacity)
+      degrade(state, invalidation)
+    else state.previewInvalidations.set(key, invalidation)
+    return
+  }
   if (state.degraded !== undefined) {
     state.degraded = recovery(event)
     return
@@ -166,5 +189,5 @@ export const remember: {
 
 export const events = (state: State): ReadonlyArray<Event> =>
   state.degraded === undefined
-    ? [...state.views.values(), ...state.latest.values(), ...state.critical]
+    ? [...state.views.values(), ...state.latest.values(), ...state.critical, ...state.previewInvalidations.values()]
     : [state.degraded]

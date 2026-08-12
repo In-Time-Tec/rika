@@ -11,7 +11,7 @@ export type TranscriptEvent = Extract<
   | { readonly _tag: "ThreadViewPatch" }
   | { readonly _tag: "ResyncRequired" }
   | { readonly _tag: "ThreadRefolding" }
-  | { readonly _tag: "ExecutionModelPreviewed" }
+  | { readonly _tag: "ExecutionModelPreviewChanged" }
 >
 
 export interface State {

@@ -14,9 +14,7 @@ import {
 } from "./styled-text-wrapping"
 import { highlightLines } from "./syntax-highlighter"
 import { colors } from "../terminal/terminal-theme"
-
-const terminalSafeText = (text: string): string =>
-  text.replaceAll("\r\n", "\n").replace(/\p{Cc}/gu, (character) => (character === "\n" ? character : "�"))
+import { terminalSafeText } from "../terminal/terminal-safe-text"
 
 const trailingBlankLines = (raw: string): number => {
   const match = /\n+$/.exec(raw)

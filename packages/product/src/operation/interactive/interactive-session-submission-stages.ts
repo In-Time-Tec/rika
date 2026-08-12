@@ -213,9 +213,9 @@ const executeInteractiveSubmissionImpl = (
           change,
         })
       }
-      const publishPreview = (preview: ExecutionGateway.ModelPreviewed) => {
+      const publishPreview = (preview: ExecutionGateway.ModelPreviewEvent) => {
         emitEvent(input, dispatch, {
-          _tag: "ExecutionModelPreviewed",
+          _tag: "ExecutionModelPreviewChanged",
           threadId: thread.id,
           turnId: current.id,
           preview,

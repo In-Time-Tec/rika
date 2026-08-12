@@ -482,7 +482,7 @@ describe("Rika Server protocol", () => {
     ).toThrow()
   })
 
-  it("round-trips the full bounded tentative preview identity and revision", () => {
+  it("round-trips the full bounded tentative preview identity and append changes", () => {
     const message = {
       _tag: "interactive-feed-event" as const,
       connectionId: "connection",
@@ -491,23 +491,22 @@ describe("Rika Server protocol", () => {
       feedGeneration: "feed",
       sequence: 1,
       event: {
-        _tag: "ExecutionModelPreviewed" as const,
+        _tag: "ExecutionModelPreviewChanged" as const,
         threadId: "thread",
         turnId: "turn",
         preview: {
-          _tag: "ModelPreviewed" as const,
-          key: {
-            runId: "run",
-            attemptFence: 2,
-            turn: 3,
-            modelCallId: "call",
-            modelAttemptId: "attempt",
-            attempt: 4,
-          },
-          revision: 5,
-          text: "tentative",
-          reasoning: "thinking",
-          truncated: false,
+          _tag: "ModelPreview" as const,
+          runId: "run",
+          attemptFence: 2,
+          turn: 3,
+          modelCallId: "call",
+          modelAttemptId: "attempt",
+          attempt: 4,
+          sequence: 5,
+          changes: [
+            { channel: "reasoning" as const, offset: 0, delta: "thinking" },
+            { channel: "text" as const, offset: 0, delta: "tentative" },
+          ],
         },
       },
     }
