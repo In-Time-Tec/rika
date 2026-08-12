@@ -91,38 +91,40 @@ test("summarizes direct subagents and tools without inflating them with descenda
   expect(formatActivity(activity)).toBe("Running 1 subagent, 1 tool")
   expect(formatActivity({ _tag: "RunningTools", subagents: 5, tools: 3 })).toBe("Running 5 subagents, 3 tools")
 })
-test("exposes thread, mode, context, fast mode, and quit commands in the command palette", () => {
-  expect(commands).toEqual([
+test("exposes thread, mode, context, fast mode, subagent limits, and quit commands in the command palette", () => {
+  expect(commands.map((command) => command.id)).toEqual([
+    "threads",
+    "mode",
+    "context",
+    "fast-mode",
+    "max-subagents-0",
+    "max-depth-0",
+    "max-subagents-1",
+    "max-depth-1",
+    "max-subagents-2",
+    "max-depth-2",
+    "max-subagents-4",
+    "max-depth-4",
+    "max-subagents-8",
+    "max-depth-8",
+    "max-subagents-16",
+    "max-depth-16",
+    "quit",
+  ])
+  expect(filter("set max subagents to 4")).toEqual([
     {
-      id: "threads",
-      category: "thread",
-      label: "switch",
-      keybinding: "Ctrl+T",
-      action: { _tag: "SwitchThread" },
-    },
-    {
-      id: "mode",
-      category: "mode",
-      label: "change mode",
-      keybinding: "Ctrl+S",
-      action: { _tag: "OpenModePicker" },
-    },
-    {
-      id: "context",
-      category: "usage",
-      label: "show context and usage",
-      keybinding: "Ctrl+Y",
-      action: { _tag: "ToggleContextDetails" },
-    },
-    { id: "fast-mode", category: "rika", label: "toggle fast mode", action: { _tag: "ToggleFastMode" } },
-    {
-      id: "quit",
-      category: "rika",
-      label: "quit",
-      keybinding: "Ctrl+C",
-      action: { _tag: "Quit" },
+      id: "max-subagents-4",
+      category: "subagents",
+      label: "set max subagents to 4",
+      action: { _tag: "SetSubagentLimit", limit: "maxSubagents", value: 4 },
     },
   ])
+  expect(filter("set max depth to 1").find((command) => command.id === "max-depth-1")).toEqual({
+    id: "max-depth-1",
+    category: "subagents",
+    label: "set max depth to 1",
+    action: { _tag: "SetSubagentLimit", limit: "maxDepth", value: 1 },
+  })
   expect(filter("review")).toEqual([])
   expect(filter("reasoning")).toEqual([])
   expect(filter("changed files")).toEqual([])

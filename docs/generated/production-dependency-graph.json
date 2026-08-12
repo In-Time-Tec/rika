@@ -7844,6 +7844,30 @@
     },
     {
       "from": "apps/rika/src/interactive/controller/interactive-palette-controller.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/controller/interactive-palette-controller.ts",
+      "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
+      "specifier": "@rika/configuration/configuration-paths",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/controller/interactive-palette-controller.ts",
+      "to": "packages/configuration/src/settings/configuration-settings.ts",
+      "specifier": "@rika/configuration/configuration-settings",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/controller/interactive-palette-controller.ts",
       "to": "packages/product/src/operation/interactive/interactive-command.ts",
       "specifier": "@rika/product/interactive-command",
       "kind": "import",

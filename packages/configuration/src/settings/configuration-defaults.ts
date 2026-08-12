@@ -43,7 +43,7 @@ export const settingsDefaults: ConfigurationSettings = {
   threadTitle: { alias: "luna", effort: "low" },
   agents: {},
   compaction: { summaryModel: { alias: "sol", effort: "xhigh" } },
-  subagents: { maxDepth: 4, maxSubagents: 4 },
+  subagents: { maxDepth: 1, maxSubagents: 4 },
   keymap: { mode: "ctrl+s", palette: "ctrl+p", submit: "enter", newline: "shift+enter", interrupt: "escape" },
   extensionRoots: [`~/${globalDirectory}/extensions`, `${workspaceDirectory}/extensions`],
   mcp: {},

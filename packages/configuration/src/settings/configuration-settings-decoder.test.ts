@@ -23,7 +23,7 @@ describe("ConfigContract", () => {
       candidates: ["gpt-5.6-luna"],
       limits: { contextWindow: 272_000, maxInputTokens: 258_400, maxOutputTokens: 128_000, keepRecentTokens: 32_000 },
     })
-    expect(ConfigContract.defaults.subagents).toEqual({ maxDepth: 4, maxSubagents: 4 })
+    expect(ConfigContract.defaults.subagents).toEqual({ maxDepth: 1, maxSubagents: 4 })
     expect(Models.catalog.gpt56Sol.limits.contextWindow).toBe(272_000)
     expect(ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")).toMatchObject({
       alias: "terra",

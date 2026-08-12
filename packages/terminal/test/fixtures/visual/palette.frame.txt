@@ -1,22 +1,22 @@
-
-
-                   :
-            ●●●●●•••••::::·
   ╭─ Command Palette ────────────────────────────────────────────────────────╮
   │ >                                                                        │
-  │                                                                          │
-  │                                                                          │
   │           thread  switch                                         Ctrl+T  │
   │             mode  change mode                                    Ctrl+S  │
   │            usage  show context and usage                         Ctrl+Y  │
   │             rika  toggle fast mode                                       │
-  │             rika  quit                                           Ctrl+C  │
+  │        subagents  set max subagents to 0                                 │
+  │        subagents  set max depth to 0                                     │
+  │        subagents  set max subagents to 1                                 │
+  │        subagents  set max depth to 1                                     │
+  │        subagents  set max subagents to 2                                 │
+  │        subagents  set max depth to 2                                     │
+  │        subagents  set max subagents to 4                                 │
+  │        subagents  set max depth to 4                                     │
+  │        subagents  set max subagents to 8                                 │
+  │        subagents  set max depth to 8                                     │
+  │        subagents  set max subagents to 16                                │
+  │        subagents  set max depth to 16                                    │
   ╰──────────────────────────────────────────────────────────────────────────╯
-       ....····:::···...........
-         ......···............
-            ...............
-                   .
-
 ╭─────────────────────────────────────────────────────────────────────── high ─╮
 │                                                                              │
 │                                                                              │

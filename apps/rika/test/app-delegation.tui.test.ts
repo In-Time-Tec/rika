@@ -1,5 +1,6 @@
 import { expect, test } from "vitest"
-import { Effect } from "effect"
+import { Effect, FileSystem, Schema } from "effect"
+import { workspacePaths } from "@rika/configuration/configuration-paths"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
@@ -77,7 +78,19 @@ test(
         const palette = yield* app.waitFrame("Command Palette")
         expect(palette).toContain("switch")
         expect(palette).toContain("toggle fast mode")
+        expect(palette).toContain("set max subagents to 4")
+        expect(palette).toContain("set max depth to 1")
         expect(palette).toContain("quit")
+        yield* Effect.promise(() => app.type("set max depth to 2"))
+        app.pressEnter()
+        yield* app.waitFrame("Max depth set to 2")
+        const settings = yield* FileSystem.FileSystem.pipe(
+          Effect.flatMap((fileSystem) => fileSystem.readFileString(workspacePaths(app.workspace).settings)),
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)),
+        )
+        expect(settings).toEqual({ subagents: { maxDepth: 2 } })
+
+        app.pressKey("o", { ctrl: true })
         yield* Effect.promise(() => app.type("usage"))
         app.pressEnter()
         yield* app.waitFrame("Context & Usage")

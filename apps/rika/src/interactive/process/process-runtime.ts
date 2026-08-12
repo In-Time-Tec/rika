@@ -5,7 +5,7 @@ import * as ProcessPrompt from "./process-prompt"
 import * as ProcessWorkspace from "./process-workspace"
 import * as ProcessLayer from "./process-layer"
 import * as ProcessSignals from "./process-signals"
-import { paletteCommand } from "../controller/interactive-palette-controller"
+import * as PaletteController from "../controller/interactive-palette-controller"
 import { classifyPrompt, displayInput, promptParts } from "@rika/terminal/terminal-session"
 import { execute, type Action, type Adapter, type ModelTuning } from "@rika/terminal/terminal-session"
 import { update } from "@rika/terminal/terminal-state-reducer"
@@ -396,11 +396,37 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     },
   }
   const consumePendingAction = () => {
-    const action = loop.model.pendingAction as Action | undefined
-    const command = paletteCommand(action)
+    const action = loop.model.pendingAction as unknown
+    const command = PaletteController.paletteCommand(action)
     if (command?._tag === "NewThread") startSelection(() => session.newThread)
+    else if (
+      action !== null &&
+      typeof action === "object" &&
+      "_tag" in action &&
+      action._tag === "SetSubagentLimit" &&
+      "limit" in action &&
+      "value" in action &&
+      (action.limit === "maxDepth" || action.limit === "maxSubagents") &&
+      typeof action.value === "number"
+    )
+      run(
+        PaletteController.writeSubagentLimit(loop.model.workspace, action.limit, action.value).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              loop.renderer?.surface.showToast(
+                `${action.limit === "maxDepth" ? "Max depth" : "Max subagents"} set to ${action.value}`,
+              )
+            }),
+          ),
+          Effect.catch(() =>
+            Effect.sync(() => {
+              loop.renderer?.surface.showToast("Could not update workspace subagent settings", "#e06c75")
+            }),
+          ),
+        ),
+      )
     else if (action !== undefined) {
-      execute(adapter, action)
+      execute(adapter, action as Action)
     }
     loop.model = update(loop.model, { _tag: "PaletteActionConsumed" })
   }

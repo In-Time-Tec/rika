@@ -62,7 +62,7 @@ test("preserves the pinned OpenAI account identity and rejects incomplete accoun
   const route = {
     version: 2 as const,
     mode: "default",
-    subagents: { maxDepth: 4, maxSubagents: 4 },
+    subagents: { maxDepth: 1, maxSubagents: 4 },
     compaction: { strategy: "default" as const, summaryPrompt: "Pinned summary prompt" },
     main: accountModel("main"),
     oracle: accountModel("oracle"),

@@ -47,7 +47,7 @@ it.effect("resolves complete ordered model candidates deterministically", () =>
     })
     expect(first).toEqual(second)
     expect(first.version).toBe(2)
-    expect(first.subagents).toEqual({ maxDepth: 4, maxSubagents: 4 })
+    expect(first.subagents).toEqual({ maxDepth: 1, maxSubagents: 4 })
     expect(first.tokenBudget).toBe(12_000)
     expect(first.main.registrationIdentity).toMatch(/^rika:model:v1:[a-f0-9]{64}$/)
     expect(first.main.candidates).toHaveLength(Settings.Defaults.settingsDefaults.models.luna!.candidates.length)

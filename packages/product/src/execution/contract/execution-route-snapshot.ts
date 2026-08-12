@@ -89,7 +89,7 @@ export const testExecutionRoute = (mode = "test"): ExecutionRouteSnapshot => {
   return {
     version: 2,
     mode,
-    subagents: { maxDepth: 4, maxSubagents: 4 },
+    subagents: { maxDepth: 1, maxSubagents: 4 },
     compaction: { strategy: "default", summaryPrompt: defaultCompactionSummaryPrompt },
     title: { ...route, role: "title", effort: "low" },
     compactionSummary: { ...route, role: "compaction" },
