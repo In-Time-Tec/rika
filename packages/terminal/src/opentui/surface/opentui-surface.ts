@@ -1,16 +1,18 @@
 import {
   BoxRenderable,
-  ScrollBarRenderable,
   ScrollBoxRenderable,
   CliRenderEvents,
+  StyledText,
   TextRenderable,
   SystemClock,
+  bold,
+  dim,
+  fg,
   type CliRenderer,
   type MouseEvent,
   createCliRenderer,
 } from "@opentui/core"
 import { Clock, Effect, Clock as EffectClock, Schema } from "effect"
-import { isFollowing } from "../../presentation/transcript/transcript-viewport"
 import { boundedThreadSidebarWidth } from "../../state/model/terminal-layout-state"
 import { colors, spacing } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
@@ -21,15 +23,10 @@ import { GoalController } from "./opentui-goal-controller"
 import { LoaderController } from "./opentui-loader-controller"
 import { HoverController } from "./opentui-hover-controller"
 import type { Handlers, SurfaceOptions } from "./opentui-surface-state"
-import { ProjectedEditorRenderable, cutoutBackground } from "./opentui-surface-renderables"
-
-class TranscriptScrollBoxRenderable extends ScrollBoxRenderable {
-  onPositionChanged: (() => void) | undefined
-  override scrollTo(position: number | { readonly x: number; readonly y: number }): void {
-    super.scrollTo(position)
-    this.onPositionChanged?.()
-  }
-}
+import { ProjectedEditorRenderable } from "./opentui-surface-renderables"
+import { TranscriptPane } from "./opentui-transcript-pane"
+import type { TranscriptScrollBoxRenderable } from "./opentui-transcript-pane-geometry"
+import { ThreadBrowser } from "./opentui-thread-browser"
 
 class SidebarScrollBoxRenderable extends ScrollBoxRenderable {
   onWindowChanged: (() => void) | undefined
@@ -91,55 +88,21 @@ export class Surface extends SurfaceLifecycle {
     this.main = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "row" })
     this.contentColumn = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "column" })
     this.transcriptRow = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "row" })
-    const transcriptBackground = cutoutBackground(renderer)
-    this.transcriptScroll = new TranscriptScrollBoxRenderable(renderer, {
-      flexGrow: 1,
-      scrollY: true,
-      stickyScroll: true,
-      stickyStart: "bottom",
-      viewportCulling: true,
-      verticalScrollbarOptions: { visible: false },
-      rootOptions: { backgroundColor: transcriptBackground },
-      wrapperOptions: { backgroundColor: transcriptBackground },
-      viewportOptions: { backgroundColor: transcriptBackground },
-      contentOptions: {
-        flexDirection: "column",
-        justifyContent: "flex-end",
-        backgroundColor: transcriptBackground,
-        paddingTop: spacing.transcript,
-        paddingBottom: 0,
-        paddingLeft: spacing.transcript,
-        paddingRight: spacing.transcript + 1,
-      },
-      onMouseScroll: (event) => this.handleTranscriptWheel(event),
-    })
-    this.transcriptScroll.verticalScrollBar.visible = false
-    this.transcriptScroll.onPositionChanged = () => {
-      if (this.transcriptBandRefreshing) return
-      this.ensureTranscriptBandsAt(this.transcriptScroll.scrollTop)
-      this.renderer.requestRender()
-    }
-    this.transcriptTopSpacer = new BoxRenderable(renderer, { height: 0, flexShrink: 0, visible: false })
-    this.transcriptBottomSpacer = new BoxRenderable(renderer, { height: 0, flexShrink: 0, visible: false })
-    this.transcriptScrollbar = new ScrollBarRenderable(renderer, {
-      orientation: "vertical",
-      showArrows: false,
-      position: "absolute",
-      top: 0,
-      bottom: 0,
-      right: 0,
-      width: 1,
-      visible: false,
-      trackOptions: { foregroundColor: toOpenColor(colors.text), backgroundColor: toOpenColor(colors.muted) },
-      onChange: (position) => {
-        if (this.scrollbarSyncing || this.destroyed) return
-        this.cancelWheelReport()
-        this.applyVirtualScrollbarPosition(position)
-        if (!this.atTranscriptBottom() && isFollowing(this.transcriptViewport.mode))
-          this.dispatchTranscriptViewport({ _tag: "DetachCommanded", anchor: this.captureViewportAnchor() })
-        this.queueTranscriptScroll(() => this.reportTranscriptScroll())
+    this.transcriptPane = new TranscriptPane(renderer, {
+      clock: this.clock,
+      handlers: {
+        scroll: (offset) => this.handlers.scroll?.(offset),
+        scrollGeometry: (offset) => this.handlers.scrollGeometry?.(offset),
+        scrollFollow: () => this.handlers.scrollFollow?.(),
+        clickToggle: (unit) => this.handlers.clickToggle?.(unit),
+        openPath: (target) => this.handlers.openPath?.(target),
+        clearWelcome: () => this.welcomeController.clear(),
       },
     })
+    this.transcriptScroll = this.transcriptPane.scroll
+    this.transcriptTopSpacer = this.transcriptPane.topSpacer
+    this.transcriptBottomSpacer = this.transcriptPane.bottomSpacer
+    this.transcriptScrollbar = this.transcriptPane.scrollbar
     this.queueBox = new BoxRenderable(renderer, {
       border: true,
       borderStyle: "rounded",
@@ -292,6 +255,36 @@ export class Surface extends SurfaceLifecycle {
     })
     this.toast = new TextRenderable(renderer, { content: "", fg: toOpenColor(colors.text) })
     this.toastBox.add(this.toast)
+    this.quitConfirmationBox = new BoxRenderable(renderer, {
+      visible: false,
+      position: "absolute",
+      right: 2,
+      bottom: spacing.inputHeight + 1,
+      width: 24,
+      height: 4,
+      zIndex: 40,
+      border: true,
+      borderStyle: "rounded",
+      borderColor: toOpenColor(colors.text),
+      focusedBorderColor: toOpenColor(colors.text),
+      backgroundColor: toOpenColor(colors.surface),
+      paddingLeft: 1,
+      paddingRight: 1,
+      overflow: "hidden",
+      title: " Ctrl+C then ",
+      titleColor: toOpenColor(colors.amber),
+      titleAlignment: "left",
+    })
+    this.quitConfirmation = new TextRenderable(renderer, {
+      content: new StyledText([
+        bold(fg(toOpenColor(colors.blue))("Ctrl+C")),
+        fg(toOpenColor(colors.text))(" Quit\n"),
+        bold(fg(toOpenColor(colors.blue))("Esc")),
+        dim(fg(toOpenColor(colors.text))(" cancel")),
+      ]),
+      selectable: false,
+    })
+    this.quitConfirmationBox.add(this.quitConfirmation)
     this.paletteBox = new BoxRenderable(renderer, {
       visible: false,
       position: "absolute",
@@ -310,6 +303,7 @@ export class Surface extends SurfaceLifecycle {
       overflow: "hidden",
     })
     this.palette = new TextRenderable(renderer, { content: "", fg: toOpenColor(colors.text), wrapMode: "word" })
+    this.threadBrowser = new ThreadBrowser(renderer, this.clock)
     this.contextDividerOne = new TextRenderable(renderer, {
       content: "",
       fg: toOpenColor(colors.muted),
@@ -390,6 +384,8 @@ export class Surface extends SurfaceLifecycle {
       verticalScrollbarOptions: { marginRight: 1 },
       onMouseScroll: () => this.defer(() => this.refreshSidebarWindow()),
     })
+    this.changedFilesBox.focusable = false
+    this.changedFilesBox.verticalScrollBar.focusable = false
     this.changedFilesBox.onWindowChanged = () => this.refreshSidebarWindow()
     this.changedFilesText = new TextRenderable(renderer, {
       content: "",
@@ -399,7 +395,6 @@ export class Surface extends SurfaceLifecycle {
     })
     this.changedFilesBox.add(this.changedFilesText)
     this.initializeSidebar()
-    this.initializeFocus()
     this.initializeToast()
     this.changedFilesBox.verticalScrollBar.on?.("change", () => {
       this.changedFilesBox.syncVirtualScroll()
@@ -449,8 +444,8 @@ export class Surface extends SurfaceLifecycle {
     this.paletteBox.add(this.contextDividerTwo)
     this.paletteBox.add(this.contextFooter)
     this.paletteBox.add(this.overlayEditor)
-    this.transcriptRow.add(this.transcriptScroll)
-    this.transcriptRow.add(this.transcriptScrollbar)
+    this.threadBrowser.mount(this.paletteBox)
+    this.transcriptPane.mount(this.transcriptRow)
     this.contentColumn.add(this.transcriptRow)
     this.contentColumn.add(this.queueBox)
     this.contentColumn.add(this.inputBox)
@@ -468,16 +463,11 @@ export class Surface extends SurfaceLifecycle {
     renderer.root.add(this.overlayHintOne)
     renderer.root.add(this.overlayHintTwo)
     renderer.root.add(this.toastBox)
-    this.paletteBox.onMouseScroll = (event) => {
-      if (this.model?.threadSwitcher.open !== true || event.scroll === undefined) return
-      event.stopPropagation()
-      this.handlers.threadPreviewScroll?.(event.scroll.direction === "up" ? 3 : -3)
-    }
+    renderer.root.add(this.quitConfirmationBox)
     renderer.keyInput.on("keypress", this.onKey)
     renderer.keyInput.on("paste", this.onPaste)
     renderer.on(CliRenderEvents.RESIZE, this.onResize)
     renderer.on(CliRenderEvents.SELECTION, this.onSelection)
-    renderer.on(CliRenderEvents.FRAME, this.recordRenderedTranscriptScroll)
   }
 }
 

@@ -7,12 +7,13 @@ import { workspaceExecutionRoute } from "../src/server/composition/server-execut
 const routeFor = (
   settings: Settings.ConfigurationSettings,
   status: Effect.Effect<OpenAiAuthContract.Status, { readonly message: string }>,
+  tuning?: { readonly fastMode?: boolean },
 ) =>
   workspaceExecutionRoute({
     testModel: undefined,
     effectiveConfigForWorkspace: () => Effect.succeed({ settings }),
     openAiAccountStatus: status,
-  })("medium", undefined, "/workspace")
+  })("medium", tuning, "/workspace")
 
 it.effect("selects the stored OpenAI account for each newly admitted native route", () =>
   Effect.gen(function* () {
@@ -77,6 +78,27 @@ it.effect("keeps API-key fallback when no OpenAI account is stored", () =>
     expect(route.main.candidates[0]?.providerConnection).toMatchObject({
       authentication: "api-key",
       apiKeyEnvironment: "OPENAI_API_KEY",
+    })
+  }),
+)
+
+it.effect("uses fast only for routes that provide a fast variant", () =>
+  Effect.gen(function* () {
+    const settings: Settings.ConfigurationSettings = {
+      ...Settings.Defaults.settingsDefaults,
+      modes: {
+        ...Settings.Defaults.settingsDefaults.modes,
+        medium: {
+          ...Settings.Defaults.settingsDefaults.modes.medium,
+          oracle: { alias: "fable", effort: "medium" },
+        },
+      },
+    }
+    const route = yield* routeFor(settings, Effect.succeed({ _tag: "Unauthenticated" }), { fastMode: true })
+    expect(route.main.fast).toBe(true)
+    expect(route.oracle.fast).toBe(false)
+    expect(route.oracle.candidates[0]?.providerOptions).toMatchObject({
+      output_config: { effort: "medium" },
     })
   }),
 )

@@ -12,10 +12,10 @@ export const InteractiveEventSchema = Schema.Union([
   ThreadView.ResyncRequired,
   Schema.Struct({ _tag: Schema.tag("ThreadsListed"), threads: Schema.Array(ThreadSummary.ThreadSummary) }),
   Schema.Struct({
-    _tag: Schema.tag("ExecutionModelPreviewed"),
+    _tag: Schema.tag("ExecutionModelPreviewChanged"),
     threadId: Thread.ThreadId,
     turnId: Turn.TurnId,
-    preview: ExecutionGateway.ModelPreviewed,
+    preview: ExecutionGateway.ModelPreviewEvent,
   }),
   Schema.Struct({
     _tag: Schema.tag("ContextDiagnostics"),
@@ -57,6 +57,11 @@ export const InteractiveEventSchema = Schema.Union([
     submissionId: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({
+    _tag: Schema.tag("SubmissionRejected"),
+    message: Schema.String,
+    submissionId: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({
     _tag: Schema.tag("ShellCompleted"),
     threadId: Thread.ThreadId,
     command: Schema.String,
@@ -89,9 +94,15 @@ export const InteractiveEventSchema = Schema.Union([
   Schema.Struct({
     _tag: Schema.tag("ThreadPreviewLoaded"),
     threadId: Schema.String,
-    turns: Schema.Array(Schema.Struct({ prompt: Schema.String, units: Schema.Array(Schema.Unknown) })),
+    requestId: Schema.Int,
+    units: Schema.Array(Schema.Unknown),
   }),
-  Schema.Struct({ _tag: Schema.tag("ThreadPreviewFailed"), threadId: Schema.String, message: Schema.String }),
+  Schema.Struct({
+    _tag: Schema.tag("ThreadPreviewFailed"),
+    threadId: Schema.String,
+    requestId: Schema.Int,
+    message: Schema.String,
+  }),
   Schema.Struct({
     _tag: Schema.tag("TurnRetryScheduled"),
     threadId: Thread.ThreadId,

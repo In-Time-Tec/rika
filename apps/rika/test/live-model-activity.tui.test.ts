@@ -45,3 +45,75 @@ test(
     ),
   tuiTestTimeout,
 )
+
+test(
+  "renders answer text beyond 4,096 UTF-16 code units before the model completes",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const beyondOldBoundary = `${"stream ".repeat(700)}\nLIVE_BEYOND_4096_BOUNDARY`
+        const app = yield* TuiApp.tuiApp({
+          script: [
+            model.turn([model.part(beyondOldBoundary), model.part("\nLIVE_STREAM_FINAL_MARKER")], {
+              streamPartDelayMillis: 750,
+            }),
+          ],
+        })
+
+        yield* Effect.promise(() => app.type("Stream well beyond the old preview boundary."))
+        app.pressEnter()
+
+        const live = yield* app.waitFrame("LIVE_BEYOND_4096_BOUNDARY", 30_000)
+        expect(live).toContain("Streaming")
+        expect(live).not.toContain("LIVE_STREAM_FINAL_MARKER")
+
+        yield* app.waitFrame("LIVE_STREAM_FINAL_MARKER", 30_000)
+        yield* app.settled
+        const completed = app.frame()
+        expect(completed.match(/LIVE_BEYOND_4096_BOUNDARY/g) ?? []).toHaveLength(1)
+        expect(completed.match(/LIVE_STREAM_FINAL_MARKER/g) ?? []).toHaveLength(1)
+        expect(completed).not.toContain("Execution failed")
+        yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)
+
+test(
+  "streams a later model call after a tool response",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          script: [
+            model.turn([
+              model.binding(
+                { module: "processes", operation: "start", input: { command: "printf TOOL_CONTINUATION_OK" } },
+                "streaming-tool",
+              ),
+            ]),
+            model.turn([model.part("SECOND_CALL_STREAMING"), model.part("\nSECOND_CALL_FINAL")], {
+              streamPartDelayMillis: 750,
+            }),
+          ],
+        })
+
+        yield* Effect.promise(() => app.type("Use a tool, then stream the answer."))
+        app.pressEnter()
+
+        const live = yield* app.waitFrame("SECOND_CALL_STREAMING", 30_000)
+        expect(live).toContain("Streaming")
+        expect(live).toContain("printf TOOL_CONTINUATION_OK")
+        expect(live).not.toContain("SECOND_CALL_FINAL")
+
+        yield* app.waitFrame("SECOND_CALL_FINAL", 30_000)
+        yield* app.settled
+        const completed = app.frame()
+        expect(completed.match(/SECOND_CALL_STREAMING/g) ?? []).toHaveLength(1)
+        expect(completed.match(/SECOND_CALL_FINAL/g) ?? []).toHaveLength(1)
+        expect(completed).not.toContain("Execution failed")
+        yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)

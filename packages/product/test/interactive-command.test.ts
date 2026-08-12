@@ -30,3 +30,20 @@ describe("Interactive authorization commands", () => {
     }),
   )
 })
+
+describe("Interactive preview commands", () => {
+  it.effect("forwards the preview request identity", () =>
+    Effect.gen(function* () {
+      const calls: Array<unknown> = []
+      const session = {
+        previewThread: (threadId: string, requestId: number) => Effect.sync(() => calls.push([threadId, requestId])),
+      } as unknown as InteractiveSession
+      yield* executeInteractiveCommand(session, {
+        _tag: "PreviewThread",
+        threadId: "thread",
+        requestId: 42,
+      })
+      expect(calls).toEqual([["thread", 42]])
+    }),
+  )
+})

@@ -27,7 +27,7 @@ const projection = (events: ReadonlyArray<ExecutionGateway.WatchEvent>) => {
   const units = new Map<string, Unit>()
   let state: Change["state"] | undefined
   for (const event of events) {
-    if (event._tag === "ModelPreviewed") continue
+    if (event._tag === "ModelPreview" || event._tag === "ModelPreviewCleared") continue
     state = event.state
     if (event._tag === "ProjectionSnapshot") {
       units.clear()

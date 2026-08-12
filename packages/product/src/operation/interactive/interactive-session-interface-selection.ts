@@ -64,36 +64,30 @@ export const makeInteractiveSessionSelection = (
     )
   const readQueueOperation = (id: string) =>
     safe(sessionDispatch, readQueue(Thread.ThreadId.make(id), selectionDispatch(typedGetCurrentSelectionEpoch())))
-  const previewThread = (id: string) =>
+  const previewThread = (id: string, requestId: number) =>
     Effect.gen(function* () {
       const threads = yield* ThreadRepository.Service
       const turns = yield* TurnRepository.Service
       const transcripts = yield* TranscriptRepository.Service
       const thread = yield* threads.get(Thread.ThreadId.make(id))
       if (thread === undefined) {
-        sessionDispatch({ _tag: "ThreadPreviewFailed", threadId: id, message: "Thread not found" })
+        sessionDispatch({ _tag: "ThreadPreviewFailed", threadId: id, requestId, message: "Thread not found" })
         return
       }
       const recent = yield* turns.listRecentNonqueued(thread.id, 4)
-      const previewTurns = yield* Effect.forEach(recent, (turn) =>
+      const previewUnits = yield* Effect.forEach(recent, (turn) =>
         Effect.gen(function* () {
           const projection = yield* transcripts.get(turn.id)
-          return {
-            prompt: turn.prompt,
-            units: projection?.units ?? [promptUnit(turn)],
-          }
-        }).pipe(
-          Effect.orElseSucceed(() => ({
-            prompt: turn.prompt,
-            units: [promptUnit(turn)],
-          })),
-        ),
+          return projection?.units ?? [promptUnit(turn)]
+        }).pipe(Effect.orElseSucceed(() => [promptUnit(turn)])),
       )
-      sessionDispatch({ _tag: "ThreadPreviewLoaded", threadId: id, turns: previewTurns })
+      sessionDispatch({ _tag: "ThreadPreviewLoaded", threadId: id, requestId, units: previewUnits.flat() })
     }).pipe(
       Effect.provide(executionDependencies),
       Effect.catchCause((cause) =>
-        Effect.sync(() => sessionDispatch({ _tag: "ThreadPreviewFailed", threadId: id, message: Cause.pretty(cause) })),
+        Effect.sync(() =>
+          sessionDispatch({ _tag: "ThreadPreviewFailed", threadId: id, requestId, message: Cause.pretty(cause) }),
+        ),
       ),
     )
   const reopenThread = safe(

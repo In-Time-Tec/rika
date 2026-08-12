@@ -51,7 +51,6 @@ const ThreadSwitcherStateSchema = Schema.Struct({
   query: Schema.String,
   selected: Schema.Finite,
   kind: Schema.Literals(["switch", "mention"]),
-  previewScroll: Schema.Finite,
 })
 const ThreadSidebarStateSchema = Schema.Struct({
   open: Schema.Boolean,
@@ -74,13 +73,14 @@ const ChangedFilesSchema = Schema.Union([
 ])
 const ThreadPreviewValueSchema = Schema.Struct({
   threadId: Schema.String,
-  turns: Schema.Array(Schema.Struct({ prompt: Schema.String, units: Schema.Array(TranscriptUnit.Unit) })),
+  requestId: Schema.Int,
+  units: Schema.Array(TranscriptUnit.Unit),
 })
 const ThreadPreviewSchema = Schema.Union([
   loadableSchemas.idle,
-  Schema.TaggedStruct("Loading", { previous: Schema.optionalKey(ThreadPreviewValueSchema) }),
+  Schema.TaggedStruct("Loading", { threadId: Schema.String, requestId: Schema.Int }),
   Schema.TaggedStruct("Ready", { value: ThreadPreviewValueSchema }),
-  Schema.TaggedStruct("Failed", { message: Schema.String }),
+  Schema.TaggedStruct("Failed", { threadId: Schema.String, requestId: Schema.Int, message: Schema.String }),
 ])
 export const Model = Schema.Struct({
   workspace: Schema.String,
@@ -216,7 +216,7 @@ const initialImpl: {
     modePicker: { open: false, selected: 0 },
     modeCommit: undefined,
     filePicker: { open: false, query: "", selected: 0, items: loadableIdle },
-    threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
+    threadSwitcher: { open: false, query: "", selected: 0, kind: "switch" },
     shortcutsOpen: false,
     shortcutsTrigger: undefined,
     composerHeight: 5,
@@ -239,7 +239,7 @@ const initialImpl: {
     sidebarWidth: 52,
     threadLoading: false,
     refoldingThreadIds: [],
-    threadPreview: loadableIdle,
+    threadPreview: { _tag: "Idle" },
   }),
 )
 export const withModeRouteMap: {

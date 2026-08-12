@@ -149,11 +149,11 @@ test(
 )
 
 test(
-  "exits cleanly when Ctrl+C quits the idle interactive TUI",
+  "exits cleanly when Ctrl+C confirms and quits the idle interactive TUI",
   () =>
     run(
       Effect.gen(function* () {
-        const result = yield* interactivePty([{ after: "Welcome to Rika", write: "\u0003" }])
+        const result = yield* interactivePty([{ after: "Welcome to Rika", write: "\u0003\0\u0003" }])
         expect(result.timedOut, result.output).toBe(false)
         expect(result.actionsCompleted).toBe(1)
         expect(result.exitCode, result.output).toBe(0)

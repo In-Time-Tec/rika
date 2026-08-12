@@ -161,9 +161,9 @@ export const promotePendingTurns = (input: {
             change,
           })
         }
-        const publishPreview = (preview: ExecutionGateway.ModelPreviewed) => {
+        const publishPreview = (preview: ExecutionGateway.ModelPreviewEvent) => {
           input.emit(input.dispatch, {
-            _tag: "ExecutionModelPreviewed",
+            _tag: "ExecutionModelPreviewChanged",
             threadId: input.thread.id,
             turnId: turn.id,
             preview,
@@ -232,9 +232,9 @@ export const promotePendingTurns = (input: {
               change,
             })
           }
-          const publishPreview = (preview: ExecutionGateway.ModelPreviewed) => {
+          const publishPreview = (preview: ExecutionGateway.ModelPreviewEvent) => {
             input.emit(input.dispatch, {
-              _tag: "ExecutionModelPreviewed",
+              _tag: "ExecutionModelPreviewChanged",
               threadId: input.thread.id,
               turnId: promoted.id,
               preview,

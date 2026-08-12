@@ -362,9 +362,9 @@ test("renders every transcript block variant and sidebar state", () => {
   expect(renderedBlocks).not.toContain(" at 42")
   expect(renderedBlocks).toContain("Execution failed\nModel unavailable")
   expect(renderedBlocks).toContain("2×3 · 4 B")
-  expect(renderedBlocks).toContain('⠿ ts await rika.workspace.read({ path: "a.ts" }) · 1 line')
-  expect(renderedBlocks).toContain("✓ $ await Bun.$`bun test` · 1 line · 1.2s · truncated")
-  expect(renderedBlocks).toContain('✕ ts throw new Error("boom") · 1 line')
+  expect(renderedBlocks).toContain('⠿ ts await rika.workspace.read({ path: "a.ts" })')
+  expect(renderedBlocks).toContain("✓ $ await Bun.$`bun test` 1.2s truncated")
+  expect(renderedBlocks).toContain('✕ ts throw new Error("boom")')
   const state = model({
     blocks: [...blocks],
     currentThreadId: "a",

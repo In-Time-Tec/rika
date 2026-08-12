@@ -335,6 +335,8 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     quit: Effect.gen(function* () {
       yield* settled
       setup.mockInput.pressCtrlC()
+      yield* Effect.promise(() => setup.flush())
+      setup.mockInput.pressCtrlC()
       yield* Fiber.join(operationFiber).pipe(Effect.asVoid, Effect.orDie)
     }),
   }

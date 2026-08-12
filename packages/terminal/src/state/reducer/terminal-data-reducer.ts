@@ -57,15 +57,17 @@ const reduceDataImpl = (
       const browserThread = browserThreads[browserSelected]
       let previewThreadId: string | undefined
       if (model.threadPreview._tag === "Ready") previewThreadId = model.threadPreview.value.threadId
-      else if (model.threadPreview._tag === "Loading") previewThreadId = model.threadPreview.previous?.threadId
+      else if (model.threadPreview._tag === "Loading" || model.threadPreview._tag === "Failed")
+        previewThreadId = model.threadPreview.threadId
       return {
         ...replacedThreads,
         threadSwitcher: {
           ...replacedThreads.threadSwitcher,
           selected: Math.min(browserSelected, Math.max(0, browserThreads.length - 1)),
-          ...(browserThread?.id === previewThreadId ? {} : { previewScroll: 0 }),
         },
-        ...(model.threadSwitcher.open && browserThread?.id !== previewThreadId ? { threadPreview: idle } : {}),
+        ...(model.threadSwitcher.open && browserThread?.id !== previewThreadId
+          ? { threadPreview: { _tag: "Idle" as const } }
+          : {}),
       }
     }
     case "ThreadActivated":
@@ -123,14 +125,6 @@ const reduceDataImpl = (
             pendingAction: thread.id === model.currentThreadId ? undefined : { _tag: "SelectThread", id: thread.id },
           }
     }
-    case "ThreadPreviewScrolled":
-      return {
-        ...model,
-        threadSwitcher: {
-          ...model.threadSwitcher,
-          previewScroll: Math.max(0, model.threadSwitcher.previewScroll + message.offset),
-        },
-      }
     case "EventReplayed":
       if (model.seenEventIds.includes(message.event.id)) return model
       {

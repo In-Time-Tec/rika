@@ -1,9 +1,8 @@
 import * as ThreadView from "@rika/product/thread-view"
 import { Function, Result } from "effect"
 import { maxInMemoryTranscriptUnits, trimTranscriptTimeline } from "@rika/terminal/terminal-timeline-bounds"
-import { applyRootUnits } from "@rika/terminal/terminal-transcript-presentation"
+import { applyRootUnits, applyTurnDelta } from "@rika/terminal/terminal-transcript-presentation"
 import type { Model, ThreadItem } from "@rika/terminal/terminal-state"
-import { streamActivity } from "@rika/terminal/terminal-message"
 import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
 import { overlayPendingSubmissions } from "@rika/terminal/terminal-submission-state"
 import type { State, TranscriptEvent, Update } from "./interactive-controller"
@@ -17,10 +16,8 @@ const activeUnitActivity = (
 ): Model["activity"] => {
   if (entry === undefined) return undefined
   if (modelPreview?.turnId === String(entry.turn.id)) {
-    if (modelPreview.preview.text.length > 0)
-      return streamActivity(undefined, "Streaming", modelPreview.preview.text, undefined)
-    if (modelPreview.preview.reasoning.length > 0)
-      return streamActivity(undefined, "Thinking", modelPreview.preview.reasoning, undefined)
+    if (modelPreview.textBytes > 0) return { _tag: "Streaming", bytes: modelPreview.textBytes }
+    if (modelPreview.reasoningBytes > 0) return { _tag: "Thinking", bytes: modelPreview.reasoningBytes }
   }
   let subagents = 0
   let tools = 0
@@ -173,7 +170,7 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
       },
       preserveAnchor: false,
     }
-  if (event._tag === "ExecutionModelPreviewed") {
+  if (event._tag === "ExecutionModelPreviewChanged") {
     if (state.view === undefined || event.threadId !== state.view.thread.id) return unchanged(state)
     const turn = state.view.turns.find((candidate) => candidate.turn.id === event.turnId)
     if (
@@ -184,20 +181,36 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
         turn.turn.status !== "waiting")
     )
       return unchanged(state)
-    const modelPreview = ModelPreview.replace(state.modelPreview, state.view, String(event.turnId), event.preview)
+    const modelPreview = ModelPreview.replace(state.modelPreview, String(event.turnId), event.preview)
     if (modelPreview === state.modelPreview) return unchanged(state)
+    const previous = ModelPreview.units(state.modelPreview, state.view)
+    const next = ModelPreview.units(modelPreview, state.view)
     return {
-      state: { ...state, modelPreview, model: project(state.model, state.view, modelPreview) },
+      state: {
+        ...state,
+        modelPreview,
+        model: {
+          ...applyTurnDelta(state.model, String(event.turnId), {
+            upsert: next,
+            remove: previous
+              .filter((unit) => !next.some((candidate) => candidate.key === unit.key))
+              .map((unit) => unit.key),
+          }),
+          activity: activeUnitActivity(turn, modelPreview),
+        },
+      },
       preserveAnchor: false,
     }
   }
-  if (event._tag === "ResyncRequired")
+  if (event._tag === "ResyncRequired") {
+    const foreign = state.view !== undefined && event.threadId !== state.view.thread.id
     return {
-      state,
+      state: foreign ? state : clearPreviewStateImpl(state, undefined),
       preserveAnchor: false,
       resync: true,
-      rejection: state.view !== undefined && event.threadId !== state.view.thread.id ? "thread" : "gap",
+      rejection: foreign ? "thread" : "gap",
     }
+  }
   if (event._tag === "ThreadViewSnapshot") {
     const sameThread = state.view?.thread.id === event.snapshot.thread.id
     if (sameThread && state.view !== undefined && event.snapshot.revision < state.view.revision) return unchanged(state)
@@ -212,15 +225,23 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
       preserveAnchor: sameThread,
     }
   }
-  if (state.view === undefined) return { state, preserveAnchor: false, resync: true, rejection: "gap" }
-  const applied = ThreadView.apply(state.view, event.patch)
-  if (Result.isFailure(applied))
+  if (state.view === undefined)
     return {
-      state,
+      state: clearPreviewStateImpl(state, undefined),
       preserveAnchor: false,
       resync: true,
-      rejection: applied.failure._tag === "ThreadViewForeignThread" ? "thread" : "revision",
+      rejection: "gap",
     }
+  const applied = ThreadView.apply(state.view, event.patch)
+  if (Result.isFailure(applied)) {
+    const foreign = applied.failure._tag === "ThreadViewForeignThread"
+    return {
+      state: foreign ? state : clearPreviewStateImpl(state, undefined),
+      preserveAnchor: false,
+      resync: true,
+      rejection: foreign ? "thread" : "revision",
+    }
+  }
   const modelPreview = ModelPreview.reconcile(state.modelPreview, applied.success)
   return {
     state: {

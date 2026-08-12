@@ -31,6 +31,6 @@ export interface InteractiveSession {
   readonly newThread: Effect.Effect<void, OperationUnavailable>
   readonly selectThread: (threadId: string) => Effect.Effect<void, OperationUnavailable>
   readonly readQueue: (threadId: string) => Effect.Effect<void, OperationUnavailable>
-  readonly previewThread: (threadId: string) => Effect.Effect<void, OperationUnavailable>
+  readonly previewThread: (threadId: string, requestId: number) => Effect.Effect<void, OperationUnavailable>
   readonly reopenThread: Effect.Effect<void, OperationUnavailable>
 }

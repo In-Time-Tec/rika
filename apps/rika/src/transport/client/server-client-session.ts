@@ -106,7 +106,7 @@ export const makeInteractiveSession = (options: SessionOptions): InteractiveSess
     newThread: invoke({ _tag: "NewThread" }),
     selectThread: (threadId) => invoke({ _tag: "SelectThread", threadId }),
     readQueue: (threadId) => invoke({ _tag: "ReadQueue", threadId }),
-    previewThread: (threadId) => invoke({ _tag: "PreviewThread", threadId }),
+    previewThread: (threadId, requestId) => invoke({ _tag: "PreviewThread", threadId, requestId }),
     reopenThread: invoke({ _tag: "ReopenThread" }),
   }
 }

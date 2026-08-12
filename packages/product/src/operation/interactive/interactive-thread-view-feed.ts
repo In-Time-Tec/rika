@@ -480,11 +480,12 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       return [resync(current)]
     }
     switch (event._tag) {
-      case "ExecutionModelPreviewed":
+      case "ExecutionModelPreviewChanged":
         return current !== undefined && event.threadId === current.thread.id ? [event] : []
       case "ContextDiagnostics":
       case "TurnRetryScheduled":
       case "ExecutionFailed":
+      case "SubmissionRejected":
       case "ExecutionControlFailed":
       case "QueueFull":
       case "SubmissionAdmitted":

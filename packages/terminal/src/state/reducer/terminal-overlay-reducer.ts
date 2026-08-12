@@ -340,16 +340,11 @@ const reduceOverlayImpl = (
       if (model.changedFiles._tag === "Ready" && sameChangedFiles(model.changedFiles.value, message.files)) return model
       return { ...model, changedFiles: ready([...message.files]) }
     }
-    case "ThreadPreviewRequested": {
-      let previous: Extract<Model["threadPreview"], { _tag: "Ready" }>["value"] | undefined
-      if (model.threadPreview._tag === "Ready") previous = model.threadPreview.value
-      else if (model.threadPreview._tag === "Loading") previous = model.threadPreview.previous
+    case "ThreadPreviewRequested":
       return {
         ...model,
-        threadPreview: { _tag: "Loading", ...(previous === undefined ? {} : { previous }) },
-        threadSwitcher: { ...model.threadSwitcher, previewScroll: 0 },
+        threadPreview: { _tag: "Loading", threadId: message.threadId, requestId: message.requestId },
       }
-    }
     case "ThreadOpenRequested":
       return { ...model, threadLoading: true }
     case "ThreadOpenCompleted":
@@ -359,15 +354,39 @@ const reduceOverlayImpl = (
       return { ...model, refoldingThreadIds: message.refolding ? [...others, message.threadId] : others }
     }
     case "ThreadPreviewLoaded":
+      if (
+        model.threadPreview._tag !== "Loading" ||
+        model.threadPreview.threadId !== message.threadId ||
+        model.threadPreview.requestId !== message.requestId
+      )
+        return model
       return {
         ...model,
-        threadPreview: ready({
-          threadId: message.threadId,
-          turns: message.turns.map((turn) => ({ prompt: turn.prompt, units: [...turn.units] })),
-        }),
+        threadPreview: {
+          _tag: "Ready",
+          value: {
+            threadId: message.threadId,
+            requestId: message.requestId,
+            units: [...message.units],
+          },
+        },
       }
     case "ThreadPreviewFailed":
-      return { ...model, threadPreview: { _tag: "Failed", message: message.message } }
+      if (
+        model.threadPreview._tag !== "Loading" ||
+        model.threadPreview.threadId !== message.threadId ||
+        model.threadPreview.requestId !== message.requestId
+      )
+        return model
+      return {
+        ...model,
+        threadPreview: {
+          _tag: "Failed",
+          threadId: message.threadId,
+          requestId: message.requestId,
+          message: message.message,
+        },
+      }
     case "ComposerReplaced":
       return {
         ...model,

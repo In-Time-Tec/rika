@@ -4,22 +4,22 @@
   │                                                                                                                 │
   │ >                                                                                                               │
   │                                                                                                                 │
-  │   Rika performance and reliability                                                              +428 ~56 -59    │
-  │   Push all local changes to main                                                                +558 ~68 -68    │
-  │   TUI performance and bug audit                                                                                 │
+  │  Rika performance and reliability                                                              +428 ~56 -59     │
+  │  Push all local changes to main                                                                +558 ~68 -68     │
+  │  TUI performance and bug audit                                                                                  │
   │                                                                                                                 │
   │                                                                                                                 │
-  │ ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮  │
-  │ │                                               Thread Preview                                               │  │
-  │ │  Rika performance and reliability                                                                          │  │
-  │ │  /workspace                                                                                                │  │
-  │ │  unread · idle                                                                                             │  │
-  │ │                                                                                                            │  │
-  │ │                                                                                                            │  │
-  │ │  ┃ Finish the thread UI parity work.                                                                       │  │
-  │ │                                                                                                            │  │
-  │ │  Merged all work into main and verified the affected paths.                                                │  │
-  │ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯  │
+  │╭────────────────────────────────────────────── Thread Preview ───────────────────────────────────────────────╮  │
+  ││                                                                                                             │  │
+  ││                                                                                                             │  │
+  ││                                                                                                             │  │
+  ││                                                                                                             │  │
+  ││                                                                                                             │  │
+  ││                                                                                                             │  │
+  ││ ┃ Finish the thread UI parity work.                                                                         │  │
+  ││                                                                                                             │  │
+  ││ Merged all work into main and verified the affected paths.                                                  │  │
+  │╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────╯  │
   │                                                                                                                 │
   │                                                                                                                 │
   ╰────────────────────────────────────────────────────────────────────── Opt+W/Ctrl+T all workspaces ── Esc close ─╯

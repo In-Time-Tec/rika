@@ -2,9 +2,8 @@ import { Function } from "effect"
 import { modeIds } from "@rika/configuration/behavior-mode"
 import type { Message } from "../model/terminal-message"
 import type { Model } from "../model/terminal-state"
-import { idle } from "../model/terminal-loadable-state"
 import { filteredFiles, filteredThreads } from "../model/terminal-thread-navigation"
-import { filter, type PaletteAction } from "../../presentation/terminal/command-palette"
+import { filter } from "../../presentation/terminal/command-palette"
 import { isPrintable, type Key } from "../../presentation/terminal/terminal-keymap"
 import { expandPastedText } from "../model/terminal-composer-paste"
 
@@ -38,8 +37,8 @@ const reduceKeyboardPickerImpl = (
     if (key.name === "escape")
       return {
         ...model,
-        threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
-        threadPreview: idle,
+        threadSwitcher: { open: false, query: "", selected: 0, kind: "switch" },
+        threadPreview: { _tag: "Idle" },
       }
     if (key.name === "return") {
       const thread = threads[model.threadSwitcher.selected]
@@ -54,9 +53,8 @@ const reduceKeyboardPickerImpl = (
                 query: "",
                 selected: 0,
                 kind: "switch",
-                previewScroll: 0,
               },
-              threadPreview: idle,
+              threadPreview: { _tag: "Idle" },
             },
             Math.min(2 + model.threadSwitcher.query.length, model.cursor),
           ),
@@ -70,9 +68,8 @@ const reduceKeyboardPickerImpl = (
           query: "",
           selected: 0,
           kind: "switch",
-          previewScroll: 0,
         },
-        threadPreview: idle,
+        threadPreview: { _tag: "Idle" },
         pendingAction: thread.id === model.currentThreadId ? undefined : { _tag: "SelectThread", id: thread.id },
       }
     }
@@ -86,7 +83,6 @@ const reduceKeyboardPickerImpl = (
               query: "",
               selected: 0,
               kind: "switch",
-              previewScroll: 0,
             },
             filePicker: { ...model.filePicker, open: true, query: "", selected: 0 },
           },
@@ -98,12 +94,13 @@ const reduceKeyboardPickerImpl = (
           ...model.threadSwitcher,
           query: model.threadSwitcher.query.slice(0, -lastCharacterLength(model.threadSwitcher.query)),
           selected: 0,
-          previewScroll: 0,
         },
       }
       const restored =
         model.threadSwitcher.kind === "mention" ? erase(next, lastCharacterLength(model.threadSwitcher.query)) : next
-      return filteredThreads(restored).length === 0 ? { ...restored, threadPreview: idle } : restored
+      return filteredThreads(restored).length === 0
+        ? { ...restored, threadPreview: { _tag: "Idle" as const } }
+        : restored
     }
     let selected = model.threadSwitcher.selected
     if (key.name === "up") {
@@ -117,7 +114,6 @@ const reduceKeyboardPickerImpl = (
         threadSwitcher: {
           ...model.threadSwitcher,
           selected,
-          previewScroll: selected === model.threadSwitcher.selected ? model.threadSwitcher.previewScroll : 0,
         },
       }
     const next = {
@@ -126,11 +122,10 @@ const reduceKeyboardPickerImpl = (
         ...model.threadSwitcher,
         query: model.threadSwitcher.query + key.sequence,
         selected: 0,
-        previewScroll: 0,
       },
     }
     const filtered = model.threadSwitcher.kind === "mention" ? insert(next, key.sequence) : next
-    return filteredThreads(filtered).length === 0 ? { ...filtered, threadPreview: idle } : filtered
+    return filteredThreads(filtered).length === 0 ? { ...filtered, threadPreview: { _tag: "Idle" as const } } : filtered
   }
   if (key.ctrl && key.name === "o") {
     const open = !model.palette.open
@@ -217,7 +212,7 @@ const reduceKeyboardPickerImpl = (
       selected = Math.max(0, Math.min(results.length - 1, model.palette.selected + 1))
     }
     if (key.name === "return") {
-      const action = results[selected]?.action as PaletteAction | undefined
+      const action = results[selected]?.action
       if (action === undefined) return { ...model, palette: { ...model.palette, selected: 0 } }
       if (action._tag === "OpenModePicker")
         return model.busy
@@ -237,8 +232,9 @@ const reduceKeyboardPickerImpl = (
           ...model,
           paletteOpen: false,
           palette: { open: false, query: "", selected: 0 },
-          threadSwitcher: { open: true, query: "", selected: 0, kind: "switch", previewScroll: 0 },
+          threadSwitcher: { open: true, query: "", selected: 0, kind: "switch" },
         }
+      if (action._tag === "ToggleContextDetails") return update(model, { _tag: "ContextDetailsToggled" })
       if (action._tag === "ToggleFastMode")
         return {
           ...model,
@@ -266,7 +262,7 @@ const reduceKeyboardPickerImpl = (
         {
           ...model,
           filePicker: { ...model.filePicker, open: false },
-          threadSwitcher: { open: true, query: "", selected: 0, kind: "mention", previewScroll: 0 },
+          threadSwitcher: { open: true, query: "", selected: 0, kind: "mention" },
         },
         "@",
       )

@@ -310,25 +310,21 @@ it.effect("keeps preview traffic out of the transcript repository and final resu
         steering: { steeringMessages: 0, followUpMessages: 0 },
       },
     }
-    const previews: ReadonlyArray<ExecutionGateway.ModelPreviewed> = Array.from({ length: 100 }, (_, index) => ({
-      _tag: "ModelPreviewed",
-      key: {
-        runId: link.runId,
-        attemptFence: 1,
-        turn: 0,
-        modelCallId: "call",
-        modelAttemptId: "attempt",
-        attempt: 0,
-      },
-      revision: index + 1,
-      text: "x".repeat(index + 1),
-      reasoning: "",
-      truncated: false,
+    const previews: ReadonlyArray<ExecutionGateway.ModelPreviewEvent> = Array.from({ length: 100 }, (_, index) => ({
+      _tag: "ModelPreview",
+      runId: link.runId,
+      attemptFence: 1,
+      turn: 0,
+      modelCallId: "call",
+      modelAttemptId: "attempt",
+      attempt: 0,
+      sequence: index,
+      changes: [{ channel: "text", offset: index, delta: "x" }],
     }))
     const execute = Effect.fn("RootTurnOwner.testPreviewNonAuthority")(function* (enabled: boolean) {
       let stored: Projection | undefined
       const commits: Array<ExecutionProjection.Change> = []
-      const delivered: Array<ExecutionProjection.Change | ExecutionGateway.ModelPreviewed> = []
+      const delivered: Array<ExecutionProjection.Change | ExecutionGateway.ModelPreviewEvent> = []
       const owner = yield* make(
         { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
         {
@@ -363,7 +359,7 @@ it.effect("keeps preview traffic out of the transcript repository and final resu
     const observed = yield* execute(true)
     const baseline = yield* execute(false)
     expect(observed.delivered).toHaveLength(101)
-    expect(observed.delivered.filter((event) => event._tag === "ModelPreviewed")).toHaveLength(100)
+    expect(observed.delivered.filter((event) => event._tag === "ModelPreview")).toHaveLength(100)
     expect(observed.commits).toEqual([completed])
     expect(baseline.commits).toEqual([completed])
     expect(observed.result).toEqual(baseline.result)

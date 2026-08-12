@@ -59,19 +59,15 @@ it.effect("delivers completion only through the live projection callback", () =>
       state,
     }
     const preview = {
-      _tag: "ModelPreviewed" as const,
-      key: {
-        runId: "run",
-        attemptFence: 1,
-        turn: 0,
-        modelCallId: "call",
-        modelAttemptId: "attempt",
-        attempt: 0,
-      },
-      revision: 1,
-      text: "tentative",
-      reasoning: "",
-      truncated: false,
+      _tag: "ModelPreview" as const,
+      runId: "run",
+      attemptFence: 1,
+      turn: 0,
+      modelCallId: "call",
+      modelAttemptId: "attempt",
+      attempt: 0,
+      sequence: 0,
+      changes: [{ channel: "text" as const, offset: 0, delta: "tentative" }],
     }
     const projectionEvents: Array<ExecutionProjection.Change> = []
     const previewEvents: Array<typeof preview> = []
@@ -100,7 +96,7 @@ it.effect("delivers completion only through the live projection callback", () =>
       threadForTurn: () => Effect.succeed(thread),
       dispatch: (event) => {
         if (event._tag === "ExecutionProjectionChanged") projectionEvents.push(event.change)
-        if (event._tag === "ExecutionModelPreviewed") previewEvents.push(event.preview)
+        if (event._tag === "ExecutionModelPreviewChanged") previewEvents.push(event.preview)
       },
       now: Effect.succeed(1),
     }).pipe(

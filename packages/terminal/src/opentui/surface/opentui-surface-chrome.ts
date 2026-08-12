@@ -124,15 +124,7 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
       const glyph = this.toolSpinner.toBraille()
       if (current.busy) this.publishWorkingFrame(glyph)
       if (current.usageDisplay === "time" && current.usageTime?._tag === "Available") this.renderModeLabel(current)
-      for (const record of this.transcriptRecords.values()) {
-        if (record.spinnerChunk === undefined) continue
-        const content = record.renderable.content
-        const chunks = [...content.chunks]
-        const chunk = chunks[record.spinnerChunk]
-        if (chunk === undefined) continue
-        chunks[record.spinnerChunk] = { ...chunk, text: glyph }
-        record.renderable.content = new StyledText(chunks)
-      }
+      this.transcriptPane.updateSpinner(glyph)
       if (current.threadSidebar.open)
         this.sidebar.content = renderSidebar(
           current,
@@ -154,5 +146,9 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
   }
   showToast(message: string, color?: ColorInput): void {
     this.toastController.show(message, color)
+  }
+  showQuitConfirmation(visible: boolean): void {
+    this.quitConfirmationBox.visible = visible
+    this.renderer.requestRender()
   }
 }

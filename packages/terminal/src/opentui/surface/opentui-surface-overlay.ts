@@ -13,9 +13,8 @@ import {
   modeSelectorIndexAtColumn,
   modeSelectorLabels,
 } from "../../presentation/terminal/terminal-mode-selector-layout"
-import { filePickerContent, threadSwitcherContent, threadSwitcherListWidth } from "./opentui-overlay-content"
+import { filePickerContent } from "./opentui-overlay-content"
 import { type ProjectedEditorRenderable } from "./opentui-surface-renderables"
-import { FocusController, type FocusableEditor } from "./opentui-focus-controller"
 import { SurfacePointer } from "./opentui-surface-pointer"
 
 export abstract class SurfaceOverlay extends SurfacePointer {
@@ -60,32 +59,24 @@ export abstract class SurfaceOverlay extends SurfacePointer {
     this.overlayEditor.height = Math.max(1, height)
     this.overlayEditor.sync(text, cursor)
   }
-  protected focusController!: FocusController
-  protected initializeFocus(): void {
-    this.focusController = new FocusController({ renderer: this.renderer, destroyed: () => this.destroyed })
+  protected focusEditor(editor: ProjectedEditorRenderable): void {
+    editor.focusable = true
+    editor.focus()
+    this.composerEditor.focusable = editor === this.composerEditor
+    this.overlayEditor.focusable = editor === this.overlayEditor
+    editor.showCursor = true
   }
-  protected focusEditor(editor: FocusableEditor | undefined): void {
-    this.focusController.focus(editor)
-  }
-  protected restoreFocusedCursor(): void {
-    this.focusController.restoreCursor()
-  }
-  protected updateOverlay(
-    model: Model,
-    contentLeft: number,
-    contentWidth: number,
-    renderedInputHeight: number,
-    threadSidebarVisible: boolean,
-  ): void {
+  protected updateOverlay(model: Model, contentLeft: number, contentWidth: number, renderedInputHeight: number): void {
     const composerTop = model.height - renderedInputHeight
     let overlay: "threads" | "files" | "modes" | "context" | "palette" | undefined
     if (model.threadSwitcher.open) overlay = "threads"
+    else if (model.palette.open || model.paletteOpen) overlay = "palette"
     else if (model.filePicker.open) overlay = "files"
     else if (model.modePicker.open) overlay = "modes"
     else if (model.contextDetailsOpen) overlay = "context"
-    else if (model.palette.open || model.paletteOpen) overlay = "palette"
     this.paletteBox.visible = overlay !== undefined
-    this.palette.visible = this.paletteBox.visible
+    this.palette.visible = this.paletteBox.visible && overlay !== "threads"
+    if (overlay !== "threads") this.threadBrowser.hide()
     this.paletteBox.bottomTitle = ""
     this.contextDividerOne.visible = false
     this.contextDividerTwo.visible = false
@@ -96,8 +87,7 @@ export abstract class SurfaceOverlay extends SurfacePointer {
     this.paletteBox.overflow = "hidden"
     this.palette.onMouseMove = undefined
     this.palette.onMouseDown = undefined
-    let cursorEditor: ProjectedEditorRenderable | undefined =
-      model.shortcutsOpen || (threadSidebarVisible && model.threadSidebar.focused) ? undefined : this.composerEditor
+    let cursorEditor: ProjectedEditorRenderable = this.composerEditor
     if (overlay === "palette") {
       const results = filter(model.palette.query)
       const boxWidth = Math.max(1, Math.min(80, model.width - 4))
@@ -160,7 +150,6 @@ export abstract class SurfaceOverlay extends SurfacePointer {
         const selected = hitMode(event)
         if (selected !== undefined) this.handlers.modeCommit?.(selected)
       }
-      cursorEditor = undefined
     } else if (overlay === "context") {
       const boxWidth = Math.min(68, contentWidth)
       const boxHeight = model.width <= 24 ? Math.min(12, model.height) : Math.min(18, Math.max(1, composerTop))
@@ -209,7 +198,6 @@ export abstract class SurfaceOverlay extends SurfacePointer {
         Math.max(1, boxHeight - 2),
         this.currentTimeMillis(),
       )
-      cursorEditor = undefined
     } else if (overlay === "files") {
       const entries = filteredFiles(model).map((file) => `@${file}`)
       const maxRows = Math.max(1, Math.min(20, composerTop - 1))
@@ -241,45 +229,18 @@ export abstract class SurfaceOverlay extends SurfacePointer {
       })
       const switcherContentWidth = Math.max(1, overlayWidth - 4)
       const contentHeight = Math.max(1, overlayHeight - 2)
-      const minute = Math.floor(this.currentTimeMillis() / 60_000)
-      const cached = this.threadSwitcherContentCache
-      if (
-        cached !== undefined &&
-        cached.threads === model.threads &&
-        cached.preview === model.threadPreview &&
-        cached.query === model.threadSwitcher.query &&
-        cached.selected === model.threadSwitcher.selected &&
-        cached.previewScroll === model.threadSwitcher.previewScroll &&
-        cached.workspace === model.workspace &&
-        cached.mode === model.mode &&
-        cached.width === switcherContentWidth &&
-        cached.height === contentHeight &&
-        cached.minute === minute
+      const browserLayout = this.threadBrowser.update(
+        model,
+        switcherContentWidth,
+        contentHeight,
+        this.currentTimeMillis(),
       )
-        this.palette.content = cached.content
-      else {
-        const content = threadSwitcherContent(model, switcherContentWidth, contentHeight)
-        this.threadSwitcherContentCache = {
-          threads: model.threads,
-          preview: model.threadPreview,
-          query: model.threadSwitcher.query,
-          selected: model.threadSwitcher.selected,
-          previewScroll: model.threadSwitcher.previewScroll,
-          workspace: model.workspace,
-          mode: model.mode,
-          width: switcherContentWidth,
-          height: contentHeight,
-          minute,
-          content,
-        }
-        this.palette.content = content
-      }
       this.syncOverlayEditor(
         `> ${model.threadSwitcher.query}`,
         2 + model.threadSwitcher.query.length,
         1,
-        overlayHeight - 2,
-        threadSwitcherListWidth(model, overlayWidth - 4),
+        1,
+        browserLayout.listWidth,
       )
       cursorEditor = this.overlayEditor
     }
