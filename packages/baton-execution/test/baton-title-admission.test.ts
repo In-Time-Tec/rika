@@ -247,7 +247,7 @@ it.live(
       expect(outcome.rootRequests.length).toBe(1)
       expect(promptText(outcome.rootRequests[0]?.prompt)).toContain("the user prompt that must not be dropped")
       expect(["cancelling", "cancelled"]).toContain(outcome.inspected.status)
-      const cancellation = outcome.changes
+      const cancellationNotice = outcome.changes
         .flatMap((change) => (change._tag === "ProjectionSnapshot" ? change.units : change.upsert))
         .find(
           (unit) =>
@@ -255,10 +255,7 @@ it.live(
             unit.content.block._tag === "Notification" &&
             unit.content.block.title === "Cancellation requested",
         )
-      expect(cancellation?.content).toEqual({
-        _tag: "Block",
-        block: { _tag: "Notification", title: "Cancellation requested", detail: "Cancelled by user" },
-      })
+      expect(cancellationNotice).toBeUndefined()
     }),
   45_000,
 )

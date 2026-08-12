@@ -640,6 +640,23 @@ describe("Baton tree projector", () => {
     ])
   })
 
+  it("projects cancellation state without adding user-visible transcript content", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-silent-cancellation", "cancel me")
+    projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }))
+    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
+    const before = projector.snapshot().units
+
+    const cancellation = projector.apply(
+      treeEvent("raw-root-run", { _tag: "RunCancellationRequested", reason: "Cancelled by user" }),
+    )
+
+    expect(cancellation.state.status).toBe("cancelling")
+    expect(cancellation.upsert).toEqual([])
+    expect(cancellation.remove).toEqual([])
+    expect(projector.snapshot().units).toEqual(before)
+  })
+
   it("parks the root as waiting when an interrupted operation needs resolution", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-resolution", "cancel me")

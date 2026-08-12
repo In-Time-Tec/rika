@@ -504,13 +504,7 @@ const make = (
         const card = cardsByChild.get(node.rawRunId)
         if (card !== undefined) updateCard(card, "cancelling")
         if (node.parentRawRunId === undefined) core.rootStatus = "cancelling"
-        return notice(
-          node,
-          "cancellation",
-          "Cancellation requested",
-          event.reason ?? "Cancellation was requested.",
-          "requested",
-        )
+        return
       }
       case "RunCancelled":
         deactivate(node, event, "terminal")

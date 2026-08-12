@@ -115,6 +115,8 @@ test(
         expect(promoted).not.toContain("Execution failed")
         expect(promoted).not.toContain("wait cancelled")
         expect(promoted).not.toContain("! cancelled")
+        expect(promoted).not.toContain("Cancellation requested")
+        expect(promoted).not.toContain("Cancelled by user")
         yield* app.quit
       }),
     ),
