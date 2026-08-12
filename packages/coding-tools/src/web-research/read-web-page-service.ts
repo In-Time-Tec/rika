@@ -28,8 +28,8 @@ export interface LayerOptions {
 
 const ApiResult = Schema.Struct({
   url: Schema.String,
-  title: Schema.NullOr(Schema.String),
-  publish_date: Schema.NullOr(Schema.String),
+  title: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  publish_date: Schema.optionalKey(Schema.NullOr(Schema.String)),
   excerpts: Schema.Array(Schema.String),
   full_content: Schema.optionalKey(Schema.NullOr(Schema.String)),
 })
@@ -38,7 +38,7 @@ const ApiExtractionError = Schema.Struct({
   url: Schema.String,
   error_type: Schema.String,
   http_status_code: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
-  content: Schema.String,
+  content: Schema.NullOr(Schema.String),
 })
 
 const ApiResponse = Schema.Struct({

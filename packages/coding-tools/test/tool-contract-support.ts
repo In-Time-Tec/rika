@@ -4,7 +4,8 @@ import * as RuntimeServiceTools from "../src/runtime/coding-tool-runtime-service
 import * as RuntimeTools from "../src/runtime/coding-tool-runtime-tools"
 import * as ThreadToolkits from "../src/catalog/thread-toolkits"
 import * as ThreadFind from "../src/catalog/thread-tool-find-contract"
-import * as ParallelSearchContract from "../src/web-research/parallel-search-contract"
+import * as WebSearchInputContract from "../src/web-research/web-search-input-contract"
+import * as WebSearchRequestContract from "../src/web-research/web-search-request-contract"
 import * as ProcessRegistry from "@rika/coding-tools/shell-process-registry"
 import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
 export const contractFixtures = {
@@ -14,7 +15,8 @@ export const contractFixtures = {
   RuntimeTools,
   ThreadToolkits,
   ThreadFind,
-  ParallelSearchContract,
+  WebSearchInputContract,
+  WebSearchRequestContract,
   ProcessRegistry,
   Runtime,
 }

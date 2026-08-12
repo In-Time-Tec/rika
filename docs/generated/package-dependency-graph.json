@@ -44,7 +44,6 @@
         "./local-safety-policy",
         "./media-view-contract",
         "./media-view-service",
-        "./parallel-web-search",
         "./read-file-tool",
         "./read-web-page-service",
         "./read-web-page-tool",

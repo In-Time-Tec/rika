@@ -251,7 +251,12 @@ const operationError = (cause: unknown): RuntimeOperationError => {
             cause.outcomes.length === 0
               ? ""
               : `: ${cause.outcomes
-                  .map((outcome) => `${outcome.provider}: ${outcome.error?.kind ?? "unknown"}`)
+                  .map(
+                    (outcome) =>
+                      `${outcome.provider}: ${outcome.error?.kind ?? "unknown"}${
+                        outcome.error?.message === undefined ? "" : ` (${outcome.error.message})`
+                      }`,
+                  )
                   .join(", ")}`
           }`,
           outcome: "known",
@@ -270,7 +275,7 @@ const operationError = (cause: unknown): RuntimeOperationError => {
         })
       : runtimeError({
           category: "dependency_unavailable",
-          message: "The web page provider failed before returning usable content",
+          message: `The web page provider failed before returning usable content: ${cause.message}`,
           outcome: "known",
           recovery: "later",
           nextAction: "Retry later or use another source",
@@ -286,7 +291,7 @@ const operationError = (cause: unknown): RuntimeOperationError => {
         })
       : runtimeError({
           category: "dependency_unavailable",
-          message: "The web page provider could not return usable content",
+          message: `The web page provider could not return usable content: ${cause.message}`,
           outcome: "known",
           recovery: "later",
           nextAction: "Use another source or retry later",

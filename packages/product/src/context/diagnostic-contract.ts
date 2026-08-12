@@ -37,7 +37,6 @@ export const failureKinds = [
   "OpenAiCredentialStoreError",
   "OperationError",
   "OperationUnavailable",
-  "ParallelSearchError",
   "ProductDatabaseError",
   "ProjectionRecoveryFailure",
   "PromoteTurnError",

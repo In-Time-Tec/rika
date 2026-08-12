@@ -227,6 +227,40 @@ describe("ReadWebPage", () => {
     }),
   )
 
+  it.effect("accepts a null extraction error content", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        run({ url: "https://example.com" }, (request) =>
+          response(
+            request,
+            apiResponse({
+              results: [],
+              errors: [{ url: "https://example.com", error_type: "fetch_error", http_status_code: 503, content: null }],
+            }),
+          ),
+        ),
+      )
+      expect(error._tag).toBe("ReadWebPageContentError")
+      expect(error.message).toContain("fetch_error (503): null")
+    }),
+  )
+
+  it.effect("accepts extract results without title or publish date and ignores usage and warnings", () =>
+    Effect.gen(function* () {
+      const content = yield* run({ url: "https://example.com/docs" }, (request) =>
+        response(
+          request,
+          apiResponse({
+            results: [{ url: "https://example.com/docs", excerpts: ["First excerpt"] }],
+            usage: [{ name: "extract", count: 1 }],
+            warnings: [{ type: "warning", message: "note" }],
+          }),
+        ),
+      )
+      expect(content).toBe("First excerpt")
+    }),
+  )
+
   it.effect("rejects empty results and missing requested full content", () =>
     Effect.gen(function* () {
       const empty = yield* Effect.flip(

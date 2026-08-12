@@ -2553,7 +2553,6 @@
         "./local-safety-policy",
         "./media-view-contract",
         "./media-view-service",
-        "./parallel-web-search",
         "./read-file-tool",
         "./read-web-page-service",
         "./read-web-page-tool",
@@ -3617,24 +3616,6 @@
       "publicExports": []
     },
     {
-      "id": "packages/coding-tools/src/web-research/parallel-search-contract.ts",
-      "path": "packages/coding-tools/src/web-research/parallel-search-contract.ts",
-      "workspace": "@rika/coding-tools",
-      "package": "@rika/coding-tools",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/coding-tools/src/web-research/parallel-web-search.ts",
-      "path": "packages/coding-tools/src/web-research/parallel-web-search.ts",
-      "workspace": "@rika/coding-tools",
-      "package": "@rika/coding-tools",
-      "kind": "source",
-      "production": true,
-      "publicExports": ["./parallel-web-search"]
-    },
-    {
       "id": "packages/coding-tools/src/web-research/read-web-page-contract.ts",
       "path": "packages/coding-tools/src/web-research/read-web-page-contract.ts",
       "workspace": "@rika/coding-tools",
@@ -3928,16 +3909,6 @@
     {
       "id": "packages/coding-tools/test/media-view.test.ts",
       "path": "packages/coding-tools/test/media-view.test.ts",
-      "workspace": "@rika/coding-tools",
-      "package": "@rika/coding-tools",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/coding-tools/test/parallel-search.test.ts",
-      "path": "packages/coding-tools/test/parallel-search.test.ts",
       "workspace": "@rika/coding-tools",
       "package": "@rika/coding-tools",
       "kind": "source",
@@ -24354,38 +24325,6 @@
       "production": true
     },
     {
-      "from": "packages/coding-tools/src/web-research/parallel-search-contract.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/web-research/parallel-web-search.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/web-research/parallel-web-search.ts",
-      "to": "external:effect/unstable/http",
-      "specifier": "effect/unstable/http",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/web-research/parallel-web-search.ts",
-      "to": "packages/coding-tools/src/web-research/parallel-search-contract.ts",
-      "specifier": "./parallel-search-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
       "from": "packages/coding-tools/src/web-research/read-web-page-contract.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -25154,46 +25093,6 @@
       "production": false
     },
     {
-      "from": "packages/coding-tools/test/parallel-search.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/coding-tools/test/parallel-search.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/coding-tools/test/parallel-search.test.ts",
-      "to": "external:effect/unstable/http",
-      "specifier": "effect/unstable/http",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/coding-tools/test/parallel-search.test.ts",
-      "to": "packages/coding-tools/src/web-research/parallel-web-search.ts",
-      "specifier": "@rika/coding-tools/parallel-web-search",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/coding-tools/test/parallel-search.test.ts",
-      "to": "packages/coding-tools/test/test-layer.ts",
-      "specifier": "./test-layer",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
       "from": "packages/coding-tools/test/process-registry.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -25387,8 +25286,16 @@
     },
     {
       "from": "packages/coding-tools/test/tool-contract-support.ts",
-      "to": "packages/coding-tools/src/web-research/parallel-search-contract.ts",
-      "specifier": "../src/web-research/parallel-search-contract",
+      "to": "packages/coding-tools/src/web-research/web-search-input-contract.ts",
+      "specifier": "../src/web-research/web-search-input-contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/test/tool-contract-support.ts",
+      "to": "packages/coding-tools/src/web-research/web-search-request-contract.ts",
+      "specifier": "../src/web-research/web-search-request-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true

@@ -18,7 +18,6 @@
     "./shell-process-registry": "./src/process/shell-process-registry.ts",
     "./coding-tool-result": "./src/runtime/coding-tool-result.ts",
     "./coding-tool-runtime": "./src/runtime/coding-tool-runtime.ts",
-    "./parallel-web-search": "./src/web-research/parallel-web-search.ts",
     "./read-web-page-service": "./src/web-research/read-web-page-service.ts",
     "./read-web-page-tool": "./src/web-research/read-web-page-tool.ts",
     "./web-search-input-contract": "./src/web-research/web-search-input-contract.ts",

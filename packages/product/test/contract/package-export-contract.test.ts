@@ -31,7 +31,6 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "shell-process-registry",
     "coding-tool-result",
     "coding-tool-runtime",
-    "parallel-web-search",
     "read-web-page-service",
     "read-web-page-tool",
     "web-search-input-contract",

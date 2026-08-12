@@ -251,23 +251,23 @@ describe("tool contracts", () => {
         "capability, not a particular provider",
       )
       expect(
-        yield* Schema.decodeUnknownEffect(contractFixtures.ParallelSearchContract.SearchQueries)(["current docs"]),
+        yield* Schema.decodeUnknownEffect(contractFixtures.WebSearchInputContract.SearchQueries)(["current docs"]),
       ).toEqual(["current docs"])
       yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ParallelSearchContract.SearchInput)({
+        Schema.decodeUnknownEffect(contractFixtures.WebSearchRequestContract.SearchInput)({
           objective: "",
           searchQueries: ["docs"],
         }),
       )
       yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ParallelSearchContract.SearchInput)({
+        Schema.decodeUnknownEffect(contractFixtures.WebSearchRequestContract.SearchInput)({
           objective: "   ",
           searchQueries: ["docs"],
         }),
       )
-      yield* Effect.flip(Schema.decodeUnknownEffect(contractFixtures.ParallelSearchContract.SearchQueries)([]))
+      yield* Effect.flip(Schema.decodeUnknownEffect(contractFixtures.WebSearchInputContract.SearchQueries)([]))
       yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ParallelSearchContract.SearchQueries)({
+        Schema.decodeUnknownEffect(contractFixtures.WebSearchInputContract.SearchQueries)({
           0: "current docs",
           __rest__: ["api"],
         }),

@@ -16,16 +16,6 @@ const mapTransport = (provider: string, cause: unknown) => {
   return failure(provider, /timeout|timed out/i.test(message) ? "timeout" : "transport", message)
 }
 
-const mapSdkFailure = (provider: string, cause: unknown) => {
-  const status =
-    typeof cause === "object" && cause !== null && "status" in cause && typeof cause.status === "number"
-      ? cause.status
-      : undefined
-  if (status === 401 || status === 403) return failure(provider, "authentication", `HTTP ${status}`)
-  if (status === 429) return failure(provider, "rate-limit", `HTTP ${status}`)
-  return mapTransport(provider, cause)
-}
-
 const execute = (
   client: HttpClient.HttpClient,
   provider: string,
@@ -74,86 +64,37 @@ const urlResult = (
   }
 }
 
-const ParallelResponse = Schema.Struct({
-  search_id: Schema.String,
-  session_id: Schema.String,
-  results: Schema.Array(
-    Schema.Struct({
-      url: Schema.String,
-      title: Schema.optionalKey(Schema.String),
-      publish_date: Schema.optionalKey(Schema.String),
-      excerpts: Schema.Array(Schema.String),
-    }),
-  ),
-})
-const ParallelResponseJson = Schema.fromJsonString(ParallelResponse)
-const ParallelRequestJson = Schema.fromJsonString(
-  Schema.Struct({
-    objective: Schema.String,
-    search_queries: Schema.Array(Schema.String),
-    mode: Schema.Literal("advanced"),
-    max_chars_total: Schema.Int,
-  }),
-)
-
-const parallelRequest = (
-  options: ProviderOptions,
-  key: string,
-  request: Request.SearchRequest,
-): Effect.Effect<typeof ParallelResponse.Type, Result.ProviderFailure> => {
-  const body = Schema.encodeSync(ParallelRequestJson)({
-    objective: request.objective,
-    search_queries: [...request.searchQueries],
-    mode: "advanced",
-    max_chars_total: 40_000,
-  })
-  return Effect.callback((resume) => {
-    const controller = new AbortController()
-    const fetcher = options.fetch ?? globalThis.fetch
-    const url = `${options.baseUrl ?? "https://api.parallel.ai"}/v1/search`
-    fetcher(url, {
-      method: "POST",
-      headers: { "x-api-key": key, "content-type": "application/json" },
-      body,
-      signal: controller.signal,
-    }).then(
-      (response) => {
-        if (!response.ok) {
-          resume(Effect.fail(mapSdkFailure("parallel", { status: response.status })))
-          return
-        }
-        response.text().then(
-          (responseBody) => {
-            try {
-              resume(Effect.succeed(Schema.decodeUnknownSync(ParallelResponseJson)(responseBody)))
-            } catch (cause) {
-              resume(Effect.fail(failure("parallel", "response", `Malformed response: ${String(cause)}`)))
-            }
-          },
-          (cause: unknown) => resume(Effect.fail(mapSdkFailure("parallel", cause))),
-        )
-      },
-      (cause: unknown) => resume(Effect.fail(mapSdkFailure("parallel", cause))),
-    )
-    return Effect.sync(() => controller.abort())
-  })
-}
-
-const makeParallel = (_client: HttpClient.HttpClient, options: ProviderOptions): Request.SearchProvider => ({
+const makeParallel = (client: HttpClient.HttpClient, options: ProviderOptions): Request.SearchProvider => ({
   id: "parallel",
   capabilities: new Set(["web"]),
   priority: options.priority ?? 100,
   search: (request) =>
     Effect.gen(function* () {
       const key = yield* credential("parallel", "PARALLEL_API_KEY", options.apiKey)
-      const response = yield* parallelRequest(options, key, request)
+      const body = yield* execute(
+        client,
+        "parallel",
+        HttpClientRequest.post(`${options.baseUrl ?? "https://api.parallel.ai"}/v1/search`, {
+          headers: { "x-api-key": key },
+        }).pipe(
+          HttpClientRequest.bodyJsonUnsafe({
+            objective: request.objective,
+            search_queries: [...request.searchQueries],
+            mode: "advanced",
+            max_chars_total: 40_000,
+          }),
+        ),
+      )
+      const root = yield* object("parallel", body)
+      if (!Array.isArray(root.results))
+        return yield* failure("parallel", "response", "Malformed response: results missing")
       return {
-        results: response.results.map((result) => ({
-          url: result.url,
-          title: result.title ?? null,
-          publishedAt: result.publish_date ?? null,
-          excerpts: result.excerpts,
-        })),
+        results: root.results.flatMap((value) => {
+          if (typeof value !== "object" || value === null) return []
+          const item = value as Record<string, unknown>
+          const result = urlResult(item, excerpts(item.excerpts))
+          return result === undefined ? [] : [result]
+        }),
       }
     }),
 })
