@@ -55,6 +55,12 @@ describe("running subagent activity", () => {
     ).toBe("Running 2 subagents")
   })
 
+  test("does not count a queued child as running", () => {
+    expect(activityOf([cell("k", "complete"), card("c", "queued")], [block(0, "k"), block(1, "c", "k")])).toBe(
+      "Running tools",
+    )
+  })
+
   test("leaves a nested child to the subagent that owns it", () => {
     expect(
       activityOf(

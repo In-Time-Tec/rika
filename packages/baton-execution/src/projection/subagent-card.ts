@@ -18,7 +18,7 @@ export interface SubagentCardProjection {
   ) => Card
   readonly updateCard: (
     card: Card,
-    status: "running" | "cancelling" | "complete" | "failed" | "cancelled",
+    status: "queued" | "running" | "cancelling" | "complete" | "failed" | "cancelled",
     output?: string,
   ) => void
   readonly groupCards: (node: Node, rawToolCallId: string, params: unknown) => ReadonlyArray<Card>
@@ -84,7 +84,7 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
       prompt: card.prompt,
       promptTruncated: card.promptTruncated,
       summary: "",
-      status: "running",
+      status: "queued",
       activity: [],
     }
     const created = unit(node, card.unitKey, { _tag: "Block", block }, orderPart)
@@ -94,7 +94,7 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
 
   const updateCard = (
     card: Card,
-    status: "running" | "cancelling" | "complete" | "failed" | "cancelled",
+    status: "queued" | "running" | "cancelling" | "complete" | "failed" | "cancelled",
     output?: string,
   ) => {
     const candidate = units.get(card.unitKey)
@@ -176,7 +176,6 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
           put({ ...candidate, revision: core.revision, parentId: card.blockId })
       }
     }
-    updateCard(card, "running")
   }
 
   return { cardFor, updateCard, groupCards, bindChild }

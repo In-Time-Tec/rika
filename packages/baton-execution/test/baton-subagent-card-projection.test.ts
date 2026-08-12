@@ -26,17 +26,34 @@ describe("Baton subagent card projection", () => {
         _tag: "SubagentCard",
         name: "Surgeon",
         prompt: "Fix the projection defect",
-        status: "running",
+        status: "queued",
       }),
     })
     expect(JSON.stringify(cardUnit)).not.toContain("raw-root-run")
-    projector.apply(
+    const linked = projector.apply(
       treeEvent("raw-root-run", {
         _tag: "ChildLinked",
         childRunId: "raw-child-run",
         invocationId: "provider-call-1",
       }),
     )
+    expect(block(linked, "SubagentCard")).toBeUndefined()
+    expect(
+      projector.snapshot().units.find(
+        (unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard",
+      )?.content,
+    ).toEqual({ _tag: "Block", block: expect.objectContaining({ status: "queued" }) })
+    const started = projector.apply(
+      treeEvent(
+        "raw-child-run",
+        { _tag: "RunAttemptStarted", attempt: 1 },
+        { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
+      ),
+    )
+    expect(block(started, "SubagentCard")).toEqual({
+      _tag: "Block",
+      block: expect.objectContaining({ status: "running" }),
+    })
     projector.apply(
       treeEvent(
         "raw-child-run",
@@ -135,7 +152,7 @@ describe("Baton subagent card projection", () => {
     )
     expect(block(linked, "SubagentCard")).toEqual({
       _tag: "Block",
-      block: expect.objectContaining({ name: "Review", prompt: "Review correctness", status: "running" }),
+      block: expect.objectContaining({ name: "Review", prompt: "Review correctness", status: "queued" }),
     })
   })
 
@@ -164,6 +181,13 @@ describe("Baton subagent card projection", () => {
     expect(cards).toHaveLength(4)
     expect(patch.upsert).toHaveLength(4)
     expect(JSON.stringify(patch.upsert)).not.toContain("run_child_group")
+    expect(
+      cards.map((unit) =>
+        unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard"
+          ? unit.content.block.status
+          : undefined,
+      ),
+    ).toEqual(["queued", "queued", "queued", "queued"])
     expect(patch.upsert.length).toBeLessThanOrEqual(128)
     const ordered = projector
       .snapshot()

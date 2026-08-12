@@ -29,7 +29,11 @@ const isCancellationNotice = (unit: Unit): boolean =>
 const cancelledUnit = (unit: Unit): Unit => {
   if (unit.content._tag !== "Block") return unit
   const block = unit.content.block
-  if ((block._tag !== "ToolCall" && block._tag !== "SubagentCard") || block.status !== "running") return unit
+  if (
+    (block._tag !== "ToolCall" && block._tag !== "SubagentCard") ||
+    (block.status !== "queued" && block.status !== "running")
+  )
+    return unit
   return {
     ...unit,
     content: { _tag: "Block", block: { ...block, status: "cancelled" } },
@@ -390,7 +394,11 @@ export const projectChildUnits: {
     for (const index of childIndexes) {
       const block = blocks[index]
       if (block === undefined) continue
-      if ((block._tag !== "ToolCall" && block._tag !== "SubagentCard") || block.status !== "running") continue
+      if (
+        (block._tag !== "ToolCall" && block._tag !== "SubagentCard") ||
+        (block.status !== "queued" && block.status !== "running")
+      )
+        continue
       blocks[index] = { ...block, status: "cancelled" as const }
     }
     return {

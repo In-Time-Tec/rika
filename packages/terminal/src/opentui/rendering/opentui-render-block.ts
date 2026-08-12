@@ -98,7 +98,8 @@ export const renderBlock: {
       }
       case "SubagentCard": {
         let icon = "✗"
-        if (block.status === "running" || block.status === "waiting" || block.status === "cancelling") icon = "⠿"
+        if (block.status === "queued") icon = "◷"
+        else if (block.status === "running" || block.status === "waiting" || block.status === "cancelling") icon = "⠿"
         else if (block.status === "complete") icon = "✓"
         else if (block.status === "cancelled") icon = "⊘"
         const detail = block.summary.length === 0 ? block.prompt : block.summary
