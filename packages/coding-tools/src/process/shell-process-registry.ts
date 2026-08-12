@@ -119,11 +119,7 @@ export interface Interface {
     args: ReadonlyArray<string>,
     cwd: string,
   ) => Effect.Effect<string, PlatformError.PlatformError>
-  readonly poll: (
-    processId: string,
-    waitMillis: number,
-    outputLimit: number,
-  ) => Effect.Effect<Output, ProcessNotFound>
+  readonly poll: (processId: string, waitMillis: number, outputLimit: number) => Effect.Effect<Output, ProcessNotFound>
   readonly cancel: (processId: string) => Effect.Effect<void, ProcessNotFound | PlatformError.PlatformError>
 }
 

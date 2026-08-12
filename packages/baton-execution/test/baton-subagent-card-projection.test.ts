@@ -39,9 +39,9 @@ describe("Baton subagent card projection", () => {
     )
     expect(block(linked, "SubagentCard")).toBeUndefined()
     expect(
-      projector.snapshot().units.find(
-        (unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard",
-      )?.content,
+      projector
+        .snapshot()
+        .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")?.content,
     ).toEqual({ _tag: "Block", block: expect.objectContaining({ status: "queued" }) })
     const started = projector.apply(
       treeEvent(
