@@ -87,24 +87,24 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
   if (state.criticalOverflowed) return
   const id = threadId(event)
   switch (event._tag) {
-    case "ExecutionModelPreviewChanged":
-      if (
-        !state.previewInvalidations.has(`${event.threadId}:${event.turnId}`) &&
-        state.previewInvalidations.size >= capacity
-      ) {
+    case "ExecutionModelPreviewChanged": {
+      const key = `${event.threadId}:${event.turnId}:${event.preview.runId}`
+      if (!state.previewInvalidations.has(key) && state.previewInvalidations.size >= capacity) {
         state.criticalOverflowed = true
         return
       }
-      state.previewInvalidations.set(`${event.threadId}:${event.turnId}`, {
+      state.previewInvalidations.set(key, {
         ...event,
         preview: {
           _tag: "ModelPreviewCleared",
           runId: event.preview.runId,
+          ...(event.preview.parentId === undefined ? {} : { parentId: event.preview.parentId }),
           attemptFence: event.preview.attemptFence,
           generation: event.preview._tag === "ModelPreviewCleared" ? event.preview.generation : 0,
         },
       })
       return
+    }
     case "ExecutionProjectionChanged":
     case "ExecutionProjectionResyncRequired":
     case "TurnStarted":

@@ -48,6 +48,8 @@ export interface Projector {
   readonly snapshot: () => Projection.Snapshot
   readonly apply: (input: RunTree.TreeEvent) => Projection.Patch
   readonly applyAll: (inputs: ReadonlyArray<RunTree.TreeEvent>) => Projection.Patch
+  readonly previewRunIds: () => ReadonlyArray<string>
+  readonly previewParentId: (runId: string) => string | undefined
   readonly applyTitle: (
     text: string | undefined,
     usage: ReadonlyArray<Run.RawUsageFact>,

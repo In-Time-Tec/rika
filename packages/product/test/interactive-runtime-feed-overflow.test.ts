@@ -5,13 +5,13 @@ import * as Overflow from "../src/operation/interactive/interactive-runtime-feed
 
 const threadId = Thread.ThreadId.make("thread")
 const turnId = Turn.TurnId.make("turn")
-const preview = (revision: number) => ({
+const preview = (revision: number, runId = "run") => ({
   _tag: "ExecutionModelPreviewChanged" as const,
   threadId,
   turnId,
   preview: {
     _tag: "ModelPreview" as const,
-    runId: "run",
+    runId,
     attemptFence: 1,
     turn: 0,
     modelCallId: "call",
@@ -41,5 +41,17 @@ describe("interactive runtime preview overflow", () => {
         preview: { _tag: "ModelPreviewCleared", runId: "run", attemptFence: 1, generation: 0 },
       },
     ])
+  })
+
+  it("retains one invalidation for each concurrently streaming run", () => {
+    const state = Overflow.make()
+    Overflow.remember(state, preview(1, "child-a"))
+    Overflow.remember(state, preview(1, "child-b"))
+
+    expect(
+      Overflow.events(state, 1, "overflow").map((event) =>
+        event._tag === "ExecutionModelPreviewChanged" ? event.preview.runId : event._tag,
+      ),
+    ).toEqual(["child-a", "child-b"])
   })
 })

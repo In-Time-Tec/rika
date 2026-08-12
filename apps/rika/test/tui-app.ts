@@ -255,7 +255,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     Effect.gen(function* () {
       const started = currentWallTime()
       for (;;) {
-        yield* Effect.promise(() => setup.flush())
+        yield* Effect.promise(() => setup.flush().catch(() => setup.renderOnce()))
         const captured = frame()
         if (predicate(captured)) return captured
         if (currentWallTime() - started >= timeoutMillis) {

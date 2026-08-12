@@ -93,7 +93,9 @@ test(
         expect(expanded.match(/ROOT_USER_PROMPT/g) ?? []).toHaveLength(1)
         expect(expanded.match(/PARENT_AGENT_PROMPT/g) ?? []).toHaveLength(1)
         app.pressEnter()
-        const collapsed = yield* app.waitGone("PARENT_AGENT_FINAL")
+        const collapsed = yield* app.waitFrameMatch(
+          (frame) => !frame.includes("PARENT_AGENT_FINAL") && frame.includes("ROOT_AGENT_FINAL"),
+        )
         expect(collapsed).not.toContain("PARENT_AGENT_PROMPT")
         expect(collapsed).toContain("ROOT_AGENT_FINAL")
         app.pressEnter()

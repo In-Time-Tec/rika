@@ -127,11 +127,12 @@ const rememberImpl = (state: State, event: Event) => {
       preview: {
         _tag: "ModelPreviewCleared",
         runId: event.preview.runId,
+        ...(event.preview.parentId === undefined ? {} : { parentId: event.preview.parentId }),
         attemptFence: event.preview.attemptFence,
         generation: event.preview._tag === "ModelPreviewCleared" ? event.preview.generation : 0,
       },
     }
-    const key = `${event.threadId}:${event.turnId}`
+    const key = `${event.threadId}:${event.turnId}:${event.preview.runId}`
     if (!state.previewInvalidations.has(key) && state.previewInvalidations.size >= capacity)
       degrade(state, invalidation)
     else state.previewInvalidations.set(key, invalidation)

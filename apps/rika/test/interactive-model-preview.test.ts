@@ -122,6 +122,7 @@ const reasoningText = (state: InteractiveController.State): string | undefined =
   )?.text
 const ids = (state: InteractiveController.State): ReadonlyArray<string> =>
   (state.model.items as ReadonlyArray<TranscriptItem>).flatMap((item) => (item.id === undefined ? [] : [item.id]))
+const runPreview = (state: InteractiveController.State, runId = "run") => state.modelPreview?.byRun.get(runId)
 
 const timelineUnit = (key: string, content: TranscriptUnit.Unit["content"], revision = 1): TranscriptUnit.Unit => ({
   key,
@@ -212,6 +213,48 @@ describe("tentative model preview overlay", () => {
     expect(formatActivity(state.model.activity)).toBe("Streaming 4 tok")
   })
 
+  it("keeps concurrent child previews separate and attaches each answer to its subagent card", () => {
+    const card = (id: string): TranscriptUnit.Unit["content"] => ({
+      _tag: "Block",
+      block: {
+        _tag: "SubagentCard",
+        id,
+        name: "Task",
+        prompt: id,
+        promptTruncated: false,
+        summary: "",
+        status: "running",
+        activity: [],
+      },
+    })
+    let state = applyPatch(loaded(), {
+      upsert: [timelineUnit("card-a", card("card-a")), timelineUnit("card-b", card("card-b"))],
+    })
+    state = InteractiveController.update(
+      state,
+      preview(1, "answer-a", { runId: "child-a", parentId: "card-a", modelCallId: "call-a" }, ""),
+    ).state
+    state = InteractiveController.update(
+      state,
+      preview(1, "answer-b", { runId: "child-b", parentId: "card-b", modelCallId: "call-b" }, ""),
+    ).state
+
+    expect(state.modelPreview?.byRun.size).toBe(2)
+    expect(
+      (state.model.items as ReadonlyArray<TranscriptItem>)
+        .flatMap((item) => {
+          if (item._tag !== "Entry" || item.parentId === undefined) return []
+          const entry = state.model.entries[item.index]
+          return entry?.role === "assistant" ? [{ text: entry.text, parentId: item.parentId }] : []
+        })
+        .toSorted((left, right) => left.text.localeCompare(right.text)),
+    ).toEqual([
+      { text: "answer-a", parentId: "card-a" },
+      { text: "answer-b", parentId: "card-b" },
+    ])
+    expect(state.model.activity).toEqual({ _tag: "Streaming", bytes: 16 })
+  })
+
   it("assembles true append frames beyond 4,096 characters across mixed channels", () => {
     let state = loaded()
     let textOffset = 0
@@ -232,15 +275,15 @@ describe("tentative model preview overlay", () => {
       textOffset += text[sequence]!.length
       reasoningOffset += reasoning[sequence]!.length
     }
-    expect(state.modelPreview?.text).toBe(text.join(""))
-    expect(state.modelPreview?.reasoning).toBe(reasoning.join(""))
-    expect(state.modelPreview?.textBytes).toBeGreaterThan(4_096)
-    expect(state.modelPreview?.sequence).toBe(49)
+    expect(runPreview(state)?.text).toBe(text.join(""))
+    expect(runPreview(state)?.reasoning).toBe(reasoning.join(""))
+    expect(runPreview(state)?.textBytes).toBeGreaterThan(4_096)
+    expect(runPreview(state)?.sequence).toBe(49)
   })
 
   it("validates UTF-16 offsets independently from UTF-8 activity bytes", () => {
     let state = InteractiveController.update(loaded(), preview(1, "🙂", {}, "é")).state
-    expect(state.modelPreview).toMatchObject({
+    expect(runPreview(state)).toMatchObject({
       text: "🙂",
       textLength: 2,
       textBytes: 4,
@@ -250,20 +293,20 @@ describe("tentative model preview overlay", () => {
     })
 
     state = InteractiveController.update(state, preview(2, "界", {}, "", { text: 2, reasoning: 1 })).state
-    expect(state.modelPreview).toMatchObject({ text: "🙂界", textLength: 3, textBytes: 7, incomplete: false })
+    expect(runPreview(state)).toMatchObject({ text: "🙂界", textLength: 3, textBytes: 7, incomplete: false })
 
     state = InteractiveController.update(state, preview(3, "wrong", {}, "", { text: 7, reasoning: 1 })).state
-    expect(state.modelPreview).toMatchObject({ text: "", textLength: 0, textBytes: 0, incomplete: true })
+    expect(runPreview(state)).toMatchObject({ text: "", textLength: 0, textBytes: 0, incomplete: true })
     expect(assistantText(state)).toBeUndefined()
     expect(ids(state).some((id) => id.startsWith("tentative:"))).toBe(false)
   })
 
   it("counts a non-BMP character split across frames as one UTF-8 scalar", () => {
     let state = InteractiveController.update(loaded(), preview(1, "\ud83d", {}, "")).state
-    expect(state.modelPreview).toMatchObject({ textLength: 1, textBytes: 3 })
+    expect(runPreview(state)).toMatchObject({ textLength: 1, textBytes: 3 })
 
     state = InteractiveController.update(state, preview(2, "\ude42", {}, "", { text: 1, reasoning: 0 })).state
-    expect(state.modelPreview).toMatchObject({ text: "🙂", textLength: 2, textBytes: 4, incomplete: false })
+    expect(runPreview(state)).toMatchObject({ text: "🙂", textLength: 2, textBytes: 4, incomplete: false })
     expect(state.model.activity).toEqual({ _tag: "Streaming", bytes: 4 })
   })
 
@@ -271,7 +314,7 @@ describe("tentative model preview overlay", () => {
     let state = InteractiveController.update(loaded(), preview(1, "visible", {}, "")).state
     state = InteractiveController.update(state, preview(3, "after gap", {}, "", { text: 7, reasoning: 0 })).state
 
-    expect(state.modelPreview).toMatchObject({ text: "", textLength: 0, incomplete: true, sequence: 2 })
+    expect(runPreview(state)).toMatchObject({ text: "", textLength: 0, incomplete: true, sequence: 2 })
     expect(assistantText(state)).toBeUndefined()
     expect(ids(state).some((id) => id.startsWith("tentative:"))).toBe(false)
   })
@@ -281,7 +324,7 @@ describe("tentative model preview overlay", () => {
     state = InteractiveController.update(state, preview(3, "after gap", {}, "", { text: 7, reasoning: 0 })).state
     state = InteractiveController.update(state, previewCleared()).state
 
-    expect(state.modelPreview?.clearFences.get("run")).toBe(1)
+    expect(runPreview(state)?.clearFence).toBe(1)
     const cleared = state
     expect(InteractiveController.update(state, previewCleared()).state).toBe(cleared)
     expect(InteractiveController.update(state, preview(4, "revived", {}, "", { text: 16, reasoning: 0 })).state).toBe(
@@ -299,8 +342,8 @@ describe("tentative model preview overlay", () => {
     let state = InteractiveController.update(loaded(), preview(1, "before overflow", {}, "")).state
     state = InteractiveController.update(state, previewCleared(0)).state
 
-    expect(state.modelPreview).toMatchObject({ text: "", incomplete: true })
-    expect(state.modelPreview?.clearFences.has("run")).toBe(false)
+    expect(runPreview(state)).toMatchObject({ text: "", incomplete: true })
+    expect(runPreview(state)?.clearFence).toBeUndefined()
     const invalidated = state
     expect(
       InteractiveController.update(state, preview(2, "same identity", {}, "", { text: 15, reasoning: 0 })).state,
@@ -311,7 +354,7 @@ describe("tentative model preview overlay", () => {
       preview(1, "next call", { modelCallId: "call-2", modelAttemptId: "attempt-2" }, ""),
     ).state
     expect(assistantText(state)).toBe("next call")
-    expect(state.modelPreview?.incomplete).toBe(false)
+    expect(runPreview(state)?.incomplete).toBe(false)
   })
 
   it("accepts a distinct model-call identity at the same fence and retires the old identity", () => {
@@ -322,7 +365,7 @@ describe("tentative model preview overlay", () => {
     ).state
 
     expect(assistantText(state)).toBe("second call")
-    expect(state.modelPreview?.incomplete).toBe(false)
+    expect(runPreview(state)?.incomplete).toBe(false)
     const second = state
     expect(InteractiveController.update(state, preview(2, " stale", {}, "", { text: 10, reasoning: 0 })).state).toBe(
       second,
@@ -373,9 +416,9 @@ describe("tentative model preview overlay", () => {
         reasoning: "second thought".length,
       }),
     ).state
-    expect(state.modelPreview?.sequence).toBe(1)
-    expect(state.modelPreview?.text).toBe("second answer revised")
-    expect(state.modelPreview?.reasoning).toBe("second thought revised")
+    expect(runPreview(state)?.sequence).toBe(1)
+    expect(runPreview(state)?.text).toBe("second answer revised")
+    expect(runPreview(state)?.reasoning).toBe("second thought revised")
   })
 
   it.each([
@@ -661,7 +704,7 @@ describe("tentative model preview overlay", () => {
         yield* Effect.promise(() => setup.flush())
         const diagnostics = surface.transcriptDiagnostics()
         expect(state.model.items).toHaveLength(3)
-        expect(state.modelPreview?.text).toContain("answer 10000")
+        expect(runPreview(state)?.text).toContain("answer 10000")
         expect(diagnostics.rows.length).toBeLessThan(32)
         expect(diagnostics.mountedPhysicalRows).toBeLessThanOrEqual(1_265)
         const tentativeRows = diagnostics.keys

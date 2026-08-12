@@ -460,6 +460,10 @@ describe("Baton subagent card projection", () => {
         { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
       ),
     )
+    const active = projector.snapshot()
+    const resumedActive = TreeProjector.make("turn-resume", "delegate this", active.checkpoint, active.units)
+    expect(resumedActive.previewRunIds()).toEqual(["raw-child-run"])
+    expect(resumedActive.previewParentId("raw-child-run")).toBeDefined()
     projector.apply(
       treeEvent(
         "raw-child-run",
@@ -469,6 +473,8 @@ describe("Baton subagent card projection", () => {
     )
     const settled = projector.snapshot()
     const resumed = TreeProjector.make("turn-resume", "delegate this", settled.checkpoint, settled.units)
+    expect(resumed.previewRunIds()).toEqual([])
+    expect(resumed.previewParentId("raw-child-run")).toBeDefined()
     resumed.apply(
       modelResponse(
         "raw-child-run",
