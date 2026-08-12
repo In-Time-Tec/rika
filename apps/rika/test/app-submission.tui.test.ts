@@ -136,6 +136,7 @@ test(
               { delayMillis: 12_000 },
             ),
             model.text("ACTIVE_STEER_COMPLETE"),
+            model.text("STEER_RESPONSE"),
           ],
         })
         yield* Effect.promise(() => app.type("Read the fixture slowly."))
