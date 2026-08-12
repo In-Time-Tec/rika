@@ -97,34 +97,26 @@ test("exposes thread, mode, context, fast mode, subagent limits, and quit comman
     "mode",
     "context",
     "fast-mode",
-    "max-subagents-0",
-    "max-depth-0",
-    "max-subagents-1",
-    "max-depth-1",
-    "max-subagents-2",
-    "max-depth-2",
-    "max-subagents-4",
-    "max-depth-4",
-    "max-subagents-8",
-    "max-depth-8",
-    "max-subagents-16",
-    "max-depth-16",
+    "max-subagents",
+    "max-depth",
     "quit",
   ])
-  expect(filter("set max subagents to 4")).toEqual([
+  expect(filter("set max subagents")).toEqual([
     {
-      id: "max-subagents-4",
+      id: "max-subagents",
       category: "subagents",
-      label: "set max subagents to 4",
-      action: { _tag: "SetSubagentLimit", limit: "maxSubagents", value: 4 },
+      label: "set max subagents",
+      action: { _tag: "EditSubagentLimit", limit: "maxSubagents" },
     },
   ])
-  expect(filter("set max depth to 1").find((command) => command.id === "max-depth-1")).toEqual({
-    id: "max-depth-1",
-    category: "subagents",
-    label: "set max depth to 1",
-    action: { _tag: "SetSubagentLimit", limit: "maxDepth", value: 1 },
-  })
+  expect(filter("set max depth")).toEqual([
+    {
+      id: "max-depth",
+      category: "subagents",
+      label: "set max depth",
+      action: { _tag: "EditSubagentLimit", limit: "maxDepth" },
+    },
+  ])
   expect(filter("review")).toEqual([])
   expect(filter("reasoning")).toEqual([])
   expect(filter("changed files")).toEqual([])

@@ -218,6 +218,24 @@ const reduceKeyboardPickerImpl = (
     return model
   }
   if (model.palette.open) {
+    if (model.palette.limit !== undefined) {
+      if (key.name === "return") {
+        if (!/^\d+$/.test(model.palette.query)) return model
+        const value = Number(model.palette.query)
+        if (!Number.isSafeInteger(value) || value > 1_024) return model
+        return {
+          ...model,
+          paletteOpen: false,
+          palette: { open: false, query: "", selected: 0 },
+          pendingAction: { _tag: "SetSubagentLimit", limit: model.palette.limit, value },
+        }
+      }
+      if (key.name === "backspace")
+        return { ...model, palette: { ...model.palette, query: model.palette.query.slice(0, -1) } }
+      return isPrintable(key) && /^\d$/.test(key.sequence)
+        ? { ...model, palette: { ...model.palette, query: model.palette.query + key.sequence } }
+        : model
+    }
     const results = filter(model.palette.query)
     let selected = model.palette.selected
     if (key.name === "up") selected = Math.max(0, model.palette.selected - 1)
@@ -254,6 +272,12 @@ const reduceKeyboardPickerImpl = (
           paletteOpen: false,
           palette: { open: false, query: "", selected: 0 },
           fastMode: !model.fastMode,
+        }
+      if (action._tag === "EditSubagentLimit")
+        return {
+          ...model,
+          paletteOpen: true,
+          palette: { open: true, query: "", selected: 0, limit: action.limit },
         }
       return {
         ...model,

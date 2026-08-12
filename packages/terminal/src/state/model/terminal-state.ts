@@ -21,7 +21,12 @@ const WorkspaceFilesSchema = Schema.Union([
   loadableSchemas.loading,
   Schema.TaggedStruct("Ready", { value: Schema.Array(Schema.String) }),
 ])
-const PaletteStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Finite })
+const PaletteStateSchema = Schema.Struct({
+  open: Schema.Boolean,
+  query: Schema.String,
+  selected: Schema.Finite,
+  limit: Schema.optional(Schema.Literals(["maxDepth", "maxSubagents"])),
+})
 const ModePickerStateSchema = Schema.Struct({
   open: Schema.Boolean,
   selected: Schema.Finite,

@@ -91,15 +91,20 @@ export abstract class SurfaceOverlay extends SurfacePointer {
     if (overlay === "palette") {
       const results = filter(model.palette.query)
       const boxWidth = Math.max(1, Math.min(80, model.width - 4))
-      const boxHeight = Math.min(Math.max(1, composerTop), results.length + 5)
+      const boxHeight = Math.min(Math.max(1, composerTop), model.palette.limit === undefined ? results.length + 5 : 6)
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
       this.paletteBox.left = Math.max(0, Math.floor((model.width - boxWidth) / 2))
       this.paletteBox.top = Math.max(0, Math.floor((composerTop - boxHeight) / 2))
-      this.paletteBox.title = " Command Palette "
+      if (model.palette.limit === "maxDepth") this.paletteBox.title = " Set Max Depth "
+      else if (model.palette.limit === "maxSubagents") this.paletteBox.title = " Set Max Subagents "
+      else this.paletteBox.title = " Command Palette "
       this.paletteBox.titleColor = toOpenColor(colors.amber)
       this.paletteBox.titleAlignment = "left"
-      this.palette.content = paletteContent(model, results, Math.max(1, boxWidth - 4), Math.max(1, boxHeight - 2))
+      this.palette.content =
+        model.palette.limit === undefined
+          ? paletteContent(model, results, Math.max(1, boxWidth - 4), Math.max(1, boxHeight - 2))
+          : `\n\nEnter an integer from 0 to 1024`
       this.syncOverlayEditor(`> ${model.palette.query}`, 2 + model.palette.query.length, 0, boxHeight - 2, boxWidth - 4)
       cursorEditor = this.overlayEditor
     } else if (overlay === "modes") {
