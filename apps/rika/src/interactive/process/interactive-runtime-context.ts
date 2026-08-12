@@ -56,6 +56,7 @@ export interface InteractiveRuntimeContext {
 
 export interface InteractiveInputContext extends InteractiveRuntimeContext {
   readonly run: <E>(effect: Effect.Effect<void, E, BunServices.BunServices>) => void
+  readonly nextSteeringRequestId: () => string
   readonly close: () => void
   readonly refreshTerminalTitle: () => void
   readonly openPath: (target: PathTarget) => void

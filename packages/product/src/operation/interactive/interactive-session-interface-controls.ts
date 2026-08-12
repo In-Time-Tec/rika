@@ -3,7 +3,6 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Clock, Effect, Ref } from "effect"
 import { OperationError, operationError } from "../operation-error"
 import { makeFailure } from "../operation-failure"
-import { steerInteractiveTurn } from "./interactive-session-steer"
 import type { InteractiveSession } from "./interactive-session"
 import { OperationUnavailable } from "../contract/product-operation"
 import type { InteractiveSessionControlsInput } from "./interactive-session-interface"
@@ -31,8 +30,8 @@ export const makeInteractiveSessionControls = (
     pendingTurnCapacity,
     emit,
     stopActiveExecutionWorkWithProjection,
+    control,
   } = input
-  const steer = (text: string, targetTurnId?: string) => steerInteractiveTurn(input, text, targetTurnId)
   const interruptAndSend = (prompt: string) =>
     safe(
       sessionDispatch,
@@ -123,7 +122,7 @@ export const makeInteractiveSessionControls = (
     }),
   )
   return {
-    steer: (text, targetTurnId) => steer(text, targetTurnId),
+    steer: (text, requestId, targetTurnId) => safe(sessionDispatch, control.steer(text, requestId, targetTurnId)),
     interruptAndSend: (prompt) => interruptAndSend(prompt),
     cancel,
     quit: stopActiveExecutionWorkWithProjection.pipe(

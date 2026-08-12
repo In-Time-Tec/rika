@@ -58,7 +58,8 @@ export const makeInteractiveSessionEvents = (
     shell: (threadId, command, incognito) => shell(threadId, command, incognito),
     editQueued: (id, prompt) => input.safe(input.sessionDispatch, input.control.editQueued(id, prompt)),
     dequeue: (id) => input.safe(input.sessionDispatch, input.control.dequeue(id)),
-    steerQueued: (id, text) => input.safe(input.sessionDispatch, input.control.steerQueued(id, text)),
+    steerQueued: (id, text, requestId) =>
+      input.safe(input.sessionDispatch, input.control.steerQueued(id, text, requestId)),
     approveAuthorization: (turnId, authorizationId) =>
       input.safe(input.sessionDispatch, input.control.approveAuthorization(turnId, authorizationId)),
     denyAuthorization: (turnId, authorizationId) =>

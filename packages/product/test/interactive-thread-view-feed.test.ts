@@ -79,7 +79,11 @@ describe("interactive ThreadView feed", () => {
     })
     expect(started[0]).toMatchObject({
       _tag: "ThreadViewPatch",
-      patch: { baseRevision: 0, revision: 1, header: { source: { projectionVersion: 2 } } },
+      patch: {
+        baseRevision: 0,
+        revision: 1,
+        header: { source: { projectionVersion: ExecutionProjection.projectionVersion } },
+      },
     })
 
     const patched = feed.publish({
@@ -98,7 +102,11 @@ describe("interactive ThreadView feed", () => {
     })
     expect(patched[0]).toMatchObject({
       _tag: "ThreadViewPatch",
-      patch: { baseRevision: 1, revision: 2, header: { source: { projectionVersion: 2 } } },
+      patch: {
+        baseRevision: 1,
+        revision: 2,
+        header: { source: { projectionVersion: ExecutionProjection.projectionVersion } },
+      },
     })
     expect(JSON.stringify([...selected, ...started, ...patched])).not.toMatch(/gateway:|secret-state|checkpoint/)
   })
@@ -131,6 +139,97 @@ describe("interactive ThreadView feed", () => {
       revision: 0,
       content: { _tag: "Entry", role: "user", text: "prompt" },
     })
+  })
+
+  it("projects accepted steering until its exact consumed unit arrives", () => {
+    const feed = makeThreadViewFeed(() => 1)
+    feed.publish({
+      _tag: "SelectionLoaded",
+      selectionEpoch: 1,
+      activitySequence: 0,
+      thread,
+      entries: [],
+      hasOlder: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 0,
+      queue: [],
+      activeTurn: turn,
+    })
+    const pending = { runId: "run-a", entryId: "entry-a", requestId: "request-a", sequence: 1, text: "same text" }
+    feed.publish({
+      _tag: "ExecutionProjectionChanged",
+      threadId,
+      turn,
+      change: {
+        _tag: "ProjectionSnapshot",
+        revision: 0,
+        units: [],
+        hasOlder: false,
+        state: {
+          status: "running",
+          usage: ExecutionProjection.emptyUsageState(),
+          steering: { steeringMessages: 1, followUpMessages: 0, pending: [pending] },
+        },
+      },
+    })
+    expect(feed.current()?.turns[0]?.pendingSteering).toEqual([pending])
+
+    const key = ExecutionProjection.steeringUnitKey(
+      String(turnId),
+      pending.runId,
+      pending.requestId,
+      pending.entryId,
+      pending.sequence,
+    )
+    feed.publish({
+      _tag: "ExecutionProjectionChanged",
+      threadId,
+      turn,
+      change: {
+        _tag: "ProjectionPatch",
+        baseRevision: 0,
+        revision: 1,
+        upsert: [
+          {
+            key,
+            turnId: String(turnId),
+            order: [{ sequence: 2, part: 0, key }],
+            revision: 1,
+            content: { _tag: "Entry", role: "user", text: pending.text },
+          },
+        ],
+        remove: [],
+        state: {
+          status: "running",
+          usage: ExecutionProjection.emptyUsageState(),
+          steering: {
+            steeringMessages: 1,
+            followUpMessages: 0,
+            pending: [],
+            settled: [
+              {
+                runId: pending.runId,
+                entryId: pending.entryId,
+                requestId: pending.requestId,
+                sequence: pending.sequence,
+                outcome: "consumed",
+              },
+            ],
+          },
+        },
+      },
+    })
+    expect(feed.current()?.turns[0]?.pendingSteering).toEqual([])
+    expect(feed.current()?.turns[0]?.settledSteering).toEqual([
+      {
+        runId: pending.runId,
+        entryId: pending.entryId,
+        requestId: pending.requestId,
+        sequence: pending.sequence,
+        outcome: "consumed",
+      },
+    ])
+    expect(feed.current()?.turns[0]?.units.filter((candidate) => candidate.key === key)).toHaveLength(1)
   })
 
   it("emits typed resync and stops patching after a projection revision gap", () => {

@@ -128,22 +128,20 @@ const makeInteractiveSupervisionComponentsImpl = (
     getSelectedThreadId: state.getSelectedThreadId,
     interactiveSinks: input.interactiveSinks,
     operationFeed: state.operationFeed,
+    queueMutationEvent: input.queueMutationEvent,
   })
-  let steeringIdentitySequence = 0
-  const nextSteeringIdentity = (turnId: string) => `rika:interactive-steer:${turnId}:${steeringIdentitySequence++}`
   const control = makeInteractiveControl({
     turns: Context.get(input.dependencyContext, TurnRepository.Service),
     transcripts: Context.get(input.dependencyContext, TranscriptRepository.Service),
     backend: input.acquiredBackend,
-    pendingCapacity: input.pendingTurnCapacity,
+    rootTurnOwner: input.rootTurnOwner,
     active: execution.active,
     dispatch: state.sessionDispatch,
     queueMutation: input.queueMutationEvent,
-    nextSteeringIdentity,
     notifyTurnChanged: input.notifyTurnChanged,
     fail: input.operationError,
   })
-  return { supervise, nextSteeringIdentity, control }
+  return { supervise, control }
 }
 
 export const makeInteractiveSupervisionComponents: {

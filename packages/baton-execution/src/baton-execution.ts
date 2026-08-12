@@ -74,6 +74,16 @@ const approvalFailure = (cause: unknown): ExecutionGateway.ApprovalResponseFailu
   else if (kind === "mismatch") failureMessage = "Authorization response conflicts with its current state"
   return ExecutionGateway.ApprovalResponseFailure.make({ kind, message: failureMessage })
 }
+const steeringFailure = (cause: Runtime.SteerError): ExecutionGateway.SteeringFailure =>
+  ExecutionGateway.SteeringFailure.make({
+    kind:
+      cause._tag === "@batonfx/runtime/RunNotFound" ||
+      cause._tag === "@batonfx/runtime/RunTerminal" ||
+      cause._tag === "@batonfx/runtime/SteeringConflict"
+        ? "rejected"
+        : "unknown",
+    message: message(cause),
+  })
 const prompt = (input: ExecutionGateway.StartTurn) =>
   input.promptParts === undefined
     ? input.prompt
@@ -281,7 +291,7 @@ const make = (
       steerTurn: (link, input) =>
         runtime
           .steer({ runId: link.runId, idempotencyKey: input.idempotencyKey, prompt: input.text })
-          .pipe(Effect.mapError((cause) => ExecutionGateway.SteeringFailure.make({ message: message(cause) }))),
+          .pipe(Effect.mapError(steeringFailure)),
       approveTurn: (link, input) => respondToApproval("approve", link, input),
       denyTurn: (link, input) => respondToApproval("deny", link, input),
       watchTurn: (link, input) => {

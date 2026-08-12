@@ -66,6 +66,7 @@
     "./transcript-repository": "./src/thread/repository/transcript-repository.ts",
     "./turn-record": "./src/thread/model/turn-record.ts",
     "./turn-repository": "./src/thread/repository/turn-repository.ts",
+    "./turn-repository-steering": "./src/thread/repository/turn-repository-steering.ts",
     "./workspace-record": "./src/thread/model/workspace-record.ts"
   },
   "dependencies": {

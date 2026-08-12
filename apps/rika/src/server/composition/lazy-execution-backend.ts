@@ -67,7 +67,9 @@ export const lazyBackendLayer = <E, R, ROut>(backendLayer: Layer.Layer<Execution
         steerTurn: (link, input) =>
           load.pipe(
             Effect.flatMap((backend) => backend.gateway.steerTurn(link, input)),
-            Effect.mapError((cause) => ExecutionGateway.SteeringFailure.make({ message: String(cause) })),
+            Effect.mapError((cause) =>
+              ExecutionGateway.SteeringFailure.make({ kind: "unknown", message: String(cause) }),
+            ),
           ),
         approveTurn: (link, input) =>
           load.pipe(

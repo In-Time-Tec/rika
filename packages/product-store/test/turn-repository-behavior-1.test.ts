@@ -420,37 +420,3 @@ it.effect("memory queue revisions stay atomic", () =>
     expect(yield* repository.readQueue(threadId)).toMatchObject({ revision: 4, queuedCount: 1 })
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
-
-it.effect("memory atomically takes a queued turn and reports a typed promotion conflict", () =>
-  Effect.gen(function* () {
-    const repository = yield* TurnRepository.Service
-    const threadId = Thread.ThreadId.make("take-queued-thread")
-    const active = yield* create(repository, {
-      id: Turn.TurnId.make("take-active"),
-      threadId,
-      prompt: "active",
-      now: 1,
-    })
-    const queued = yield* create(repository, {
-      id: Turn.TurnId.make("take-queued"),
-      threadId,
-      prompt: "queued",
-      now: 2,
-    })
-    const taken = yield* repository.takeQueued(queued.id)
-    expect(taken).toMatchObject({
-      turn: { id: queued.id, prompt: "queued" },
-      queue: { revision: 2, queuedCount: 0, change: { _tag: "Removed", turnId: queued.id } },
-    })
-    expect(yield* repository.get(queued.id)).toBeUndefined()
-    const conflict = yield* Effect.result(repository.takeQueued(active.id))
-    expect(conflict).toMatchObject({
-      _tag: "Failure",
-      failure: {
-        _tag: "QueuedTurnUnavailable",
-        turnId: active.id,
-        message: `Turn ${active.id} is not queued`,
-      },
-    })
-  }).pipe(provideLayer(TurnRepository.memoryLayer())),
-)

@@ -4,6 +4,12 @@ import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
 const tuiTestTimeout = 90_000
+const green = "0,128,0,255"
+const hasGreenText = (app: TuiApp.TuiApp, text: string): boolean =>
+  app
+    .spans()
+    .lines.flatMap((line) => line.spans)
+    .some((span) => span.text.includes(text) && span.fg.toInts().join(",") === green)
 
 test(
   "echoes an idle submission in the next frame before server admission",
@@ -76,8 +82,10 @@ test(
         app.pressEnter()
         const queuedFrame = yield* app.waitFrame("Second queued prompt.")
         expect(queuedFrame).toContain("First slow prompt.")
+        expect(hasGreenText(app, "Second queued prompt.")).toBe(false)
         const finalFrame = yield* app.waitFrame("QUEUED_SECOND_ANSWER", 30_000)
         expect(finalFrame).toContain("SLOW_FIRST_ANSWER")
+        expect(hasGreenText(app, "Second queued prompt.")).toBe(true)
         yield* app.quit
       }),
     ),
@@ -144,14 +152,14 @@ test(
         yield* app.waitFrame("Enter to steer")
         app.pressEnter()
         yield* app.waitFrame("steering: Focus on the exact fixture text.")
-        const steered = yield* app.waitFrame("ACTIVE_STEER_COMPLETE", 25_000)
+        yield* app.waitFrame("ACTIVE_STEER_COMPLETE", 25_000)
         yield* app.settled
         yield* app.waitTerminalTitle((title) => !/^[⠀-⣿] /u.test(title))
-        expect(steered).not.toContain("Execution failed")
-        expect(steered).toContain("steering: Answer in one sentence.")
-        expect(steered).toContain("steering: Focus on the exact fixture text.")
-        expect(steered.match(/steering: Answer in one sentence\./g) ?? []).toHaveLength(1)
-        expect(steered.match(/steering: Focus on the exact fixture text\./g) ?? []).toHaveLength(1)
+        const consumed = yield* app.waitGone("steering: Answer in one sentence.")
+        expect(consumed).not.toContain("Execution failed")
+        expect(consumed).not.toContain("steering: Focus on the exact fixture text.")
+        expect(consumed.match(/Answer in one sentence\./g) ?? []).toHaveLength(1)
+        expect(consumed.match(/Focus on the exact fixture text\./g) ?? []).toHaveLength(1)
         yield* app.quit
       }),
     ),

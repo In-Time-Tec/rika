@@ -103,6 +103,15 @@ export const create = Effect.gen(function* () {
     start_input_json TEXT NOT NULL,
     prepared_at INTEGER NOT NULL
   )`
+  yield* sql`CREATE TABLE rika_turn_steering_outbox (
+    request_id TEXT PRIMARY KEY NOT NULL,
+    target_turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    source_turn_id TEXT UNIQUE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    admission_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'rejected')),
+    prepared_at INTEGER NOT NULL
+  )`
   yield* sql`CREATE TABLE rika_thread_queue_state (
     thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
     revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
@@ -360,6 +369,7 @@ export const schemaObjects: ReadonlyArray<string> = [
   "index:rika_turns_thread_nonqueued",
   "trigger:rika_tombstoned_thread_turn_insert",
   "table:rika_turn_admission_outbox",
+  "table:rika_turn_steering_outbox",
   "table:rika_thread_queue_state",
   "table:rika_thread_turn_activity",
   "index:rika_thread_turn_activity_summary",
@@ -401,6 +411,19 @@ export const additions: ReadonlyArray<{
   readonly apply: (sql: SqlClient) => Effect.Effect<unknown, SqlError>
 }> = [
   {
+    name: "table:rika_turn_steering_outbox",
+    since: "0.5.10",
+    apply: (sql) => sql`CREATE TABLE rika_turn_steering_outbox (
+    request_id TEXT PRIMARY KEY NOT NULL,
+    target_turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    source_turn_id TEXT UNIQUE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    admission_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'rejected')),
+    prepared_at INTEGER NOT NULL
+  )`,
+  },
+  {
     name: "table:rika_thread_deletion_outbox",
     since: "0.5.7",
     apply: (sql) => sql`CREATE TABLE rika_thread_deletion_outbox (
@@ -437,12 +460,22 @@ export const additions: ReadonlyArray<{
   )`,
   },
 ]
+const versionAtLeast = (left: string, right: string): boolean => {
+  const leftParts = left.split(".").map(Number)
+  const rightParts = right.split(".").map(Number)
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0)
+    if (difference !== 0) return difference > 0
+  }
+  return true
+}
+
 export const knownObjectShapes: ReadonlyArray<{
   readonly version: string
   readonly objects: ReadonlyArray<string>
 }> = [...new Set(additions.map((addition) => addition.since))].map((version) => ({
   version,
   objects: schemaObjects.filter(
-    (key) => !additions.some((addition) => addition.since >= version && addition.name === key),
+    (key) => !additions.some((addition) => versionAtLeast(addition.since, version) && addition.name === key),
   ),
 }))

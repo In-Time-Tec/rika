@@ -275,8 +275,10 @@ export const makeInteractiveSession = (
         state.composition.admitLocal(implementation.shell(threadId, command, incognito)),
       editQueued: (turnId, prompt) => state.composition.admitLocal(implementation.editQueued(turnId, prompt)),
       dequeue: (turnId) => state.composition.admitLocal(implementation.dequeue(turnId)),
-      steerQueued: (turnId, text) => state.composition.admitLocal(implementation.steerQueued(turnId, text)),
-      steer: (text, targetTurnId) => state.composition.admitLocal(implementation.steer(text, targetTurnId)),
+      steerQueued: (turnId, text, requestId) =>
+        state.composition.admitLocal(implementation.steerQueued(turnId, text, requestId)),
+      steer: (text, requestId, targetTurnId) =>
+        state.composition.admitLocal(implementation.steer(text, requestId, targetTurnId)),
       approveAuthorization: (turnId, authorizationId) =>
         state.composition.admitLocal(implementation.approveAuthorization(turnId, authorizationId)),
       denyAuthorization: (turnId, authorizationId) =>

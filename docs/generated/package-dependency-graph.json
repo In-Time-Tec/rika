@@ -203,6 +203,7 @@
         "./transcript-repository",
         "./turn-record",
         "./turn-repository",
+        "./turn-repository-steering",
         "./workspace-record"
       ]
     },

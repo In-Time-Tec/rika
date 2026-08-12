@@ -20,7 +20,11 @@ it.effect("delegates the five execution operations through the deferred backend"
         ExecutionGateway.Service.of({
           startTurn: () => Effect.sync(() => (calls.push("start"), link)),
           cancelTurn: () => Effect.sync(() => calls.push("cancel")),
-          steerTurn: () => Effect.sync(() => calls.push("steer")),
+          steerTurn: () =>
+            Effect.sync(() => {
+              calls.push("steer")
+              return { entryId: "test-steering", sequence: 0 }
+            }),
           approveTurn: () => Effect.sync(() => calls.push("approve")),
           denyTurn: () => Effect.sync(() => calls.push("deny")),
           watchTurn: () => Stream.fromEffect(Effect.sync(() => calls.push("watch"))).pipe(Stream.drain),

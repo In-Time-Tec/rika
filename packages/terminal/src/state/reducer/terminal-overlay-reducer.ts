@@ -4,12 +4,7 @@ import type { Model } from "../model/terminal-state"
 import type { TranscriptBlock, TranscriptItem } from "../model/terminal-transcript-state"
 import { ready, loading } from "../model/terminal-loadable-state"
 import { streamActivity } from "../model/terminal-activity-state"
-import {
-  dropSubmittedDrafts,
-  settleSteering,
-  takeSubmittedDraftFor,
-  validQueueSelection,
-} from "../model/terminal-queue-state"
+import { dropSubmittedDrafts, takeSubmittedDraftFor, validQueueSelection } from "../model/terminal-queue-state"
 import { hasProvisionalUserEntry, settleProvisionalUserEntry } from "../model/terminal-submission-state"
 import { expandableRowIds, transcriptUnits, transcriptUnitId } from "../../presentation/transcript/transcript-row"
 import { context } from "./terminal-state-reducer"
@@ -147,14 +142,9 @@ const reduceOverlayImpl = (
     }
     case "ExecutionCompleted": {
       if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
-      const settled = settleSteering(model, message.turnId ?? model.activeTurnId)
       return {
         ...model,
         submittedDrafts: dropSubmittedDrafts(model.submittedDrafts, message.turnId),
-        pendingSteering: settled.pendingSteering,
-        ...(settled.restoredInput === undefined
-          ? {}
-          : { input: settled.restoredInput, cursor: settled.restoredInput.length }),
         cancelPending: false,
         busy: false,
         activity: undefined,
@@ -244,7 +234,6 @@ const reduceOverlayImpl = (
         blocks: alreadyPresented ? settled.blocks : [...settled.blocks, errorBlock(message.failure)],
         items: alreadyPresented ? settled.items : [...settled.items, { _tag: "Block", index: settled.blocks.length }],
         submittedDrafts: taken.draft === undefined ? dropSubmittedDrafts(model.submittedDrafts, turnId) : taken.rest,
-        pendingSteering: settleSteering(model, turnId).pendingSteering,
         cancelPending: settlesActive ? false : model.cancelPending,
         busy: remainsBusy,
         activity: settledActivity(activeTurnId, model.activity, taken.rest.length),
@@ -273,7 +262,6 @@ const reduceOverlayImpl = (
           ...queue,
           ...(restore ? { input: draft.input, cursor: draft.cursor, pastedText: draft.attachments } : {}),
           submittedDrafts: taken.rest,
-          pendingSteering: settleSteering(model, turnId).pendingSteering,
           blocks: cancelTranscriptBlocks(settled.blocks as ReadonlyArray<TranscriptBlock>),
           cancelPending: cancelsActive ? false : model.cancelPending,
           busy: remainsBusy,
@@ -283,15 +271,10 @@ const reduceOverlayImpl = (
       }
       if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
       if (!model.busy) return model
-      const cancelSettled = settleSteering(model, turnId)
       return {
         ...model,
         submittedDrafts: dropSubmittedDrafts(model.submittedDrafts, turnId),
-        pendingSteering: cancelSettled.pendingSteering,
         cancelPending: false,
-        ...(cancelSettled.restoredInput === undefined
-          ? {}
-          : { input: cancelSettled.restoredInput, cursor: cancelSettled.restoredInput.length }),
         blocks: cancelTranscriptBlocks(model.blocks as ReadonlyArray<TranscriptBlock>),
         busy: false,
         activity: undefined,

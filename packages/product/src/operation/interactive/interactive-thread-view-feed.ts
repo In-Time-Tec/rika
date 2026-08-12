@@ -176,6 +176,8 @@ const snapshotFromSelection = (
       readonly units: Array<import("@rika/transcript/transcript-unit").Unit>
       projectionRevision: number
       usage: ExecutionProjection.UsageState
+      pendingSteering: ReadonlyArray<ExecutionProjection.PendingSteering>
+      settledSteering: ReadonlyArray<ExecutionProjection.SteeringDisposition>
     }
   >()
   for (const entry of event.entries) {
@@ -187,10 +189,16 @@ const snapshotFromSelection = (
         units: [entry.unit],
         projectionRevision: entry.projectionRevision,
         usage: entry.projectionState.usage,
+        pendingSteering: entry.projectionState.steering.pending ?? [],
+        settledSteering: entry.projectionState.steering.settled ?? [],
       })
     else {
       current.units.push(entry.unit)
-      if (entry.projectionRevision >= current.projectionRevision) current.usage = entry.projectionState.usage
+      if (entry.projectionRevision >= current.projectionRevision) {
+        current.usage = entry.projectionState.usage
+        current.pendingSteering = entry.projectionState.steering.pending ?? []
+        current.settledSteering = entry.projectionState.steering.settled ?? []
+      }
       current.projectionRevision = Math.max(current.projectionRevision, entry.projectionRevision)
     }
   }
@@ -200,6 +208,8 @@ const snapshotFromSelection = (
       units: [promptUnit(event.activeTurn)],
       projectionRevision: 0,
       usage: ExecutionProjection.emptyUsageState(),
+      pendingSteering: [],
+      settledSteering: [],
     })
   }
   const groupedTurns = [...grouped.values()]
@@ -371,6 +381,8 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
               turn: { ...ThreadView.turnRecord(event.turn!), status: change.state.status },
               projectionRevision: change.revision,
               usage: change.state.usage,
+              pendingSteering: change.state.steering.pending ?? [],
+              settledSteering: change.state.steering.settled ?? [],
             },
           ],
           header,
@@ -398,6 +410,8 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
             turn: record,
             projectionRevision: change.revision,
             usage: change.state.usage,
+            pendingSteering: change.state.steering.pending ?? [],
+            settledSteering: change.state.steering.settled ?? [],
           },
         ],
         header,
@@ -419,6 +433,8 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
             turn: ThreadView.turnRecord(event.turn),
             projectionRevision: 0,
             usage: ExecutionProjection.emptyUsageState(),
+            pendingSteering: [],
+            settledSteering: [],
           },
         ],
       })
@@ -438,6 +454,8 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
             turn: { ...existing.turn, status: event.status, updatedAt: now() },
             projectionRevision: existing.projectionRevision,
             usage: existing.usage,
+            pendingSteering: existing.pendingSteering ?? [],
+            settledSteering: existing.settledSteering ?? [],
           },
         ],
       })

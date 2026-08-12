@@ -30,7 +30,11 @@ it.effect("passes one opaque execution link through all gateway operations", () 
         return Stream.empty
       },
       cancelTurn: (received) => Effect.sync(() => void observed.push(["cancel", received])),
-      steerTurn: (received, input) => Effect.sync(() => void observed.push(["steer", received, input])),
+      steerTurn: (received, input) =>
+        Effect.sync(() => {
+          observed.push(["steer", received, input])
+          return { entryId: "steering-1", sequence: 0 }
+        }),
       approveTurn: (received, input) => Effect.sync(() => void observed.push(["approve", received, input])),
       denyTurn: (received, input) => Effect.sync(() => void observed.push(["deny", received, input])),
       inspectTurn: (received) => Effect.sync(() => (observed.push(["inspect", received]), { status: "running" })),

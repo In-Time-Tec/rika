@@ -1,14 +1,17 @@
 import * as Turn from "@rika/product/turn-record"
+import * as Thread from "@rika/product/thread-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import { operationError, OperationError } from "../operation-error"
 import type { InteractiveOperationFeed } from "./interactive-operation-feed"
-import * as ThreadResult from "@rika/product/thread-result"
 import * as TurnRepository from "@rika/product/turn-repository"
+import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import * as ExecutionAuthorityReconciliation from "../../execution/lifecycle/execution-authority-reconciliation"
-import { Effect, PubSub } from "effect"
+import { Cause, Effect, PubSub } from "effect"
+import { makeFailure } from "../operation-failure"
+import type { SteeringAdmissionRejection } from "../../thread/queue/root-turn-owner"
 import type { InteractiveEvent } from "./interactive-runtime-event"
 import type {
   InteractiveExecutionContext,
@@ -42,6 +45,7 @@ export interface InteractiveSupervisionInput {
   readonly getSelectedThreadId: () => string | undefined
   readonly interactiveSinks: Map<number, (origin: number, event: InteractiveEvent) => void>
   readonly operationFeed: InteractiveOperationFeed
+  readonly queueMutationEvent: InteractiveSessionInput["queueMutationEvent"]
 }
 
 export const makeInteractiveSupervision = (
@@ -64,6 +68,7 @@ export const makeInteractiveSupervision = (
     dirtyTurnObservers,
     isTerminalStatus,
     setTurnStatus,
+    settleThread,
     notifyTurnChanged,
     observeTurn,
     serverOwner,
@@ -72,15 +77,73 @@ export const makeInteractiveSupervision = (
     getSelectedThreadId,
     interactiveSinks,
     operationFeed,
+    queueMutationEvent,
   } = input
-  // A restarted observer is the live owner after a durable wait; the server owner broadcasts without filling its
-  // internal session queue, while an interactive claimant also delivers to its own feed.
   const observedDispatch = serverOwner ? (_event: InteractiveEvent) => {} : operationFeed.sessionDispatch
   const publishObserved = (event: InteractiveEvent) => operationFeed.emit(observedDispatch, event)
+  const publishSteeringRejection = (rejection: SteeringAdmissionRejection) => {
+    if (rejection.queue !== undefined) publishObserved(queueMutationEvent(rejection.queue))
+    publishObserved({
+      _tag: "ExecutionControlFailed",
+      selectionEpoch: 0,
+      threadId: Thread.ThreadId.make(rejection.admission.target.threadId),
+      turnId: Turn.TurnId.make(rejection.admission.target.turnId),
+      action: "steer",
+      failure: makeFailure(Cause.fail(rejection.failure)),
+      steeringRequestId: rejection.admission.input.idempotencyKey,
+    })
+  }
   const supervise = Effect.scoped(
     Effect.gen(function* () {
       const changes = yield* PubSub.subscribe(turnChanges)
       const turns = yield* TurnRepository.Service
+      const steeringChanges = yield* PubSub.sliding<void>(1)
+      const steeringSignals = yield* PubSub.subscribe(steeringChanges)
+      const steeringRecovery = Effect.forever(
+        Effect.gen(function* () {
+          yield* PubSub.take(steeringSignals)
+          let retryDelay = 100
+          while (true) {
+            const recovered = yield* Effect.exit(rootTurnOwner.recoverSteeringAdmissions)
+            if (recovered._tag === "Failure") {
+              yield* Effect.logError("steering.recovery.failed").pipe(
+                Effect.annotateLogs({ "rika.failure.message": String(recovered.cause) }),
+              )
+              yield* Effect.sleep(retryDelay)
+              retryDelay = Math.min(retryDelay * 2, 5_000)
+              continue
+            }
+            for (const acceptance of recovered.value.accepted) {
+              yield* notifyTurnChanged({
+                id: Turn.TurnId.make(acceptance.admission.target.turnId),
+                threadId: Thread.ThreadId.make(acceptance.admission.target.threadId),
+              })
+            }
+            for (const rejection of recovered.value.rejected) {
+              const handled = yield* Effect.exit(
+                Effect.gen(function* () {
+                  if (rejection.notify) publishSteeringRejection(rejection)
+                  if (rejection.queue !== undefined && rejection.admission.source !== undefined) {
+                    const threads = yield* ThreadRepository.Service
+                    const thread = yield* threads.get(rejection.queue.threadId)
+                    if (thread !== undefined) yield* Effect.forkChild(settleThread(thread, publishObserved))
+                  }
+                  yield* rootTurnOwner.acknowledgeSteeringRejection(rejection.admission.input.idempotencyKey)
+                }),
+              )
+              if (handled._tag === "Failure")
+                yield* Effect.logError("steering.rejection.failed").pipe(
+                  Effect.annotateLogs({ "rika.failure.message": String(handled.cause) }),
+                )
+            }
+            if (!recovered.value.pending) break
+            yield* Effect.sleep(retryDelay)
+            retryDelay = Math.min(retryDelay * 2, 5_000)
+          }
+        }),
+      )
+      yield* Effect.forkChild(steeringRecovery)
+      const launchSteeringRecovery = PubSub.publish(steeringChanges, undefined).pipe(Effect.asVoid)
       const launch = (
         turn: Turn.AgentExecutionTurn,
       ): Effect.Effect<
@@ -100,7 +163,7 @@ export const makeInteractiveSupervision = (
                 .pipe(
                   Effect.flatMap((current) =>
                     current !== undefined &&
-                    ThreadResult.TurnResult.isAgentExecution(current) &&
+                    current._tag === "AgentExecution" &&
                     isTerminalStatus(current.status) !== true &&
                     current.status !== "queued" &&
                     current.status !== "waiting"
@@ -123,7 +186,10 @@ export const makeInteractiveSupervision = (
           ),
         )
       const recover = Effect.gen(function* () {
-        if (serverOwner) yield* rootTurnOwner.recoverExecutionAdmissions
+        if (serverOwner) {
+          yield* rootTurnOwner.recoverExecutionAdmissions
+          yield* launchSteeringRecovery
+        }
         const transcripts = yield* TranscriptRepository.Service
         const summaryRepository = yield* ThreadSummaryRepository.Service
         const setSettledStatus = (id: Turn.TurnId, status: ExecutionStatus.Status, now: number) =>
@@ -141,13 +207,14 @@ export const makeInteractiveSupervision = (
         for (const turn of reconciled.active) yield* launch(turn)
       })
       const scanDirty = Effect.gen(function* () {
+        if (serverOwner) yield* launchSteeringRecovery
         const dirty = [...dirtyTurnObservers]
         dirtyTurnObservers.clear()
         for (const turnId of dirty) {
           const turn = yield* turns.get(turnId)
           if (
             turn !== undefined &&
-            ThreadResult.TurnResult.isAgentExecution(turn) &&
+            turn._tag === "AgentExecution" &&
             isTerminalStatus(turn.status) !== true &&
             turn.status !== "queued"
           )

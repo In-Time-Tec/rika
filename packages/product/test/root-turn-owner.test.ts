@@ -7,6 +7,7 @@ import type { Projection } from "@rika/product/transcript-page"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
+import type * as TurnRepositorySteering from "@rika/product/turn-repository-steering"
 import { Deferred, Effect, Fiber, Schema, Stream } from "effect"
 import { unitOrder } from "@rika/transcript/transcript-unit-order"
 
@@ -28,6 +29,21 @@ const turn: Turn.AgentExecutionTurn = {
   createdAt: 0,
   updatedAt: 0,
 }
+
+it.effect("coalesces an observer request that arrives before the current observer releases", () =>
+  Effect.gen(function* () {
+    const owner = yield* make(
+      { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
+      {} as TranscriptRepository.Interface,
+      {} as ExecutionGateway.Interface,
+    )
+    expect(yield* owner.claim(turn.id)).toBe(true)
+    expect(yield* owner.claim(turn.id)).toBe(false)
+    expect(yield* owner.release(turn.id)).toBe(true)
+    expect(yield* owner.claim(turn.id)).toBe(true)
+    expect(yield* owner.release(turn.id)).toBe(false)
+  }),
+)
 
 it.effect("returns stored terminal state and units when checkpoint resume yields no new changes", () =>
   Effect.gen(function* () {
@@ -262,6 +278,334 @@ it.effect("recovers every dual-database admission crash window into one idempote
     yield* scenario("before-start")
     yield* scenario("after-start")
     yield* scenario("after-link")
+  }),
+)
+
+it.effect("retries unknown steering admissions with one identity and journals definitive rejection", () =>
+  Effect.gen(function* () {
+    const queued = (id: string): Turn.AgentExecutionTurn => {
+      const { executionLink: _executionLink, ...base } = turn
+      return { ...base, id: Turn.TurnId.make(id), prompt: `queued ${id}`, status: "queued" }
+    }
+    const target = { ...link, turnId: "target" }
+    const repository = (requestId: string, source?: Turn.AgentExecutionTurn) => {
+      const admission: TurnRepositorySteering.SteeringAdmission = {
+        target,
+        input: { text: source?.prompt ?? `direct ${requestId}`, idempotencyKey: requestId },
+        ...(source === undefined ? {} : { source }),
+        preparedAt: 1,
+        outcome: { _tag: "Pending" },
+      }
+      let admissions: ReadonlyArray<TurnRepositorySteering.SteeringAdmission> = [admission]
+      return {
+        listSteeringAdmissions: Effect.sync(() => admissions),
+        acceptSteeringAdmission: (_requestId: string, receipt: ExecutionGateway.SteeringReceipt) =>
+          Effect.sync(() => {
+            const accepted = { ...admission, outcome: { _tag: "Accepted" as const, receipt } }
+            admissions = [accepted]
+            return accepted
+          }),
+        rejectSteeringAdmission: (_requestId: string, failure: ExecutionGateway.SteeringFailure) =>
+          Effect.sync(() => {
+            const queue =
+              source === undefined
+                ? undefined
+                : {
+                    threadId: source.threadId,
+                    revision: 2,
+                    queuedCount: 1,
+                    becameNonempty: true,
+                    change: { _tag: "Added" as const, turn: source },
+                  }
+            const rejected = {
+              ...admission,
+              outcome: { _tag: "Rejected" as const, failure, ...(queue === undefined ? {} : { queue }) },
+            }
+            admissions = [rejected]
+            return rejected
+          }),
+        completeSteeringAdmission: () => Effect.sync(() => (admissions = [])),
+        completeRejectedSteeringAdmission: () =>
+          Effect.sync(() => {
+            admissions = []
+            return true
+          }),
+      } as unknown as TurnRepository.Interface
+    }
+    const unknownSource = queued("unknown-source")
+    const unknownRepository = repository("request-unknown", unknownSource)
+    const attempts: Array<ExecutionGateway.SteeringInput> = []
+    let unknown = true
+    const retryingOwner = yield* make(
+      unknownRepository,
+      { get: () => Effect.void } as TranscriptRepository.Interface,
+      {
+        steerTurn: (_target, input) =>
+          Effect.gen(function* () {
+            attempts.push(input)
+            if (unknown) {
+              unknown = false
+              return yield* ExecutionGateway.SteeringFailure.make({ kind: "unknown", message: "connection lost" })
+            }
+            return { entryId: "entry-unknown", sequence: 1 }
+          }),
+      } as ExecutionGateway.Interface,
+    )
+    expect(yield* retryingOwner.recoverSteeringAdmissions).toEqual({ accepted: [], rejected: [], pending: true })
+    expect(yield* unknownRepository.listSteeringAdmissions).toHaveLength(1)
+    expect(yield* retryingOwner.recoverSteeringAdmissions).toMatchObject({
+      accepted: [
+        {
+          admission: { input: { idempotencyKey: "request-unknown" } },
+          receipt: { entryId: "entry-unknown", sequence: 1 },
+        },
+      ],
+      rejected: [],
+      pending: true,
+    })
+    expect(attempts).toEqual([
+      { text: unknownSource.prompt, idempotencyKey: "request-unknown" },
+      { text: unknownSource.prompt, idempotencyKey: "request-unknown" },
+    ])
+    expect(yield* unknownRepository.listSteeringAdmissions).toMatchObject([
+      { outcome: { _tag: "Accepted", receipt: { entryId: "entry-unknown", sequence: 1 } } },
+    ])
+
+    const rejectedSource = queued("rejected-source")
+    const rejectedRepository = repository("request-rejected", rejectedSource)
+    const rejectingOwner = yield* make(
+      rejectedRepository,
+      { get: () => Effect.void } as TranscriptRepository.Interface,
+      {
+        steerTurn: () => ExecutionGateway.SteeringFailure.make({ kind: "rejected", message: "turn settled" }),
+      } as ExecutionGateway.Interface,
+    )
+    expect(yield* rejectingOwner.recoverSteeringAdmissions).toMatchObject({
+      accepted: [],
+      rejected: [
+        {
+          admission: { input: { idempotencyKey: "request-rejected" } },
+          queue: { change: { _tag: "Added", turn: { id: rejectedSource.id, status: "queued" } } },
+          failure: { kind: "rejected" },
+          notify: true,
+        },
+      ],
+      pending: true,
+    })
+    expect(yield* rejectedRepository.listSteeringAdmissions).toMatchObject([
+      { outcome: { _tag: "Rejected", failure: { kind: "rejected" } } },
+    ])
+    expect(yield* rejectingOwner.recoverSteeringAdmissions).toMatchObject({
+      rejected: [{ admission: { input: { idempotencyKey: "request-rejected" } }, notify: false }],
+      pending: true,
+    })
+    yield* rejectingOwner.acknowledgeSteeringRejection("request-rejected")
+    expect(yield* rejectedRepository.listSteeringAdmissions).toEqual([])
+
+    const oversizedSource = {
+      ...queued("oversized-source"),
+      prompt: "x".repeat(ExecutionGateway.SteeringTextMaxCharacters + 1),
+    }
+    const oversizedRepository = repository("request-oversized", oversizedSource)
+    let oversizedAttempts = 0
+    const oversizedOwner = yield* make(
+      oversizedRepository,
+      { get: () => Effect.void } as TranscriptRepository.Interface,
+      {
+        steerTurn: () =>
+          Effect.sync(() => {
+            oversizedAttempts += 1
+            return { entryId: "entry-oversized", sequence: 2 }
+          }),
+      } as ExecutionGateway.Interface,
+    )
+    expect(yield* oversizedOwner.recoverSteeringAdmissions).toMatchObject({
+      accepted: [],
+      rejected: [{ admission: { source: { id: oversizedSource.id } }, failure: { kind: "rejected" } }],
+      pending: true,
+    })
+    expect(oversizedAttempts).toBe(0)
+    expect(yield* oversizedRepository.listSteeringAdmissions).toMatchObject([
+      { outcome: { _tag: "Rejected", failure: { kind: "rejected" } } },
+    ])
+  }),
+)
+
+it.effect("persists the Baton receipt until exact accepted, consumed, or discarded identity is observed", () =>
+  Effect.gen(function* () {
+    const input = { text: "durable steering", idempotencyKey: "durable-request" }
+    let admission: TurnRepositorySteering.SteeringAdmission | undefined = {
+      target: link,
+      input,
+      preparedAt: 1,
+      outcome: { _tag: "Pending" },
+    }
+    let projection: Projection | undefined
+    let attempts = 0
+    const repository = {
+      listSteeringAdmissions: Effect.sync(() => (admission === undefined ? [] : [admission])),
+      acceptSteeringAdmission: (_requestId: string, receipt: ExecutionGateway.SteeringReceipt) =>
+        Effect.sync(() => {
+          admission = { ...admission!, outcome: { _tag: "Accepted", receipt } }
+          return admission
+        }),
+      completeSteeringAdmission: () => Effect.sync(() => (admission = undefined)),
+    } as unknown as TurnRepository.Interface
+    const transcripts = {
+      get: () => Effect.sync(() => projection),
+    } as TranscriptRepository.Interface
+    const owner = yield* make(repository, transcripts, {
+      steerTurn: () =>
+        Effect.sync(() => {
+          attempts += 1
+          return { entryId: "opaque-entry", sequence: 9 }
+        }),
+    } as ExecutionGateway.Interface)
+
+    expect(yield* owner.recoverSteeringAdmissions).toMatchObject({
+      accepted: [{ receipt: { entryId: "opaque-entry", sequence: 9 } }],
+      pending: true,
+    })
+    expect(yield* owner.recoverSteeringAdmissions).toMatchObject({
+      accepted: [{ receipt: { entryId: "opaque-entry", sequence: 9 } }],
+      pending: true,
+    })
+    expect(attempts).toBe(1)
+
+    const projectionState = (entryId: string): Projection =>
+      ({
+        units: [],
+        state: {
+          status: "running",
+          usage: ExecutionProjection.emptyUsageState(),
+          steering: {
+            steeringMessages: 0,
+            followUpMessages: 0,
+            pending: [{ runId: link.runId, entryId, requestId: input.idempotencyKey, sequence: 9, text: input.text }],
+          },
+        },
+      }) as Projection
+    projection = projectionState("wrong-entry")
+    expect(yield* Effect.result(owner.recoverSteeringAdmissions)).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "TurnRepositoryError" },
+    })
+    expect(attempts).toBe(1)
+
+    projection = projectionState("opaque-entry")
+    expect(yield* owner.recoverSteeringAdmissions).toEqual({ accepted: [], rejected: [], pending: true })
+    expect(admission?.outcome._tag).toBe("Accepted")
+
+    projection = {
+      ...projection,
+      state: {
+        ...projection.state,
+        status: "completed",
+        steering: { steeringMessages: 0, followUpMessages: 0 },
+      },
+    }
+    expect(yield* owner.recoverSteeringAdmissions).toMatchObject({
+      accepted: [{ receipt: { entryId: "opaque-entry", sequence: 9 } }],
+      pending: true,
+    })
+    expect(admission?.outcome._tag).toBe("Accepted")
+
+    projection = {
+      ...projection,
+      state: {
+        ...projection.state,
+        status: "running",
+        steering: {
+          steeringMessages: 0,
+          followUpMessages: 0,
+          settled: [
+            {
+              runId: link.runId,
+              entryId: "opaque-entry",
+              requestId: input.idempotencyKey,
+              sequence: 10,
+              outcome: "discarded",
+            },
+          ],
+        },
+      },
+    }
+    expect(yield* Effect.result(owner.recoverSteeringAdmissions)).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "TurnRepositoryError" },
+    })
+    expect(admission?.outcome._tag).toBe("Accepted")
+
+    projection = {
+      ...projection,
+      units: [
+        {
+          key: ExecutionProjection.steeringUnitKey(turn.id, link.runId, input.idempotencyKey, "wrong-entry", 9),
+          turnId: turn.id,
+          order: unitOrder("wrong-durable-steering", 0),
+          revision: 1,
+          content: { _tag: "Entry", role: "user", text: input.text },
+        },
+      ],
+      state: {
+        ...projection.state,
+        steering: { steeringMessages: 1, followUpMessages: 0 },
+      },
+    }
+    expect(yield* owner.recoverSteeringAdmissions).toMatchObject({
+      accepted: [{ receipt: { entryId: "opaque-entry", sequence: 9 } }],
+      pending: true,
+    })
+    expect(admission?.outcome._tag).toBe("Accepted")
+
+    projection = {
+      ...projection,
+      units: [
+        {
+          key: ExecutionProjection.steeringUnitKey(turn.id, link.runId, input.idempotencyKey, "opaque-entry", 9),
+          turnId: turn.id,
+          order: unitOrder("durable-steering", 0),
+          revision: 1,
+          content: { _tag: "Entry", role: "user", text: input.text },
+        },
+      ],
+      state: {
+        ...projection.state,
+        steering: { steeringMessages: 1, followUpMessages: 0 },
+      },
+    }
+    expect(yield* owner.recoverSteeringAdmissions).toEqual({ accepted: [], rejected: [], pending: false })
+    expect(admission).toBeUndefined()
+    expect(attempts).toBe(1)
+
+    admission = {
+      target: link,
+      input,
+      preparedAt: 1,
+      outcome: { _tag: "Accepted", receipt: { entryId: "opaque-entry", sequence: 9 } },
+    }
+    projection = {
+      ...projection,
+      units: [],
+      state: {
+        ...projection.state,
+        steering: {
+          steeringMessages: 1,
+          followUpMessages: 0,
+          settled: [
+            {
+              runId: link.runId,
+              entryId: "opaque-entry",
+              requestId: input.idempotencyKey,
+              sequence: 9,
+              outcome: "discarded",
+            },
+          ],
+        },
+      },
+    }
+    expect(yield* owner.recoverSteeringAdmissions).toEqual({ accepted: [], rejected: [], pending: false })
+    expect(admission).toBeUndefined()
   }),
 )
 

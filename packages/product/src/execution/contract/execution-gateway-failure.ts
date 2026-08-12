@@ -7,6 +7,7 @@ export class CancelTurnFailure extends Schema.TaggedErrorClass<CancelTurnFailure
   message: Schema.String,
 }) {}
 export class SteeringFailure extends Schema.TaggedErrorClass<SteeringFailure>()("SteeringFailure", {
+  kind: Schema.Literals(["rejected", "unknown"]),
   message: Schema.String,
 }) {}
 export class WatchTurnFailure extends Schema.TaggedErrorClass<WatchTurnFailure>()("WatchTurnFailure", {

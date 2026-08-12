@@ -29,6 +29,8 @@ export interface PersistedProjector {
   readonly title?: Projection.GeneratedTitle
   readonly steeringMessages: number
   readonly followUpMessages: number
+  readonly pendingSteering: ReadonlyArray<Projection.PendingSteering>
+  readonly settledSteering: ReadonlyArray<Projection.SteeringDisposition>
   readonly usageState: Projection.UsageState
   readonly requestOrdinal: number
   readonly pendingContextOrdinal?: number

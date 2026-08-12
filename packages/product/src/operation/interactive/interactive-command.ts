@@ -28,8 +28,18 @@ export const InteractiveCommand = Schema.Union([
   }),
   Schema.Struct({ _tag: Schema.tag("EditQueued"), turnId: Schema.String, prompt: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("Dequeue"), turnId: Schema.String }),
-  Schema.Struct({ _tag: Schema.tag("SteerQueued"), turnId: Schema.String, text: Schema.String }),
-  Schema.Struct({ _tag: Schema.tag("Steer"), text: Schema.String, turnId: Schema.optionalKey(Schema.String) }),
+  Schema.Struct({
+    _tag: Schema.tag("SteerQueued"),
+    turnId: Schema.String,
+    text: Schema.String,
+    requestId: Schema.String,
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("Steer"),
+    text: Schema.String,
+    requestId: Schema.String,
+    turnId: Schema.optionalKey(Schema.String),
+  }),
   Schema.Struct({ _tag: Schema.tag("ApproveAuthorization"), turnId: Schema.String, authorizationId: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("DenyAuthorization"), turnId: Schema.String, authorizationId: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("InterruptAndSend"), prompt: Schema.String }),
@@ -63,9 +73,9 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
     case "Dequeue":
       return session.dequeue(command.turnId)
     case "SteerQueued":
-      return session.steerQueued(command.turnId, command.text)
+      return session.steerQueued(command.turnId, command.text, command.requestId)
     case "Steer":
-      return session.steer(command.text, command.turnId)
+      return session.steer(command.text, command.requestId, command.turnId)
     case "ApproveAuthorization":
       return session.approveAuthorization(command.turnId, command.authorizationId)
     case "DenyAuthorization":

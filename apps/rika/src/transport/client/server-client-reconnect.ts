@@ -207,8 +207,8 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
         }),
       editQueued: (turnId, prompt) => mutation((session) => session.editQueued(turnId, prompt)),
       dequeue: (turnId) => mutation((session) => session.dequeue(turnId)),
-      steerQueued: (turnId, text) => mutation((session) => session.steerQueued(turnId, text)),
-      steer: (text, turnId) => mutation((session) => session.steer(text, turnId)),
+      steerQueued: (turnId, text, requestId) => mutation((session) => session.steerQueued(turnId, text, requestId)),
+      steer: (text, requestId, turnId) => mutation((session) => session.steer(text, requestId, turnId)),
       approveAuthorization: (turnId, authorizationId) =>
         mutation((session) => session.approveAuthorization(turnId, authorizationId)),
       denyAuthorization: (turnId, authorizationId) =>

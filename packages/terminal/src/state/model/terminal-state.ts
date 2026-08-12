@@ -109,9 +109,20 @@ export const Model = Schema.Struct({
   ),
   pendingSteering: Schema.Array(
     Schema.Struct({
+      runId: Schema.String,
+      requestId: Schema.String,
       turnId: Schema.String,
       text: Schema.String,
-      sequence: Schema.optionalKey(Schema.Finite),
+      entryId: Schema.String,
+      sequence: Schema.Finite,
+    }),
+  ),
+  steeringRequests: Schema.Array(
+    Schema.Struct({
+      requestId: Schema.String,
+      turnId: Schema.String,
+      text: Schema.String,
+      origin: Schema.Literals(["composer", "queue"]),
     }),
   ),
   cancelPending: Schema.Boolean,
@@ -201,6 +212,7 @@ const initialImpl: {
     historySearch: "",
     submittedDrafts: [],
     pendingSteering: [],
+    steeringRequests: [],
     cancelPending: false,
     busy: false,
     contextUsage: { _tag: "Loading" },

@@ -7,7 +7,11 @@ import { expandPastedText } from "../model/terminal-composer-paste"
 import { bindSubmittedDraft, validQueueSelection } from "../model/terminal-queue-state"
 import { composerHeightLimit, clampSidebarWidth } from "../model/terminal-layout-state"
 import { runningToolsActivity, type Activity } from "../model/terminal-activity-state"
-import { appendProvisionalUserEntry, reconcileUserEntry } from "../model/terminal-submission-state"
+import {
+  appendProvisionalUserEntry,
+  reconcileUserEntry,
+  settleProvisionalUserEntry,
+} from "../model/terminal-submission-state"
 
 const reduceExecutionImpl = (
   model: Model,
@@ -86,17 +90,35 @@ const reduceExecutionImpl = (
         : submitted
     }
     case "SubmissionAdmitted": {
+      const draft = model.submittedDrafts.find(
+        (candidate) =>
+          (message.submissionId !== undefined && candidate.submissionId === message.submissionId) ||
+          candidate.turnId === message.turnId,
+      )
+      const prompt = draft === undefined ? undefined : expandPastedText(draft.input, draft.attachments)
       const admitProvisional = (item: QueueItem): ReadonlyArray<QueueItem> => {
-        if (item.id !== message.submissionId || item.provisional !== true) return [item]
+        if ((item.id !== message.submissionId && item.id !== message.turnId) || item.provisional !== true) return [item]
         if (message.status === "queued") return [{ ...item, id: message.turnId }]
         return []
       }
-      const queue = message.submissionId === undefined ? model.queue : model.queue.flatMap(admitProvisional)
+      let queue = model.queue.flatMap(admitProvisional)
+      if (message.status === "queued" && !queue.some((item) => item.id === message.turnId) && prompt !== undefined)
+        queue = [...queue, { id: message.turnId, prompt, provisional: true }]
+      const laneModel =
+        message.status === "queued"
+          ? settleProvisionalUserEntry(
+              { ...model, queue },
+              {
+                turnId: message.turnId,
+                ...(message.submissionId === undefined ? {} : { submissionId: message.submissionId }),
+              },
+              true,
+            )
+          : { ...model, queue }
       const admitted = reconcileUserEntry(
         {
-          ...model,
-          queue,
-          queueSelection: validQueueSelection(model.queueSelection, queue),
+          ...laneModel,
+          queueSelection: validQueueSelection(laneModel.queueSelection, queue),
           submittedDrafts: bindSubmittedDraft(model.submittedDrafts, message.turnId, message.submissionId),
         },
         {
@@ -105,40 +127,24 @@ const reduceExecutionImpl = (
           started: false,
         },
       )
-      return admitted.model
+      if (message.status !== "active" || admitted.found || prompt === undefined) return admitted.model
+      return reconcileUserEntry(appendProvisionalUserEntry(admitted.model, prompt, message.submissionId), {
+        turnId: message.turnId,
+        ...(message.submissionId === undefined ? {} : { submissionId: message.submissionId }),
+        started: false,
+      }).model
     }
-    case "SteeringAccepted": {
-      const index = model.pendingSteering.findIndex(
-        (row) => row.turnId === message.turnId && row.sequence === undefined && row.text === message.text,
-      )
-      if (index < 0) return model
-      if (model.activeTurnId !== message.turnId)
-        return { ...model, pendingSteering: model.pendingSteering.filter((_, position) => position !== index) }
-      const pendingSteering = model.pendingSteering.map((row, position) =>
-        position === index ? { ...row, sequence: message.sequence } : row,
-      )
-      return { ...model, pendingSteering }
-    }
-    case "SteeringDelivered":
-      return {
-        ...model,
-        pendingSteering: model.pendingSteering.filter(
-          (row) =>
-            row.turnId !== message.turnId || row.sequence === undefined || !message.sequences.includes(row.sequence),
-        ),
-      }
     case "SteeringFailed": {
-      const index = model.pendingSteering.findIndex(
-        (row) => row.turnId === message.turnId && row.sequence === undefined && row.text === message.text,
-      )
+      const index = model.steeringRequests.findIndex((row) => row.requestId === message.requestId)
       if (index < 0) return model
-      const pendingSteering = model.pendingSteering.filter((_, position) => position !== index)
-      if (model.activeTurnId !== message.turnId) return { ...model, pendingSteering }
-      const restoreInput = model.input.length === 0
+      const rejected = model.steeringRequests[index]!
+      const steeringRequests = model.steeringRequests.filter((_, position) => position !== index)
+      if (model.activeTurnId !== rejected.turnId) return { ...model, steeringRequests }
+      const restoreInput = rejected.origin === "composer" && model.input.length === 0
       return {
         ...model,
-        pendingSteering,
-        ...(restoreInput ? { input: message.text, cursor: message.text.length } : {}),
+        steeringRequests,
+        ...(restoreInput ? { input: rejected.text, cursor: rejected.text.length } : {}),
         blocks: [...model.blocks, { _tag: "Notification", title: "Steering not delivered", detail: message.message }],
         items: [...model.items, { _tag: "Block", index: model.blocks.length }],
       }

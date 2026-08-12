@@ -12,6 +12,7 @@ import { readTurn } from "./turn-sqlite-reader"
 import { listAgentTurns } from "./turn-sqlite-queries"
 import { makeTurnSqliteQueue } from "./turn-sqlite-queue"
 import { makeTurnSqliteAdmission } from "./turn-sqlite-admission"
+import { makeTurnSqliteSteeringAdmission } from "./turn-sqlite-steering-admission"
 import { makeTurnSqliteState } from "./turn-sqlite-state"
 import { makeTurnSqliteSubmission } from "./turn-sqlite-submission"
 import { makeTurnSqliteRecordedShell } from "./turn-sqlite-recorded-shell"
@@ -26,6 +27,7 @@ export const layer = Layer.effect(
       ...makeTurnSqliteRecordedShell(sql),
       ...makeTurnSqliteQueue(sql),
       ...makeTurnSqliteAdmission(sql),
+      ...makeTurnSqliteSteeringAdmission(sql),
       ...makeTurnSqliteState(sql),
       get,
       list: Effect.fn("TurnRepository.list")(function* (threadId): Effect.fn.Return<

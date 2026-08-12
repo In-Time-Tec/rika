@@ -320,9 +320,21 @@ test("steers a queued row into the active turn while idle with a queue", () => {
     { id: "two", prompt: "two" },
   ])
   model = update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
-  model = update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
-  expect(model.pendingAction).toEqual({ _tag: "SteerQueued", id: "two", prompt: "two" })
-  expect(model.pendingSteering).toEqual([{ turnId: "active", text: "two" }])
+  model = update(model, {
+    _tag: "KeyPressed",
+    key: key({ name: "return" }),
+    steeringRequestId: "request-idle",
+  })
+  expect(model.pendingAction).toEqual({
+    _tag: "SteerQueued",
+    id: "two",
+    prompt: "two",
+    requestId: "request-idle",
+  })
+  expect(model.pendingSteering).toEqual([])
+  expect(model.steeringRequests).toEqual([
+    { requestId: "request-idle", turnId: "active", text: "two", origin: "queue" },
+  ])
 })
 test("recalls composer history only when the queue is empty", () => {
   let model: Model = {
@@ -365,8 +377,17 @@ test("steers and dequeues only while a queued turn is selected", () => {
     { id: "two", prompt: "two" },
   ])
   model = update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
-  model = update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
-  expect(model.pendingAction).toEqual({ _tag: "SteerQueued", id: "two", prompt: "two" })
+  model = update(model, {
+    _tag: "KeyPressed",
+    key: key({ name: "return" }),
+    steeringRequestId: "request-selected",
+  })
+  expect(model.pendingAction).toEqual({
+    _tag: "SteerQueued",
+    id: "two",
+    prompt: "two",
+    requestId: "request-selected",
+  })
   model = { ...model, pendingAction: undefined }
   model = update(model, { _tag: "KeyPressed", key: key({ name: "backspace" }) })
   expect(model.pendingAction).toEqual({ _tag: "Dequeue", id: "two" })
@@ -451,8 +472,17 @@ test("Enter on a selected queued row without edit mode still steers", () => {
     { id: "a", prompt: "alpha" },
   ])
   model = update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
-  model = update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
-  expect(model.pendingAction).toEqual({ _tag: "SteerQueued", id: "a", prompt: "alpha" })
+  model = update(model, {
+    _tag: "KeyPressed",
+    key: key({ name: "return" }),
+    steeringRequestId: "request-edit",
+  })
+  expect(model.pendingAction).toEqual({
+    _tag: "SteerQueued",
+    id: "a",
+    prompt: "alpha",
+    requestId: "request-edit",
+  })
   expect(model.editingTurnId).toBeUndefined()
 })
 test("does not allow submit while editing a queued turn", () => {

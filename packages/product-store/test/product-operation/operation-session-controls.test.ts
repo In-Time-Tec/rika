@@ -7,6 +7,7 @@ import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Deferred, Effect, Layer, Ref, Stream } from "effect"
+import { TestClock } from "effect/testing"
 
 import { executionRoute } from "../support/product-test-current-state"
 import { executionSessionLifecycleLayerTest, productLayer, provideLayer } from "../support/operation-layer-harness"
@@ -58,7 +59,7 @@ describe("Operation", () => {
         yield* session.shell(undefined, "pwd", false)
         yield* session.editQueued("orphan", "changed")
         yield* session.dequeue("missing")
-        yield* session.steer("direction")
+        yield* session.steer("direction", "request-direction")
         yield* session.interruptAndSend("next")
         yield* session.cancel
         yield* session.selectThread("missing")
@@ -70,6 +71,13 @@ describe("Operation", () => {
         expect.objectContaining({
           _tag: "ExecutionFailed",
           failure: expect.objectContaining({ message: expect.stringContaining("Thread missing does not exist") }),
+        }),
+      )
+      expect(yield* Ref.get(events)).toContainEqual(
+        expect.objectContaining({
+          _tag: "ExecutionControlFailed",
+          action: "steer",
+          steeringRequestId: "request-direction",
         }),
       )
     }),
@@ -269,7 +277,10 @@ describe("Operation", () => {
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
       const activeCancelled = yield* Deferred.make<void>()
+      const firstSteeringAttempt = yield* Deferred.make<void>()
+      const secondSteeringAttempt = yield* Deferred.make<void>()
       const cancellationReasons = yield* Ref.make<ReadonlyArray<string>>([])
+      let steeringAttempts = 0
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const dispatch = (event: InteractiveEvent) => runSync(Ref.update(events, (current) => [...current, event]))
       const controlBackend = ExecutionGateway.Service.of({
@@ -288,6 +299,15 @@ describe("Operation", () => {
           Ref.update(cancellationReasons, (reasons) => [...reasons, reason]).pipe(
             Effect.andThen(Deferred.succeed(activeCancelled, undefined)),
           ),
+        steerTurn: () =>
+          Effect.gen(function* () {
+            steeringAttempts += 1
+            if (steeringAttempts === 1) yield* Deferred.succeed(firstSteeringAttempt, undefined)
+            if (steeringAttempts === 2) yield* Deferred.succeed(secondSteeringAttempt, undefined)
+            return steeringAttempts < 3
+              ? yield* ExecutionGateway.SteeringFailure.make({ kind: "unknown", message: "connection lost" })
+              : { entryId: "accepted-steering", sequence: 0 }
+          }),
       })
       yield* Effect.gen(function* () {
         const session = yield* openInteractiveSession(sessions, {
@@ -296,12 +316,18 @@ describe("Operation", () => {
           ephemeral: false,
         })
         yield* Effect.forkChild(session.events(dispatch))
-        yield* Effect.yieldNow
+        yield* settleEvents
         yield* session.selectThread(thread.id)
         yield* session.editQueued("queued-control", "edited")
         yield* session.dequeue("queued-control")
         yield* session.submit("later")
-        yield* session.steerQueued("queued-control-2", "redirect")
+        yield* session.steerQueued("queued-control-2", "redirect", "request-redirect")
+        yield* Deferred.await(firstSteeringAttempt)
+        yield* TestClock.adjust("100 millis")
+        yield* Deferred.await(secondSteeringAttempt)
+        yield* TestClock.adjust("200 millis")
+        while ((yield* turns.listSteeringAdmissions).some((admission) => admission.outcome._tag === "Pending"))
+          yield* Effect.yieldNow
         yield* session.cancel
         while ((yield* turns.get(Turn.TurnId.make("submitted-control")))?.status !== "completed") yield* Effect.yieldNow
         yield* session.reopenThread
@@ -326,13 +352,121 @@ describe("Operation", () => {
         dispatched
           .filter((event) => event._tag === "ExecutionControlled")
           .map((event) => (event._tag === "ExecutionControlled" ? event.action : undefined)),
-      ).toEqual(["steered", "cancelled"])
+      ).toEqual(["cancelled"])
+      expect(steeringAttempts).toBe(3)
       expect(yield* Ref.get(cancellationReasons)).toEqual(["Cancelled by user"])
       expect(yield* turns.get(Turn.TurnId.make("active-control"))).toMatchObject({
         status: "cancelled",
       })
       expect(yield* turns.get(Turn.TurnId.make("queued-control-2"))).toBeUndefined()
       expect(yield* turns.get(Turn.TurnId.make("submitted-control"))).toMatchObject({ status: "completed" })
+    }),
+  )
+
+  it.effect("promotes a queued turn restored after steering rejection and the final drain", () =>
+    Effect.gen(function* () {
+      const thread: Thread.Thread = {
+        id: Thread.ThreadId.make("restored-steering"),
+        lineage: threadLineage,
+        workspace: "/work",
+        title: "Restored steering",
+        labels: [],
+        pinned: false,
+        archived: false,
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      const activeId = Turn.TurnId.make("restored-active")
+      const queuedId = Turn.TurnId.make("restored-queued")
+      const turns = yield* TurnRepository.makeMemory([
+        {
+          id: activeId,
+          ...turnProvenance,
+          threadId: thread.id,
+          prompt: "active",
+          executionRoute: executionRoute(),
+          executionLink: { runId: "restored-run", turnId: activeId, threadId: thread.id },
+          status: "running",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: queuedId,
+          ...turnProvenance,
+          threadId: thread.id,
+          prompt: "restore and promote",
+          executionRoute: executionRoute(),
+          status: "queued",
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
+      const runSync = Effect.runSyncWith(yield* Effect.context<never>())
+      const dispatch = (event: InteractiveEvent) => runSync(Ref.update(events, (all) => [...all, event]))
+      const steeringAttempted = yield* Deferred.make<void>()
+      const rejectSteering = yield* Deferred.make<void>()
+      const promoted = yield* Deferred.make<void>()
+      const promotedCancelled = yield* Deferred.make<void>()
+      const restoredBackend = ExecutionGateway.Service.of({
+        ...backend,
+        inspectTurn: inspectTurnFromTurns(turns),
+        watchTurn: (link) =>
+          Stream.fromEffect(Deferred.await(promotedCancelled)).pipe(
+            Stream.map(() => projectionSnapshot(link.turnId, "cancelled", "promoted-cancelled")),
+          ),
+        cancelTurn: () => Deferred.succeed(promotedCancelled, undefined),
+        steerTurn: () =>
+          Deferred.succeed(steeringAttempted, undefined).pipe(
+            Effect.andThen(Deferred.await(rejectSteering)),
+            Effect.andThen(ExecutionGateway.SteeringFailure.make({ kind: "rejected", message: "turn settled" })),
+          ),
+        startTurn: (input) =>
+          Deferred.succeed(promoted, undefined).pipe(
+            Effect.as({ runId: "promoted-run", turnId: input.turnId, threadId: input.threadId }),
+          ),
+      })
+      const scenario = Effect.gen(function* () {
+        const session = yield* openInteractiveSession(sessions, {
+          _tag: "Interactive",
+          prompt: [],
+          ephemeral: false,
+        })
+        yield* Effect.forkChild(session.events(dispatch))
+        yield* settleEvents
+        yield* session.selectThread(thread.id)
+        yield* session.steerQueued(queuedId, "restore and promote", "restore-request")
+        expect(yield* turns.listSteeringAdmissions).toMatchObject([
+          { input: { idempotencyKey: "restore-request" }, outcome: { _tag: "Pending" } },
+        ])
+        yield* settleEvents
+        expect(yield* Deferred.isDone(steeringAttempted)).toBe(true)
+        yield* turns.setStatus(activeId, "completed", 3)
+        yield* Deferred.succeed(rejectSteering, undefined)
+        yield* settleEvents
+        expect(yield* Deferred.isDone(promoted)).toBe(true)
+        yield* TestClock.adjust("100 millis")
+        while ((yield* turns.listSteeringAdmissions).length > 0) yield* Effect.yieldNow
+        expect(yield* turns.get(queuedId)).toMatchObject({ status: "running" })
+        expect(yield* turns.readQueue(thread.id)).toMatchObject({ queuedCount: 0 })
+        yield* session.quit
+      }).pipe(
+        provideLayer(
+          productLayer({
+            executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
+            repositoryLayer: ThreadRepository.memoryLayer([thread]),
+            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+            backendLayer: Layer.succeed(ExecutionGateway.Service, restoredBackend),
+            defaultWorkspace: "/work",
+            makeThreadId: Effect.die("unused"),
+            makeTurnId: Effect.die("unused"),
+            interactive: holdSession(sessions),
+          }),
+        ),
+      )
+      yield* scenario
+      expect(yield* turns.listSteeringAdmissions).toEqual([])
     }),
   )
 })

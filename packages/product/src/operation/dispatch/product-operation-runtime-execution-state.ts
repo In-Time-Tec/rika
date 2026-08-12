@@ -183,8 +183,8 @@ export const buildProductOperationExecutionState = (
         rootTurnOwner
           .release(turnId)
           .pipe(
-            Effect.tap(() =>
-              notify
+            Effect.tap((reobserve) =>
+              notify || reobserve
                 ? Effect.sync(() => dirtyTurnObservers.add(turnId)).pipe(
                     Effect.andThen(PubSub.publish(turnChanges, undefined)),
                   )

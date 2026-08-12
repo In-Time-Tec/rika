@@ -103,6 +103,8 @@ const applyImpl = (
     units: [...entry.units],
     projectionRevision: entry.projectionRevision,
     usage: entry.usage,
+    pendingSteering: entry.pendingSteering ?? [],
+    settledSteering: entry.settledSteering ?? [],
   }))
   const currentUnits = new Map(entries.flatMap((entry) => entry.units.map((unit) => [unit.key, unit] as const)))
   const currentOwners = new Map(
@@ -137,6 +139,8 @@ const applyImpl = (
       units: current?.units ?? [],
       projectionRevision: change.projectionRevision,
       usage: change.usage,
+      pendingSteering: change.pendingSteering ?? [],
+      settledSteering: change.settledSteering ?? [],
     })
   }
   const unitOwners = new Map<string, string>()
@@ -158,6 +162,8 @@ const applyImpl = (
       turn: entry.turn,
       projectionRevision: entry.projectionRevision,
       usage: entry.usage,
+      pendingSteering: entry.pendingSteering ?? [],
+      settledSteering: entry.settledSteering ?? [],
       units: entry.units.toSorted((left, right) => {
         const order = TranscriptUnitOrder.compareUnitOrder(left.order, right.order)
         return order === 0 ? left.key.localeCompare(right.key) : order

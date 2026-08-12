@@ -51,7 +51,7 @@ const backend = ExecutionGateway.Service.of({
   startTurn: (input) =>
     Effect.succeed({ runId: `opaque-run:${input.turnId}`, turnId: input.turnId, threadId: input.threadId }),
   cancelTurn: () => Effect.void,
-  steerTurn: () => Effect.void,
+  steerTurn: () => Effect.succeed({ entryId: "test-steering", sequence: 0 }),
   approveTurn: () => Effect.void,
   denyTurn: () => Effect.void,
   watchTurn: () => Stream.empty,

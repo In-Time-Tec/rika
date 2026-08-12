@@ -2,15 +2,51 @@ import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import * as TurnRepository from "@rika/product/turn-repository"
+import type * as TurnRepositorySteering from "@rika/product/turn-repository-steering"
 import * as TurnQueuePromotion from "../repository/turn-repository-queue"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import { Cause, Clock, Effect, Fiber, Scope, Semaphore, Stream } from "effect"
+import { Cause, Clock, Effect, Fiber, Schema, Scope, Semaphore, Stream } from "effect"
 
 export interface Lifecycle {
   readonly run: (turnId: Turn.TurnId) => Effect.Effect<void, Error>
 }
+
+export interface SteeringAdmissionRejection {
+  readonly admission: TurnRepositorySteering.SteeringAdmission
+  readonly queue?: TurnQueuePromotion.QueueItemChange
+  readonly failure: ExecutionGateway.SteeringFailure
+  readonly notify: boolean
+}
+
+export interface SteeringAdmissionAcceptance {
+  readonly admission: TurnRepositorySteering.SteeringAdmission
+  readonly receipt: ExecutionGateway.SteeringReceipt
+}
+
+export interface SteeringAdmissionRecovery {
+  readonly accepted: ReadonlyArray<SteeringAdmissionAcceptance>
+  readonly rejected: ReadonlyArray<SteeringAdmissionRejection>
+  readonly pending: boolean
+}
+
+type SteeringAdmissionOutcome =
+  | {
+      readonly _tag: "Accepted"
+      readonly admission: TurnRepositorySteering.SteeringAdmission
+      readonly receipt: ExecutionGateway.SteeringReceipt
+    }
+  | {
+      readonly _tag: "Rejected"
+      readonly admission: TurnRepositorySteering.SteeringAdmission
+      readonly queue?: TurnQueuePromotion.QueueItemChange
+      readonly failure: ExecutionGateway.SteeringFailure
+      readonly notify: boolean
+    }
+  | { readonly _tag: "Pending" }
+  | { readonly _tag: "Observed" }
+  | { readonly _tag: "Completed" }
 
 export interface Interface {
   readonly claim: (
@@ -29,6 +65,26 @@ export interface Interface {
     void,
     ExecutionGateway.StartTurnFailure | TurnRepository.RepositoryError
   >
+  readonly prepareSteering: (
+    target: ExecutionGateway.ExecutionLink,
+    input: ExecutionGateway.SteeringInput,
+  ) => Effect.Effect<
+    TurnRepositorySteering.SteeringAdmission,
+    TurnRepository.RepositoryError | TranscriptRepository.RepositoryError
+  >
+  readonly prepareQueuedSteering: (
+    source: Turn.TurnId,
+    target: ExecutionGateway.ExecutionLink,
+    input: ExecutionGateway.SteeringInput,
+  ) => Effect.Effect<
+    TurnRepositorySteering.QueuedSteeringAdmissionPreparation,
+    TurnRepository.RepositoryError | TurnRepository.QueuedTurnUnavailable | TranscriptRepository.RepositoryError
+  >
+  readonly recoverSteeringAdmissions: Effect.Effect<
+    SteeringAdmissionRecovery,
+    TurnRepository.RepositoryError | TranscriptRepository.RepositoryError
+  >
+  readonly acknowledgeSteeringRejection: (requestId: string) => Effect.Effect<boolean, TurnRepository.RepositoryError>
   readonly watchTurn: (
     turnId: Turn.TurnId,
     onChange?: (change: ExecutionProjection.Change) => void,
@@ -48,19 +104,24 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
   backend: ExecutionGateway.Interface,
   scope?: Scope.Scope,
 ) {
-  const admission = yield* Semaphore.make(1)
+  const ownerAdmission = yield* Semaphore.make(1)
   const ownerScope = scope ?? (yield* Scope.make())
   const claimed = new Set<string>()
+  const reobserve = new Set<string>()
   const claimedThreads = new Map<string, string>()
   const quiesced = new Set<string>()
   const quiescedTurns = new Set<string>()
   let lifecycle: Lifecycle | undefined
   const running = new Map<string, Fiber.Fiber<void, Error>>()
+  const relaunch = new Set<string>()
   const claim = (turnId: Turn.TurnId, expectedStatus?: ExecutionStatus.Status) =>
-    admission.withPermits(1)(
+    ownerAdmission.withPermits(1)(
       Effect.gen(function* () {
         const key = String(turnId)
-        if (claimed.has(key)) return false
+        if (claimed.has(key)) {
+          reobserve.add(key)
+          return false
+        }
         const current = yield* turns.get(turnId)
         if (
           current === undefined ||
@@ -78,16 +139,23 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
       }),
     )
   const release = (turnId: Turn.TurnId) =>
-    admission.withPermits(1)(
+    ownerAdmission.withPermits(1)(
       Effect.sync(() => {
-        claimedThreads.delete(String(turnId))
-        return claimed.delete(String(turnId))
+        const key = String(turnId)
+        claimedThreads.delete(key)
+        claimed.delete(key)
+        return reobserve.delete(key)
       }),
     )
-  const launch = (turnId: Turn.TurnId) =>
-    admission.withPermits(1)(
+  const launch = (turnId: Turn.TurnId): Effect.Effect<void> =>
+    ownerAdmission.withPermits(1)(
       Effect.gen(function* () {
-        if (lifecycle === undefined || running.has(String(turnId))) return
+        const key = String(turnId)
+        if (lifecycle === undefined) return
+        if (running.has(key)) {
+          relaunch.add(key)
+          return
+        }
         if (quiescedTurns.has(String(turnId)) || quiesced.has(claimedThreads.get(String(turnId)) ?? "")) return
         const program = lifecycle.run(turnId).pipe(
           Effect.catchCause((cause) =>
@@ -97,14 +165,23 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
                   Effect.annotateLogs({ "rika.turn.id": String(turnId), "rika.failure.message": String(cause) }),
                 ),
           ),
-          Effect.ensuring(admission.withPermits(1)(Effect.sync(() => running.delete(String(turnId))))),
+          Effect.ensuring(
+            ownerAdmission
+              .withPermits(1)(
+                Effect.sync(() => {
+                  running.delete(key)
+                  return relaunch.delete(key)
+                }),
+              )
+              .pipe(Effect.flatMap((requested) => (requested ? launch(turnId) : Effect.void))),
+          ),
         )
         const fiber = yield* Effect.forkIn(program, ownerScope)
-        running.set(String(turnId), fiber)
+        running.set(key, fiber)
       }),
     )
   const claimQueued = (threadId: Thread.ThreadId, now: number) =>
-    admission.withPermits(1)(
+    ownerAdmission.withPermits(1)(
       Effect.gen(function* () {
         if (quiesced.has(String(threadId))) return undefined
         const queueClaim = yield* turns.claimNextQueued(threadId, now)
@@ -126,6 +203,120 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
     yield* turns.attachExecutionLink(Turn.TurnId.make(input.turnId), link, yield* Clock.currentTimeMillis)
     return link
   })
+  const isSteeringFailure = Schema.is(ExecutionGateway.SteeringFailure)
+  const rejection = (
+    admission: TurnRepositorySteering.SteeringAdmission,
+    notify: boolean,
+  ): SteeringAdmissionOutcome => {
+    if (admission.outcome._tag !== "Rejected") return { _tag: "Pending" }
+    return {
+      _tag: "Rejected",
+      admission,
+      ...(admission.outcome.queue === undefined ? {} : { queue: admission.outcome.queue }),
+      failure: admission.outcome.failure,
+      notify,
+    }
+  }
+  const rejectSteering = (
+    admission: TurnRepositorySteering.SteeringAdmission,
+    failure: ExecutionGateway.SteeringFailure,
+  ) =>
+    turns
+      .rejectSteeringAdmission(admission.input.idempotencyKey, failure)
+      .pipe(Effect.map((rejected) => rejection(rejected, true)))
+  const acceptedSteering = (
+    admission: TurnRepositorySteering.SteeringAdmission,
+  ): Effect.Effect<SteeringAdmissionOutcome, TurnRepository.RepositoryError | TranscriptRepository.RepositoryError> =>
+    Effect.gen(function* () {
+      if (admission.outcome._tag !== "Accepted") return { _tag: "Pending" as const }
+      const receipt = admission.outcome.receipt
+      const turnId = Turn.TurnId.make(admission.target.turnId)
+      const projection = yield* transcripts.get(turnId)
+      const pending = projection?.state.steering.pending?.find(
+        (entry) => entry.runId === admission.target.runId && entry.requestId === admission.input.idempotencyKey,
+      )
+      if (pending !== undefined) {
+        if (pending.entryId !== receipt.entryId || pending.sequence !== receipt.sequence)
+          return yield* TurnRepository.RepositoryError.make({
+            message: `Steering admission ${admission.input.idempotencyKey} has conflicting Baton identity`,
+          })
+        return { _tag: "Observed" as const }
+      }
+      const disposition = projection?.state.steering.settled?.find(
+        (entry) => entry.runId === admission.target.runId && entry.requestId === admission.input.idempotencyKey,
+      )
+      if (disposition !== undefined) {
+        if (disposition.entryId !== receipt.entryId || disposition.sequence !== receipt.sequence)
+          return yield* TurnRepository.RepositoryError.make({
+            message: `Steering admission ${admission.input.idempotencyKey} has conflicting Baton disposition`,
+          })
+        yield* turns.completeSteeringAdmission(admission.input.idempotencyKey, admission.target, receipt)
+        return { _tag: "Completed" as const }
+      }
+      const consumed = projection?.units.some(
+        (unit) =>
+          unit.key ===
+          ExecutionProjection.steeringUnitKey(
+            turnId,
+            admission.target.runId,
+            admission.input.idempotencyKey,
+            receipt.entryId,
+            receipt.sequence,
+          ),
+      )
+      if (consumed === true) {
+        yield* turns.completeSteeringAdmission(admission.input.idempotencyKey, admission.target, receipt)
+        return { _tag: "Completed" as const }
+      }
+      return {
+        _tag: "Accepted" as const,
+        admission,
+        receipt: admission.outcome.receipt,
+      }
+    })
+  const recoverSteeringAdmission = (
+    admission: TurnRepositorySteering.SteeringAdmission,
+  ): Effect.Effect<SteeringAdmissionOutcome, TurnRepository.RepositoryError | TranscriptRepository.RepositoryError> =>
+    Effect.uninterruptibleMask((restore) => {
+      if (admission.outcome._tag === "Rejected") return Effect.succeed(rejection(admission, false))
+      if (admission.outcome._tag === "Accepted") return acceptedSteering(admission)
+      if (admission.input.text.length > ExecutionGateway.SteeringTextMaxCharacters)
+        return rejectSteering(
+          admission,
+          ExecutionGateway.SteeringFailure.make({
+            kind: "rejected",
+            message: `Steering text exceeds ${ExecutionGateway.SteeringTextMaxCharacters} characters`,
+          }),
+        )
+      return Effect.exit(restore(backend.steerTurn(admission.target, admission.input))).pipe(
+        Effect.flatMap((outcome): Effect.Effect<SteeringAdmissionOutcome, TurnRepository.RepositoryError> => {
+          if (outcome._tag === "Success")
+            return turns.acceptSteeringAdmission(admission.input.idempotencyKey, outcome.value).pipe(
+              Effect.as<SteeringAdmissionOutcome>({
+                _tag: "Accepted",
+                admission: { ...admission, outcome: { _tag: "Accepted", receipt: outcome.value } },
+                receipt: outcome.value,
+              }),
+            )
+          const error = Cause.findErrorOption(outcome.cause)
+          const failure = error._tag === "Some" && isSteeringFailure(error.value) ? error.value : undefined
+          if (failure === undefined || failure.kind === "unknown")
+            return Effect.succeed<SteeringAdmissionOutcome>({ _tag: "Pending" })
+          return rejectSteering(admission, failure)
+        }),
+      )
+    })
+  const pendingRequestIds = (target: ExecutionGateway.ExecutionLink) =>
+    transcripts
+      .get(Turn.TurnId.make(target.turnId))
+      .pipe(
+        Effect.map(
+          (projection) =>
+            projection?.state.steering.pending
+              ?.filter((entry) => entry.runId === target.runId)
+              .map((entry) => entry.requestId) ?? [],
+        ),
+      )
   return {
     claim,
     release,
@@ -144,6 +335,73 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
         ),
       ),
     ),
+    prepareSteering: (target, input) =>
+      ownerAdmission.withPermits(1)(
+        Effect.gen(function* () {
+          if (input.text.length > ExecutionGateway.SteeringTextMaxCharacters)
+            return yield* TurnRepository.RepositoryError.make({
+              message: `Steering text exceeds ${ExecutionGateway.SteeringTextMaxCharacters} characters`,
+            })
+          return yield* turns.prepareSteeringAdmission(
+            target,
+            input,
+            yield* pendingRequestIds(target),
+            yield* Clock.currentTimeMillis,
+          )
+        }),
+      ),
+    prepareQueuedSteering: (source, target, input) =>
+      ownerAdmission.withPermits(1)(
+        Effect.gen(function* () {
+          if (input.text.length > ExecutionGateway.SteeringTextMaxCharacters)
+            return yield* TurnRepository.RepositoryError.make({
+              message: `Steering text exceeds ${ExecutionGateway.SteeringTextMaxCharacters} characters`,
+            })
+          return yield* turns.prepareQueuedSteeringAdmission(
+            source,
+            target,
+            input,
+            yield* pendingRequestIds(target),
+            yield* Clock.currentTimeMillis,
+          )
+        }),
+      ),
+    recoverSteeringAdmissions: ownerAdmission.withPermits(1)(
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const admissions = yield* turns.listSteeringAdmissions
+          const outcomes = yield* Effect.forEach(admissions, (steeringAdmission) =>
+            restore(recoverSteeringAdmission(steeringAdmission)),
+          )
+          return {
+            accepted: outcomes.flatMap((outcome) =>
+              outcome._tag === "Accepted" ? [{ admission: outcome.admission, receipt: outcome.receipt }] : [],
+            ),
+            rejected: outcomes.flatMap((outcome) =>
+              outcome._tag === "Rejected"
+                ? [
+                    {
+                      admission: outcome.admission,
+                      ...(outcome.queue === undefined ? {} : { queue: outcome.queue }),
+                      failure: outcome.failure,
+                      notify: outcome.notify,
+                    },
+                  ]
+                : [],
+            ),
+            pending: outcomes.some(
+              (outcome) =>
+                outcome._tag === "Pending" ||
+                outcome._tag === "Accepted" ||
+                outcome._tag === "Observed" ||
+                outcome._tag === "Rejected",
+            ),
+          } satisfies SteeringAdmissionRecovery
+        }),
+      ),
+    ),
+    acknowledgeSteeringRejection: (requestId) =>
+      ownerAdmission.withPermits(1)(turns.completeRejectedSteeringAdmission(requestId)),
     watchTurn: (turnId, onChange, onPreview) =>
       Effect.gen(function* () {
         const turn = yield* turns.get(turnId)
@@ -226,7 +484,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
       Effect.gen(function* () {
         const threadTurns = yield* turns.list(threadId)
         const keys = new Set(threadTurns.map((turn) => String(turn.id)))
-        const fibers = yield* admission.withPermits(1)(
+        const fibers = yield* ownerAdmission.withPermits(1)(
           Effect.sync(() => {
             quiesced.add(String(threadId))
             const owned = [...running].flatMap(([key, fiber]) => (keys.has(key) ? [fiber] : []))
@@ -234,6 +492,8 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
               quiescedTurns.add(key)
               claimed.delete(key)
               claimedThreads.delete(key)
+              reobserve.delete(key)
+              relaunch.delete(key)
               running.delete(key)
             }
             return owned

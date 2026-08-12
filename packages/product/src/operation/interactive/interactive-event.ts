@@ -41,7 +41,7 @@ export const InteractiveEventSchema = Schema.Union([
     turnId: Schema.optionalKey(Turn.TurnId),
     action: Schema.Literals(["steer", "cancel", "approve", "deny"]),
     failure: Failure,
-    steeringText: Schema.optionalKey(Schema.String),
+    steeringRequestId: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({
     _tag: Schema.tag("QueueFull"),
@@ -73,10 +73,8 @@ export const InteractiveEventSchema = Schema.Union([
     _tag: Schema.tag("ExecutionControlled"),
     threadId: Schema.optionalKey(Thread.ThreadId),
     turnId: Schema.optionalKey(Turn.TurnId),
-    action: Schema.Literals(["steered", "cancelled"]),
+    action: Schema.Literal("cancelled"),
     agentResponseArrived: Schema.optionalKey(Schema.Boolean),
-    steeringSequence: Schema.optionalKey(Schema.Int),
-    steeringText: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({ _tag: Schema.tag("ThreadTitled"), threadId: Schema.String, title: Schema.String }),
   Schema.Struct({

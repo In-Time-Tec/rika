@@ -3,6 +3,7 @@ import { Checkpoint, type Change } from "./execution-projection"
 import type { Status } from "./execution-status"
 import type { ModelPreviewEvent } from "./model-preview"
 import { AuthorizationResponse, ExecutionLink, StartTurn } from "./execution-gateway-request"
+import { SteeringInput, SteeringReceipt } from "./execution-steering"
 import {
   ApprovalResponseFailure,
   CancelTurnFailure,
@@ -15,6 +16,7 @@ import { Context, Effect, Layer, Stream } from "effect"
 
 export * from "./execution-gateway-failure"
 export * from "./execution-gateway-request"
+export * from "./execution-steering"
 export * from "./model-preview"
 
 export type WatchEvent = Change | ModelPreviewEvent
@@ -22,10 +24,7 @@ export type WatchEvent = Change | ModelPreviewEvent
 export interface Interface {
   readonly startTurn: (input: StartTurn) => Effect.Effect<ExecutionLink, StartTurnFailure>
   readonly cancelTurn: (link: ExecutionLink, reason: string) => Effect.Effect<void, CancelTurnFailure>
-  readonly steerTurn: (
-    link: ExecutionLink,
-    input: { readonly text: string; readonly idempotencyKey: string },
-  ) => Effect.Effect<void, SteeringFailure>
+  readonly steerTurn: (link: ExecutionLink, input: SteeringInput) => Effect.Effect<SteeringReceipt, SteeringFailure>
   readonly approveTurn: (
     link: ExecutionLink,
     input: AuthorizationResponse,
@@ -51,7 +50,7 @@ export const layerTest = (overrides: Partial<Interface> = {}) =>
       startTurn: (input) =>
         Effect.succeed({ runId: "opaque-test-run", turnId: input.turnId, threadId: input.threadId }),
       cancelTurn: () => Effect.void,
-      steerTurn: () => Effect.void,
+      steerTurn: () => Effect.succeed({ entryId: "test-steering", sequence: 0 }),
       approveTurn: () => Effect.void,
       denyTurn: () => Effect.void,
       watchTurn: () => Stream.empty,
