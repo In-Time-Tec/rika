@@ -1,9 +1,16 @@
+import { TextAttributes } from "@opentui/core"
 import { Effect } from "effect"
 import { expect, test } from "vitest"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
 const tuiTestTimeout = 90_000
+
+const hasBoldText = (app: TuiApp.TuiApp, text: string): boolean =>
+  app
+    .spans()
+    .lines.flatMap((line) => line.spans)
+    .some((span) => span.text.includes(text) && (span.attributes & TextAttributes.BOLD) === TextAttributes.BOLD)
 
 test(
   "shows live Thinking and Streaming activity for a fresh turn with the prompt always visible",
@@ -40,6 +47,40 @@ test(
         expect(completed.match(/LIVE_ACTIVITY_PROMPT/g) ?? []).toHaveLength(1)
         expect(completed.match(/LIVE_STREAM_ANSWER_COMPLETE/g) ?? []).toHaveLength(1)
         expect(completed).not.toContain("Execution failed")
+        yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)
+
+test(
+  "styles Markdown before the streamed answer completes",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          script: [
+            model.turn(
+              [
+                model.part("Plain intro"),
+                model.part("\n\n**LIVE_MARKDOWN_STYLED**\n\n"),
+                model.part("LIVE_MARKDOWN_FINAL"),
+              ],
+              { streamPartDelayMillis: 750 },
+            ),
+          ],
+        })
+
+        yield* Effect.promise(() => app.type("Stream styled Markdown."))
+        app.pressEnter()
+
+        const live = yield* app.waitFrame("LIVE_MARKDOWN_STYLED", 30_000)
+        expect(live).toContain("Streaming")
+        expect(live).not.toContain("LIVE_MARKDOWN_FINAL")
+        expect(live).not.toContain("**LIVE_MARKDOWN_STYLED**")
+        expect(hasBoldText(app, "LIVE_MARKDOWN_STYLED")).toBe(true)
+
+        yield* app.waitFrame("LIVE_MARKDOWN_FINAL", 30_000)
         yield* app.quit
       }),
     ),

@@ -124,6 +124,7 @@ export interface TranscriptRangeBundle {
 export interface TentativeTranscriptLayout {
   readonly width: number
   readonly tone: "answer" | "reasoning"
+  markdown: boolean
   sourceLength: number
   pending: string
   pendingSource: string

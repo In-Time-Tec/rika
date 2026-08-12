@@ -9,7 +9,6 @@ import {
   renderMarkdownLines,
   renderMarkdownStyled,
   highlightShellCommand,
-  terminalSafeText,
   wrapStyledLine,
   toOpenChunk,
 } from "./terminal-text-adapter"
@@ -83,17 +82,6 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
   const renderEntryBody = (index: number) => {
     const entry = model.entries[index]!
     if (entry.role === "assistant") {
-      const tentative = orderedTranscriptItems(model).some(
-        (item) => item._tag === "Entry" && item.index === index && item.id?.startsWith("tentative:") === true,
-      )
-      if (tentative) {
-        const rows = wrapTextToWidth(terminalSafeText(entry.text), transcriptWrapWidth(model.width))
-        rows.forEach((row, rowIndex) => {
-          if (rowIndex > 0) append(fg(colors.text)("\n"))
-          append(fg(colors.text)(row))
-        })
-        return
-      }
       appendAll(renderMarkdownStyled(entry.text.trimEnd(), transcriptWrapWidth(model.width)))
       return
     }

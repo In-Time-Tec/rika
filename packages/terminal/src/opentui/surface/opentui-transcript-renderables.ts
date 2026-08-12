@@ -31,7 +31,7 @@ import {
 import { transcriptUnitBuilder } from "../rendering/opentui-render-unit"
 import { wrapTextToWidth } from "../rendering/opentui-render-window"
 import { splitStyledLines } from "../rendering/opentui-transcript-styled-lines"
-import { toOpenColor } from "../rendering/terminal-text-adapter"
+import { renderMarkdownLines, toOpenColor } from "../rendering/terminal-text-adapter"
 import type { Model } from "../../state/model/terminal-state"
 import type {
   TranscriptRenderableDescriptor,
@@ -112,9 +112,46 @@ const buildTentativeTranscriptUnitBundles = (
   const previous = cached?.tentative
   const layout: TentativeTranscriptLayout =
     previous === undefined || previous.width !== width || previous.tone !== tone || previous.sourceLength > text.length
-      ? { width, tone, sourceLength: 0, pending: "", pendingSource: "", bands: [[]], stableContent: [] }
+      ? {
+          width,
+          tone,
+          markdown: false,
+          sourceLength: 0,
+          pending: "",
+          pendingSource: "",
+          bands: [[]],
+          stableContent: [],
+        }
       : previous
   const sourceDelta = text.slice(layout.sourceLength)
+  if (tone === "answer" && (layout.markdown || /[\n\\`*{}[\]<>()#+\-.!|>~:/@_]/u.test(sourceDelta))) {
+    layout.markdown = true
+    layout.sourceLength = text.length
+    const bundles: Array<TranscriptRangeBundle> = []
+    const lines = renderMarkdownLines(text.trimEnd(), width)
+    for (let start = 0; start < lines.length; start += transcriptRenderableBandRows) {
+      const band = lines.slice(start, start + transcriptRenderableBandRows)
+      const chunks: Array<TextChunk> = []
+      for (const [index, line] of band.entries()) {
+        chunks.push(...line)
+        if (index < band.length - 1) chunks.push(fg(colors.text)("\n"))
+      }
+      const bandKey = start === 0 ? `${key}:body` : `${key}:body:${start}`
+      bundles.push({
+        key: bandKey,
+        rows: band.length,
+        descriptors: [
+          {
+            key: bandKey,
+            revision: `${revision}#${start}`,
+            content: new StyledText(chunks),
+            selectable: false,
+          },
+        ],
+      })
+    }
+    return { revision, bundles, tentative: layout }
+  }
   if (sourceDelta.length > 0) {
     let source = layout.pendingSource + sourceDelta
     const trailing = source.charCodeAt(source.length - 1)
