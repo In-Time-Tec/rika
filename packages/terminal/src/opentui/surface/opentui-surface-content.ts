@@ -22,6 +22,7 @@ export const animationActive = (model: Model): boolean =>
   model.compactionShimmer !== undefined ||
   model.busy ||
   model.activity !== undefined ||
+  model.connectionStatus !== undefined ||
   panelLoading(model) !== undefined ||
   (model.usageDisplay === "time" &&
     model.usageTime?._tag === "Available" &&

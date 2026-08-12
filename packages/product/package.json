@@ -44,6 +44,7 @@
     "./review-intent": "./src/execution/contract/review-intent.ts",
     "./review-policy": "./src/operation/review/review-policy.ts",
     "./root-turn-owner": "./src/thread/queue/root-turn-owner.ts",
+    "./server-interactive-connection": "./src/server/server-interactive-connection.ts",
     "./server-interactive-feed": "./src/server/server-interactive-feed.ts",
     "./server-operation-request": "./src/server/server-operation-request.ts",
     "./server-service": "./src/server/server-service.ts",

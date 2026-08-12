@@ -30,15 +30,6 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/client/interactive-runtime-restart.ts",
-      "path": "apps/rika/src/client/interactive-runtime-restart.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
       "id": "apps/rika/src/client/private-runtime-launch.ts",
       "path": "apps/rika/src/client/private-runtime-launch.ts",
       "workspace": "@rika/cli",
@@ -518,15 +509,6 @@
     {
       "id": "apps/rika/src/provider/openrouter/openrouter-provider-auth.ts",
       "path": "apps/rika/src/provider/openrouter/openrouter-provider-auth.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "apps/rika/src/release/relaunch-argument.ts",
-      "path": "apps/rika/src/release/relaunch-argument.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -1158,6 +1140,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "apps/rika/test/connection-status.tui.test.ts",
+      "path": "apps/rika/test/connection-status.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
       "id": "apps/rika/test/dependency-boundary.test.ts",
       "path": "apps/rika/test/dependency-boundary.test.ts",
       "workspace": "@rika/cli",
@@ -1180,16 +1172,6 @@
     {
       "id": "apps/rika/test/fixtures/logging-hardexit.ts",
       "path": "apps/rika/test/fixtures/logging-hardexit.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "apps/rika/test/fixtures/runtime-stub.ts",
-      "path": "apps/rika/test/fixtures/runtime-stub.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -2706,6 +2688,7 @@
         "./review-intent",
         "./review-policy",
         "./root-turn-owner",
+        "./server-interactive-connection",
         "./server-interactive-feed",
         "./server-operation-request",
         "./server-service",
@@ -6984,6 +6967,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/product/src/server/server-interactive-connection.ts",
+      "path": "packages/product/src/server/server-interactive-connection.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./server-interactive-connection"]
+    },
+    {
       "id": "packages/product/src/server/server-interactive-feed.ts",
       "path": "packages/product/src/server/server-interactive-feed.ts",
       "workspace": "@rika/product",
@@ -7708,6 +7700,16 @@
     {
       "id": "packages/product/test/operation/turn-retry-policy.test.ts",
       "path": "packages/product/test/operation/turn-retry-policy.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/product-operation-admission.test.ts",
+      "path": "packages/product/test/product-operation-admission.test.ts",
       "workspace": "@rika/product",
       "package": "@rika/product",
       "kind": "source",
@@ -11253,14 +11255,6 @@
     },
     {
       "from": "apps/rika/src/client/client-process.ts",
-      "to": "apps/rika/src/client/interactive-runtime-restart.ts",
-      "specifier": "./interactive-runtime-restart",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/client/client-process.ts",
       "to": "apps/rika/src/client/private-runtime-launch.ts",
       "specifier": "./private-runtime-launch",
       "kind": "import",
@@ -11287,14 +11281,6 @@
       "from": "apps/rika/src/client/client-process.ts",
       "to": "apps/rika/src/server/process/server-process-spawn.ts",
       "specifier": "../server/process/server-process-spawn",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/client/client-process.ts",
-      "to": "apps/rika/src/server/process/server-process.ts",
-      "specifier": "../server/process/server-process",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -11373,22 +11359,6 @@
     },
     {
       "from": "apps/rika/src/client/client-process.ts",
-      "to": "packages/product/src/server/server-service.ts",
-      "specifier": "@rika/product/server-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/client/interactive-runtime-restart.ts",
-      "to": "apps/rika/src/server/process/server-process.ts",
-      "specifier": "../server/process/server-process",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/client/interactive-runtime-restart.ts",
       "to": "packages/product/src/server/server-service.ts",
       "specifier": "@rika/product/server-service",
       "kind": "import",
@@ -12309,6 +12279,14 @@
     },
     {
       "from": "apps/rika/src/interactive/process/interactive-process-loop.ts",
+      "to": "packages/product/src/server/server-interactive-connection.ts",
+      "specifier": "@rika/product/server-interactive-connection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-process-loop.ts",
       "to": "packages/product/src/server/server-interactive-feed.ts",
       "specifier": "@rika/product/server-interactive-feed",
       "kind": "import",
@@ -12335,6 +12313,14 @@
       "from": "apps/rika/src/interactive/process/interactive-process-loop.ts",
       "to": "packages/terminal/src/state/model/terminal-state.ts",
       "specifier": "@rika/terminal/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-process-loop.ts",
+      "to": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
+      "specifier": "@rika/terminal/terminal-state-reducer",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12957,14 +12943,6 @@
     },
     {
       "from": "apps/rika/src/interactive/process/process-start.ts",
-      "to": "apps/rika/src/release/relaunch-argument.ts",
-      "specifier": "../../release/relaunch-argument",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/process/process-start.ts",
       "to": "apps/rika/src/transport/client/server-client-transport.ts",
       "specifier": "../../transport/client/server-client-transport",
       "kind": "import",
@@ -13045,14 +13023,6 @@
     },
     {
       "from": "apps/rika/src/interactive/process/process-start.ts",
-      "to": "packages/product/src/server/server-service.ts",
-      "specifier": "@rika/product/server-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/process/process-start.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-surface.ts",
       "specifier": "@rika/terminal/opentui-surface",
       "kind": "import",
@@ -13095,14 +13065,6 @@
       "from": "apps/rika/src/interactive/process/process-startup-dispatcher.ts",
       "to": "apps/rika/src/server/process/server-process-spawn.ts",
       "specifier": "../../server/process/server-process-spawn",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/process/process-startup-dispatcher.ts",
-      "to": "apps/rika/src/server/process/server-process.ts",
-      "specifier": "../../server/process/server-process",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -14917,6 +14879,14 @@
     },
     {
       "from": "apps/rika/src/transport/client/server-client-connection.ts",
+      "to": "packages/product/src/server/server-interactive-connection.ts",
+      "specifier": "@rika/product/server-interactive-connection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/client/server-client-connection.ts",
       "to": "packages/product/src/server/server-interactive-feed.ts",
       "specifier": "@rika/product/server-interactive-feed",
       "kind": "import",
@@ -15013,6 +14983,14 @@
     },
     {
       "from": "apps/rika/src/transport/client/server-client-feed.ts",
+      "to": "packages/product/src/server/server-interactive-connection.ts",
+      "specifier": "@rika/product/server-interactive-connection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/client/server-client-feed.ts",
       "to": "packages/product/src/server/server-interactive-feed.ts",
       "specifier": "@rika/product/server-interactive-feed",
       "kind": "import",
@@ -15087,6 +15065,14 @@
       "from": "apps/rika/src/transport/client/server-client-reconnect.ts",
       "to": "packages/product/src/operation/interactive/interactive-session.ts",
       "specifier": "@rika/product/interactive-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/client/server-client-reconnect.ts",
+      "to": "packages/product/src/server/server-interactive-connection.ts",
+      "specifier": "@rika/product/server-interactive-connection",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -16637,14 +16623,6 @@
     },
     {
       "from": "apps/rika/test/client-main.proc.test.ts",
-      "to": "apps/rika/src/client/interactive-runtime-restart.ts",
-      "specifier": "../src/client/interactive-runtime-restart",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/client-main.proc.test.ts",
       "to": "apps/rika/test/client-process-test-runtime.ts",
       "specifier": "./client-process-test-runtime",
       "kind": "import",
@@ -16663,22 +16641,6 @@
       "from": "apps/rika/test/client-main.proc.test.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/client-main.proc.test.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/client-main.proc.test.ts",
-      "to": "external:url",
-      "specifier": "url",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -16837,14 +16799,6 @@
     },
     {
       "from": "apps/rika/test/command.test.ts",
-      "to": "apps/rika/src/client/interactive-runtime-restart.ts",
-      "specifier": "../src/client/interactive-runtime-restart",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/command.test.ts",
       "to": "apps/rika/src/command/root/noninteractive-run-command.ts",
       "specifier": "../src/command/root/noninteractive-run-command",
       "kind": "import",
@@ -16908,6 +16862,38 @@
       "production": false
     },
     {
+      "from": "apps/rika/test/connection-status.tui.test.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/connection-status.tui.test.ts",
+      "to": "apps/rika/test/tui-app.ts",
+      "specifier": "./tui-app",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/connection-status.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/connection-status.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "apps/rika/test/dependency-boundary.test.ts",
       "to": "apps/rika/src/command/root/rika-command.ts",
       "specifier": "../src/command/root/rika-command",
@@ -16997,22 +16983,6 @@
     },
     {
       "from": "apps/rika/test/fixtures/logging-hardexit.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/fixtures/runtime-stub.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/fixtures/runtime-stub.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -41177,6 +41147,14 @@
       "production": true
     },
     {
+      "from": "packages/product/src/server/server-interactive-connection.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/product/src/server/server-interactive-feed.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -41268,6 +41246,14 @@
       "from": "packages/product/src/server/server-service.ts",
       "to": "packages/product/src/operation/interactive/interactive-session.ts",
       "specifier": "../operation/interactive/interactive-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/server/server-service.ts",
+      "to": "packages/product/src/server/server-interactive-connection.ts",
+      "specifier": "./server-interactive-connection",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -43732,6 +43718,38 @@
       "from": "packages/product/test/operation/turn-retry-policy.test.ts",
       "to": "packages/product/src/operation/turn-retry-policy.ts",
       "specifier": "../../src/operation/turn-retry-policy",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/product-operation-admission.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/product-operation-admission.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/product-operation-admission.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/product-operation-admission.test.ts",
+      "to": "packages/product/src/operation/dispatch/product-operation-admission.ts",
+      "specifier": "../src/operation/dispatch/product-operation-admission",
       "kind": "import",
       "relationship": "test",
       "production": false

@@ -612,27 +612,40 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
               .run(
                 { _tag: "Interactive", prompt: [], ephemeral: false, workspace },
                 {
-                  interactive: (_input, session) =>
+                  interactive: (_input, session, interactiveConnection) =>
                     Effect.gen(function* () {
                       callbacks += 1
                       yield* emit({ type: "interactive-callback", callbacks })
+                      yield* emit({ type: "connection-status", status: interactiveConnection.initialStatus })
+                      const statuses = yield* Queue.unbounded<typeof interactiveConnection.initialStatus>()
+                      yield* Effect.forkChild(
+                        interactiveConnection.statusChanges.pipe(
+                          Stream.runForEach((status) => Queue.offer(statuses, status)),
+                        ),
+                      )
+                      const awaitStatus = (expected: typeof interactiveConnection.initialStatus) =>
+                        Effect.gen(function* () {
+                          while ((yield* Queue.take(statuses)) !== expected) {}
+                          yield* emit({ type: "connection-status", status: expected })
+                        })
+                      yield* awaitStatus("connected")
                       const events = yield* Queue.unbounded<string>()
                       yield* Effect.forkChild(session.events((event) => Queue.offerUnsafe(events, event._tag)))
                       yield* emit({ type: "initial-read", tag: yield* Queue.take(events) })
+                      yield* awaitStatus("reconnecting")
+                      yield* awaitStatus("connected")
                       yield* emit({ type: "upgrade-survived", tag: yield* Queue.take(events), callbacks })
                       return yield* Effect.never
                     }),
                 },
               )
               .pipe(
+                Effect.andThen(emit({ type: "upgrade-closed" })),
                 Effect.catch((error) =>
                   emit({
-                    type: "restart-required",
+                    type: "upgrade-failed",
                     tag: error._tag,
                     error: error.message,
-                    ...(error._tag === "ServerRestartRequired" && error.threadId !== undefined
-                      ? { text: error.threadId }
-                      : {}),
                   }),
                 ),
               )
@@ -721,7 +734,11 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
               streamJsonInput: false,
               streamJsonThinking: false,
             })
-            .pipe(Effect.catch((error) => emit({ type: "active-execution-failed", error: error.message })))
+            .pipe(
+              Effect.catch((error) => emit({ type: "active-execution-failed", error: error.message })),
+              Effect.forkChild,
+              Effect.asVoid,
+            )
         if (command === "cancel-delayed")
           return Effect.gen(function* () {
             const operation = yield* Effect.forkChild(

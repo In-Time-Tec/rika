@@ -226,33 +226,9 @@ export const start = () => {
           const loadProduct = yield* Effect.cached(loadProductEffect)
           yield* loadProduct.pipe(Effect.mapError((error) => startupError("startup-failed", error)))
           return Operation.Service.of({
-            hasActiveExecutionWork: Ref.get(productLoaded).pipe(
-              Effect.flatMap((loaded) =>
-                loaded
-                  ? loadProduct.pipe(
-                      Effect.flatMap((service) => service.hasActiveExecutionWork ?? Effect.succeed(true)),
-                    )
-                  : Effect.succeed(false),
-              ),
-              Effect.mapError((error) =>
-                Schema.is(ProductOperation.OperationUnavailable)(error)
-                  ? error
-                  : ProductOperation.OperationUnavailable.make({
-                      operation: "ServerReplacement",
-                      message: String(error),
-                    }),
-              ),
-            ),
-            authorizeServerReplacement: loadProduct.pipe(
-              Effect.flatMap((service) => service.authorizeServerReplacement ?? Effect.succeed("defer" as const)),
-              Effect.mapError((error) =>
-                Schema.is(ProductOperation.OperationUnavailable)(error)
-                  ? error
-                  : ProductOperation.OperationUnavailable.make({
-                      operation: "ServerReplacement",
-                      message: String(error),
-                    }),
-              ),
+            prepareServerReplacement: loadProduct.pipe(
+              Effect.flatMap((service) => service.prepareServerReplacement ?? Effect.void),
+              Effect.orDie,
             ),
             stopActiveExecutionWork: Ref.get(productLoaded).pipe(
               Effect.flatMap((loaded) =>
@@ -380,8 +356,11 @@ export const start = () => {
         )
   const removeSigintIsolation = installServerSigintIsolation()
   const fiber = Effect.runFork(observedProgram("server", paths.dataRoot, hostProgram))
+  const terminate = () => fiber.interruptUnsafe()
+  process.on("SIGTERM", terminate)
   fiber.addObserver((exit) => {
     removeSigintIsolation()
+    process.off("SIGTERM", terminate)
     process.exit(exit._tag === "Success" ? 0 : 1)
   })
 }

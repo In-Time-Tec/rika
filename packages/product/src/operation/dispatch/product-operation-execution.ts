@@ -116,7 +116,6 @@ export interface ProductOperationExecutionInput {
   readonly rawBackend: ExecutionGatewayInterface
   readonly dependencyContext: InteractiveDependencyContext
   readonly executionDependencies: InteractiveExecutionContext
-  readonly withExecutionAdmission: <A, E, R>(effect: Effect.Effect<A, E, R>, closed: E) => Effect.Effect<A, E, R>
   readonly extensionService:
     | import("@rika/extensions/execution-extension-service").ExecutionExtensionInterface
     | undefined

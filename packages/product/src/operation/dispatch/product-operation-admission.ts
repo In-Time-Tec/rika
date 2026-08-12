@@ -1,29 +1,38 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import { Effect, Ref, Semaphore } from "effect"
+import { Deferred, Effect, Ref, Semaphore } from "effect"
 
 export interface ProductOperationAdmissionInput {
   readonly rawBackend: ExecutionGateway.Interface
-  readonly replacementAdmission: Semaphore.Semaphore
-  readonly replacementState: Ref.Ref<{ readonly closed: boolean; readonly active: number }>
 }
 
-export const makeProductOperationAdmission = (input: ProductOperationAdmissionInput) => {
-  const { rawBackend, replacementAdmission, replacementState } = input
+export const makeProductOperationAdmission = Effect.fn("ProductOperation.makeAdmission")(function* (
+  input: ProductOperationAdmissionInput,
+) {
+  const { rawBackend } = input
+  const admission = yield* Semaphore.make(1)
+  const state = yield* Ref.make({ closed: false, active: 0 })
+  const drained = yield* Deferred.make<void>()
+  const release = Ref.modify(state, (current) => {
+    const next = { ...current, active: Math.max(0, current.active - 1) }
+    return [next.closed && next.active === 0, next] as const
+  }).pipe(Effect.flatMap((complete) => (complete ? Deferred.succeed(drained, undefined) : Effect.void)))
   const withExecutionAdmission = <A, E, R>(effect: Effect.Effect<A, E, R>, closed: E): Effect.Effect<A, E, R> =>
     Effect.acquireUseRelease(
-      replacementAdmission.withPermits(1)(
-        Ref.modify(replacementState, (state) =>
-          state.closed ? [false, state] : [true, { ...state, active: state.active + 1 }],
+      admission.withPermits(1)(
+        Ref.modify(state, (current) =>
+          current.closed ? [false, current] : [true, { ...current, active: current.active + 1 }],
         ),
       ),
       (admitted): Effect.Effect<A, E, R> => (admitted === true ? effect : Effect.fail(closed)),
-      (admitted) =>
-        admitted === true
-          ? Ref.update(replacementState, (state: { closed: boolean; active: number }) => ({
-              ...state,
-              active: Math.max(0, state.active - 1),
-            }))
-          : Effect.void,
+      (admitted) => (admitted === true ? release : Effect.void),
+    )
+  const prepareServerReplacement = admission
+    .withPermits(1)(
+      Ref.modify(state, (current) => [current.active, current.closed ? current : { ...current, closed: true }]),
+    )
+    .pipe(
+      Effect.flatMap((active) => (active === 0 ? Effect.void : Deferred.await(drained))),
+      Effect.uninterruptible,
     )
   const acquiredBackend = ExecutionGateway.Service.of({
     startTurn: (backendInput) =>
@@ -63,5 +72,5 @@ export const makeProductOperationAdmission = (input: ProductOperationAdmissionIn
     watchTurn: (link, cursor) => rawBackend.watchTurn(link, cursor),
     inspectTurn: (link) => rawBackend.inspectTurn(link),
   })
-  return { withExecutionAdmission, acquiredBackend }
-}
+  return { acquiredBackend, prepareServerReplacement }
+})

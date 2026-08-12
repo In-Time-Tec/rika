@@ -109,12 +109,14 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
     const current = this.model
     if (current !== undefined) {
       const label =
+        current.connectionStatus ??
         formatActivity(
           current.activity,
           current.activity?._tag === "Retrying"
             ? Math.max(0, Math.ceil((current.activity.nextAt - this.currentTimeMillis()) / 1000))
             : undefined,
-        ) ?? panelLoading(current)
+        ) ??
+        panelLoading(current)
       if (label !== undefined)
         this.statusLabel.content = new StyledText([
           fg(toOpenColor(colors.text))(" "),

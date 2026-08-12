@@ -112,7 +112,7 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
   "rika.server.generation": boundedNumber,
   "rika.server.port": boundedNumber,
   "rika.server.previous.pid": boundedNumber,
-  "rika.server.rejection.reason": oneOf("accepted", "incompatible", "active-execution-work"),
+  "rika.server.rejection.reason": oneOf("AuthenticationFailed", "BuildMismatch", "IdentityMismatch"),
   "rika.server.request.id": uuid,
   "rika.server.session.id": uuid,
   "rika.server.startup.pid": boundedNumber,

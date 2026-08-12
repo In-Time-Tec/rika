@@ -1,4 +1,4 @@
-import { Context, Effect, PubSub, Scope, Semaphore, Ref, Layer } from "effect"
+import { Context, Effect, PubSub, Scope, Semaphore, Layer } from "effect"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ThreadDeletion from "../../thread/lifecycle/thread-deletion"
@@ -87,9 +87,7 @@ export interface ProductOperationExecutionState extends ProductOperationExecutio
     | import("../../context/context-resolution-service").Service
     | import("@rika/extensions/execution-extension-service").ExecutionExtensionService
   >
-  readonly withExecutionAdmission: <A, E, R>(effect: Effect.Effect<A, E, R>, closed: E) => Effect.Effect<A, E, R>
-  readonly replacementAdmission: Semaphore.Semaphore
-  readonly replacementState: Ref.Ref<{ closed: boolean; active: number }>
+  readonly prepareServerReplacement: Effect.Effect<void>
   readonly rawBackend: ExecutionGatewayInterface
   readonly executionSessionLifecycle: import("@rika/product/execution-session-lifecycle").Interface
   readonly acquiredBackend: ExecutionGatewayInterface
@@ -144,9 +142,7 @@ export const buildProductOperationExecutionState = (
       rootTurnOwner,
       extensionService,
       acquiredDependencies,
-      withExecutionAdmission,
-      replacementAdmission,
-      replacementState,
+      prepareServerReplacement,
       rawBackend,
       executionSessionLifecycle,
       acquiredBackend,
@@ -214,7 +210,6 @@ export const buildProductOperationExecutionState = (
       rawBackend,
       dependencyContext,
       executionDependencies,
-      withExecutionAdmission,
       extensionService,
       publishInteractiveActivity,
       publishTurnSettled,
@@ -241,9 +236,7 @@ export const buildProductOperationExecutionState = (
       extensionService,
       deleteThread: threadDeletion.request,
       acquiredDependencies,
-      withExecutionAdmission,
-      replacementAdmission,
-      replacementState,
+      prepareServerReplacement,
       rawBackend,
       executionSessionLifecycle,
       acquiredBackend,

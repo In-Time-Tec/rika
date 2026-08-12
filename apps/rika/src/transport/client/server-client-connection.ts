@@ -3,9 +3,10 @@ import * as InteractiveSession from "@rika/product/interactive-session"
 import type { InteractiveCommand } from "@rika/product/interactive-command"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as ServerHandshake from "@rika/product/server-service-handshake"
+import type * as ServerInteractiveConnection from "@rika/product/server-interactive-connection"
 import * as ServerFeed from "@rika/product/server-interactive-feed"
 import * as ServerService from "@rika/product/server-service"
-import { Context, Crypto, Deferred, Effect, Exit, Layer, Queue, Ref, Schema, Scope, Semaphore } from "effect"
+import { Context, Crypto, Deferred, Effect, Exit, Layer, Queue, Ref, Schema, Scope, Semaphore, Stream } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 import { makeClientMessageWriter, makePhysicalFeed, traceInteractiveEvent } from "./server-client-feed"
 import { eventForSequenceGap } from "./server-client-feed-gap"
@@ -25,6 +26,10 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
   readonly connectRole: ServerHandshake.ConnectRole
   readonly role: ServerService.Connection["role"]
 }) {
+  const interactiveConnection: ServerInteractiveConnection.Connection = {
+    initialStatus: "connected",
+    statusChanges: Stream.succeed("connected"),
+  }
   const crypto = yield* Crypto.Crypto
   const connectionScope = yield* Scope.make()
   yield* Effect.addFinalizer(() => Scope.close(connectionScope, Exit.void))
@@ -88,55 +93,31 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
           ).pipe(
             Effect.flatMap((message) => {
               if (message === undefined) return Effect.void
-              if (message._tag === "accepted" || message._tag === "incompatible") {
+              if (message._tag === "accepted" || message._tag === "build-mismatch") {
                 if (message.identity !== options.identity || message.clientNonce !== clientNonce)
                   return Effect.fail(transportError("Foreign server listener", "foreign-listener"))
                 if (!verifyServerHandshake(options.token, signedHandshake, message))
                   return Effect.fail(transportError("Foreign server listener", "foreign-listener"))
-                if (message._tag === "incompatible") {
-                  const validDisposition =
-                    options.connectRole === "launch"
-                      ? message.disposition === "supersede" || message.disposition === "defer"
-                      : message.disposition === "restart"
-                  if (!validDisposition)
+                if (message._tag === "build-mismatch") {
+                  if (message.buildIdentity === signedHandshake.buildIdentity)
+                    return Effect.fail(transportError("Server returned an invalid build mismatch", "foreign-listener"))
+                  if (options.connectRole !== "launch")
                     return Effect.fail(
-                      transportError("Server returned an invalid upgrade disposition", "foreign-listener"),
-                    )
-                  if (!ServerHandshake.HandshakeProtocol.isValidIncompatibility(options.connectRole, message))
-                    return Effect.fail(
-                      transportError(
-                        "Server returned an incompatible response for a compatible handshake",
-                        "foreign-listener",
-                      ),
-                    )
-                  if (message.disposition === "defer")
-                    return Effect.fail(
-                      ServerService.ServerServiceError.make({
-                        reason: "replacement-delayed",
-                        message: `Rika server replacement is delayed because server${message.serverPid === undefined ? "" : ` PID ${message.serverPid}`} owns active execution work. Try again after that work completes`,
-                        ...(message.serverPid === undefined ? {} : { serverPid: message.serverPid }),
-                      }),
+                      transportError("Server rejected an authenticated reattachment", "foreign-listener"),
                     )
                   return Effect.fail(
                     ServerService.ServerServiceError.make({
-                      reason: "incompatible-server",
-                      message: `An incompatible Rika server${message.serverPid === undefined ? "" : ` (PID ${message.serverPid})`} is still running at ${options.url}; close other Rika clients, then run rika again`,
+                      reason: "replacement-required",
+                      message: `A different Rika build${message.serverPid === undefined ? "" : ` (PID ${message.serverPid})`} is still running at ${options.url}`,
                       ...(message.serverPid === undefined ? {} : { serverPid: message.serverPid }),
                     }),
                   )
                 }
-                if (message.protocolVersion !== ServerHandshake.HandshakeProtocol.protocolVersion)
-                  return Effect.fail(
-                    transportError(
-                      `An incompatible Rika server${message.serverPid === undefined ? "" : ` (PID ${message.serverPid})`} is still running at ${options.url}; close other Rika clients, then run rika again`,
-                      "incompatible-server",
-                    ),
-                  )
                 if (
                   options.connectRole === "launch" &&
                   message.buildIdentity !== ServerHandshake.HandshakeProtocol.buildIdentity
                 )
-                  return Effect.fail(transportError("Server accepted an incompatible launch", "foreign-listener"))
+                  return Effect.fail(transportError("Server accepted a different build", "foreign-listener"))
                 return Effect.sync(() => (acceptedConnectionId = message.connectionId)).pipe(
                   Effect.andThen(Deferred.succeed(accepted, message)),
                 )
@@ -437,7 +418,11 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
                     ? Effect.void
                     : Effect.raceFirst(
                         whileConnected(
-                          runOptions.interactive!(input as ServerFeed.InteractiveInput, state.started.session),
+                          runOptions.interactive!(
+                            input as ServerFeed.InteractiveInput,
+                            state.started.session,
+                            interactiveConnection,
+                          ),
                         ).pipe(
                           Effect.exit,
                           Effect.map((outcome) => ({ _tag: "Callback" as const, outcome })),

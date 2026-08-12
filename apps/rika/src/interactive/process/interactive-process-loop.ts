@@ -3,12 +3,14 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as ProductOperation from "@rika/product/product-operation"
 import * as InteractiveSession from "@rika/product/interactive-session"
 import * as InteractiveFeed from "@rika/product/server-interactive-feed"
+import type * as ServerInteractiveConnection from "@rika/product/server-interactive-connection"
 import * as Turn from "@rika/product/turn-record"
 import { create as createTui } from "@rika/terminal/opentui-surface"
 import { Model, initial, withModeRouteMap } from "@rika/terminal/terminal-state"
+import { update } from "@rika/terminal/terminal-state-reducer"
 import type { ThreadItem } from "@rika/terminal/terminal-state"
 type ModeRoutes = Model["modeRoutes"]
-import { Crypto, Deferred, Effect, Exit, Fiber, FiberHandle, FiberSet, Scope, SubscriptionRef } from "effect"
+import { Crypto, Deferred, Effect, Exit, Fiber, FiberHandle, FiberSet, Scope, Stream, SubscriptionRef } from "effect"
 import { terminalTitleSequence } from "./interactive-process"
 import { makeEventRouter } from "./process-events"
 import { makeProcessRuntime } from "./process-runtime"
@@ -29,6 +31,7 @@ export const interactiveTui =
   (
     input: InteractiveFeed.InteractiveInput,
     session: InteractiveSession.InteractiveSession,
+    connection: ServerInteractiveConnection.Connection,
   ): Effect.Effect<void, ProductOperation.OperationUnavailable> =>
     Effect.gen(function* () {
       if (options.makeRenderer === undefined && (!process.stdin.isTTY || !process.stdout.isTTY)) return
@@ -47,8 +50,14 @@ export const interactiveTui =
       const resolvedModeRoutes = options.modeRoutes?.()
       return yield* Effect.callback<void, ProductOperation.OperationUnavailable>((resume) => {
         let renderPending = false
+        let initialConnectionStatus: Model["connectionStatus"]
+        if (connection.initialStatus === "connecting") initialConnectionStatus = "Connecting"
+        else if (connection.initialStatus === "reconnecting") initialConnectionStatus = "Reconnecting"
         const loop: InteractiveLoop = {
-          model: initial(input.workspace ?? process.cwd(), input.mode ?? "medium"),
+          model: {
+            ...initial(input.workspace ?? process.cwd(), input.mode ?? "medium"),
+            connectionStatus: initialConnectionStatus,
+          },
           threadView: undefined,
           modelPreview: undefined,
           requestedThreadId: input.threadId,
@@ -146,6 +155,22 @@ export const interactiveTui =
           render,
           requestSelectionResync,
         })
+        fork(
+          connection.statusChanges.pipe(
+            Stream.runForEach((status) =>
+              Effect.sync(() => {
+                let connectionStatus: Model["connectionStatus"]
+                if (status === "connecting") connectionStatus = "Connecting"
+                else if (status === "reconnecting") connectionStatus = "Reconnecting"
+                loop.model = update(loop.model, {
+                  _tag: "ConnectionStatusChanged",
+                  ...(connectionStatus === undefined ? {} : { status: connectionStatus }),
+                })
+                loop.renderer?.surface.update(loop.model)
+              }),
+            ),
+          ),
+        )
         loop.initialization = initializeRenderer({
           loop,
           input,

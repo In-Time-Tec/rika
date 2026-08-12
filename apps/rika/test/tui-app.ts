@@ -9,7 +9,7 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as Turn from "@rika/product/turn-record"
 import * as ThreadQuery from "@rika/product/thread-query-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
-import { Config, Context, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Scope } from "effect"
+import { Config, Context, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Scope, SubscriptionRef } from "effect"
 import { performance } from "node:perf_hooks"
 import { interactiveTui } from "../src/interactive/process/interactive-process-loop"
 import {
@@ -21,6 +21,9 @@ import type { Lane, LaneModels, Profile } from "./tui-app-model"
 import { tuiToolRuntimeLayer } from "./tui-app-tool-runtime"
 import { backendLayer, kernelPoolFor } from "./tui-app-backend"
 import { laneExecutionRoute, makeLaneModels } from "./tui-app-model"
+
+type InteractiveConnection = Parameters<ReturnType<typeof interactiveTui>>[2]
+type InteractiveConnectionStatus = InteractiveConnection["initialStatus"]
 
 /**
  * Settling means no work is still in flight, so a running subagent counts. `Running` covers every
@@ -43,6 +46,7 @@ export interface TuiAppOptions {
   readonly workspaceFiles?: Readonly<Record<string, string>>
   readonly width?: number
   readonly height?: number
+  readonly initialConnectionStatus?: InteractiveConnectionStatus
   readonly holdSubmissionAdmission?: Deferred.Deferred<void>
   readonly mapInteractiveEvent?: (event: SessionEvent) => SessionEvent
   readonly historicalTranscriptFixture?: HistoricalTranscriptFixture
@@ -80,6 +84,7 @@ export interface TuiApp {
   readonly settled: Effect.Effect<string>
   readonly reload: Effect.Effect<void>
   readonly waitModelRequests: (count: number) => Effect.Effect<void>
+  readonly setConnectionStatus: (status: InteractiveConnectionStatus) => Effect.Effect<void>
   readonly modelRequestCount: Effect.Effect<number>
   readonly modelPrompts: ReturnType<LaneModels["promptsFor"]>
   readonly modelToolNamesFor: (profile: Profile) => Effect.Effect<ReadonlyArray<ReadonlyArray<string>>>
@@ -175,6 +180,12 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   let nextThread = options.idStart ?? 0
   let nextTurn = options.idStart ?? 0
   let session: InteractiveSession.InteractiveSession | undefined
+  const initialConnectionStatus = options.initialConnectionStatus ?? "connected"
+  const connectionStatus = yield* SubscriptionRef.make<InteractiveConnectionStatus>(initialConnectionStatus)
+  const interactiveConnection: InteractiveConnection = {
+    initialStatus: initialConnectionStatus,
+    statusChanges: SubscriptionRef.changes(connectionStatus),
+  }
   let selectionsLoaded = 0
   const awaitSelectionLoaded = (count: number): Effect.Effect<void> =>
     Effect.suspend(() =>
@@ -203,21 +214,25 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     },
     interactive: (settings, current) => {
       session = current
-      return runInteractive(settings, {
-        ...current,
-        submit: (prompt, mode, parts, tuning, submissionId) => {
-          const submitted = current.submit(prompt, mode, parts, tuning, submissionId)
-          return options.holdSubmissionAdmission === undefined
-            ? submitted
-            : Deferred.await(options.holdSubmissionAdmission).pipe(Effect.andThen(submitted))
+      return runInteractive(
+        settings,
+        {
+          ...current,
+          submit: (prompt, mode, parts, tuning, submissionId) => {
+            const submitted = current.submit(prompt, mode, parts, tuning, submissionId)
+            return options.holdSubmissionAdmission === undefined
+              ? submitted
+              : Deferred.await(options.holdSubmissionAdmission).pipe(Effect.andThen(submitted))
+          },
+          events: (dispatch) =>
+            current.events((event) => {
+              const delivered = options.mapInteractiveEvent?.(event) ?? event
+              dispatch(delivered)
+              if (delivered._tag === "ThreadViewSnapshot") selectionsLoaded += 1
+            }),
         },
-        events: (dispatch) =>
-          current.events((event) => {
-            const delivered = options.mapInteractiveEvent?.(event) ?? event
-            dispatch(delivered)
-            if (delivered._tag === "ThreadViewSnapshot") selectionsLoaded += 1
-          }),
-      })
+        interactiveConnection,
+      )
     },
   })
   const operation = Context.get(yield* Layer.buildWithScope(operationLayer, resourceScope), Service)
@@ -324,6 +339,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
       yield* awaitSelectionLoaded(before + 1)
     }),
     waitModelRequests: awaitModelRequests,
+    setConnectionStatus: (status) => SubscriptionRef.set(connectionStatus, status),
     modelRequestCount: laneModels.requestCountFor("Root"),
     modelPrompts: laneModels.promptsFor("Root"),
     modelToolNamesFor: (profile) =>

@@ -1,6 +1,7 @@
 import {
   Context,
   Crypto,
+  Deferred,
   Effect,
   Encoding,
   FiberSet,
@@ -10,7 +11,6 @@ import {
   Option,
   Path,
   Ref,
-  Runtime,
   Schema,
   Scope,
   Semaphore,
@@ -19,6 +19,7 @@ import { ChildProcessSpawner } from "effect/unstable/process"
 import * as Feed from "./server-interactive-feed"
 import * as Request from "./server-operation-request"
 import * as Handshake from "./server-service-handshake"
+import type * as InteractiveConnection from "./server-interactive-connection"
 import { OperationUnavailable } from "../operation/contract/product-operation"
 import { Input } from "../operation/contract/product-operation"
 import type { InteractiveSession } from "../operation/interactive/interactive-session"
@@ -35,7 +36,7 @@ const ClientMessage = Schema.Union([
 ])
 const ServerMessage = Schema.Union([
   Handshake.HandshakeProtocol.HandshakeAccepted,
-  Handshake.HandshakeProtocol.HandshakeIncompatible,
+  Handshake.HandshakeProtocol.HandshakeBuildMismatch,
   Handshake.HandshakeProtocol.HandshakeRejected,
   Request.OperationRequestProtocol.Pong,
   Request.OperationRequestProtocol.Output,
@@ -53,10 +54,9 @@ class ServerServiceError extends Schema.TaggedErrorClass<ServerServiceError>()("
   reason: Schema.Literals([
     "authentication-failed",
     "identity-mismatch",
-    "incompatible-server",
     "foreign-listener",
     "message-too-large",
-    "replacement-delayed",
+    "replacement-required",
     "server-absent",
     "server-draining",
     "startup-failed",
@@ -66,15 +66,6 @@ class ServerServiceError extends Schema.TaggedErrorClass<ServerServiceError>()("
   message: Schema.String,
   serverPid: Schema.optionalKey(Schema.Int),
 }) {}
-
-const runtimeRestartExitCode = 75
-class ServerRestartRequired extends Schema.TaggedErrorClass<ServerRestartRequired>()("ServerRestartRequired", {
-  message: Schema.String,
-  threadId: Schema.optionalKey(Schema.String),
-}) {
-  override readonly [Runtime.errorExitCode] = runtimeRestartExitCode
-  override readonly [Runtime.errorReported] = false
-}
 
 export interface Connection {
   readonly role: "owner" | "attached"
@@ -89,9 +80,10 @@ export interface Connection {
       readonly interactive?: (
         input: Feed.InteractiveInput,
         session: InteractiveSession,
+        connection: InteractiveConnection.Connection,
       ) => Effect.Effect<void, OperationUnavailable>
     },
-  ) => Effect.Effect<void, OperationUnavailable | ServerServiceError | ServerRestartRequired>
+  ) => Effect.Effect<void, OperationUnavailable | ServerServiceError>
   readonly closed: Effect.Effect<void>
   readonly close: Effect.Effect<void>
 }
@@ -107,7 +99,6 @@ interface Interface {
     readonly dataRoot: string
     readonly clientKind: Handshake.Handshake["clientKind"]
     readonly graceMilliseconds?: number
-    readonly allowSupersede?: boolean
     readonly startHost?: () => Effect.Effect<
       StartedHost,
       ServerServiceError,
@@ -115,7 +106,7 @@ interface Interface {
     >
   }) => Effect.Effect<
     Connection,
-    ServerServiceError | ServerRestartRequired,
+    ServerServiceError,
     Crypto.Crypto | FileSystem.FileSystem | Path.Path | Scope.Scope | ChildProcessSpawner.ChildProcessSpawner
   >
 }
@@ -139,21 +130,36 @@ const canonicalServiceIdentity: {
 )
 
 type LifecycleState = "starting" | "ready" | "grace" | "draining" | "stopped"
-type LifecycleValue = { state: LifecycleState; clients: number; graceGeneration: number; replacementWork: number }
+type LifecycleValue = { state: LifecycleState; clients: number; graceGeneration: number; transientWork: number }
 const makeLifecycle = (changed: (state: LifecycleState) => Effect.Effect<void>) =>
   Effect.gen(function* () {
     const value = yield* Ref.make<LifecycleValue>({
       state: "starting",
       clients: 0,
       graceGeneration: 0,
-      replacementWork: 0,
+      transientWork: 0,
     })
     const admission = yield* Semaphore.make(1)
+    const drained = yield* Deferred.make<void>()
     const transition = (update: (current: LifecycleValue) => LifecycleValue) =>
       Ref.modify(value, (current) => {
         const next = update(current)
         return [next.state === current.state ? undefined : next.state, next] as const
       }).pipe(Effect.flatMap((state) => (state === undefined ? Effect.void : changed(state))))
+    const releaseTransientWork = Ref.modify(value, (current) => {
+      const next = { ...current, transientWork: Math.max(0, current.transientWork - 1) }
+      return [next.state === "draining" && next.transientWork === 0, next] as const
+    }).pipe(Effect.flatMap((complete) => (complete ? Deferred.succeed(drained, undefined) : Effect.void)))
+    const enterDrain = transition((current) =>
+      current.state === "stopped" ? current : { ...current, state: "draining" },
+    ).pipe(
+      Effect.andThen(Ref.get(value)),
+      Effect.flatMap((current) =>
+        current.state === "draining" && current.transientWork === 0
+          ? Deferred.succeed(drained, undefined)
+          : Effect.void,
+      ),
+    )
     return {
       state: Ref.get(value).pipe(Effect.map((current) => current.state)),
       soleClient: Ref.get(value).pipe(
@@ -216,58 +222,42 @@ const makeLifecycle = (changed: (state: LifecycleState) => Effect.Effect<void>) 
             }),
           )
           .pipe(Effect.tap((draining) => (draining === true ? changed("draining") : Effect.void))),
-      reserveReplacementWork: admission.withPermits(1)(
+      reserveTransientWork: admission.withPermits(1)(
         Ref.modify(value, (current) => {
           if (current.state === "draining" || current.state === "stopped") return [undefined, current] as const
           let released = false
           const release = Effect.suspend(() => {
             if (released) return Effect.void
             released = true
-            return Ref.update(value, (state) => ({
-              ...state,
-              replacementWork: Math.max(0, state.replacementWork - 1),
-            }))
+            return releaseTransientWork
           })
-          return [release, { ...current, replacementWork: current.replacementWork + 1 }] as const
+          return [release, { ...current, transientWork: current.transientWork + 1 }] as const
         }),
       ),
       runWork: <A, E, R>(
         fibers: FiberSet.FiberSet<A, E>,
         work: Effect.Effect<A, E, R>,
-        replacementRelevant: boolean = true,
+        drainRelevant: boolean = true,
       ) =>
         admission.withPermits(1)(
           Effect.gen(function* () {
             const current = yield* Ref.get(value)
             if (current.state === "draining" || current.state === "stopped") return undefined
-            if (replacementRelevant)
-              yield* Ref.update(value, (state) => ({ ...state, replacementWork: state.replacementWork + 1 }))
-            const release = replacementRelevant
-              ? Ref.update(value, (state) => ({
-                  ...state,
-                  replacementWork: Math.max(0, state.replacementWork - 1),
-                }))
-              : Effect.void
+            if (drainRelevant)
+              yield* Ref.update(value, (state) => ({ ...state, transientWork: state.transientWork + 1 }))
+            const release = drainRelevant ? releaseTransientWork : Effect.void
             return yield* FiberSet.run(fibers, work.pipe(Effect.ensuring(release)))
           }),
         ),
-      authorizeReplacement: (hasActiveExecutionWork: Effect.Effect<boolean>) =>
-        admission.withPermits(1)(
-          Effect.gen(function* () {
-            const current = yield* Ref.get(value)
-            if (current.state === "draining" || current.state === "stopped") return "supersede" as const
-            if (current.replacementWork > 0 || (yield* hasActiveExecutionWork)) return "defer" as const
-            yield* transition((state) => ({ ...state, state: "draining" }))
-            return "supersede" as const
-          }).pipe(Effect.uninterruptible),
-        ),
-      beginDrain: admission.withPermits(1)(
-        transition((current) => (current.state === "stopped" ? current : { ...current, state: "draining" })),
-      ),
+      drainForReplacement: (prepare: Effect.Effect<void>) =>
+        admission
+          .withPermits(1)(enterDrain.pipe(Effect.andThen(prepare), Effect.uninterruptible))
+          .pipe(Effect.andThen(Deferred.await(drained))),
+      beginDrain: admission.withPermits(1)(enterDrain),
       stopped: transition((current) => ({ ...current, state: "stopped", clients: 0 })),
     }
   })
 
-const ServiceRuntime = { runtimeRestartExitCode, testLayer, canonicalServiceIdentity, makeLifecycle } as const
+const ServiceRuntime = { testLayer, canonicalServiceIdentity, makeLifecycle } as const
 
-export { ClientMessage, ServerMessage, ServerServiceError, ServerRestartRequired, Service, ServiceRuntime }
+export { ClientMessage, ServerMessage, ServerServiceError, Service, ServiceRuntime }

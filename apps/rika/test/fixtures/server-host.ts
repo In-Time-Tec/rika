@@ -176,6 +176,9 @@ const program = Effect.gen(function* () {
     owner: (interactive) =>
       Effect.gen(function* () {
         yield* append("owner-acquisitions.log", `${process.pid}\n`)
+        yield* append("owner-lifecycle.log", `acquire:${process.pid}\n`)
+        if (yield* fs.exists(path.join(dataRoot, "durable-executions.pending")).pipe(Effect.orDie))
+          yield* append("recovered-executions.log", `${process.pid}:root\n${process.pid}:child\n`)
         yield* Effect.sleep(ownerStartupDelay)
         yield* Effect.addFinalizer(() =>
           append("owner-finalizer-starts.log", `${process.pid}:${activeWork}\n`).pipe(
@@ -185,13 +188,13 @@ const program = Effect.gen(function* () {
                 : Effect.sleep(finalizerDelay).pipe(
                     Effect.andThen(append("owner-finalizations.log", `${process.pid}\n`)),
                     Effect.andThen(Scope.close(interactiveExecutionScope, Exit.void)),
+                    Effect.andThen(append("owner-lifecycle.log", `release:${process.pid}\n`)),
                   ),
             ),
           ),
         )
         return Service.of({
-          hasActiveExecutionWork: Effect.sync(() => activeWork > 0),
-          authorizeServerReplacement: Effect.sync(() => (activeWork > 0 ? "defer" : "supersede")),
+          prepareServerReplacement: Effect.void,
           stopActiveExecutionWork: Effect.sync(() => {
             activeWork = 0
           }).pipe(Effect.andThen(append("stop-work.log", `${process.pid}\n`))),
@@ -206,21 +209,39 @@ const program = Effect.gen(function* () {
                     Effect.orDie,
                   )
                 const delegated = input.prompt[0] === "active-root-with-child"
+                if (delegated)
+                  return Effect.sync(() => {
+                    activeWork += 2
+                  }).pipe(
+                    Effect.andThen(append("delayed-work-starts.log", `${process.pid}\n`)),
+                    Effect.andThen(append("active-executions.log", `${process.pid}:root\n${process.pid}:child\n`)),
+                    Effect.andThen(
+                      fs
+                        .writeFileString(path.join(dataRoot, "durable-executions.pending"), "root\nchild\n")
+                        .pipe(Effect.orDie),
+                    ),
+                    Effect.andThen(
+                      Effect.forkIn(
+                        (activeWorkMilliseconds > 0 ? Effect.sleep(activeWorkMilliseconds) : Effect.never).pipe(
+                          Effect.ensuring(
+                            Effect.sync(() => {
+                              activeWork -= 2
+                            }).pipe(Effect.andThen(append("delayed-work-finalizations.log", `${process.pid}\n`))),
+                          ),
+                        ),
+                        interactiveExecutionScope,
+                      ),
+                    ),
+                    Effect.andThen(Effect.never),
+                  )
                 return Effect.sync(() => {
-                  activeWork += delegated ? 2 : 1
+                  activeWork += 1
                 }).pipe(
                   Effect.andThen(append("delayed-work-starts.log", `${process.pid}\n`)),
-                  Effect.andThen(
-                    delegated
-                      ? append("active-executions.log", `${process.pid}:root\n${process.pid}:child\n`)
-                      : Effect.void,
-                  ),
-                  Effect.andThen(
-                    delegated && activeWorkMilliseconds > 0 ? Effect.sleep(activeWorkMilliseconds) : Effect.never,
-                  ),
+                  Effect.andThen(Effect.never),
                   Effect.ensuring(
                     Effect.sync(() => {
-                      activeWork -= delegated ? 2 : 1
+                      activeWork -= 1
                     }).pipe(Effect.andThen(append("delayed-work-finalizations.log", `${process.pid}\n`))),
                   ),
                 )

@@ -2,19 +2,10 @@ import { Function, Schema } from "effect"
 
 declare const RIKA_BUILD_IDENTITY: string | undefined
 
-const protocolVersion = 8
 const buildIdentity = typeof RIKA_BUILD_IDENTITY === "string" ? RIKA_BUILD_IDENTITY : "rika-development-build"
-const replacementGuard = "active-execution-v1" as const
 const ClientKind = Schema.Literals(["interactive", "run", "thread-continue", "product"])
 const ConnectRole = Schema.Literals(["launch", "reattach"])
 type ConnectRole = typeof ConnectRole.Type
-const replacementDisposition = (options: {
-  readonly connectRole: ConnectRole
-  readonly hasActiveExecutionWork: boolean
-}) => {
-  if (options.connectRole === "reattach") return "restart" as const
-  return options.hasActiveExecutionWork ? ("defer" as const) : ("supersede" as const)
-}
 const WireIdentifier = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_024))
 const Proof = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
 const Handshake = Schema.Struct({
@@ -23,7 +14,6 @@ const Handshake = Schema.Struct({
   clientNonce: WireIdentifier,
   clientKind: ClientKind,
   connectRole: ConnectRole,
-  protocolVersion: Schema.Int,
   buildIdentity: WireIdentifier,
   clientProof: Proof,
 })
@@ -35,37 +25,30 @@ const HandshakeAccepted = Schema.Struct({
   clientNonce: WireIdentifier,
   serviceNonce: WireIdentifier,
   connectionId: WireIdentifier,
-  protocolVersion: Schema.Int,
   buildIdentity: WireIdentifier,
   serverProof: Proof,
   serverPid: Schema.optionalKey(Schema.Int),
 })
 type HandshakeAccepted = typeof HandshakeAccepted.Type
-const HandshakeIncompatible = Schema.Struct({
-  _tag: Schema.tag("incompatible"),
-  disposition: Schema.Literals(["supersede", "restart", "defer"]),
-  replacementGuard: Schema.Literal(replacementGuard),
+const HandshakeBuildMismatch = Schema.Struct({
+  _tag: Schema.tag("build-mismatch"),
   family: Schema.tag("rika-server"),
   identity: WireIdentifier,
   clientNonce: WireIdentifier,
   serviceNonce: WireIdentifier,
   connectionId: WireIdentifier,
-  protocolVersion: Schema.Int,
   buildIdentity: WireIdentifier,
   serverProof: Proof,
   serverPid: Schema.optionalKey(Schema.Int),
 })
-type HandshakeIncompatible = typeof HandshakeIncompatible.Type
+type HandshakeBuildMismatch = typeof HandshakeBuildMismatch.Type
 const HandshakeRejected = Schema.Struct({
   _tag: Schema.tag("rejected"),
   reason: Schema.Literal("draining"),
 })
 type HandshakeRejected = typeof HandshakeRejected.Type
 
-type ProofHandshake = Pick<
-  Handshake,
-  "identity" | "clientNonce" | "clientKind" | "connectRole" | "protocolVersion" | "buildIdentity"
->
+type ProofHandshake = Pick<Handshake, "identity" | "clientNonce" | "clientKind" | "connectRole" | "buildIdentity">
 const proof = (token: string, fields: ReadonlyArray<string | number>) =>
   new Bun.CryptoHasher("sha256", token).update(JSON.stringify(fields)).digest("hex")
 const proofMatches = (actual: string, expected: string) => {
@@ -77,7 +60,6 @@ const proofMatches = (actual: string, expected: string) => {
 const clientProofImpl = (token: string, handshake: ProofHandshake) =>
   proof(token, [
     "rika-server-client",
-    handshake.protocolVersion,
     handshake.identity,
     handshake.clientNonce,
     handshake.clientKind,
@@ -91,45 +73,23 @@ const clientProof: {
 type ServerProofResponse =
   | Pick<
       HandshakeAccepted,
-      | "_tag"
-      | "family"
-      | "identity"
-      | "clientNonce"
-      | "serviceNonce"
-      | "connectionId"
-      | "protocolVersion"
-      | "buildIdentity"
-      | "serverPid"
+      "_tag" | "family" | "identity" | "clientNonce" | "serviceNonce" | "connectionId" | "buildIdentity" | "serverPid"
     >
   | Pick<
-      HandshakeIncompatible,
-      | "_tag"
-      | "disposition"
-      | "replacementGuard"
-      | "family"
-      | "identity"
-      | "clientNonce"
-      | "serviceNonce"
-      | "connectionId"
-      | "protocolVersion"
-      | "buildIdentity"
-      | "serverPid"
+      HandshakeBuildMismatch,
+      "_tag" | "family" | "identity" | "clientNonce" | "serviceNonce" | "connectionId" | "buildIdentity" | "serverPid"
     >
 const serverProofImpl = (token: string, handshake: ProofHandshake, response: ServerProofResponse) =>
   proof(token, [
     "rika-server-response",
-    handshake.protocolVersion,
     handshake.identity,
     handshake.clientNonce,
     handshake.clientKind,
     handshake.connectRole,
     handshake.buildIdentity,
     response._tag,
-    response._tag === "incompatible" ? response.disposition : "accepted",
-    response._tag === "incompatible" ? response.replacementGuard : "absent",
     response.serviceNonce,
     response.connectionId,
-    response.protocolVersion,
     response.buildIdentity,
     response.serverPid ?? "absent",
   ])
@@ -140,27 +100,16 @@ const serverProof: {
 const verifyServerProofImpl = (
   token: string,
   handshake: ProofHandshake,
-  response: HandshakeAccepted | HandshakeIncompatible,
+  response: HandshakeAccepted | HandshakeBuildMismatch,
 ) => proofMatches(response.serverProof, serverProof(token, handshake, response))
 const verifyServerProof: {
-  (handshake: ProofHandshake, response: HandshakeAccepted | HandshakeIncompatible): (token: string) => boolean
-  (token: string, handshake: ProofHandshake, response: HandshakeAccepted | HandshakeIncompatible): boolean
+  (handshake: ProofHandshake, response: HandshakeAccepted | HandshakeBuildMismatch): (token: string) => boolean
+  (token: string, handshake: ProofHandshake, response: HandshakeAccepted | HandshakeBuildMismatch): boolean
 } = Function.dual(3, verifyServerProofImpl)
-type IncompatibilityIdentity = Pick<HandshakeIncompatible, "protocolVersion" | "buildIdentity">
-const isValidIncompatibility: {
-  (response: IncompatibilityIdentity): (connectRole: ConnectRole) => boolean
-  (connectRole: ConnectRole, response: IncompatibilityIdentity): boolean
-} = Function.dual(
-  2,
-  (connectRole: ConnectRole, response: IncompatibilityIdentity) =>
-    response.protocolVersion !== protocolVersion ||
-    (connectRole === "launch" && response.buildIdentity !== buildIdentity),
-)
 type HandshakeResult =
   | { readonly _tag: "Accepted" }
   | { readonly _tag: "AuthenticationFailed" }
   | { readonly _tag: "IdentityMismatch" }
-  | { readonly _tag: "ProtocolMismatch" }
   | { readonly _tag: "BuildMismatch" }
 const validateHandshake: {
   (expected: {
@@ -181,29 +130,24 @@ const validateHandshake: {
     if (handshake.identity !== expected.identity) return { _tag: "IdentityMismatch" }
     if (!proofMatches(handshake.clientProof, clientProof(expected.token, handshake)))
       return { _tag: "AuthenticationFailed" }
-    if (handshake.protocolVersion !== protocolVersion) return { _tag: "ProtocolMismatch" }
     if (handshake.connectRole === "launch" && handshake.buildIdentity !== expected.buildIdentity)
       return { _tag: "BuildMismatch" }
     return { _tag: "Accepted" }
   },
 )
-export { Handshake, HandshakeAccepted, HandshakeIncompatible, HandshakeRejected }
+export { Handshake, HandshakeAccepted, HandshakeBuildMismatch, HandshakeRejected }
 
 export const HandshakeProtocol = {
-  protocolVersion,
   buildIdentity,
-  replacementGuard,
   ClientKind,
   ConnectRole,
-  replacementDisposition,
   Handshake,
   HandshakeAccepted,
-  HandshakeIncompatible,
+  HandshakeBuildMismatch,
   HandshakeRejected,
   clientProof,
   serverProof,
   verifyServerProof,
-  isValidIncompatibility,
   validateHandshake,
 } as const
 export type { ConnectRole, HandshakeResult }

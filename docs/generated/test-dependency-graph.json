@@ -213,6 +213,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "apps/rika/test/connection-status.tui.test.ts",
+      "path": "apps/rika/test/connection-status.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
       "id": "apps/rika/test/dependency-boundary.test.ts",
       "path": "apps/rika/test/dependency-boundary.test.ts",
       "workspace": "@rika/cli",
@@ -235,16 +245,6 @@
     {
       "id": "apps/rika/test/fixtures/logging-hardexit.ts",
       "path": "apps/rika/test/fixtures/logging-hardexit.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "apps/rika/test/fixtures/runtime-stub.ts",
-      "path": "apps/rika/test/fixtures/runtime-stub.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -3081,6 +3081,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/product/test/product-operation-admission.test.ts",
+      "path": "packages/product/test/product-operation-admission.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/product/test/queued-turn-policy.test.ts",
       "path": "packages/product/test/queued-turn-policy.test.ts",
       "workspace": "@rika/product",
@@ -4991,22 +5001,6 @@
     },
     {
       "from": "apps/rika/test/client-main.proc.test.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/client-main.proc.test.ts",
-      "to": "external:url",
-      "specifier": "url",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/client-main.proc.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5065,6 +5059,22 @@
       "from": "apps/rika/test/command.test.ts",
       "to": "packages/product/src/operation/contract/product-operation.ts",
       "specifier": "@rika/product/product-operation",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/connection-status.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/connection-status.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -5135,22 +5145,6 @@
     },
     {
       "from": "apps/rika/test/fixtures/logging-hardexit.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/fixtures/runtime-stub.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/fixtures/runtime-stub.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -10553,6 +10547,30 @@
       "from": "packages/product/test/operation/turn-retry-policy.test.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/product-operation-admission.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/product-operation-admission.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/product-operation-admission.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
       "kind": "import",
       "relationship": "test",
       "production": false

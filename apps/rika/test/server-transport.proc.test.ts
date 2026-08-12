@@ -171,13 +171,13 @@ describe("server WebSocket process transport", () => {
   )
 
   test(
-    "launching client supersedes a compatible different build while two interactive clients stay alive",
+    "keeps two interactive clients alive while replacing a different-build server with active durable work",
     () =>
       run(
         Effect.gen(function* () {
           const root = yield* makeRoot
           try {
-            const mismatched = yield* start(root, 1_000, 0, false, 1_024, 0, false, undefined, 0, {
+            const mismatched = yield* start(root, 1_000, 0, true, 1_024, 0, false, undefined, 0, {
               script: "test/fixtures/server-mismatched-client.ts",
               environment: {
                 RIKA_TEST_SERVER_HOST_SCRIPT: "test/fixtures/server-mismatched-host.ts",
@@ -185,7 +185,7 @@ describe("server WebSocket process transport", () => {
               },
             })
             const oldAttached = yield* attachedEffect(mismatched)
-            const second = yield* start(root, 1_000, 0, false, 1_024, 0, false, undefined, 0, {
+            const second = yield* start(root, 1_000, 0, true, 1_024, 0, false, undefined, 0, {
               script: "test/fixtures/server-mismatched-client.ts",
               environment: {
                 RIKA_TEST_SERVER_HOST_SCRIPT: "test/fixtures/server-mismatched-host.ts",
@@ -194,11 +194,17 @@ describe("server WebSocket process transport", () => {
             })
             const secondAttached = yield* attachedEffect(second)
             expect(secondAttached.hostPid).toBe(oldAttached.hostPid)
+            yield* mismatched.send("active-root-with-child")
+            yield* waitUntil(fileExists(`${root}/active-executions.log`))
             yield* mismatched.send("upgrade-interactive")
             yield* second.send("upgrade-interactive")
             expect(yield* mismatched.nextEffect).toMatchObject({ type: "interactive-callback", callbacks: 1 })
+            expect(yield* mismatched.nextEffect).toEqual({ type: "connection-status", status: "connecting" })
+            expect(yield* mismatched.nextEffect).toEqual({ type: "connection-status", status: "connected" })
             expect((yield* mismatched.nextEffect).type).toBe("initial-read")
             expect(yield* second.nextEffect).toMatchObject({ type: "interactive-callback", callbacks: 1 })
+            expect(yield* second.nextEffect).toEqual({ type: "connection-status", status: "connecting" })
+            expect(yield* second.nextEffect).toEqual({ type: "connection-status", status: "connected" })
             expect((yield* second.nextEffect).type).toBe("initial-read")
 
             const current = yield* start(root, 1_000)
@@ -211,18 +217,30 @@ describe("server WebSocket process transport", () => {
             )
 
             for (const client of [mismatched, second]) {
+              const statuses: Array<string> = []
               let event = yield* client.nextEffect
               while (event.type !== "upgrade-survived") {
                 expect(event.type).not.toBe("server-status")
-                expect(event.type).not.toBe("restart-required")
+                expect(event.type).not.toBe("upgrade-closed")
+                expect(event.type).not.toBe("upgrade-failed")
                 expect(event.type).not.toBe("interactive-callback")
+                if (event.type === "connection-status" && event.status !== undefined) statuses.push(event.status)
                 event = yield* client.nextEffect
               }
+              expect(statuses).toEqual(["reconnecting", "connected"])
               expect(event).toMatchObject({ tag: "ThreadsListed", callbacks: 1 })
             }
-            expect(yield* readText(`${root}/owner-acquisitions.log`)).toBe(
-              `${oldAttached.hostPid}\n${newAttached.hostPid}\n`,
+            expect(yield* readText(`${root}/active-executions.log`)).toBe(
+              `${oldAttached.hostPid}:root\n${oldAttached.hostPid}:child\n`,
             )
+            expect(yield* readText(`${root}/owner-lifecycle.log`)).toBe(
+              `acquire:${oldAttached.hostPid}\nrelease:${oldAttached.hostPid}\nacquire:${newAttached.hostPid}\n`,
+            )
+            expect(yield* readText(`${root}/owner-finalizer-starts.log`)).toBe(`${oldAttached.hostPid}:2\n`)
+            expect(yield* readText(`${root}/recovered-executions.log`)).toBe(
+              `${newAttached.hostPid}:root\n${newAttached.hostPid}:child\n`,
+            )
+            expect(yield* fileExists(`${root}/stop-work.log`)).toBe(false)
 
             yield* Effect.sleep("750 millis")
             expect(alive(newAttached.hostPid!)).toBe(true)
@@ -237,90 +255,6 @@ describe("server WebSocket process transport", () => {
         }),
       ),
     20_000,
-  )
-
-  test(
-    "keeps a different-build server alive while a root and delegated child execution are active",
-    () =>
-      run(
-        Effect.gen(function* () {
-          const root = yield* makeRoot
-          try {
-            const mismatched = yield* start(root, 1_000, 0, true, 1_024, 0, false, undefined, 0, {
-              script: "test/fixtures/server-mismatched-client.ts",
-              environment: {
-                RIKA_TEST_SERVER_HOST_SCRIPT: "test/fixtures/server-mismatched-host.ts",
-                RIKA_TEST_BUILD_IDENTITY: "rika-test-other-build",
-                RIKA_TEST_SERVER_ACTIVE_WORK_MILLIS: "1000",
-              },
-            })
-            const oldAttached = yield* attachedEffect(mismatched)
-            yield* mismatched.send("active-root-with-child")
-            yield* waitUntil(fileExists(`${root}/active-executions.log`))
-
-            const current = yield* start(root, 1_000)
-            expect(yield* current.nextEffect).toMatchObject({
-              type: "rejected",
-              tag: "ServerServiceError",
-              error: expect.stringContaining("replacement is delayed"),
-            })
-            expect(alive(oldAttached.hostPid!)).toBe(true)
-            expect(yield* readText(`${root}/active-executions.log`)).toBe(
-              `${oldAttached.hostPid}:root\n${oldAttached.hostPid}:child\n`,
-            )
-            expect(yield* readText(`${root}/owner-acquisitions.log`)).toBe(`${oldAttached.hostPid}\n`)
-
-            yield* waitUntil(fileExists(`${root}/delayed-work-finalizations.log`), 3_000)
-            const retry = yield* start(root, 1_000)
-            expect(yield* retry.nextEffect).toEqual({ type: "server-status", callbacks: 1 })
-            const replacement = yield* attachedEffect(retry)
-            expect(replacement.hostPid).not.toBe(oldAttached.hostPid)
-            yield* waitUntil(
-              Effect.sync(() => !alive(oldAttached.hostPid!)),
-              3_000,
-            )
-            yield* retry.closeEffect
-            yield* mismatched.kill
-          } finally {
-            yield* cleanRoot(root)
-          }
-        }),
-      ),
-    15_000,
-  )
-
-  test(
-    "a client without supersede rights attaches to a compatible different build",
-    () =>
-      run(
-        Effect.gen(function* () {
-          const root = yield* makeRoot
-          try {
-            const mismatched = yield* start(root, 1_000, 0, false, 1_024, 0, false, undefined, 0, {
-              script: "test/fixtures/server-mismatched-client.ts",
-              environment: {
-                RIKA_TEST_SERVER_HOST_SCRIPT: "test/fixtures/server-mismatched-host.ts",
-                RIKA_TEST_BUILD_IDENTITY: "rika-test-other-build",
-              },
-            })
-            const oldAttached = yield* attachedEffect(mismatched)
-
-            const restarted = yield* start(root, 1_000, 0, false, 1_024, 0, false, undefined, 0, {
-              environment: { RIKA_TEST_SERVER_NO_SUPERSEDE: "1" },
-            })
-            const attached = yield* attachedEffect(restarted)
-            expect(attached.hostPid).toBe(oldAttached.hostPid)
-            expect(alive(oldAttached.hostPid!)).toBe(true)
-            yield* mismatched.send("ping")
-            expect((yield* mismatched.nextEffect).type).toBe("pong")
-            yield* restarted.closeEffect
-            yield* mismatched.closeEffect
-          } finally {
-            yield* cleanRoot(root)
-          }
-        }),
-      ),
-    15_000,
   )
 
   test(

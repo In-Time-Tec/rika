@@ -1,37 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Crypto, Effect, Layer, Runtime, Schema } from "effect"
+import { Crypto, Effect, Layer, Schema } from "effect"
 import { provideLayer } from "./product-test-layer"
 import * as ServerHandshake from "../src/server/server-service-handshake"
 import * as ServerService from "../src/server/server-service"
 
 describe("Rika Server protocol", () => {
-  it("supersedes only an idle server for a launching client", () => {
-    expect(
-      ServerHandshake.HandshakeProtocol.replacementDisposition({
-        connectRole: "launch",
-        hasActiveExecutionWork: false,
-      }),
-    ).toBe("supersede")
-    expect(
-      ServerHandshake.HandshakeProtocol.replacementDisposition({
-        connectRole: "launch",
-        hasActiveExecutionWork: true,
-      }),
-    ).toBe("defer")
-    expect(
-      ServerHandshake.HandshakeProtocol.replacementDisposition({
-        connectRole: "reattach",
-        hasActiveExecutionWork: false,
-      }),
-    ).toBe("restart")
-    expect(
-      ServerHandshake.HandshakeProtocol.replacementDisposition({
-        connectRole: "reattach",
-        hasActiveExecutionWork: true,
-      }),
-    ).toBe("restart")
-  })
-
   it.effect("uses canonical profile and data root identity", () => {
     const crypto = Layer.succeed(
       Crypto.Crypto,
@@ -48,14 +21,13 @@ describe("Rika Server protocol", () => {
     })
   })
 
-  it("fails closed for token and identity mismatches", () => {
+  it("fails closed for credentials and uses build identity only for launches", () => {
     const unsigned = {
       family: "rika-server" as const,
       identity: "identity",
       clientNonce: "nonce",
       clientKind: "run" as const,
       connectRole: "launch" as const,
-      protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
       buildIdentity: "build-a",
     }
     const base = { ...unsigned, clientProof: ServerHandshake.HandshakeProtocol.clientProof("token", unsigned) }
@@ -78,16 +50,6 @@ describe("Rika Server protocol", () => {
         { identity: "identity", token: "token", buildIdentity: "build-a" },
       )._tag,
     ).toBe("IdentityMismatch")
-    expect(
-      ServerHandshake.HandshakeProtocol.validateHandshake(
-        {
-          ...base,
-          protocolVersion: 0,
-          clientProof: ServerHandshake.HandshakeProtocol.clientProof("token", { ...unsigned, protocolVersion: 0 }),
-        },
-        { identity: "identity", token: "token", buildIdentity: "build-a" },
-      )._tag,
-    ).toBe("ProtocolMismatch")
     expect(
       ServerHandshake.HandshakeProtocol.validateHandshake(
         {
@@ -117,49 +79,33 @@ describe("Rika Server protocol", () => {
         { identity: "identity", token: "token", buildIdentity: "build-a" },
       )._tag,
     ).toBe("AuthenticationFailed")
-    expect(
-      ServerHandshake.HandshakeProtocol.validateHandshake(
-        { ...base, protocolVersion: 0, buildIdentity: "build-b" },
-        { identity: "identity", token: "token", buildIdentity: "build-a" },
-      )._tag,
-    ).toBe("AuthenticationFailed")
   })
 
-  it("requires an explicit protocol version and bounded non-empty transport identities", () => {
+  it("requires the current handshake fields and bounded non-empty transport identities", () => {
     const base = {
       family: "rika-server",
       identity: "identity",
       clientNonce: "nonce",
       clientKind: "run",
+      connectRole: "launch",
+      buildIdentity: "build-a",
       clientProof: "0".repeat(64),
     }
-    expect(() => Schema.decodeUnknownSync(ServerService.ClientMessage)(base)).toThrow()
     expect(() =>
       Schema.decodeUnknownSync(ServerService.ClientMessage)({
         ...base,
-        protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
-      }),
-    ).toThrow()
-    expect(() =>
-      Schema.decodeUnknownSync(ServerService.ClientMessage)({
-        ...base,
-        protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
-        buildIdentity: "build-a",
         clientNonce: "",
       }),
     ).toThrow()
     expect(() =>
       Schema.decodeUnknownSync(ServerService.ClientMessage)({
         ...base,
-        protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
-        buildIdentity: "build-a",
         identity: "x".repeat(1_025),
       }),
     ).toThrow()
     expect(() =>
       Schema.decodeUnknownSync(ServerService.ClientMessage)({
         ...base,
-        protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
         buildIdentity: "x".repeat(1_025),
       }),
     ).toThrow()
@@ -168,8 +114,6 @@ describe("Rika Server protocol", () => {
         Schema.decodeUnknownSync(ServerService.ClientMessage)({
           ...base,
           connectRole,
-          protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
-          buildIdentity: "build-a",
         }),
       ).toMatchObject({ connectRole })
   })
@@ -180,7 +124,6 @@ describe("Rika Server protocol", () => {
       clientNonce: "client-nonce",
       clientKind: "run" as const,
       connectRole: "launch" as const,
-      protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
       buildIdentity: "build-a",
     }
     const accepted = Schema.decodeUnknownSync(ServerService.ServerMessage)({
@@ -190,7 +133,6 @@ describe("Rika Server protocol", () => {
       clientNonce: handshake.clientNonce,
       serviceNonce: "service-nonce",
       connectionId: "connection",
-      protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
       buildIdentity: "build-a",
       serverProof: ServerHandshake.HandshakeProtocol.serverProof("token", handshake, {
         _tag: "accepted",
@@ -199,7 +141,6 @@ describe("Rika Server protocol", () => {
         clientNonce: handshake.clientNonce,
         serviceNonce: "service-nonce",
         connectionId: "connection",
-        protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
         buildIdentity: "build-a",
       }),
     })
@@ -229,12 +170,6 @@ describe("Rika Server protocol", () => {
     expect(
       ServerHandshake.HandshakeProtocol.verifyServerProof("token", handshake, {
         ...accepted,
-        protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion + 1,
-      }),
-    ).toBe(false)
-    expect(
-      ServerHandshake.HandshakeProtocol.verifyServerProof("token", handshake, {
-        ...accepted,
         serviceNonce: "foreign",
       }),
     ).toBe(false)
@@ -245,77 +180,38 @@ describe("Rika Server protocol", () => {
       ServerHandshake.HandshakeProtocol.verifyServerProof("token", { ...handshake, connectRole: "reattach" }, accepted),
     ).toBe(false)
 
-    const incompatibleFields = {
-      _tag: "incompatible" as const,
-      disposition: "supersede" as const,
-      replacementGuard: ServerHandshake.HandshakeProtocol.replacementGuard,
+    const mismatchFields = {
+      _tag: "build-mismatch" as const,
       family: "rika-server" as const,
       identity: handshake.identity,
       clientNonce: handshake.clientNonce,
       serviceNonce: "service-nonce",
       connectionId: "connection",
-      protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
       buildIdentity: "build-b",
       serverPid: 123,
     }
-    const incompatible = Schema.decodeUnknownSync(ServerService.ServerMessage)({
-      ...incompatibleFields,
-      serverProof: ServerHandshake.HandshakeProtocol.serverProof("token", handshake, incompatibleFields),
+    const mismatch = Schema.decodeUnknownSync(ServerService.ServerMessage)({
+      ...mismatchFields,
+      serverProof: ServerHandshake.HandshakeProtocol.serverProof("token", handshake, mismatchFields),
     })
-    expect(incompatible._tag).toBe("incompatible")
-    if (incompatible._tag !== "incompatible") return
-    expect(ServerHandshake.HandshakeProtocol.verifyServerProof("token", handshake, incompatible)).toBe(true)
+    expect(mismatch._tag).toBe("build-mismatch")
+    if (mismatch._tag !== "build-mismatch") return
+    expect(ServerHandshake.HandshakeProtocol.verifyServerProof("token", handshake, mismatch)).toBe(true)
     expect(
       ServerHandshake.HandshakeProtocol.verifyServerProof("token", handshake, {
-        ...incompatible,
-        disposition: "restart",
+        ...mismatch,
+        buildIdentity: "build-c",
       }),
     ).toBe(false)
     expect(
-      ServerHandshake.HandshakeProtocol.verifyServerProof("token", handshake, {
-        ...incompatible,
-        disposition: "defer",
-      }),
-    ).toBe(false)
-    expect(() =>
-      Schema.decodeUnknownSync(ServerService.ServerMessage)({ ...incompatible, replacementGuard: "unattested" }),
-    ).toThrow()
-    expect(
-      ServerHandshake.HandshakeProtocol.verifyServerProof("token", handshake, { ...incompatible, serverPid: 124 }),
+      ServerHandshake.HandshakeProtocol.verifyServerProof("token", handshake, { ...mismatch, serverPid: 124 }),
     ).toBe(false)
     expect(
       ServerHandshake.HandshakeProtocol.verifyServerProof("token", handshake, {
-        ...incompatible,
+        ...mismatch,
         connectionId: "other",
       }),
     ).toBe(false)
-  })
-
-  it("accepts only incompatibility responses justified by the connection role", () => {
-    expect(
-      ServerHandshake.HandshakeProtocol.isValidIncompatibility("launch", {
-        protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
-        buildIdentity: "other-build",
-      }),
-    ).toBe(true)
-    expect(
-      ServerHandshake.HandshakeProtocol.isValidIncompatibility("launch", {
-        protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
-        buildIdentity: "rika-development-build",
-      }),
-    ).toBe(false)
-    expect(
-      ServerHandshake.HandshakeProtocol.isValidIncompatibility("reattach", {
-        protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
-        buildIdentity: "other-build",
-      }),
-    ).toBe(false)
-    expect(
-      ServerHandshake.HandshakeProtocol.isValidIncompatibility("reattach", {
-        protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion - 1,
-        buildIdentity: "rika-development-build",
-      }),
-    ).toBe(true)
   })
 
   it("round-trips bounded ThreadView snapshots without undefined wire fields", () => {
@@ -425,23 +321,6 @@ describe("Rika Server protocol", () => {
         command: { _tag: "OldCommand" },
       }),
     ).toThrow()
-  })
-
-  it("marks a restart-required failure with the dedicated runtime exit code", () => {
-    expect(ServerService.ServiceRuntime.runtimeRestartExitCode).toBe(75)
-    const restart = ServerService.ServerRestartRequired.make({ message: "server upgraded", threadId: "thread-1" })
-    expect(restart[Runtime.errorExitCode]).toBe(ServerService.ServiceRuntime.runtimeRestartExitCode)
-    expect(Schema.is(ServerService.ServerRestartRequired)(restart)).toBe(true)
-    const decoded = Schema.decodeUnknownSync(ServerService.ServerRestartRequired)({
-      _tag: "ServerRestartRequired",
-      message: "server upgraded",
-    })
-    expect(decoded.threadId).toBeUndefined()
-    expect(Schema.encodeSync(ServerService.ServerRestartRequired)(restart)).toMatchObject({
-      _tag: "ServerRestartRequired",
-      message: "server upgraded",
-      threadId: "thread-1",
-    })
   })
 
   it("rejects sequence values outside the current server contract", () => {

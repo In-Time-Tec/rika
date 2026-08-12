@@ -17,7 +17,6 @@ export const makeClientHandshake = (options: ClientHandshakeOptions): ServerHand
     clientNonce: options.clientNonce,
     clientKind: options.clientKind,
     connectRole: options.connectRole,
-    protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
     buildIdentity: ServerHandshake.HandshakeProtocol.buildIdentity,
   }
   return {
@@ -37,7 +36,7 @@ const verifyServerHandshakeImpl = (
   client: ServerHandshake.Handshake,
   server: ServerService.ServerMessage,
 ): boolean =>
-  (server._tag === "accepted" || server._tag === "incompatible") &&
+  (server._tag === "accepted" || server._tag === "build-mismatch") &&
   server.identity === client.identity &&
   server.clientNonce === client.clientNonce &&
   ServerHandshake.HandshakeProtocol.verifyServerProof(token, client, server)

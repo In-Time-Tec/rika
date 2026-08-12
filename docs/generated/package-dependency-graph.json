@@ -179,6 +179,7 @@
         "./review-intent",
         "./review-policy",
         "./root-turn-owner",
+        "./server-interactive-connection",
         "./server-interactive-feed",
         "./server-operation-request",
         "./server-service",

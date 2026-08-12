@@ -3,31 +3,16 @@ import * as ProductOperation from "@rika/product/product-operation"
 import * as Operation from "@rika/product/product-operation-service"
 import * as ServerHandshake from "@rika/product/server-service-handshake"
 import * as ServerService from "@rika/product/server-service"
-import {
-  Config,
-  Console,
-  Context,
-  Crypto,
-  Effect,
-  FileSystem,
-  Layer,
-  Option,
-  Path,
-  Schema,
-  Stdio,
-  Stream,
-} from "effect"
+import { Config, Console, Context, Crypto, Effect, FileSystem, Layer, Option, Path, Schema, Stdio } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Command } from "effect/unstable/cli"
 import { command, version } from "../command/root/rika-command"
 import * as Logging from "../diagnostics/diagnostic-file-logging"
 import { layer as serverLayer } from "../transport/client/server-client-transport"
-import * as ServerProcessStartup from "../server/process/server-process"
 import { spawn as spawnServer } from "../server/process/server-process-spawn"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
 import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
-import { interactiveRuntimeRestartLimit, interactiveRuntimeRestartPlan } from "./interactive-runtime-restart"
-import { encodeLaunchArguments, inheritedEnvironment, privateRuntime } from "./private-runtime-launch"
+import { inheritedEnvironment, privateRuntime } from "./private-runtime-launch"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -63,8 +48,10 @@ const operationFailure = (input: ProductOperation.Input, error: unknown) =>
     ? error
     : ProductOperation.OperationUnavailable.make({ operation: input._tag, message: String(error) })
 
-let interactiveSigintObserved = false
 let interactiveClientLaunch = false
+
+export const cleanInteractiveRuntimeExit = (exitCode: number): boolean =>
+  exitCode === 0 || exitCode === 130 || exitCode === 129
 
 export const clientSigintMode = (input: Pick<ProductOperation.Input, "_tag"> | undefined): "root" | "child" =>
   input?._tag === "Interactive" ? "child" : "root"
@@ -113,11 +100,7 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                     const environment: Record<string, string> = {
                       ...inheritedEnvironment(),
                       RIKA_INTERNAL_CLIENT_RUNTIME: "1",
-                      RIKA_INTERNAL_LAUNCHER_EXECUTABLE: process.execPath,
-                      RIKA_INTERNAL_LAUNCH_ARGUMENTS: encodeLaunchArguments(forwardedArguments),
-                      RIKA_INTERNAL_RUNTIME_RESTART_ATTEMPT: "0",
                     }
-                    delete environment[ServerProcessStartup.runtimeRestart.runtimeRestartFdEnvironment]
                     const execve = process.execve
                     if (execve === undefined)
                       return yield* ProductOperation.OperationUnavailable.make({
@@ -126,73 +109,33 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                       })
                     execve(runtime.executable, [runtime.executable, ...forwardedArguments], environment)
                   }
-                  let attempt = 0
-                  let restartEnvironment: Record<string, string> = {}
-                  while (true) {
-                    const handle = yield* spawner.spawn(
-                      ChildProcess.make(runtime.executable, [...runtime.prefixArguments, ...forwardedArguments], {
-                        detached: false,
-                        stdin: "inherit",
-                        stdout: "inherit",
-                        stderr: "inherit",
-                        additionalFds: { fd3: { type: "output" } },
-                        extendEnv: true,
-                        env: {
-                          RIKA_INTERNAL_CLIENT_RUNTIME: "1",
-                          [ServerProcessStartup.runtimeRestart.runtimeRestartFdEnvironment]: String(
-                            ServerProcessStartup.runtimeRestart.runtimeRestartFd,
-                          ),
-                          ...restartEnvironment,
-                        },
-                      }),
-                    )
-                    const forwardHangup = () => {
-                      try {
-                        process.kill(Number(handle.pid), "SIGHUP")
-                      } catch {}
-                    }
-                    process.on("SIGHUP", forwardHangup)
-                    const exitCode = Number(
-                      yield* handle.exitCode.pipe(
-                        Effect.ensuring(Effect.sync(() => process.off("SIGHUP", forwardHangup))),
-                      ),
-                    )
-                    const restartLine = yield* Stream.runFold(
-                      Stream.splitLines(
-                        Stream.decodeText(handle.getOutputFd(ServerProcessStartup.runtimeRestart.runtimeRestartFd)),
-                      ),
-                      () => Option.none<string>(),
-                      (first, text) => (Option.isSome(first) ? first : Option.some(text)),
-                    ).pipe(
-                      Effect.timeoutOrElse({
-                        duration: "1 second",
-                        orElse: () => Effect.succeed(Option.none<string>()),
-                      }),
-                      Effect.orElseSucceed(() => Option.none<string>()),
-                    )
-                    const restart = Option.isSome(restartLine)
-                      ? Option.getOrUndefined(
-                          yield* ServerProcessStartup.runtimeRestart
-                            .decodeRuntimeRestart(restartLine.value)
-                            .pipe(Effect.option),
-                        )
-                      : undefined
-                    const decision = interactiveRuntimeRestartPlan({
-                      exitCode,
-                      restart,
-                      attempt,
-                      limit: interactiveRuntimeRestartLimit,
-                    })
-                    if (decision._tag === "done") return
-                    if (decision._tag === "fail")
-                      return yield* ProductOperation.OperationUnavailable.make({
-                        operation: "Interactive",
-                        message: decision.message,
-                      })
-                    if (interactiveSigintObserved) return
-                    attempt += 1
-                    restartEnvironment = decision.environment
+                  const handle = yield* spawner.spawn(
+                    ChildProcess.make(runtime.executable, [...runtime.prefixArguments, ...forwardedArguments], {
+                      detached: false,
+                      stdin: "inherit",
+                      stdout: "inherit",
+                      stderr: "inherit",
+                      extendEnv: true,
+                      env: { RIKA_INTERNAL_CLIENT_RUNTIME: "1" },
+                    }),
+                  )
+                  const forwardHangup = () => {
+                    try {
+                      process.kill(Number(handle.pid), "SIGHUP")
+                    } catch {}
                   }
+                  process.on("SIGHUP", forwardHangup)
+                  const exitCode = Number(
+                    yield* handle.exitCode.pipe(
+                      Effect.ensuring(Effect.sync(() => process.off("SIGHUP", forwardHangup))),
+                    ),
+                  )
+                  if (cleanInteractiveRuntimeExit(exitCode)) return
+                  return yield* ProductOperation.OperationUnavailable.make({
+                    operation: "Interactive",
+                    message:
+                      "Rika closed unexpectedly. Run rika again. If it keeps happening, run rika diagnostics status.",
+                  })
                 }
                 let clientKind: ServerHandshake.Handshake["clientKind"]
                 if (input._tag === "Thread") clientKind = "thread-continue"
@@ -249,7 +192,3 @@ export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<s
 })
 
 export const isInteractiveClientLaunch = (): boolean => interactiveClientLaunch
-
-export const observeClientSigint = (): void => {
-  interactiveSigintObserved = true
-}

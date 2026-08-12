@@ -65,36 +65,18 @@ export const hardExit = (reason: string) =>
   )
 
 export const makeExecutionControls = (operationReady: Deferred.Deferred<Operation.Interface>) => {
-  const hasActiveExecutionWork = Deferred.await(operationReady).pipe(
-    Effect.flatMap((operation) =>
-      operation.authorizeServerReplacement !== undefined
-        ? operation.authorizeServerReplacement.pipe(Effect.map((disposition) => disposition === "defer"))
-        : (operation.hasActiveExecutionWork ?? Effect.succeed(true)),
-    ),
-    Effect.catch((error) =>
-      Effect.logError("server.replacement.status_failed").pipe(
-        Effect.annotateLogs("rika.failure.kind", String(error)),
-        Effect.as(true),
-      ),
-    ),
+  const prepareServerReplacement = Deferred.await(operationReady).pipe(
+    Effect.flatMap((operation) => operation.prepareServerReplacement ?? Effect.void),
   )
   const stopExecutionWork = Deferred.await(operationReady).pipe(
     Effect.flatMap((operation) => operation.stopActiveExecutionWork ?? Effect.void),
   )
-  const stopAbandonedExecutionWork = (generation: number, requireActiveWork: boolean) =>
-    (requireActiveWork ? hasActiveExecutionWork : Effect.succeed(true)).pipe(
-      Effect.flatMap((active) =>
-        !active
-          ? Effect.void
-          : Effect.logInfo("server.abandonment.cancelling").pipe(
-              Effect.annotateLogs("rika.server.generation", generation),
-              Effect.andThen(stopExecutionWork),
-              Effect.andThen(
-                Effect.logInfo("server.abandonment.cancelled").pipe(
-                  Effect.annotateLogs("rika.server.generation", generation),
-                ),
-              ),
-            ),
+  const stopAbandonedExecutionWork = (generation: number) =>
+    Effect.logInfo("server.abandonment.cancelling").pipe(
+      Effect.annotateLogs("rika.server.generation", generation),
+      Effect.andThen(stopExecutionWork),
+      Effect.andThen(
+        Effect.logInfo("server.abandonment.cancelled").pipe(Effect.annotateLogs("rika.server.generation", generation)),
       ),
       Effect.catch((error) =>
         Effect.logError("server.abandonment.cancel_failed").pipe(
@@ -102,7 +84,7 @@ export const makeExecutionControls = (operationReady: Deferred.Deferred<Operatio
         ),
       ),
     )
-  return { hasActiveExecutionWork, stopAbandonedExecutionWork }
+  return { prepareServerReplacement, stopAbandonedExecutionWork }
 }
 
 export const handleOperation = (context: OperationContext) => {
@@ -282,7 +264,7 @@ export const handleOperation = (context: OperationContext) => {
             ),
           ),
         ),
-        message.input._tag !== "Interactive",
+        message.input._tag !== "Interactive" && message.input._tag !== "Run" && message.input._tag !== "Review",
       )
       if (fiber === undefined) {
         yield* Ref.update(routesState, (current) => (current.delete(requestRouteKey), current))

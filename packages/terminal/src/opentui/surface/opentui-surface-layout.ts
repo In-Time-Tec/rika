@@ -151,12 +151,13 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     const statusChanged =
       previousModel === undefined ||
       previousModel.activity !== model.activity ||
+      previousModel.connectionStatus !== model.connectionStatus ||
       previousModel.retryCountdown !== model.retryCountdown ||
       previousModel.busy !== model.busy ||
       panelLoading(previousModel) !== panelLoadingLabel
     if (statusChanged) {
-      if (activityLabel !== undefined || panelLoadingLabel !== undefined) {
-        const statusName = activityLabel ?? panelLoadingLabel!
+      if (model.connectionStatus !== undefined || activityLabel !== undefined || panelLoadingLabel !== undefined) {
+        const statusName = model.connectionStatus ?? activityLabel ?? panelLoadingLabel!
         this.inputBox.bottomTitle = ""
         this.statusLabel.content = new StyledText([
           fg(toOpenColor(colors.text))(" "),
