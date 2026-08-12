@@ -468,13 +468,18 @@ export const projectTranscriptRows = (options: ProjectTranscriptRowsOptions) => 
   options.bottomSpacer.height = rowsAfter
   options.bottomSpacer.visible = rowsAfter > 0
   const descriptors: Array<TranscriptRenderableDescriptor> = []
-  for (const { gapBefore, bundle } of mounted) {
-    if (gapBefore)
+  const rowByKey = new Map<string, number>()
+  for (const [mountedIndex, { gapBefore, bundle }] of mounted.entries()) {
+    const row = rowPrefix[bandStart + mountedIndex] ?? 0
+    if (gapBefore) {
+      rowByKey.set(`${bundle.key}:gap`, row)
       descriptors.push({
         key: `${bundle.key}:gap`,
         revision: "gap",
         content: new StyledText([fg(toOpenColor(colors.text))(" ")]),
       })
+    }
+    for (const descriptor of bundle.descriptors) rowByKey.set(descriptor.key, row + (gapBefore ? 1 : 0))
     descriptors.push(...bundle.descriptors)
   }
   const children = reconcileTranscriptRenderables({
@@ -499,5 +504,6 @@ export const projectTranscriptRows = (options: ProjectTranscriptRowsOptions) => 
     mountedRows: (rowPrefix[bandEnd] ?? 0) - rowsBefore,
     rowTotal,
     rowPrefix,
+    rowByKey,
   }
 }

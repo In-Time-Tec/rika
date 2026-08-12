@@ -130,7 +130,6 @@ export class ThreadBrowser {
     this.previewHeight = transcriptHeight
     if (showTranscript) {
       this.status.visible = false
-      this.transcript.scrollbar.visible = this.transcript.scrollbar.scrollSize > this.transcript.scrollbar.viewportSize
       return { listWidth }
     }
     this.transcript.scrollbar.visible = false

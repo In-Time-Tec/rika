@@ -9,7 +9,7 @@ import {
 } from "@opentui/core"
 import { Effect } from "effect"
 import { transcriptOverscanRows } from "../../presentation/transcript/terminal-transcript-window"
-import { clampScrollTop, isFollowing } from "../../presentation/transcript/transcript-viewport"
+import { isFollowing } from "../../presentation/transcript/transcript-viewport"
 import { atBottomWithin, maxScrollTop } from "../../presentation/transcript/transcript-viewport-metrics"
 import type { ViewportEvent } from "../../presentation/transcript/transcript-viewport-protocol"
 import { reduceViewport } from "../../presentation/transcript/transcript-viewport-reducer"
@@ -31,6 +31,7 @@ import type {
 } from "./opentui-surface-transcript-types"
 import {
   TranscriptPaneGeometry,
+  TranscriptPaneFrame,
   TranscriptScrollBarRenderable,
   TranscriptScrollBoxRenderable,
 } from "./opentui-transcript-pane-geometry"
@@ -90,17 +91,15 @@ export class TranscriptPane {
   private bandRowsAfter = 0
   private windowExactRows = 0
   private bandRowPrefix: ReadonlyArray<number> = [0]
+  private rowByKey: ReadonlyMap<string, number> = new Map()
   private mountAnchorKey: string | undefined
   private bandRefreshing = false
   private bandTargetTop: number | undefined
   private readonly virtualDocument = new TranscriptVirtualDocument()
   private windowThread: string | undefined
-  private positionFrame: (() => void) | undefined
-  private scrollbarSyncPending = false
   private anchorScrollBy = 0
   private anchorNearBottom = false
   private pendingPosition: PendingTranscriptPosition | undefined
-  private nextPositionToken = 0
   private scrollbarSyncing = false
   private scrollGeneration = 0
   private manualScrollPosition = false
@@ -108,17 +107,10 @@ export class TranscriptPane {
   private staticContent = false
   private destroyed = false
   private readonly geometry: TranscriptPaneGeometry
+  private readonly frame: TranscriptPaneFrame
   private readonly recordRenderedScroll = () => {
-    this.geometry.synchronize()
+    this.synchronizeGeometry()
     this.renderedScrollTop = this.scroll.scrollTop
-    if (
-      !this.destroyed &&
-      !this.manualScrollPosition &&
-      this.pendingPosition === undefined &&
-      (this.staticContent || (this.model !== undefined && isFollowing(this.viewport.mode))) &&
-      !this.atBottom()
-    )
-      this.schedulePosition({ _tag: "Follow", threadId: this.model?.currentThreadId })
   }
 
   constructor(
@@ -130,8 +122,7 @@ export class TranscriptPane {
     this.scroll = new TranscriptScrollBoxRenderable(renderer, {
       flexGrow: 1,
       scrollY: true,
-      stickyScroll: true,
-      stickyStart: "bottom",
+      stickyScroll: false,
       viewportCulling: true,
       verticalScrollbarOptions: { visible: false },
       rootOptions: { backgroundColor: background },
@@ -149,6 +140,7 @@ export class TranscriptPane {
       onMouseScroll: (event) => this.handleWheel(event),
     })
     this.geometry = new TranscriptPaneGeometry(this.scroll)
+    this.frame = new TranscriptPaneFrame(renderer, () => this.settleFrame())
     const viewportSizeChange = this.scroll.viewport.onSizeChange
     this.scroll.viewport.onSizeChange = () => {
       viewportSizeChange?.call(this.scroll.viewport)
@@ -164,7 +156,11 @@ export class TranscriptPane {
     this.scroll.verticalScrollBar.visible = false
     this.scroll.onPositionChanged = () => {
       if (this.bandRefreshing) return
-      if (!this.scrollProgrammatic) this.manualScrollPosition = !this.atBottom()
+      if (!this.scrollProgrammatic) {
+        this.manualScrollPosition = !this.atBottom()
+        if (this.manualScrollPosition && isFollowing(this.viewport.mode) && this.model?.scrollFollow === false)
+          this.dispatchViewport({ _tag: "DetachCommanded", anchor: this.readingAnchor() })
+      }
       this.ensureBandsAt(this.scroll.scrollTop)
       this.renderer.requestRender()
     }
@@ -206,6 +202,7 @@ export class TranscriptPane {
   setViewportRows(rows: number): void {
     this.viewportRows = Math.max(1, rows)
     this.scroll.content.minHeight = this.viewportRows
+    this.projectScrollbarVisibility()
   }
 
   update(model: Model, preserveAnchor = false, spinnerGlyph = this.spinnerGlyph): void {
@@ -237,11 +234,11 @@ export class TranscriptPane {
       this.pendingPosition === undefined &&
       this.viewport.wheel._tag === "Idle"
     const preservePosition = preserveAnchor || detachedSameThread
-    const anchor = preservePosition ? this.geometry.captureAnchor(this.records, this.renderedScrollTop) : undefined
+    const anchor = preservePosition
+      ? this.geometry.captureAnchor(this.records, this.renderedScrollTop, this.rowByKey)
+      : undefined
     this.mountAnchorKey = anchor?.key
     if (this.windowThread !== model.currentThreadId) {
-      if (this.positionFrame !== undefined) this.renderer.off(CliRenderEvents.FRAME, this.positionFrame)
-      this.positionFrame = undefined
       this.pendingPosition = undefined
       this.anchorScrollBy = 0
       this.anchorNearBottom = false
@@ -287,14 +284,8 @@ export class TranscriptPane {
       this.anchorNearBottom = false
       this.schedulePosition(position)
     } else if (this.pendingPosition !== undefined) this.renderer.requestRender()
-    else if (following && layoutChanged) this.schedulePosition({ _tag: "Follow", threadId: model.currentThreadId })
-    else if (!this.scrollbarSyncPending) {
-      this.scrollbarSyncPending = true
-      this.defer(() => {
-        this.scrollbarSyncPending = false
-        if (this.model !== undefined) this.syncScrollbar()
-      })
-    }
+    else if (following && (previousModel === undefined || layoutChanged))
+      this.schedulePosition({ _tag: "Follow", threadId: model.currentThreadId })
   }
 
   show(child: TextRenderable): void {
@@ -310,6 +301,7 @@ export class TranscriptPane {
     if (this.bottomSpacer.parent === this.scroll.content) this.scroll.content.remove(this.bottomSpacer)
     this.children = [child]
     this.scroll.content.add(child, 0)
+    this.scrollbar.visible = false
     this.schedulePosition({ _tag: "Follow", threadId: undefined })
   }
 
@@ -406,7 +398,7 @@ export class TranscriptPane {
   }
 
   captureVisibleAnchor(): ViewportAnchor | undefined {
-    const anchor = this.geometry.captureAnchor(this.records, this.renderedScrollTop)
+    const anchor = this.geometry.captureAnchor(this.records, this.renderedScrollTop, this.rowByKey)
     return anchor === undefined ? undefined : { unitId: anchor.key, offset: anchor.screenY }
   }
 
@@ -455,6 +447,7 @@ export class TranscriptPane {
     this.bandRowsAfter = 0
     this.windowExactRows = 0
     this.bandRowPrefix = [0]
+    this.rowByKey = new Map()
   }
 
   destroy(): void {
@@ -462,8 +455,7 @@ export class TranscriptPane {
     this.destroyed = true
     this.scrollGeneration += 1
     this.scrollbarSyncing = false
-    if (this.positionFrame !== undefined) this.renderer.off(CliRenderEvents.FRAME, this.positionFrame)
-    this.positionFrame = undefined
+    this.frame.destroy()
     this.renderer.off(CliRenderEvents.FRAME, this.recordRenderedScroll)
     this.pendingPosition = undefined
     this.cancelWheelReport()
@@ -508,19 +500,14 @@ export class TranscriptPane {
     this.mountedRows = projection.mountedRows
     this.windowExactRows = projection.rowTotal
     this.bandRowPrefix = projection.rowPrefix
+    this.rowByKey = projection.rowByKey
     this.rowTotal = projection.rowTotal
     this.renderInput = projection.input
+    this.projectScrollbarVisibility()
   }
 
   private handleScrollBoxSizeChanged(): void {
-    this.geometry.synchronize()
-    if (
-      this.pendingPosition === undefined &&
-      !this.manualScrollPosition &&
-      (this.staticContent || (this.model !== undefined && isFollowing(this.viewport.mode))) &&
-      !this.atBottom()
-    )
-      this.schedulePosition({ _tag: "Follow", threadId: this.model?.currentThreadId })
+    this.frame.settleNow()
   }
 
   private atBottom(near = false): boolean {
@@ -538,9 +525,6 @@ export class TranscriptPane {
     if (previousMode !== decision.viewport.mode || event._tag === "ResetCommanded") this.scrollGeneration += 1
     for (const effect of decision.effects)
       switch (effect._tag) {
-        case "ProjectState":
-          this.scroll.stickyScroll = isFollowing(this.viewport.mode)
-          break
         case "RequestFollowPosition":
           if (event._tag === "FollowCommanded" && this.model !== undefined) {
             this.windowEnd = this.model.items.length
@@ -583,10 +567,6 @@ export class TranscriptPane {
     }, 16)
   }
 
-  private clampScrollTop(scrollTop: number): number {
-    return clampScrollTop(scrollTop, { ...this.geometry.metrics(), scrollTop })
-  }
-
   private ensureBandsAt(scrollTop: number): void {
     const model = this.model
     if (model === undefined || this.bandTotal === 0) return
@@ -612,7 +592,7 @@ export class TranscriptPane {
       this.renderInput = undefined
       this.update(model, false)
       this.scrollProgrammatic = true
-      this.scroll.scrollTop = this.clampScrollTop(previousTop)
+      this.scroll.scrollTop = this.geometry.clampScrollTop(previousTop)
     } finally {
       this.scrollProgrammatic = false
       this.bandTargetTop = undefined
@@ -621,10 +601,10 @@ export class TranscriptPane {
   }
 
   private applyPosition(scrollTop: number): void {
-    this.geometry.synchronize()
-    let target = this.clampScrollTop(scrollTop)
+    this.synchronizeGeometry()
+    let target = this.geometry.clampScrollTop(scrollTop)
     this.ensureBandsAt(target)
-    target = this.clampScrollTop(target)
+    target = this.geometry.clampScrollTop(target)
     if (target === this.scroll.scrollTop) return
     this.scrollProgrammatic = true
     this.scroll.scrollTop = target
@@ -632,7 +612,7 @@ export class TranscriptPane {
   }
 
   private readingAnchor(): ViewportAnchor | undefined {
-    return this.geometry.readingAnchor(this.records, this.renderedScrollTop)
+    return this.geometry.readingAnchor(this.records, this.renderedScrollTop, this.rowByKey)
   }
 
   private handleScroll(): void {
@@ -697,12 +677,11 @@ export class TranscriptPane {
 
   private syncScrollbar(): void {
     if (this.destroyed) return
-    this.geometry.synchronize()
-    const viewportHeight = this.scroll.viewport.height
+    this.synchronizeGeometry()
+    const viewportHeight = this.scroll.viewport.height > 0 ? this.scroll.viewport.height : this.viewportRows
     const virtual = this.virtualMetrics()
     const scrollHeight = virtual.scrollHeight
     const scrollTop = virtual.rowsAbove + this.scroll.scrollTop
-    const overflowing = viewportHeight > 0 && scrollHeight > Math.max(viewportHeight, this.viewportRows)
     this.scrollbarSyncing = true
     try {
       this.scrollbar.scrollSize = scrollHeight
@@ -711,7 +690,13 @@ export class TranscriptPane {
     } finally {
       this.scrollbarSyncing = false
     }
-    if (this.scrollbar.visible !== overflowing) this.scrollbar.visible = overflowing
+  }
+
+  private projectScrollbarVisibility(): void {
+    const viewportHeight = this.scroll.viewport.height > 0 ? this.scroll.viewport.height : this.viewportRows
+    this.scrollbar.visible =
+      this.virtualMetrics(Math.max(viewportHeight, this.windowExactRows + spacing.transcript)).scrollHeight >
+      viewportHeight
   }
 
   private applyVirtualScrollbarPosition(position: number): void {
@@ -746,47 +731,64 @@ export class TranscriptPane {
     })
   }
 
-  private schedulePosition(position: Omit<PendingTranscriptPosition, "token">): void {
-    const token = this.nextPositionToken
-    this.nextPositionToken += 1
-    this.pendingPosition = { ...position, token } as PendingTranscriptPosition
-    if (this.positionFrame !== undefined) this.renderer.off(CliRenderEvents.FRAME, this.positionFrame)
-    const apply = () => {
-      this.renderer.off(CliRenderEvents.FRAME, apply)
-      if (this.positionFrame === apply) this.positionFrame = undefined
-      const current = this.pendingPosition
-      if (current === undefined || current.token !== token || this.destroyed) return
-      this.pendingPosition = undefined
-      if (current.threadId !== this.model?.currentThreadId) return
-      if (current._tag === "Follow" && !isFollowing(this.viewport.mode)) return
-      if (current._tag === "Anchor") {
-        if (isFollowing(this.viewport.mode)) return
-        const anchored = current.anchor === undefined ? undefined : this.records.get(current.anchor.key)
-        const anchorScreenY = current.anchor?.screenY
-        const offset =
-          anchored === undefined || anchorScreenY === undefined ? 0 : anchored.renderable.screenY - anchorScreenY
-        this.applyPosition(this.scroll.scrollTop + offset + current.scrollBy)
-        if (current.scrollBy === 0) this.handlers.scrollGeometry?.(this.scroll.scrollTop)
-        else this.reportScroll(current.nearBottom)
-      } else {
-        this.manualScrollPosition = false
-        this.applyPosition(maxScrollTop(this.geometry.metrics()))
-      }
-      this.syncScrollbar()
-      this.renderer.requestRender()
-    }
-    this.positionFrame = apply
-    this.renderer.once(CliRenderEvents.FRAME, apply)
-    this.renderer.requestRender()
+  private schedulePosition(position: PendingTranscriptPosition): void {
+    this.pendingPosition = position
+    this.frame.request()
   }
 
-  private virtualMetrics(): { readonly scrollHeight: number; readonly rowsAbove: number } {
+  private settleFrame(): void {
+    if (this.destroyed) return
+    this.synchronizeGeometry()
+    const current = this.pendingPosition
+    if (current !== undefined) {
+      this.pendingPosition = undefined
+      if (current.threadId === this.model?.currentThreadId) {
+        if (current._tag === "Anchor" && !isFollowing(this.viewport.mode)) {
+          const restored = this.geometry.restoreAnchor(current.anchor, this.records, this.rowByKey)
+          const target = restored.target
+          this.applyPosition(restored.scrollTop + current.scrollBy)
+          if (target !== undefined && target.key !== current.anchor?.key)
+            this.dispatchViewport({
+              _tag: "AnchorRebased",
+              anchor: { unitId: target.key, offset: target.screenY },
+            })
+          if (current.scrollBy === 0) this.handlers.scrollGeometry?.(this.scroll.scrollTop)
+          else this.reportScroll(current.nearBottom)
+          if (current.scrollBy === 0 && maxScrollTop(this.geometry.metrics()) === 0)
+            this.dispatchViewport({ _tag: "BottomSettled" })
+        } else if (current._tag === "Follow" && isFollowing(this.viewport.mode)) {
+          this.manualScrollPosition = false
+          this.applyPosition(maxScrollTop(this.geometry.metrics()))
+        }
+      }
+    }
+    if (
+      !this.manualScrollPosition &&
+      (this.staticContent || (this.model !== undefined && isFollowing(this.viewport.mode))) &&
+      !this.atBottom()
+    ) {
+      this.applyPosition(maxScrollTop(this.geometry.metrics()))
+    }
+    this.syncScrollbar()
+  }
+
+  private synchronizeGeometry(): void {
+    this.geometry.synchronize(
+      this.viewportRows,
+      this.model === undefined ? undefined : this.windowExactRows + spacing.transcript,
+    )
+  }
+
+  private virtualMetrics(physicalScrollHeight = this.scroll.scrollHeight): {
+    readonly scrollHeight: number
+    readonly rowsAbove: number
+  } {
     return this.virtualDocument.metrics({
       model: this.model,
       windowEnd: this.windowEnd,
       bandRowsBefore: this.bandRowsBefore,
       bandRowsAfter: this.bandRowsAfter,
-      physicalScrollHeight: this.scroll.scrollHeight,
+      physicalScrollHeight,
     })
   }
 

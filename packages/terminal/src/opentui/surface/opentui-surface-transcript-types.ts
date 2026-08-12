@@ -20,15 +20,20 @@ export interface TranscriptRenderableDescriptor {
   readonly onMouseDown?: TextRenderable["onMouseDown"]
 }
 
-export interface TranscriptAnchor {
+export interface TranscriptAnchorTarget {
   readonly key: string
   readonly screenY: number
+  readonly row: number
+  readonly scrollTop: number
+}
+
+export interface TranscriptAnchor extends TranscriptAnchorTarget {
+  readonly fallbacks: ReadonlyArray<TranscriptAnchorTarget>
 }
 
 export type PendingTranscriptPosition =
   | {
       readonly _tag: "Anchor"
-      readonly token: number
       readonly anchor: TranscriptAnchor | undefined
       readonly threadId: string | undefined
       readonly scrollBy: number
@@ -36,7 +41,6 @@ export type PendingTranscriptPosition =
     }
   | {
       readonly _tag: "Follow"
-      readonly token: number
       readonly threadId: string | undefined
     }
 

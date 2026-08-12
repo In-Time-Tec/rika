@@ -16,7 +16,10 @@ interface TranscriptVirtualMetricsInput {
 }
 
 export class TranscriptVirtualDocument {
-  private key: unknown
+  private items: unknown
+  private entries: unknown
+  private blocks: unknown
+  private expandedRowKeys: unknown
   private width = 0
   private indexValue: TranscriptVirtualIndex | undefined
 
@@ -44,8 +47,17 @@ export class TranscriptVirtualDocument {
   }
 
   private index(model: Model): TranscriptVirtualIndex {
-    if (this.key !== model.items || this.width !== model.width) {
-      this.key = model.items
+    if (
+      this.items !== model.items ||
+      this.entries !== model.entries ||
+      this.blocks !== model.blocks ||
+      this.expandedRowKeys !== model.expandedRowKeys ||
+      this.width !== model.width
+    ) {
+      this.items = model.items
+      this.entries = model.entries
+      this.blocks = model.blocks
+      this.expandedRowKeys = model.expandedRowKeys
       this.width = model.width
       this.indexValue = transcriptVirtualIndex(model, model.width)
     }

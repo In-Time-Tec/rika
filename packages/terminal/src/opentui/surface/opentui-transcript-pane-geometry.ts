@@ -1,12 +1,60 @@
-import { ScrollBarRenderable, ScrollBoxRenderable, type MouseEvent } from "@opentui/core"
+import {
+  CliRenderEvents,
+  ScrollBarRenderable,
+  ScrollBoxRenderable,
+  type CliRenderer,
+  type MouseEvent,
+} from "@opentui/core"
 import { topmostVisibleAnchor } from "../../presentation/transcript/transcript-anchor-geometry"
 import {
   mountedTranscriptRowBudget,
   transcriptOverscanRows,
 } from "../../presentation/transcript/terminal-transcript-window"
+import { clampScrollTop } from "../../presentation/transcript/transcript-viewport"
 import { atBottomWithin, type ViewportMetrics } from "../../presentation/transcript/transcript-viewport-metrics"
 import type { ViewportAnchor } from "../../presentation/transcript/transcript-viewport-state"
-import type { TranscriptAnchor, TranscriptRenderableRecord } from "./opentui-surface-transcript-types"
+import type {
+  TranscriptAnchor,
+  TranscriptAnchorTarget,
+  TranscriptRenderableRecord,
+} from "./opentui-surface-transcript-types"
+
+export class TranscriptPaneFrame {
+  private pending = false
+
+  constructor(
+    private readonly renderer: CliRenderer,
+    private readonly settle: () => void,
+  ) {
+    if (renderer.setFrameCallback === undefined) renderer.on(CliRenderEvents.FRAME, this.prepareAfterFrame)
+    else renderer.setFrameCallback(this.prepare)
+  }
+
+  readonly prepare = (_deltaTime: number): Promise<void> => {
+    this.pending = false
+    this.settle()
+    return Promise.resolve()
+  }
+
+  request(): void {
+    this.pending = true
+    this.renderer.requestRender()
+  }
+
+  settleNow(): void {
+    if (!this.pending) this.settle()
+  }
+
+  destroy(): void {
+    if (this.renderer.removeFrameCallback === undefined)
+      this.renderer.off(CliRenderEvents.FRAME, this.prepareAfterFrame)
+    else this.renderer.removeFrameCallback(this.prepare)
+  }
+
+  private readonly prepareAfterFrame = () => {
+    void this.prepare(0)
+  }
+}
 
 export class TranscriptScrollBoxRenderable extends ScrollBoxRenderable {
   onPositionChanged: (() => void) | undefined
@@ -38,16 +86,23 @@ export class TranscriptPaneGeometry {
     }
   }
 
-  synchronize(): void {
-    const viewportHeight = this.scroll.viewport.height
-    const contentHeight = this.scroll.content.height
-    if (viewportHeight <= 0 || contentHeight <= 0) return
-    this.scroll.verticalScrollBar.scrollSize = contentHeight
+  synchronize(viewportRows: number, contentRows: number | undefined): void {
+    const viewportHeight = this.scroll.viewport.height > 0 ? this.scroll.viewport.height : viewportRows
+    if (viewportHeight <= 0) return
+    const scrollHeight =
+      contentRows === undefined
+        ? Math.max(viewportHeight, this.scroll.content.height)
+        : Math.max(viewportRows, contentRows)
+    this.scroll.verticalScrollBar.scrollSize = Math.max(scrollHeight, viewportHeight)
     this.scroll.verticalScrollBar.viewportSize = viewportHeight
   }
 
   atMountedBottom(): boolean {
     return atBottomWithin(this.metrics(), this.overscan())
+  }
+
+  clampScrollTop(scrollTop: number): number {
+    return clampScrollTop(scrollTop, { ...this.metrics(), scrollTop })
   }
 
   overscan(): number {
@@ -70,27 +125,62 @@ export class TranscriptPaneGeometry {
   captureAnchor(
     records: ReadonlyMap<string, TranscriptRenderableRecord>,
     renderedScrollTop: number,
+    rowByKey: ReadonlyMap<string, number>,
   ): TranscriptAnchor | undefined {
-    return topmostVisibleAnchor(
-      [...records.values()].map(({ key, renderable }) => ({
-        key,
-        screenY: renderable.screenY,
-        height: renderable.height,
-      })),
-      {
-        viewportTop: this.scroll.screenY,
-        drift: this.scroll.scrollTop - renderedScrollTop,
-      },
-    )
+    const drift = this.scroll.scrollTop - renderedScrollTop
+    const candidates = [...records.values()].flatMap(({ key, renderable }) => {
+      const row = rowByKey.get(key)
+      return row === undefined
+        ? []
+        : [
+            {
+              key,
+              screenY: renderable.screenY,
+              height: renderable.height,
+              row,
+            },
+          ]
+    })
+    const anchor = topmostVisibleAnchor(candidates, { viewportTop: this.scroll.screenY, drift })
+    if (anchor === undefined) return undefined
+    const fallbacks = candidates
+      .filter(({ key, height }) => key !== anchor.key && height > 0)
+      .map(({ key, screenY, row }) => ({ key, screenY: screenY + drift, row, scrollTop: renderedScrollTop }))
+      .toSorted(
+        (left, right) =>
+          Math.abs(left.screenY - anchor.screenY) - Math.abs(right.screenY - anchor.screenY) ||
+          left.screenY - right.screenY,
+      )
+    return { ...anchor, row: rowByKey.get(anchor.key)!, scrollTop: renderedScrollTop, fallbacks }
   }
 
   readingAnchor(
     records: ReadonlyMap<string, TranscriptRenderableRecord>,
     renderedScrollTop: number,
+    rowByKey: ReadonlyMap<string, number>,
   ): ViewportAnchor | undefined {
-    const anchor = this.captureAnchor(records, renderedScrollTop)
+    const anchor = this.captureAnchor(records, renderedScrollTop, rowByKey)
     if (anchor !== undefined) return { unitId: anchor.key, offset: anchor.screenY }
     const first = records.values().next().value as TranscriptRenderableRecord | undefined
     return first === undefined ? undefined : { unitId: first.key, offset: 0 }
+  }
+
+  restoreAnchor(
+    anchor: TranscriptAnchor | undefined,
+    records: ReadonlyMap<string, TranscriptRenderableRecord>,
+    rowByKey: ReadonlyMap<string, number>,
+  ): { readonly scrollTop: number; readonly target: TranscriptAnchorTarget | undefined } {
+    const target =
+      anchor === undefined
+        ? undefined
+        : [anchor, ...anchor.fallbacks].find(({ key }) => records.has(key) && rowByKey.has(key))
+    const targetRow = target === undefined ? undefined : rowByKey.get(target.key)
+    return {
+      target,
+      scrollTop:
+        target === undefined || targetRow === undefined
+          ? this.scroll.scrollTop
+          : target.scrollTop + targetRow - target.row,
+    }
   }
 }
