@@ -64,8 +64,13 @@ describe("running subagent activity", () => {
   test("leaves a nested child to the subagent that owns it", () => {
     expect(
       activityOf(
-        [cell("k", "complete"), card("task", "running"), cell("tk", "complete"), card("oracle", "running")],
-        [block(0, "k"), block(1, "task", "k"), block(2, "tk", "task"), block(3, "oracle", "tk")],
+        [cell("k", "complete"), card("task", "running"), cell("tk", "running"), card("oracle", "running")],
+        [
+          block(0, "root-cell-unit"),
+          block(1, "task-card-unit", "k"),
+          block(2, "task-cell-unit", "task"),
+          block(3, "oracle-card-unit", "task"),
+        ],
       ),
     ).toBe("Running 1 subagent")
   })

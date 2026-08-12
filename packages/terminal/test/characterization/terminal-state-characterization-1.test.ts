@@ -64,7 +64,7 @@ test("formats Amp activity counters with the singular tok unit", () => {
   expect(formatActivityCounter(1_234_567)).toBe("1.2M tok")
   expect(formatActivityCounter(1_234)).toBe(formatTokens(1_234))
 })
-test("summarizes top-level subagents separately from all other running tools", () => {
+test("summarizes direct subagents and tools without inflating them with descendants", () => {
   const rootAgent = {
     ...readCall("root-agent", "Root agent"),
     presentation: {
@@ -87,8 +87,8 @@ test("summarizes top-level subagents separately from all other running tools", (
     ],
   })
 
-  expect(activity).toEqual({ _tag: "RunningTools", subagents: 1, tools: 2 })
-  expect(formatActivity(activity)).toBe("Running 1 subagent, 2 tools")
+  expect(activity).toEqual({ _tag: "RunningTools", subagents: 1, tools: 1 })
+  expect(formatActivity(activity)).toBe("Running 1 subagent, 1 tool")
   expect(formatActivity({ _tag: "RunningTools", subagents: 5, tools: 3 })).toBe("Running 5 subagents, 3 tools")
 })
 test("exposes thread, mode, context, fast mode, and quit commands in the command palette", () => {

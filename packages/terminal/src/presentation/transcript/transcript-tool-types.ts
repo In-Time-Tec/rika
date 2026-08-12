@@ -18,7 +18,7 @@ export type CellTranscriptUnit = {
   readonly kind: "cell"
   readonly block: number
 }
-export type NestedTranscriptUnit = ToolTranscriptUnit | CellTranscriptUnit
+export type NestedTranscriptUnit = ToolTranscriptUnit | SubagentTranscriptUnit | CellTranscriptUnit
 export type TranscriptUnit =
   | { readonly kind: "entry"; readonly entry: number }
   | ToolTranscriptUnit

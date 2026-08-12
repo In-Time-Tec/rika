@@ -109,13 +109,25 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
   }
   const agentResponseFor = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): AgentResponseState | undefined =>
     block.presentation.family === "agent" ? agentResponseState(model, block, childItems.get(block.id) ?? []) : undefined
-  const nestedTools = (parentId: string): ReadonlyArray<NestedTranscriptUnit> =>
+  const nestedUnits = (parentId: string): ReadonlyArray<NestedTranscriptUnit> =>
     (childItems.get(parentId) ?? []).flatMap((item): ReadonlyArray<NestedTranscriptUnit> => {
       if (item._tag !== "Block") return []
       const block = model.blocks[item.index] as TranscriptBlock
       if (block._tag === "Cell") return [{ kind: "cell", block: item.index }]
+      if (block._tag === "SubagentCard") {
+        const children = nestedUnits(block.id)
+        const agentResponse = subagentResponseFor(block)
+        return [
+          {
+            kind: "subagent",
+            block: item.index,
+            children,
+            ...(agentResponse === undefined ? {} : { agentResponse }),
+          },
+        ]
+      }
       if (block._tag !== "ToolCall" || continuationIsFolded(block, model.blocks)) return []
-      const children = nestedTools(block.id)
+      const children = nestedUnits(block.id)
       const agentResponse = agentResponseFor(block)
       return [
         {
@@ -162,7 +174,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
     const block = model.blocks[item.index] as TranscriptBlock
     if (block._tag === "ToolCall" && continuationIsFolded(block, model.blocks)) continue
     if (block._tag === "ToolCall") {
-      const children = nestedTools(block.id)
+      const children = nestedUnits(block.id)
       const agentResponse = agentResponseFor(block)
       if (block.presentation.outputDisplay === "inline" || children.length > 0 || agentResponse !== undefined) {
         flush()
@@ -191,7 +203,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
       units.push({
         kind: "subagent",
         block: item.index,
-        children: nestedTools(block.id),
+        children: nestedUnits(block.id),
         ...(agentResponse === undefined ? {} : { agentResponse }),
       })
     } else if (block._tag === "Diff") units.push({ kind: "diff", block: item.index })
@@ -254,6 +266,7 @@ export const expandableRowIds = (model: Model): ReadonlyArray<TranscriptUnitId> 
     ids.push(id)
     if (unit.kind === "cell" || !expanded.has(id)) return
     for (const child of unit.children ?? []) appendNested(child)
+    if (unit.kind === "subagent") return
     if (unit.group === "edit") {
       const files = unit.blocks.flatMap((index) => {
         const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "ToolCall" }>

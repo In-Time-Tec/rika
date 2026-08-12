@@ -2,6 +2,7 @@ import * as ThreadView from "@rika/product/thread-view"
 import { steeringUnitKeyPrefix } from "@rika/product/execution-projection"
 import { Function, Result } from "effect"
 import { maxInMemoryTranscriptUnits, trimTranscriptTimeline } from "@rika/terminal/terminal-timeline-bounds"
+import { runningToolsActivity as transcriptActivity } from "@rika/terminal/terminal-message"
 import { applyRootUnits, applyTurnDelta } from "@rika/terminal/terminal-transcript-presentation"
 import type { Model, ThreadItem } from "@rika/terminal/terminal-state"
 import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
@@ -14,30 +15,15 @@ const unchanged = (state: State): Update => ({ state, preserveAnchor: false })
 const activeUnitActivity = (
   entry: ThreadView.ThreadViewTurn | undefined,
   modelPreview: ModelPreview.Overlay | undefined,
+  model: Model,
 ): Model["activity"] => {
   if (entry === undefined) return undefined
   if (modelPreview?.turnId === String(entry.turn.id)) {
     if (modelPreview.textBytes > 0) return { _tag: "Streaming", bytes: modelPreview.textBytes }
     if (modelPreview.reasoningBytes > 0) return { _tag: "Thinking", bytes: modelPreview.reasoningBytes }
   }
-  let subagents = 0
-  let tools = 0
-  for (const unit of entry.units) {
-    if (unit.content._tag !== "Block") continue
-    const block = unit.content.block
-    // A cell is how work happens now, so a running one is what the reader is waiting on. Counting
-    // only the tool call it used to be leaves the line saying "Waiting" for the whole of a long cell.
-    if (block._tag === "Cell" && block.status === "running") tools += 1
-    else if (block._tag === "ToolCall" && block.status === "running") {
-      if (block.presentation.family === "agent") subagents += 1
-      else tools += 1
-    } else if (
-      block._tag === "SubagentCard" &&
-      (block.status === "running" || block.status === "waiting" || block.status === "cancelling")
-    )
-      subagents += 1
-  }
-  return subagents === 0 && tools === 0 ? { _tag: "Waiting" } : { _tag: "RunningTools", subagents, tools }
+  const activity = transcriptActivity(model)
+  return (activity.subagents ?? 0) === 0 && (activity.tools ?? 0) === 0 ? { _tag: "Waiting" } : activity
 }
 
 const clearTimeline = (model: Model): Model => ({
@@ -82,7 +68,7 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot, modelPre
     currentThreadTitle: snapshot.thread.title,
     activeTurnId: active === undefined ? undefined : String(active.turn.id),
     busy: active !== undefined,
-    activity: activeUnitActivity(active, modelPreview),
+    activity: undefined,
     pendingSteering: authoritativeSteering,
     steeringRequests,
     editingTurnId: editing ? model.editingTurnId : undefined,
@@ -107,6 +93,7 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot, modelPre
   if (previewUnits.length > 0) next = applyRootUnits(next, String(previewUnits[0]!.turnId), previewUnits)
   if (model.currentThreadId === undefined || model.currentThreadId === String(snapshot.thread.id))
     next = overlayPendingSubmissions(next, model)
+  next = { ...next, activity: activeUnitActivity(active, modelPreview, next) }
   if (active === undefined && model.activeTurnId !== undefined) {
     const settled = snapshot.turns.find((entry) => String(entry.turn.id) === model.activeTurnId)?.turn
     if (settled?.status === "completed") next = updateModel(next, { _tag: "ExecutionCompleted", turnId: settled.id })
@@ -205,18 +192,17 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
     if (modelPreview === state.modelPreview) return unchanged(state)
     const previous = ModelPreview.units(state.modelPreview, state.view)
     const next = ModelPreview.units(modelPreview, state.view)
+    const model = applyTurnDelta(state.model, String(event.turnId), {
+      upsert: next,
+      remove: previous.filter((unit) => !next.some((candidate) => candidate.key === unit.key)).map((unit) => unit.key),
+    })
     return {
       state: {
         ...state,
         modelPreview,
         model: {
-          ...applyTurnDelta(state.model, String(event.turnId), {
-            upsert: next,
-            remove: previous
-              .filter((unit) => !next.some((candidate) => candidate.key === unit.key))
-              .map((unit) => unit.key),
-          }),
-          activity: activeUnitActivity(turn, modelPreview),
+          ...model,
+          activity: activeUnitActivity(turn, modelPreview, model),
         },
       },
       preserveAnchor: false,

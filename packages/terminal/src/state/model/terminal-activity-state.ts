@@ -64,29 +64,30 @@ export const formatActivity: {
 
 const runningCardStatuses: ReadonlySet<string> = new Set(["running", "waiting", "cancelling"])
 
-export const runningToolsActivity = (model: Model): Activity => {
+export const runningToolsActivity = (model: Model): Extract<Activity, { readonly _tag: "RunningTools" }> => {
   const items = model.items as ReadonlyArray<TranscriptItem>
   const blockItems = items.flatMap((item) => (item._tag === "Block" ? [item] : []))
-  const indexById = new Map(blockItems.flatMap((item) => (item.id === undefined ? [] : [[item.id, item.index]])))
-  const parentById = new Map(blockItems.flatMap((item) => (item.id === undefined ? [] : [[item.id, item.parentId]])))
-  /**
-   * A card counts only when no ANCESTOR card owns it, so a subagent's own subagents are reported by
-   * the one the user delegated to rather than counted again beside it. Every card now hangs off the
-   * cell that spawned it, so having any parent no longer distinguishes the two.
-   */
   const ownsChildren = (index: number): boolean => {
     const block = model.blocks[index] as TranscriptBlock | undefined
     if (block === undefined) return false
     return block._tag === "SubagentCard" || (block._tag === "ToolCall" && block.presentation.family === "agent")
   }
+  const ownerById = new Map(
+    blockItems.flatMap((item) => {
+      const block = model.blocks[item.index] as TranscriptBlock | undefined
+      if (block?._tag !== "SubagentCard" && block?._tag !== "ToolCall") return []
+      return [[block.id, item] as const]
+    }),
+  )
   const ownedByCard = (item: (typeof blockItems)[number]): boolean => {
     const seen = new Set<string>()
     let cursor = item.parentId
     while (cursor !== undefined && !seen.has(cursor)) {
       seen.add(cursor)
-      const index = indexById.get(cursor) ?? indexById.get(`tool:${cursor}`)
-      if (index !== undefined && ownsChildren(index)) return true
-      cursor = parentById.get(cursor) ?? parentById.get(`tool:${cursor}`)
+      const owner = ownerById.get(cursor)
+      if (owner === undefined) return false
+      if (ownsChildren(owner.index)) return true
+      cursor = owner.parentId
     }
     return false
   }
@@ -101,12 +102,15 @@ export const runningToolsActivity = (model: Model): Activity => {
       continue
     }
     if (block._tag === "Cell") {
-      if (block.status === "running") tools += 1
+      const item = itemByIndex.get(index)
+      if (block.status === "running" && (item === undefined || !ownedByCard(item))) tools += 1
       continue
     }
     if (block._tag !== "ToolCall" || block.status !== "running") continue
+    const item = itemByIndex.get(index) ?? { _tag: "Block" as const, index }
+    if (ownedByCard(item)) continue
     if (block.presentation.family === "agent") {
-      if (!ownedByCard(itemByIndex.get(index) ?? { _tag: "Block", index })) subagents += 1
+      subagents += 1
     } else tools += 1
   }
   return { _tag: "RunningTools", subagents, tools }

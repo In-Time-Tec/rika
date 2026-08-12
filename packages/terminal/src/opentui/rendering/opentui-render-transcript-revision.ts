@@ -61,7 +61,13 @@ const transcriptUnitRevisionImpl = (
   }
   const walkNested = (nested: NestedTranscriptUnit) => {
     if (nested.kind === "cell") walkBlock(nested.block)
-    else walkTool(nested)
+    else if (nested.kind === "subagent") {
+      walkBlock(nested.block)
+      const block = model.blocks[nested.block] as Extract<TranscriptBlock, { _tag: "SubagentCard" }>
+      pushExpanded(`subagent:${block.id}`)
+      for (const child of nested.children) walkNested(child)
+      walkAgentResponse(nested.agentResponse)
+    } else walkTool(nested)
   }
   const walkAgentResponse = (state: AgentResponseState | undefined) => {
     const response = state === undefined ? undefined : agentResponseOutcome(state)
