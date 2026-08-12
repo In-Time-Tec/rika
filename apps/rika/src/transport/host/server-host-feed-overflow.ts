@@ -136,7 +136,11 @@ const rememberView = (state: State, event: ViewEvent) => {
 const rememberImpl = (state: State, event: Event) => {
   if (event._tag === "ExecutionModelPreviewed") return
   if (state.degraded !== undefined) {
-    state.degraded = recovery(event)
+    // The degraded recovery is a thread resync: only a newer view event may replace it. A later
+    // control event must not overwrite the resync, or the client would stay durably stale while
+    // the recovery frame that could repair it is lost.
+    if (event._tag === "ThreadViewSnapshot" || event._tag === "ThreadViewPatch" || event._tag === "ResyncRequired")
+      state.degraded = recovery(event)
     return
   }
   if (event._tag === "ThreadViewSnapshot" || event._tag === "ThreadViewPatch" || event._tag === "ResyncRequired") {
