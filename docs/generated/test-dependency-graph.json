@@ -4051,6 +4051,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/terminal/test/integration/opentui-transcript-frame-stability.test.ts",
+      "path": "packages/terminal/test/integration/opentui-transcript-frame-stability.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/terminal/test/integration/opentui-transcript-hold-position.test.ts",
       "path": "packages/terminal/test/integration/opentui-transcript-hold-position.test.ts",
       "workspace": "@rika/terminal",
@@ -11961,6 +11971,30 @@
       "from": "packages/terminal/test/integration/opentui-transcript-follow-sync.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-frame-stability.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-frame-stability.test.ts",
+      "to": "external:@opentui/core/testing",
+      "specifier": "@opentui/core/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-frame-stability.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "test",
       "production": false

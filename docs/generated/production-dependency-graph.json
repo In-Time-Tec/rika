@@ -28164,6 +28164,14 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane-geometry.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-viewport.ts",
+      "specifier": "../../presentation/transcript/transcript-viewport",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",

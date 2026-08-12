@@ -10082,6 +10082,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/terminal/test/integration/opentui-transcript-frame-stability.test.ts",
+      "path": "packages/terminal/test/integration/opentui-transcript-frame-stability.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/terminal/test/integration/opentui-transcript-hold-position.test.ts",
       "path": "packages/terminal/test/integration/opentui-transcript-hold-position.test.ts",
       "workspace": "@rika/terminal",
@@ -46656,6 +46666,14 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane-geometry.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-viewport.ts",
+      "specifier": "../../presentation/transcript/transcript-viewport",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",
@@ -53633,6 +53651,62 @@
     },
     {
       "from": "packages/terminal/test/integration/opentui-transcript-follow-sync.test.ts",
+      "to": "packages/terminal/test/integration/opentui-surface-characterization-5-support.ts",
+      "specifier": "./opentui-surface-characterization-5-support",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-frame-stability.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-frame-stability.test.ts",
+      "to": "external:@opentui/core/testing",
+      "specifier": "@opentui/core/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-frame-stability.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-frame-stability.test.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-surface.ts",
+      "specifier": "../../src/opentui/surface/opentui-surface",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-frame-stability.test.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-state.ts",
+      "specifier": "../../src/presentation/transcript/transcript-viewport-state",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-frame-stability.test.ts",
+      "to": "packages/terminal/src/state/model/terminal-state.ts",
+      "specifier": "../../src/state/model/terminal-state",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-frame-stability.test.ts",
       "to": "packages/terminal/test/integration/opentui-surface-characterization-5-support.ts",
       "specifier": "./opentui-surface-characterization-5-support",
       "kind": "import",
