@@ -5533,6 +5533,14 @@
     },
     {
       "from": "apps/rika/test/live-model-activity.tui.test.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/live-model-activity.tui.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
