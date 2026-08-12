@@ -152,7 +152,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Setup Bun
+        id: setup-bun
+        continue-on-error: true
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: Retry Bun download
+        if: steps.setup-bun.outcome == 'failure' && runner.os == 'macOS'
+        run: |
+          version="$(node -p "require('./package.json').packageManager.split('@')[1]")"
+          archive="$RUNNER_TEMP/bun.zip"
+          directory="$RUNNER_TEMP/bun"
+          curl --fail --location --retry 5 --retry-all-errors --retry-delay 5 --output "$archive" "https://github.com/oven-sh/bun/releases/download/bun-v$version/bun-darwin-aarch64.zip"
+          unzip -q "$archive" -d "$directory"
+          echo "$directory/bun-darwin-aarch64" >> "$GITHUB_PATH"
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Ensure native packages for the target
