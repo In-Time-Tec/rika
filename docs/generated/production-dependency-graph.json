@@ -579,24 +579,6 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/server/composition/server-agent-port.ts",
-      "path": "apps/rika/src/server/composition/server-agent-port.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "apps/rika/src/server/composition/server-agent-services.ts",
-      "path": "apps/rika/src/server/composition/server-agent-services.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
       "id": "apps/rika/src/server/composition/server-auth-layer.ts",
       "path": "apps/rika/src/server/composition/server-auth-layer.ts",
       "workspace": "@rika/cli",
@@ -1823,8 +1805,6 @@
       "kind": "package",
       "production": true,
       "publicExports": [
-        "./agent-port",
-        "./agents-binding",
         "./artifact-store",
         "./artifacts-binding",
         "./binding-modules",
@@ -1900,7 +1880,6 @@
         "./server-operation-request",
         "./server-service",
         "./server-service-handshake",
-        "./subagent-policy",
         "./thread-deletion",
         "./thread-operation",
         "./thread-query-service",
@@ -3168,33 +3147,6 @@
       "kind": "source",
       "production": true,
       "publicExports": []
-    },
-    {
-      "id": "packages/kernel/src/binding/agent-directory-contract.ts",
-      "path": "packages/kernel/src/binding/agent-directory-contract.ts",
-      "workspace": "@rika/kernel",
-      "package": "@rika/kernel",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/kernel/src/binding/agent-port.ts",
-      "path": "packages/kernel/src/binding/agent-port.ts",
-      "workspace": "@rika/kernel",
-      "package": "@rika/kernel",
-      "kind": "source",
-      "production": true,
-      "publicExports": ["./agent-port"]
-    },
-    {
-      "id": "packages/kernel/src/binding/agents-binding.ts",
-      "path": "packages/kernel/src/binding/agents-binding.ts",
-      "workspace": "@rika/kernel",
-      "package": "@rika/kernel",
-      "kind": "source",
-      "production": true,
-      "publicExports": ["./agents-binding"]
     },
     {
       "id": "packages/kernel/src/binding/artifact-store.ts",
@@ -9451,102 +9403,6 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/server/composition/server-agent-port.ts",
-      "to": "external:@batonfx/core",
-      "specifier": "@batonfx/core",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-agent-port.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-agent-port.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-agent-port.ts",
-      "to": "external:effect/unstable/ai",
-      "specifier": "effect/unstable/ai",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-agent-port.ts",
-      "to": "packages/kernel/src/binding/agent-port.ts",
-      "specifier": "@rika/kernel/agent-port",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-agent-port.ts",
-      "to": "packages/kernel/src/binding/artifact-store.ts",
-      "specifier": "@rika/kernel/artifact-store",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-agent-services.ts",
-      "to": "apps/rika/src/server/composition/server-runtime-tools.ts",
-      "specifier": "./server-runtime-tools",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-agent-services.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-agent-services.ts",
-      "to": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
-      "specifier": "@rika/coding-tools/coding-tool-catalog",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-agent-services.ts",
-      "to": "packages/configuration/src/settings/configuration-settings.ts",
-      "specifier": "@rika/configuration/configuration-settings",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-agent-services.ts",
-      "to": "packages/product/src/thread/query/thread-query-service.ts",
-      "specifier": "@rika/product/thread-query-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-agent-services.ts",
-      "to": "packages/product/src/thread/tool/thread-tool-action.ts",
-      "specifier": "@rika/product/thread-tool-action",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
       "from": "apps/rika/src/server/composition/server-auth-layer.ts",
       "to": "apps/rika/src/provider/openai/openai-provider-auth.ts",
       "specifier": "../../provider/openai/openai-provider-auth",
@@ -9908,14 +9764,6 @@
     },
     {
       "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "to": "apps/rika/src/server/composition/server-agent-port.ts",
-      "specifier": "./server-agent-port",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
       "to": "apps/rika/src/server/composition/server-kernel-harness.ts",
       "specifier": "./server-kernel-harness",
       "kind": "import",
@@ -10118,14 +9966,6 @@
       "from": "apps/rika/src/server/composition/server-product-layer.ts",
       "to": "apps/rika/src/server/composition/lazy-execution-backend.ts",
       "specifier": "./lazy-execution-backend",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-product-layer.ts",
-      "to": "apps/rika/src/server/composition/server-agent-services.ts",
-      "specifier": "./server-agent-services",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12132,14 +11972,6 @@
     },
     {
       "from": "apps/rika/test/tui-app-backend.ts",
-      "to": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
-      "specifier": "@rika/coding-tools/coding-tool-catalog",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app-backend.ts",
       "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
       "specifier": "@rika/coding-tools/coding-tool-runtime",
       "kind": "import",
@@ -12158,14 +11990,6 @@
       "from": "apps/rika/test/tui-app-backend.ts",
       "to": "packages/product/src/thread/repository/goal-repository.ts",
       "specifier": "@rika/product/goal-repository",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app-backend.ts",
-      "to": "packages/product/src/thread/tool/thread-tool-action.ts",
-      "specifier": "@rika/product/thread-tool-action",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12390,14 +12214,6 @@
       "from": "apps/rika/test/tui-app.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app.ts",
-      "to": "external:effect/unstable/ai",
-      "specifier": "effect/unstable/ai",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12798,14 +12614,6 @@
     },
     {
       "from": "packages/baton-execution/src/baton-cell-call-context.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-cell-call-context.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -13054,24 +12862,8 @@
     },
     {
       "from": "packages/baton-execution/src/baton-route-options.ts",
-      "to": "external:effect/unstable/ai",
-      "specifier": "effect/unstable/ai",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-route-options.ts",
       "to": "packages/baton-execution/src/baton-cell-call-context.ts",
       "specifier": "./baton-cell-call-context",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-route-options.ts",
-      "to": "packages/coding-tools/src/catalog/agent-role-toolkits.ts",
-      "specifier": "@rika/coding-tools/agent-role-toolkits",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -16421,78 +16213,6 @@
       "production": true
     },
     {
-      "from": "packages/kernel/src/binding/agent-directory-contract.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/kernel/src/binding/agent-port.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/kernel/src/binding/agent-port.ts",
-      "to": "packages/kernel/src/binding/agent-directory-contract.ts",
-      "specifier": "./agent-directory-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/kernel/src/binding/agents-binding.ts",
-      "to": "external:@batonfx/core",
-      "specifier": "@batonfx/core",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/kernel/src/binding/agents-binding.ts",
-      "to": "external:@batonfx/repl",
-      "specifier": "@batonfx/repl",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/kernel/src/binding/agents-binding.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/kernel/src/binding/agents-binding.ts",
-      "to": "packages/kernel/src/binding/agent-directory-contract.ts",
-      "specifier": "./agent-directory-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/kernel/src/binding/agents-binding.ts",
-      "to": "packages/kernel/src/binding/agent-port.ts",
-      "specifier": "./agent-port",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/kernel/src/binding/agents-binding.ts",
-      "to": "packages/kernel/src/binding/nested-operation-envelope.ts",
-      "specifier": "./nested-operation-envelope",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
       "from": "packages/kernel/src/binding/artifact-store.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -16560,14 +16280,6 @@
       "from": "packages/kernel/src/binding/binding-module-catalog.ts",
       "to": "external:@batonfx/repl",
       "specifier": "@batonfx/repl",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/kernel/src/binding/binding-module-catalog.ts",
-      "to": "packages/kernel/src/binding/agents-binding.ts",
-      "specifier": "./agents-binding",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -16744,14 +16456,6 @@
       "from": "packages/kernel/src/binding/binding-requirements.ts",
       "to": "packages/extensions/src/mcp/mcp-runtime.ts",
       "specifier": "@rika/extensions/mcp-runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/kernel/src/binding/binding-requirements.ts",
-      "to": "packages/kernel/src/binding/agent-port.ts",
-      "specifier": "./agent-port",
       "kind": "import",
       "relationship": "runtime",
       "production": true

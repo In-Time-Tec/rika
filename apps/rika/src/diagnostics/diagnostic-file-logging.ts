@@ -122,7 +122,6 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
   "rika.tool.deadline.ms": boundedNumber,
   "rika.tool.dependency": oneOf("parallel", "sequential"),
   "rika.tool.name": oneOf(
-    "await_child_group",
     "bash",
     "code_mode",
     "edit",
@@ -131,9 +130,9 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
     "read_thread_transcript",
     "read_web_page",
     "run_child",
+    "run_child_group",
     "search_threads",
     "shell_command_status",
-    "start_child_group",
     "view_media",
     "web_search",
     "write",

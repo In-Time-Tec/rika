@@ -14,17 +14,11 @@ test(
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
           workspaceFiles: { "nested.txt": "NESTED_TOOL_CONTENT" },
-          /**
-           * Child admission is non-blocking, so the root answer can arrive before the child's cell and
-           * final output. The durable projection predicate below waits for both child-owned records.
-           */
           lanes: [
             {
               steps: [
                 model.turn([model.spawn([{ profile: "Task", prompt: "PARENT_AGENT_PROMPT" }], "parent-agent")]),
                 model.text("ROOT_AGENT_FINAL"),
-                model.text("PARENT_AGENT_SETTLEMENT_ACKNOWLEDGED"),
-                model.text("PARENT_AGENT_SETTLEMENT_RETRY_ACKNOWLEDGED"),
               ],
             },
             {
@@ -79,21 +73,7 @@ test(
         if (parentCard?.content._tag === "Block" && parentCard.content.block._tag === "SubagentCard") {
           expect(parentCard.content.block.prompt).toBe("PARENT_AGENT_PROMPT")
         }
-        const cardUnit = (childId: string | undefined) =>
-          units.find(
-            (unit) =>
-              unit.content._tag === "Block" &&
-              unit.content.block._tag === "SubagentCard" &&
-              unit.content.block.id === childId,
-          )
-        const cellOwning = (childId: string | undefined) =>
-          units.find(
-            (unit) =>
-              unit.content._tag === "Block" &&
-              unit.content.block._tag === "Cell" &&
-              unit.content.block.id === cardUnit(childId)?.parentId,
-          )
-        expect(cellOwning(parentId), "the root cell that spawned Task").toBeDefined()
+        expect(parentCard?.parentId, "the root-owned blocking child card").toBeUndefined()
         const owner = (text: string) =>
           units.find((unit) => unit.content._tag === "Entry" && unit.content.text.includes(text))?.parentId
         expect(owner("PARENT_AGENT_FINAL")).toBe(parentId)
@@ -106,22 +86,19 @@ test(
         )
         expect(nestedReadCell?.parentId).toBe(parentId)
 
-        // The spawning cell is the first expandable row now, so the card is one Tab further on.
-        app.pressKey("\t")
         app.pressKey("\t")
         app.pressEnter()
-        const expanded = yield* app.waitFrame("PARENT_AGENT_PROMPT")
+        const expanded = yield* app.waitFrame("PARENT_AGENT_FINAL")
         expect(expanded).toContain("PARENT_AGENT_FINAL")
         expect(expanded.match(/ROOT_USER_PROMPT/g) ?? []).toHaveLength(1)
-        expect(expanded.match(/PARENT_AGENT_PROMPT/g) ?? []).toHaveLength(2)
+        expect(expanded.match(/PARENT_AGENT_PROMPT/g) ?? []).toHaveLength(1)
         app.pressEnter()
-        const collapsed = yield* app.waitFrameMatch((frame) => (frame.match(/PARENT_AGENT_PROMPT/g) ?? []).length === 1)
+        const collapsed = yield* app.waitGone("PARENT_AGENT_FINAL")
+        expect(collapsed).not.toContain("PARENT_AGENT_PROMPT")
         expect(collapsed).toContain("ROOT_AGENT_FINAL")
         app.pressEnter()
-        const reexpanded = yield* app.waitFrameMatch(
-          (frame) => (frame.match(/PARENT_AGENT_PROMPT/g) ?? []).length === 2,
-        )
-        expect(reexpanded.match(/PARENT_AGENT_PROMPT/g) ?? []).toHaveLength(2)
+        const reexpanded = yield* app.waitFrame("PARENT_AGENT_FINAL")
+        expect(reexpanded.match(/PARENT_AGENT_PROMPT/g) ?? []).toHaveLength(1)
         yield* app.quit
       }),
     ),

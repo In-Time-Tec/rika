@@ -1,6 +1,5 @@
 import type { HostBindingRegistry } from "@batonfx/repl"
 import type { BindingRequirements, Options } from "./binding-requirements"
-import * as AgentsBinding from "./agents-binding"
 import * as ArtifactsBinding from "./artifacts-binding"
 import * as ContextBinding from "./context-binding"
 import * as EditsBinding from "./edits-binding"
@@ -25,7 +24,6 @@ export const make = (options: Options): ReadonlyArray<HostBindingRegistry.Module
   WebBinding.module,
   MediaBinding.module,
   ThreadsBinding.make(options.workspace),
-  AgentsBinding.module,
   ContextBinding.make({ workspace: options.workspace, trustMode: options.trustMode }),
   HarnessBinding.make({ workspaceDigest: options.workspaceDigest }),
   GoalBinding.module,
@@ -40,7 +38,6 @@ export const moduleNames: ReadonlyArray<string> = [
   WebBinding.name,
   MediaBinding.name,
   ThreadsBinding.name,
-  AgentsBinding.name,
   ContextBinding.name,
   HarnessBinding.name,
   GoalBinding.name,

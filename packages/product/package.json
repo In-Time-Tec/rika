@@ -40,7 +40,6 @@
     "./product-operation-service": "./src/operation/contract/product-operation-service.ts",
     "./provider-connection-snapshot": "./src/execution/contract/provider-connection-snapshot.ts",
     "./provider-credential-store": "./src/authentication/provider-credential-store.ts",
-    "./subagent-policy": "./src/execution/contract/subagent-policy.ts",
     "./resolved-context": "./src/context/resolved-context.ts",
     "./review-intent": "./src/execution/contract/review-intent.ts",
     "./review-policy": "./src/operation/review/review-policy.ts",

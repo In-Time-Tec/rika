@@ -1,71 +1,64 @@
-import * as Turn from "@rika/product/turn-record"
 import { Effect } from "effect"
 import type { Prompt } from "effect/unstable/ai"
 import { expect, test } from "vitest"
+import * as Turn from "@rika/product/turn-record"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
 const promptText = (prompt: Prompt.Prompt): string =>
   prompt.content
-    .flatMap((message) =>
-      message.role === "user" || message.role === "assistant"
-        ? message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
-        : [],
-    )
+    .flatMap((message) => {
+      if (message.role === "user" || message.role === "assistant")
+        return message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+      if (message.role === "tool")
+        return message.content.flatMap((part) => (part.type === "tool-result" ? [JSON.stringify(part.result)] : []))
+      return []
+    })
     .join("\n")
 
 test(
-  "a slow child settles durably into its parent's next same-Run model turn without inspect polling",
+  "a slow child resumes its parent Run without another user Turn",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
-        const largeResult = `CHILD_RESULT_START:${"x".repeat(20_000)}`
+        const largeResult = `CHILD_RESULT_START:${"x".repeat(20_000)}:CHILD_RESULT_END`
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
           lanes: [
             {
               steps: [
-                model.turn([model.spawn([{ profile: "Oracle", prompt: "SETTLEMENT_CHILD" }], "spawn-without-wait")]),
-                model.text("FIRST_PARENT_TURN_ENDED"),
-                model.text("SECOND_PARENT_TURN_STARTED"),
-                model.text("PARENT_RECEIVED_DURABLE_SETTLEMENT"),
+                model.turn([model.spawn([{ profile: "Oracle", prompt: "SETTLEMENT_CHILD" }], "blocking-child")]),
+                model.text("PARENT_AUTOMATICALLY_RESUMED"),
               ],
             },
             { profile: "Oracle", steps: [model.text(largeResult, 750)] },
           ],
         })
 
-        yield* Effect.promise(() => app.type("Start the slow child and end this turn."))
+        yield* Effect.promise(() => app.type("Start the slow child and use its result."))
         app.pressEnter()
-        yield* app.waitFrame("FIRST_PARENT_TURN_ENDED", 20_000)
-
-        const first = yield* app.waitTranscript(Turn.TurnId.make("tui-turn-0"), (turn) =>
-          turn.units.some(
-            (unit) =>
-              unit.content._tag === "Entry" &&
-              unit.content.role === "assistant" &&
-              unit.content.text.includes("FIRST_PARENT_TURN_ENDED"),
-          ),
-        )
-        const sources = first.units.flatMap((unit) =>
-          unit.content._tag === "Block" && unit.content.block._tag === "Cell" ? [unit.content.block.source.text] : [],
-        )
-        expect(sources.join("\n")).toContain("rika.agents.spawn")
-        expect(sources.join("\n")).not.toContain("inspectAll")
-
-        yield* app.waitFrame("Oracle has spoken", 20_000)
-        yield* Effect.promise(() => app.type("Continue after the child settlement."))
-        app.pressEnter()
-        yield* app.waitFrame("SECOND_PARENT_TURN_STARTED", 20_000)
-        const completed = yield* app.waitFrame("PARENT_RECEIVED_DURABLE_SETTLEMENT", 20_000)
-        yield* app.waitModelRequests(4)
+        const completed = yield* app.waitFrame("PARENT_AUTOMATICALLY_RESUMED", 20_000)
         expect(completed).not.toContain("Execution failed")
 
         const prompts = yield* app.modelPrompts
-        const settlementTurnPrompt = promptText(prompts.at(-1)!)
-        expect(settlementTurnPrompt).toContain("settled with status succeeded")
-        expect(settlementTurnPrompt).toContain("20019 UTF-8 bytes exceeds the 16384-byte notification limit")
-        expect(settlementTurnPrompt).not.toContain("x".repeat(1_000))
+        const resumedPrompt = prompts.map(promptText).find((value) => value.includes("CHILD_RESULT_START"))
+        expect(resumedPrompt).toBeDefined()
+        expect(resumedPrompt).toContain(largeResult)
+        yield* app.settled
+        const turnId = Turn.TurnId.make("tui-turn-0")
+        const persisted = yield* app.transcript(turnId)
+        expect(
+          persisted?.units.find(
+            (unit) => unit.content._tag === "Entry" && unit.content.text.startsWith("CHILD_RESULT_START"),
+          )?.content,
+        ).toEqual({ _tag: "Entry", role: "assistant", text: largeResult })
+        yield* app.reload
+        const restored = yield* app.transcript(turnId)
+        expect(
+          restored?.units.find(
+            (unit) => unit.content._tag === "Entry" && unit.content.text.startsWith("CHILD_RESULT_START"),
+          )?.content,
+        ).toEqual({ _tag: "Entry", role: "assistant", text: largeResult })
         yield* app.quit
       }),
     ),

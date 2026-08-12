@@ -41,9 +41,13 @@ export const ExecutionRouteModelSnapshot = Schema.Struct({
 export type ExecutionRouteModelSnapshot = typeof ExecutionRouteModelSnapshot.Type
 
 export const ExecutionRouteSnapshot = Schema.Struct({
-  version: Schema.Literal(1),
+  version: Schema.Literal(2),
   mode: Schema.String,
   tokenBudget: Schema.optionalKey(Schema.Finite),
+  subagents: Schema.Struct({
+    maxDepth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(1_024)),
+    maxSubagents: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(1_024)),
+  }),
   compaction: Schema.Struct({
     strategy: Schema.Literal("default"),
     summaryPrompt: Schema.String,
@@ -83,8 +87,9 @@ export const testExecutionRoute = (mode = "test"): ExecutionRouteSnapshot => {
     compaction: { contextWindow: 372_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
   }
   return {
-    version: 1,
+    version: 2,
     mode,
+    subagents: { maxDepth: 4, maxSubagents: 4 },
     compaction: { strategy: "default", summaryPrompt: defaultCompactionSummaryPrompt },
     title: { ...route, role: "title", effort: "low" },
     compactionSummary: { ...route, role: "compaction" },
@@ -164,11 +169,22 @@ export const toExecutionRouteSnapshot = (routeValue: unknown): ExecutionRouteSna
   const route = requireRecord(routeValue, "Malformed execution route")
   requireKeys(
     route,
-    ["version", "mode", "tokenBudget", "compaction", "title", "compactionSummary", "main", "oracle", "agents"],
+    [
+      "version",
+      "mode",
+      "tokenBudget",
+      "subagents",
+      "compaction",
+      "title",
+      "compactionSummary",
+      "main",
+      "oracle",
+      "agents",
+    ],
     "Unsupported execution route field",
   )
   if (route.version === undefined) throw new Error("Malformed execution route version")
-  if (route.version !== 1) throw new Error("Unsupported execution route version")
+  if (route.version !== 2) throw new Error("Unsupported execution route version")
   validateModel(route.main, "main")
   validateModel(route.oracle, "oracle")
   validateModel(route.title, "title")

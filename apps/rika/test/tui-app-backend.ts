@@ -1,9 +1,7 @@
 import * as BatonExecution from "@rika/baton-execution/baton-execution"
 import type { LaneModels } from "@rika/baton-execution/baton-test-harness"
-import { Catalog as CodingToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as ThreadQuery from "@rika/product/thread-query-service"
-import * as ThreadToolAction from "@rika/product/thread-tool-action"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Context, Layer } from "effect"
 import * as GoalRepository from "@rika/product/goal-repository"
@@ -54,10 +52,4 @@ export const backendLayer = (options: BackendOptions) =>
     kernelPool: options.kernelPool,
 
     modelServices: options.registryLayer,
-    agentServices: (workspace) =>
-      Layer.mergeAll(
-        CodingToolCatalog.handlerLayer.pipe(Layer.provide(options.toolRuntimeLayer)),
-        ThreadToolAction.handlerLayerForWorkspace(workspace).pipe(Layer.provide(options.queryFactoryLayer)),
-        ThreadToolAction.findHandlerLayerForWorkspace(workspace).pipe(Layer.provide(options.queryFactoryLayer)),
-      ) as Layer.Layer<BatonExecution.AgentToolServices>,
   })

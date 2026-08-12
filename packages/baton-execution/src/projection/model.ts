@@ -37,9 +37,10 @@ export interface Card {
   readonly unitKey: string
   readonly blockId: string
   readonly selection: string
+  readonly label?: string
   prompt: string
   promptTruncated: boolean
-  readonly groupKey?: string
+  readonly memberKey?: string
   rawChildRunId?: string
 }
 

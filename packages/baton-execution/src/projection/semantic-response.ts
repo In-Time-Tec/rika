@@ -5,14 +5,14 @@ export { semanticTreeEvent, type SemanticTreeEvent } from "./semantic-event"
 import type { Node } from "./model"
 import { encoded } from "./decoding"
 import { optionalString, record, string } from "./values"
-import { projectorNames, textLimit } from "./values"
+import { projectorNames } from "./values"
 
 export interface SemanticResponseProjectionInput {
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
   readonly put: (unit: Unit) => void
   readonly unit: (node: Node, key: string, content: Unit["content"], part?: number) => Unit
   readonly openCell: (node: Node, rawId: string, source: string) => void
-  readonly cardFor: (node: Node, rawId: string, selection: string, prompt: string) => unknown
+  readonly cardFor: (node: Node, rawId: string, selection: string, prompt: string, label?: string) => unknown
   readonly groupCards: (node: Node, rawId: string, input: unknown) => unknown
   readonly removeTool: (node: Node, rawId: string) => void
   readonly putTool: (node: Node, rawId: string, name: string, input: string) => void
@@ -37,21 +37,16 @@ export const makeSemanticResponseProjection = (input: SemanticResponseProjection
     text: string,
   ) => {
     if (node.hidden || text.length === 0) return
-    const chunks = Array.from({ length: Math.ceil(text.length / textLimit) }, (_, index) =>
-      text.slice(index * textLimit, (index + 1) * textLimit),
+    const key = input.localId(kind, node.publicId, node.phase, event.operationKey, contentIndex)
+    input.put(
+      input.unit(
+        node,
+        key,
+        kind === "assistant"
+          ? { _tag: "Entry", role: "assistant", text }
+          : { _tag: "Block", block: { _tag: "Reasoning", text } },
+      ),
     )
-    for (const [chunkIndex, chunk] of chunks.entries()) {
-      const key = input.localId(kind, node.publicId, node.phase, event.operationKey, contentIndex, chunkIndex)
-      input.put(
-        input.unit(
-          node,
-          key,
-          kind === "assistant"
-            ? { _tag: "Entry", role: "assistant", text: chunk }
-            : { _tag: "Block", block: { _tag: "Reasoning", text: chunk } },
-        ),
-      )
-    }
   }
 
   const apply = (node: Node, event: ModelResponseCommitted) => {
@@ -69,13 +64,18 @@ export const makeSemanticResponseProjection = (input: SemanticResponseProjection
             if (part.name === cellToolName) input.openCell(node, part.id, string(record(part.params).code, ""))
             else if (part.name === projectorNames.runChild) {
               const toolInput = record(part.params)
-              input.cardFor(node, part.id, string(toolInput.selection, "Subagent"), optionalString(toolInput.prompt))
+              input.cardFor(
+                node,
+                part.id,
+                string(toolInput.selection, "Subagent"),
+                optionalString(toolInput.prompt),
+                optionalString(toolInput.label) || undefined,
+              )
               input.removeTool(node, part.id)
-            } else if (part.name === projectorNames.startChildGroup) {
+            } else if (part.name === projectorNames.runChildGroup) {
               input.groupCards(node, part.id, part.params)
               input.removeTool(node, part.id)
-            } else if (part.name === projectorNames.awaitChildGroup) input.removeTool(node, part.id)
-            else input.putTool(node, part.id, part.name, encoded(part.params))
+            } else input.putTool(node, part.id, part.name, encoded(part.params))
             break
           case "file":
             input.notice(

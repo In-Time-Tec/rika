@@ -1,8 +1,7 @@
 import type { Block, Unit } from "@rika/product/execution-transcript-contract"
 import { makeTool } from "./tool"
 import { type Node, type ToolState } from "./model"
-import { bounded } from "./values"
-import { projectorNames, toolTextLimit } from "./values"
+import { bounded, toolTextLimit } from "./values"
 
 export interface ToolUnitProjection {
   readonly toolState: (node: Node, rawId: string) => ToolState
@@ -58,7 +57,7 @@ export const makeToolUnitProjection = (dependencies: ToolUnitProjectionInput): T
     input: string,
     mutate?: (block: Extract<Block, { readonly _tag: "ToolCall" }>) => Extract<Block, { readonly _tag: "ToolCall" }>,
   ) => {
-    if (node.hidden || name === projectorNames.awaitChildGroup) return
+    if (node.hidden) return
     const identity = toolState(node, rawId)
     const previous = toolBlock(node, rawId)
     const base = makeTool(identity.blockId, name, bounded(input, toolTextLimit), previous)

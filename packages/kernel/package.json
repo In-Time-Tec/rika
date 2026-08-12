@@ -12,8 +12,6 @@
     "./web-binding": "./src/binding/web-binding.ts",
     "./media-binding": "./src/binding/media-binding.ts",
     "./threads-binding": "./src/binding/threads-binding.ts",
-    "./agents-binding": "./src/binding/agents-binding.ts",
-    "./agent-port": "./src/binding/agent-port.ts",
     "./context-binding": "./src/binding/context-binding.ts",
     "./harness-binding": "./src/binding/harness-binding.ts",
     "./harness-scope-policy": "./src/harness/harness-scope-policy.ts",

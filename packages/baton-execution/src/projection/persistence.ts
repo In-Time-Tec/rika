@@ -58,10 +58,6 @@ export interface PersistedProjector {
     readonly cells: ReadonlyArray<readonly [string, CellState]>
   }>
   readonly cards: ReadonlyArray<PersistedCard>
-  readonly pendingGroups: ReadonlyArray<{ readonly parentRawRunId: string; readonly toolCallId: string }>
-  readonly fanOutTools: ReadonlyArray<
-    readonly [string, { readonly parentRawRunId: string; readonly toolCallId: string }]
-  >
   readonly authorizations: ReadonlyArray<readonly [string, AuthorizationState]>
 }
 

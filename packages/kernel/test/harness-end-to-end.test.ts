@@ -91,7 +91,7 @@ describe("continual harness end to end over the real store", () => {
             id: "reviewer",
             title: "reviewer",
             content: "review the diff",
-            reference: "rika.agents.spawn",
+            reference: "run_child",
             baseSnapshot: HarnessState.snapshotId(yield* effective),
           },
         })
@@ -104,7 +104,7 @@ describe("continual harness end to end over the real store", () => {
             id: "reviewer",
             title: "reviewer",
             content: "review the diff",
-            reference: "rika.agents.spawn",
+            reference: "run_child",
             baseSnapshot: HarnessState.snapshotId(yield* store.load(workspaceScope)),
             scope: "workspace",
           },
@@ -119,9 +119,7 @@ describe("continual harness end to end over the real store", () => {
         })
         const merged = yield* effective
         expect(merged.entries.subagent.map((entry) => entry.scope)).toEqual([workspaceScope])
-        expect(PromptSections.block({ harness: merged, skillListings: "", mcpServers: [] })).toContain(
-          "rika.agents.spawn",
-        )
+        expect(PromptSections.block({ harness: merged, skillListings: "", mcpServers: [] })).toContain("run_child")
       }),
     )
   })

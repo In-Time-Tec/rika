@@ -16,7 +16,6 @@ import type { ServerProductOptions } from "./server-auth-layer"
 import * as ServerRepository from "./server-repository-layer"
 import * as GoalService from "@rika/product/goal-service"
 import * as ThreadQuery from "@rika/product/thread-query-service"
-import { makeAgentServices } from "./server-agent-services"
 import { defaultWorkspaceToolRuntimeLayer } from "./server-runtime-tools"
 
 const provideLayerScoped =
@@ -117,7 +116,6 @@ const createOperationLayerImpl = (
       const queryFactory = Layer.succeedContext(
         yield* Layer.build(ThreadQuery.Runtime.factoryLayer.pipe(Layer.provide(repositories))),
       )
-      const agentServices = makeAgentServices({ effectiveConfigForWorkspace, queryFactory })
       const goalRepositories = Layer.succeedContext(yield* Layer.build(goalRepositoryLayer))
       const kernelOptions = {
         workspace: workspaceRoot,
@@ -141,7 +139,6 @@ const createOperationLayerImpl = (
         kernelPool,
         skills,
         harnessSnapshot,
-        agentServices,
         credentialStore: ServerAuth.createProviderCredentialStoreLayer(options.database, options.profileIdentity),
         openAiAccountAuth,
         ...(testModel === undefined ? {} : { testModel }),

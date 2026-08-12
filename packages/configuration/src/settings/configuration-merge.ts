@@ -145,6 +145,7 @@ export const mergeConfigurationSettings = ({
         workspace.modelRoutes?.compaction ?? global.modelRoutes?.compaction,
       ),
     },
+    subagents: { ...settingsDefaults.subagents, ...global.subagents, ...workspace.subagents },
     keymap: { ...settingsDefaults.keymap, ...global.keymap, ...workspace.keymap },
     extensionRoots: workspace.extensionRoots ?? global.extensionRoots ?? settingsDefaults.extensionRoots,
     mcp: { ...settingsDefaults.mcp, ...global.mcp, ...workspace.mcp },

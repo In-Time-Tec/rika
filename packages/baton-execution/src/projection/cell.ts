@@ -67,7 +67,6 @@ const truncationTotals = (value: unknown): { readonly droppedBytes: number; read
 export interface CellProjection {
   readonly cellState: (node: Node, rawId: string) => CellState
   readonly cellBlock: (node: Node, rawId: string) => Cell | undefined
-  readonly cellForOperationKey: (node: Node, operationKey: string) => CellState | undefined
   readonly openCell: (node: Node, rawId: string, source: string) => void
   readonly appendCellSource: (node: Node, rawId: string, delta: string) => void
   readonly progressCell: (node: Node, rawId: string, data: unknown) => void
@@ -118,12 +117,6 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
     return candidate?.content._tag === "Block" && candidate.content.block._tag === "Cell"
       ? candidate.content.block
       : undefined
-  }
-
-  const cellForOperationKey = (node: Node, operationKey: string): CellState | undefined => {
-    for (const [rawId, candidate] of node.cells)
-      if (operationKey === rawId || operationKey.endsWith(`:${rawId}:${cellToolName}`)) return candidate
-    return undefined
   }
 
   const write = (node: Node, rawId: string, block: Cell) => {
@@ -309,7 +302,6 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
   return {
     cellState,
     cellBlock,
-    cellForOperationKey,
     openCell,
     appendCellSource,
     progressCell,

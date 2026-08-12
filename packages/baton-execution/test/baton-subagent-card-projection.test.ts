@@ -80,6 +80,47 @@ describe("Baton subagent card projection", () => {
     expect(JSON.stringify(snapshot.units)).not.toContain("raw-child-run")
   })
 
+  it("preserves a long child final response as one complete semantic entry across resume", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-long", "delegate this")
+    projector.apply(
+      modelResponse("raw-root-run", {
+        type: "tool-call",
+        id: "provider-call-long",
+        name: "run_child",
+        params: { selection: "Task", prompt: "Return a detailed report" },
+        providerExecuted: false,
+        metadata: {},
+      }),
+    )
+    projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ChildLinked",
+        childRunId: "raw-child-long",
+        invocationId: "provider-call-long",
+      }),
+    )
+    const response = `BEGIN\n\n${"complete paragraph. ".repeat(700)}\n\nEND`
+    expect(response.length).toBeGreaterThan(8_192)
+    projector.apply(
+      modelResponse(
+        "raw-child-long",
+        { type: "text", text: response, metadata: {} },
+        { parentRunId: "raw-root-run", invocationId: "provider-call-long" },
+      ),
+    )
+    const snapshot = projector.snapshot()
+    const answers = snapshot.units.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant")
+    expect(answers).toHaveLength(1)
+    expect(answers[0]?.content).toEqual({ _tag: "Entry", role: "assistant", text: response })
+    const resumed = TreeProjector.make("turn-long", "delegate this", snapshot.checkpoint, snapshot.units)
+    const restored = resumed
+      .snapshot()
+      .units.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant")
+    expect(restored).toHaveLength(1)
+    expect(restored[0]?.content).toEqual({ _tag: "Entry", role: "assistant", text: response })
+  })
+
   it("creates initial child cards from canonical linked selection and prompt", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-initial", "review")
@@ -98,20 +139,21 @@ describe("Baton subagent card projection", () => {
     })
   })
 
-  it("materializes every child-group member without exposing group plumbing", () => {
+  it("materializes four distinctly labelled group members without exposing group plumbing", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-group", "fan out")
-    const members = Array.from({ length: 64 }, (_, index) => ({
+    const members = Array.from({ length: 4 }, (_, index) => ({
       key: `lane-${index}`,
       selection: index % 2 === 0 ? "Oracle" : "Surgeon",
+      label: `Explore subsystem ${index}`,
       prompt: `Inspect lane ${index}`,
     }))
     const patch = projector.apply(
       modelResponse("raw-root-run", {
         type: "tool-call",
         id: "group-call",
-        name: "start_child_group",
-        params: { members, concurrency: 8 },
+        name: "run_child_group",
+        params: { members, concurrency: 4 },
         providerExecuted: false,
         metadata: {},
       }),
@@ -119,9 +161,9 @@ describe("Baton subagent card projection", () => {
     const cards = patch.upsert.filter(
       (unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard",
     )
-    expect(cards).toHaveLength(64)
-    expect(patch.upsert).toHaveLength(64)
-    expect(JSON.stringify(patch.upsert)).not.toContain("start_child_group")
+    expect(cards).toHaveLength(4)
+    expect(patch.upsert).toHaveLength(4)
+    expect(JSON.stringify(patch.upsert)).not.toContain("run_child_group")
     expect(patch.upsert.length).toBeLessThanOrEqual(128)
     const ordered = projector
       .snapshot()
@@ -133,6 +175,186 @@ describe("Baton subagent card projection", () => {
           unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard" ? unit.content.block.prompt : "",
         ),
     ).toEqual(["Inspect lane 0", "Inspect lane 1", "Inspect lane 2"])
+    expect(
+      ordered.map((unit) =>
+        unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard" ? unit.content.block.name : "",
+      ),
+    ).toEqual(["Explore subsystem 0", "Explore subsystem 1", "Explore subsystem 2", "Explore subsystem 3"])
+  })
+
+  it("fails every provisional card when an exact group is rejected before admission", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-rejected-group", "fan out")
+    const call = {
+      type: "tool-call" as const,
+      id: "rejected-group-call",
+      name: "run_child_group",
+      params: {
+        members: Array.from({ length: 4 }, (_, index) => ({
+          key: `lane-${index}`,
+          selection: "Task",
+          label: `Rejected lane ${index}`,
+          prompt: `Inspect rejected lane ${index}`,
+        })),
+        concurrency: 4,
+      },
+      providerExecuted: false,
+      metadata: {},
+    }
+    projector.apply(modelResponse("raw-root-run", call))
+    const failed = projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolExecutionCompleted",
+        turn: 0,
+        call,
+        result: {
+          type: "tool-result",
+          id: call.id,
+          name: call.name,
+          isFailure: true,
+          result: { message: "direct child limit exceeded" },
+          encodedResult: { message: "direct child limit exceeded" },
+          providerExecuted: false,
+          preliminary: false,
+          metadata: {},
+        },
+      } as never),
+    )
+    const cards = projector
+      .snapshot()
+      .units.filter((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")
+    expect(cards).toHaveLength(4)
+    expect(
+      cards.map((unit) =>
+        unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard"
+          ? { status: unit.content.block.status, summary: unit.content.block.summary }
+          : undefined,
+      ),
+    ).toEqual(Array.from({ length: 4 }, () => ({ status: "failed", summary: "direct child limit exceeded" })))
+    expect(failed.state.status).toBe("running")
+  })
+
+  it("keeps repeated group lifecycle events correlated to their own child cards", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-groups", "fan out twice")
+    const members = (group: string) => [
+      { key: "first", selection: "Oracle", label: `${group} first`, prompt: `${group} first prompt` },
+      { key: "second", selection: "Task", label: `${group} second`, prompt: `${group} second prompt` },
+    ]
+    const declare = (id: string, group: string) => {
+      const call = {
+        type: "tool-call" as const,
+        id,
+        name: "run_child_group",
+        params: { members: members(group), concurrency: 2 },
+        providerExecuted: false,
+        metadata: {},
+      }
+      projector.apply(modelResponse("raw-root-run", call))
+      projector.apply(treeEvent("raw-root-run", { _tag: "ToolExecutionStarted", turn: 0, call } as never))
+    }
+    const link = (group: string, toolCallId: string, key: string, childRunId: string) =>
+      projector.apply(
+        treeEvent("raw-root-run", {
+          _tag: "ChildLinked",
+          childRunId,
+          invocationId: `fan-${group}:${key}`,
+          selection: key === "first" ? "Oracle" : "Task",
+          prompt: [{ role: "user", content: [{ type: "text", text: `${group} ${key} prompt` }] }],
+          childDepth: 1,
+          key,
+          label: `${group} ${key}`,
+          origin: { parentToolCallId: toolCallId },
+        } as never),
+      )
+    declare("group-one-call", "one")
+    link("one", "group-one-call", "first", "raw-one-first")
+    link("one", "group-one-call", "second", "raw-one-second")
+    declare("group-two-call", "two")
+    link("two", "group-two-call", "first", "raw-two-first")
+    link("two", "group-two-call", "second", "raw-two-second")
+    projector.apply(
+      modelResponse(
+        "raw-two-first",
+        { type: "text", text: "second group result", metadata: {} },
+        { parentRunId: "raw-root-run", invocationId: "fan-two:first" },
+      ),
+    )
+    const snapshot = projector.snapshot()
+    const secondGroupCard = snapshot.units.find(
+      (unit) =>
+        unit.content._tag === "Block" &&
+        unit.content.block._tag === "SubagentCard" &&
+        unit.content.block.name === "two first",
+    )
+    const result = snapshot.units.find(
+      (unit) => unit.content._tag === "Entry" && unit.content.text === "second group result",
+    )
+    expect(
+      snapshot.units.filter((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard"),
+    ).toHaveLength(4)
+    expect(result?.parentId).toBe(
+      secondGroupCard?.content._tag === "Block" && secondGroupCard.content.block._tag === "SubagentCard"
+        ? secondGroupCard.content.block.id
+        : undefined,
+    )
+  })
+
+  it("nests a descendant card under the direct child that actually spawned it", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-nested", "delegate recursively")
+    projector.apply(
+      modelResponse("raw-root-run", {
+        type: "tool-call",
+        id: "parent-call",
+        name: "run_child",
+        params: { selection: "Task", label: "Explore backend", prompt: "Inspect the backend" },
+        providerExecuted: false,
+        metadata: {},
+      }),
+    )
+    projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ChildLinked",
+        childRunId: "raw-parent-child",
+        invocationId: "parent-call",
+      }),
+    )
+    projector.apply(
+      modelResponse(
+        "raw-parent-child",
+        {
+          type: "tool-call",
+          id: "descendant-call",
+          name: "run_child",
+          params: { selection: "Oracle", label: "Map dependencies", prompt: "Map backend dependencies" },
+          providerExecuted: false,
+          metadata: {},
+        },
+        { parentRunId: "raw-root-run", invocationId: "parent-call" },
+      ),
+    )
+    const cards = projector
+      .snapshot()
+      .units.filter((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")
+    expect(cards).toHaveLength(2)
+    const direct = cards.find(
+      (unit) =>
+        unit.content._tag === "Block" &&
+        unit.content.block._tag === "SubagentCard" &&
+        unit.content.block.name === "Explore backend",
+    )
+    const descendant = cards.find(
+      (unit) =>
+        unit.content._tag === "Block" &&
+        unit.content.block._tag === "SubagentCard" &&
+        unit.content.block.name === "Map dependencies",
+    )
+    expect(descendant?.parentId).toBe(
+      direct?.content._tag === "Block" && direct.content.block._tag === "SubagentCard"
+        ? direct.content.block.id
+        : undefined,
+    )
   })
 
   it("attributes a child unit to its subagent card when the child streams before ChildLinked", () => {

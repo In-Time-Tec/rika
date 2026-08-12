@@ -108,8 +108,6 @@
       "kind": "package",
       "production": true,
       "publicExports": [
-        "./agent-port",
-        "./agents-binding",
         "./artifact-store",
         "./artifacts-binding",
         "./binding-modules",
@@ -185,7 +183,6 @@
         "./server-operation-request",
         "./server-service",
         "./server-service-handshake",
-        "./subagent-policy",
         "./thread-deletion",
         "./thread-operation",
         "./thread-query-service",

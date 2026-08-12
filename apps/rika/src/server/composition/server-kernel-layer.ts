@@ -12,7 +12,6 @@ import * as KernelComposition from "@rika/kernel/kernel-composition"
 import * as GoalService from "@rika/product/goal-service"
 import { Effect, FileSystem, Layer, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
-import { runtimeAgentPortLayer } from "./server-agent-port"
 
 export { workspaceDigest, harnessStoreLayer, effectiveHarness } from "./server-kernel-harness"
 export type { Options } from "./server-kernel-options"
@@ -33,7 +32,6 @@ const staticBindingServices = (options: Options) => {
     McpRuntime.layer,
     harnessStoreLayer(options),
     GoalService.layer.pipe(Layer.provide(options.goalRepositoryLayer)),
-    runtimeAgentPortLayer.pipe(Layer.provide(artifacts)),
     artifacts,
   ).pipe(Layer.provide(SkillFileSystem.fileSystemLayer), Layer.provide(BunServices.layer))
 }

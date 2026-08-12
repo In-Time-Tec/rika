@@ -8,4 +8,4 @@ Notices come from kernel events, never from parsing cell source: the kernel star
 
 Cell display output is projected by media type. An image becomes an image attachment block beneath the cell. A diff or patch becomes a file entry on the cell carrying its path, add or update kind, bounded patch, and added and removed line counts.
 
-A child admitted from a cell attaches its subagent card beneath that cell, ordered by the host-assigned ordinal. The attachment is resolved from the child's invocation origin — its operation key and ordinal — matched against the cell that owns that operation key. Cards, their status transitions, and their nested activity are driven by Baton child-tree events exactly as before; nothing about a subagent is recovered from cell source.
+Child orchestration does not run inside a cell. Baton's blocking child tools suspend and resume the parent Run durably, while child-tree events drive each subagent card and its nested activity without parsing cell source or correlating child identity to JavaScript execution.

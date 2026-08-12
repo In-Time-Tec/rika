@@ -1,5 +1,4 @@
 import type { HostBindingRegistry } from "@batonfx/repl"
-import { maxSpawnedSubagentsPerExecution } from "@rika/product/subagent-policy"
 import type { BindingRequirements } from "./binding-requirements"
 
 /**
@@ -95,10 +94,6 @@ export const cellInstructions = (facts: CellInstructionFacts): string =>
       : `Your workspace is ${JSON.stringify(facts.workspace)} and it is ${facts.workspaceState}.`,
     `Cell stdout and stderr are each capped at ${bytes(facts.channelBytes)}; page big results at 16KB per page.`,
     "Run shell commands with rika.processes.start; it is the supported shell path.",
-    `You may spawn at most ${maxSpawnedSubagentsPerExecution} subagents across this execution tree; recursive Task delegation uses the same total.`,
-    "After spawning children, end your turn or keep working; bounded settlements are delivered durably at a",
-    "model-turn boundary or the next same-Thread turn. rika.agents.inbox pages structured settlements by afterSequence.",
-    "Do not poll or sleep.",
     "The kernel exposes a `rika` object your cell code can await. It is not a tool; the only tool",
     "name that exists is typescript. Example cell body:",
     "",

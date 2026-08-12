@@ -1,4 +1,4 @@
-import { ChildAdmission, type Run, type RunTree } from "@batonfx/runtime"
+import type { Run, RunTree } from "@batonfx/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import * as UnitOrder from "@rika/product/execution-transcript-contract"
 import type { Unit } from "@rika/product/execution-transcript-contract"
@@ -49,15 +49,6 @@ const make = (
   const cardsByInvocation = new Map<string, Card>()
   const cardsByChild = new Map<string, Card>()
   const unitKeysByRun = new Map<string, Set<string>>()
-  const pendingGroups: Array<{
-    readonly parentRawRunId: string
-    readonly toolCallId: string
-    readonly memberKeys: ReadonlyArray<string>
-  }> = []
-  const fanOutTools = new Map<
-    string,
-    { readonly parentRawRunId: string; readonly toolCallId: string; readonly memberKeys: ReadonlyArray<string> }
-  >()
   const authorizations = new Map<string, AuthorizationState>()
   let changed = new Map<string, Unit>()
   let removed = new Set<string>()
@@ -143,26 +134,22 @@ const make = (
 
   const { toolState, toolBlock, putTool, updateTool } = makeToolUnitProjection({ units, localId, put, unit })
 
-  const { cellBlock, cellForOperationKey, openCell, progressCell, completeCell, settleRunningCells } =
-    makeCellProjection({ units, localId, put, unit, notice, error })
+  const { cellBlock, openCell, progressCell, completeCell, settleRunningCells } = makeCellProjection({
+    units,
+    localId,
+    put,
+    unit,
+    notice,
+    error,
+  })
 
-  const { cardFor, updateCard, groupCards, bindFanOut, bindChild } = makeSubagentCardProjection({
-    cellFor: (parent, invocationId) => {
-      const origin = ChildAdmission.originOf(invocationId)
-      if (origin === undefined) return undefined
-      const candidate = cellForOperationKey(parent, origin.operationKey)
-      return candidate === undefined
-        ? undefined
-        : { blockId: candidate.blockId, unitKey: candidate.key, ordinal: origin.ordinal }
-    },
+  const { cardFor, updateCard, groupCards, bindChild } = makeSubagentCardProjection({
     core,
     units,
     nodes,
     unitKeysByRun,
     cardsByInvocation,
     cardsByChild,
-    pendingGroups,
-    fanOutTools,
     localId,
     put,
     unit,
@@ -255,14 +242,19 @@ const make = (
           return openCell(node, event.call.id, string(record(event.call.params).code, ""))
         if (event.call.name === projectorNames.runChild) {
           const input = record(event.call.params)
-          cardFor(node, event.call.id, string(input.selection, "Subagent"), optionalString(input.prompt))
+          cardFor(
+            node,
+            event.call.id,
+            string(input.selection, "Subagent"),
+            optionalString(input.prompt),
+            optionalString(input.label) || undefined,
+          )
           return remove(toolState(node, event.call.id).key)
         }
-        if (event.call.name === projectorNames.startChildGroup) {
+        if (event.call.name === projectorNames.runChildGroup) {
           groupCards(node, event.call.id, event.call.params)
           return remove(toolState(node, event.call.id).key)
         }
-        if (event.call.name === projectorNames.awaitChildGroup) return remove(toolState(node, event.call.id).key)
         return putTool(node, event.call.id, event.call.name, encoded(event.call.params))
       case "ToolProgress":
         if (node.cells.has(event.toolCallId)) return progressCell(node, event.toolCallId, event.data)
@@ -291,8 +283,15 @@ const make = (
             )
           return
         }
-        if (event.call.name === projectorNames.startChildGroup || event.call.name === projectorNames.awaitChildGroup)
+        if (event.call.name === projectorNames.runChildGroup) {
+          if (event.result.isFailure) {
+            const result = record(event.result.result)
+            const detail = optionalString(result.message)
+            for (const card of groupCards(node, event.call.id, event.call.params))
+              if (card.rawChildRunId === undefined) updateCard(card, "failed", detail)
+          }
           return
+        }
         return updateTool(node, event.call.id, (tool) =>
           completeTool(
             tool,
@@ -464,7 +463,7 @@ const make = (
           event.operationId,
         )
       case "ChildLinked":
-        return bindChild(node, event.childRunId, event.invocationId, event.selection, event.prompt)
+        return bindChild(node, event.childRunId, event)
       case "ChildSettled": {
         const card = cardsByChild.get(event.childRunId)
         if (card !== undefined) {
@@ -474,7 +473,7 @@ const make = (
         return
       }
       case "FanOutAdmitted":
-        return bindFanOut(node, event.fanOutId, event.memberCount)
+        return
       case "FanOutJoined":
         return
       case "RunCompleted":
@@ -537,8 +536,6 @@ const make = (
     nodes,
     cardsByInvocation,
     cardsByChild,
-    pendingGroups,
-    fanOutTools,
     authorizations,
     pendingSteering: steering.pending,
     settledSteering: steering.settled,
