@@ -13,6 +13,8 @@ export type Event = {
   callbacks?: number | undefined
   tags?: ReadonlyArray<string> | undefined
   outcome?: string | undefined
+  revision?: number | undefined
+  runId?: string | undefined
 }
 
 export class FixtureFailure extends Data.TaggedError("FixtureFailure")<{
@@ -57,6 +59,8 @@ export const EventSchema = Schema.Struct({
   callbacks: Schema.optional(Schema.Finite),
   tags: Schema.optional(Schema.Array(Schema.String)),
   outcome: Schema.optional(Schema.String),
+  revision: Schema.optional(Schema.Finite),
+  runId: Schema.optional(Schema.String),
 })
 
 const decodeEventLine = Schema.decodeUnknownEffect(Schema.fromJsonString(EventSchema))
