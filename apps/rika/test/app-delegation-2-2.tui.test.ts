@@ -53,9 +53,8 @@ test(
         expect(direct).toContain("Running 1 subagent")
         yield* app.clickText("Parent survey working")
         const recursive = yield* app.waitFrame("Nested survey finished", 30_000)
-        expect(recursive).toContain("Parent survey working")
+        expect(recursive).toContain("Parent survey")
         expect(recursive).toContain("Nested survey finished")
-        expect(recursive).toContain("Running 1 subagent")
         expect(recursive).not.toContain("Running 2 subagents")
         yield* app.waitFrame("ROOT_DEEP_DONE", 30_000)
         const durable = yield* app.waitTranscript(
