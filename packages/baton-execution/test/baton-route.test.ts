@@ -640,7 +640,7 @@ it.effect("keeps one finite recursive profile registry for every configured dept
   }),
 )
 
-it.effect("leaves quota gating to the pinned runtime tree policy", () =>
+it.effect("leaves active-capacity gating to the pinned runtime tree policy", () =>
   Effect.gen(function* () {
     const configured = yield* configure({
       executionRoute: { ...testExecutionRoute(), subagents: { maxDepth: 4, maxSubagents: 0 } },
