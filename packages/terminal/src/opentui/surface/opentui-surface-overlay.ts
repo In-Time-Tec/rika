@@ -13,7 +13,7 @@ import {
   modeSelectorIndexAtColumn,
   modeSelectorLabels,
 } from "../../presentation/terminal/terminal-mode-selector-layout"
-import { filePickerContent, threadSwitcherContent, threadSwitcherListWidth } from "./opentui-overlay-content"
+import { filePickerContent } from "./opentui-overlay-content"
 import { type ProjectedEditorRenderable } from "./opentui-surface-renderables"
 import { SurfacePointer } from "./opentui-surface-pointer"
 
@@ -75,7 +75,8 @@ export abstract class SurfaceOverlay extends SurfacePointer {
     else if (model.modePicker.open) overlay = "modes"
     else if (model.contextDetailsOpen) overlay = "context"
     this.paletteBox.visible = overlay !== undefined
-    this.palette.visible = this.paletteBox.visible
+    this.palette.visible = this.paletteBox.visible && overlay !== "threads"
+    if (overlay !== "threads") this.threadBrowser.hide()
     this.paletteBox.bottomTitle = ""
     this.contextDividerOne.visible = false
     this.contextDividerTwo.visible = false
@@ -228,45 +229,18 @@ export abstract class SurfaceOverlay extends SurfacePointer {
       })
       const switcherContentWidth = Math.max(1, overlayWidth - 4)
       const contentHeight = Math.max(1, overlayHeight - 2)
-      const minute = Math.floor(this.currentTimeMillis() / 60_000)
-      const cached = this.threadSwitcherContentCache
-      if (
-        cached !== undefined &&
-        cached.threads === model.threads &&
-        cached.preview === model.threadPreview &&
-        cached.query === model.threadSwitcher.query &&
-        cached.selected === model.threadSwitcher.selected &&
-        cached.previewScroll === model.threadSwitcher.previewScroll &&
-        cached.workspace === model.workspace &&
-        cached.mode === model.mode &&
-        cached.width === switcherContentWidth &&
-        cached.height === contentHeight &&
-        cached.minute === minute
+      const browserLayout = this.threadBrowser.update(
+        model,
+        switcherContentWidth,
+        contentHeight,
+        this.currentTimeMillis(),
       )
-        this.palette.content = cached.content
-      else {
-        const content = threadSwitcherContent(model, switcherContentWidth, contentHeight)
-        this.threadSwitcherContentCache = {
-          threads: model.threads,
-          preview: model.threadPreview,
-          query: model.threadSwitcher.query,
-          selected: model.threadSwitcher.selected,
-          previewScroll: model.threadSwitcher.previewScroll,
-          workspace: model.workspace,
-          mode: model.mode,
-          width: switcherContentWidth,
-          height: contentHeight,
-          minute,
-          content,
-        }
-        this.palette.content = content
-      }
       this.syncOverlayEditor(
         `> ${model.threadSwitcher.query}`,
         2 + model.threadSwitcher.query.length,
         1,
-        overlayHeight - 2,
-        threadSwitcherListWidth(model, overlayWidth - 4),
+        1,
+        browserLayout.listWidth,
       )
       cursorEditor = this.overlayEditor
     }

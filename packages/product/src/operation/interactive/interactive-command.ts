@@ -41,7 +41,7 @@ export const InteractiveCommand = Schema.Union([
     threadId: Schema.String,
   }),
   Schema.Struct({ _tag: Schema.tag("ReadQueue"), threadId: Schema.String }),
-  Schema.Struct({ _tag: Schema.tag("PreviewThread"), threadId: Schema.String }),
+  Schema.Struct({ _tag: Schema.tag("PreviewThread"), threadId: Schema.String, requestId: Schema.Int }),
   Schema.Struct({ _tag: Schema.tag("ReopenThread") }),
 ])
 export type InteractiveCommand = typeof InteractiveCommand.Type
@@ -83,7 +83,7 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
     case "ReadQueue":
       return session.readQueue(command.threadId)
     case "PreviewThread":
-      return session.previewThread(command.threadId)
+      return session.previewThread(command.threadId, command.requestId)
     case "ReopenThread":
       return session.reopenThread
   }

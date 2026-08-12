@@ -286,7 +286,8 @@ export const makeInteractiveSession = (
       quit: implementation.quit,
       selectThread: (threadId) => state.composition.admitLocal(implementation.selectThread(threadId)),
       readQueue: (threadId) => state.composition.admitLocal(implementation.readQueue(threadId)),
-      previewThread: (threadId) => state.composition.admitLocal(implementation.previewThread(threadId)),
+      previewThread: (threadId, requestId) =>
+        state.composition.admitLocal(implementation.previewThread(threadId, requestId)),
       reopenThread: state.composition.admitLocal(implementation.reopenThread),
     }
     return {

@@ -2,7 +2,6 @@ import { modeIds } from "@rika/configuration/behavior-mode"
 import { Function } from "effect"
 import type { Message } from "../model/terminal-message"
 import { contentColumnWidth } from "../model/terminal-layout-state"
-import { idle } from "../model/terminal-loadable-state"
 import type { Model } from "../model/terminal-state"
 
 const openModeSelector = (model: Model): Model => ({
@@ -14,8 +13,8 @@ const openModeSelector = (model: Model): Model => ({
   palette: { open: false, query: "", selected: 0 },
   modePicker: { open: true, selected: modeIds.indexOf(model.mode) },
   filePicker: { ...model.filePicker, open: false },
-  threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
-  threadPreview: idle,
+  threadSwitcher: { open: false, query: "", selected: 0, kind: "switch" },
+  threadPreview: { _tag: "Idle" },
   shortcutsOpen: false,
   shortcutsTrigger: undefined,
 })

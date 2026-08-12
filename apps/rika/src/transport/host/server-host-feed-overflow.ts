@@ -147,7 +147,7 @@ const rememberImpl = (state: State, event: Event) => {
       break
     case "ThreadPreviewLoaded":
     case "ThreadPreviewFailed":
-      key = `preview:${event.threadId}`
+      key = `preview:${event.threadId}:${event.requestId}`
       break
   }
   if (key !== undefined) {

@@ -94,9 +94,15 @@ export const InteractiveEventSchema = Schema.Union([
   Schema.Struct({
     _tag: Schema.tag("ThreadPreviewLoaded"),
     threadId: Schema.String,
-    turns: Schema.Array(Schema.Struct({ prompt: Schema.String, units: Schema.Array(Schema.Unknown) })),
+    requestId: Schema.Int,
+    units: Schema.Array(Schema.Unknown),
   }),
-  Schema.Struct({ _tag: Schema.tag("ThreadPreviewFailed"), threadId: Schema.String, message: Schema.String }),
+  Schema.Struct({
+    _tag: Schema.tag("ThreadPreviewFailed"),
+    threadId: Schema.String,
+    requestId: Schema.Int,
+    message: Schema.String,
+  }),
   Schema.Struct({
     _tag: Schema.tag("TurnRetryScheduled"),
     threadId: Thread.ThreadId,

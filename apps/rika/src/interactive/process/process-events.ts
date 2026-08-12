@@ -191,10 +191,8 @@ export const makeEventRouter = (runtime: Runtime) => {
         loop.model = update(loop.model, {
           _tag: "ThreadPreviewLoaded",
           threadId: event.threadId,
-          turns: event.turns.map((turn) => ({
-            prompt: turn.prompt,
-            units: turn.units.map((unit) => Schema.decodeUnknownSync(TranscriptUnit.Unit)(unit)),
-          })),
+          requestId: event.requestId,
+          units: event.units.map((unit) => Schema.decodeUnknownSync(TranscriptUnit.Unit)(unit)),
         })
     } else if (event._tag === "ThreadPreviewFailed") {
       if (loop.model.threadSwitcher.open && selectedThreadMetadata(loop.model)?.id === event.threadId)

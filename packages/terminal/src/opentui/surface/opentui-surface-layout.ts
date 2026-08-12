@@ -188,8 +188,7 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     this.modeLabel.top = model.height - renderedInputHeight
     this.queueLeftJoint.top = model.height - renderedInputHeight
     this.queueRightJoint.top = model.height - renderedInputHeight
-    this.transcriptViewportRows = Math.max(1, model.height - renderedInputHeight - queueHeight)
-    this.transcriptScroll.content.minHeight = this.transcriptViewportRows
+    this.transcriptPane.setViewportRows(Math.max(1, model.height - renderedInputHeight - queueHeight))
     this.input.visible = model.shortcutsOpen
     const shortcutsChanged =
       previousModel === undefined ||

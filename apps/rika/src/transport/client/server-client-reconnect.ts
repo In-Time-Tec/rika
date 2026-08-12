@@ -225,7 +225,7 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
           yield* retryRead((session) => session.selectThread(threadId))
         }),
       readQueue: (threadId) => retryRead((session) => session.readQueue(threadId)),
-      previewThread: (threadId) => retryRead((session) => session.previewThread(threadId)),
+      previewThread: (threadId, requestId) => retryRead((session) => session.previewThread(threadId, requestId)),
       reopenThread: Effect.gen(function* () {
         yield* Ref.set(selected, { _tag: "latest" as const })
         yield* retryRead((session) => session.reopenThread)

@@ -98,7 +98,6 @@ type Message =
   | { readonly _tag: "WorkspaceFilesToggled" }
   | { readonly _tag: "ThreadSidebarSelectionMoved"; readonly offset: number }
   | { readonly _tag: "ThreadSidebarSelectionConfirmed"; readonly index?: number }
-  | { readonly _tag: "ThreadPreviewScrolled"; readonly offset: number }
   | { readonly _tag: "EventReplayed"; readonly event: UiEvent }
   | { readonly _tag: "DetailMoved"; readonly offset: number }
   | { readonly _tag: "DetailToggled"; readonly id?: string }
@@ -111,16 +110,22 @@ type Message =
   | { readonly _tag: "ChangedFilesReplaced"; readonly files: ReadonlyArray<ChangedFile> }
   | { readonly _tag: "FilesRequested" }
   | { readonly _tag: "FilesFailed"; readonly message: string }
-  | { readonly _tag: "ThreadPreviewRequested" }
+  | { readonly _tag: "ThreadPreviewRequested"; readonly threadId: string; readonly requestId: number }
   | { readonly _tag: "ThreadOpenRequested" }
   | { readonly _tag: "ThreadOpenCompleted" }
   | { readonly _tag: "ThreadRefolding"; readonly threadId: string; readonly refolding: boolean }
   | {
       readonly _tag: "ThreadPreviewLoaded"
       readonly threadId: string
-      readonly turns: ReadonlyArray<{ readonly prompt: string; readonly units: ReadonlyArray<Unit> }>
+      readonly requestId: number
+      readonly units: ReadonlyArray<Unit>
     }
-  | { readonly _tag: "ThreadPreviewFailed"; readonly threadId: string; readonly message: string }
+  | {
+      readonly _tag: "ThreadPreviewFailed"
+      readonly threadId: string
+      readonly requestId: number
+      readonly message: string
+    }
 
 export type { Message }
 export const runningToolsActivity = ActivityState.runningToolsActivity

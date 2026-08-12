@@ -5374,6 +5374,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/terminal/src/opentui/rendering/opentui-transcript-styled-lines.ts",
+      "path": "packages/terminal/src/opentui/rendering/opentui-transcript-styled-lines.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/terminal/src/opentui/rendering/terminal-diff-text-adapter.ts",
       "path": "packages/terminal/src/opentui/rendering/terminal-diff-text-adapter.ts",
       "workspace": "@rika/terminal",
@@ -5581,6 +5590,15 @@
       "publicExports": ["./opentui-surface"]
     },
     {
+      "id": "packages/terminal/src/opentui/surface/opentui-thread-browser.ts",
+      "path": "packages/terminal/src/opentui/surface/opentui-thread-browser.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/terminal/src/opentui/surface/opentui-toast-controller.ts",
       "path": "packages/terminal/src/opentui/surface/opentui-toast-controller.ts",
       "workspace": "@rika/terminal",
@@ -5590,8 +5608,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
-      "path": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
+      "id": "packages/terminal/src/opentui/surface/opentui-transcript-pane-geometry.ts",
+      "path": "packages/terminal/src/opentui/surface/opentui-transcript-pane-geometry.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -5599,8 +5617,26 @@
       "publicExports": []
     },
     {
-      "id": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
-      "path": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
+      "id": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "path": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "path": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/terminal/src/opentui/surface/opentui-transcript-virtual-document.ts",
+      "path": "packages/terminal/src/opentui/surface/opentui-transcript-virtual-document.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -26548,6 +26584,14 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/opentui/rendering/opentui-transcript-styled-lines.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/opentui/rendering/terminal-diff-text-adapter.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",
@@ -26853,14 +26897,6 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-overlay-content.ts",
-      "to": "packages/terminal/src/opentui/rendering/opentui-renderer.ts",
-      "specifier": "../rendering/opentui-renderer",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-overlay-content.ts",
       "to": "packages/terminal/src/presentation/terminal/terminal-format.ts",
       "specifier": "../../presentation/terminal/terminal-format",
       "kind": "import",
@@ -26879,14 +26915,6 @@
       "from": "packages/terminal/src/opentui/surface/opentui-overlay-content.ts",
       "to": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
       "specifier": "../../presentation/terminal/terminal-theme",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-overlay-content.ts",
-      "to": "packages/terminal/src/presentation/transcript/terminal-transcript-projection.ts",
-      "specifier": "../../presentation/transcript/terminal-transcript-projection",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -27349,24 +27377,8 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-lifecycle.ts",
-      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-window.ts",
-      "specifier": "../rendering/opentui-render-transcript-window",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface-lifecycle.ts",
       "to": "packages/terminal/src/opentui/rendering/opentui-spinner.ts",
       "specifier": "../rendering/opentui-spinner",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface-lifecycle.ts",
-      "to": "packages/terminal/src/opentui/surface/opentui-lifecycle-transcript.ts",
-      "specifier": "./opentui-lifecycle-transcript",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -27391,22 +27403,6 @@
       "from": "packages/terminal/src/opentui/surface/opentui-surface-lifecycle.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-welcome-state.ts",
       "specifier": "./opentui-welcome-state",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface-lifecycle.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-viewport.ts",
-      "specifier": "../../presentation/transcript/transcript-viewport",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface-lifecycle.ts",
-      "to": "packages/terminal/src/state/model/terminal-layout-state.ts",
-      "specifier": "../../state/model/terminal-layout-state",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -27645,14 +27641,6 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-pointer.ts",
-      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-window.ts",
-      "specifier": "../rendering/opentui-render-transcript-window",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface-pointer.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-sidebar-controller.ts",
       "specifier": "./opentui-sidebar-controller",
       "kind": "import",
@@ -27661,8 +27649,8 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-pointer.ts",
-      "to": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
-      "specifier": "./opentui-transcript-scroll",
+      "to": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
+      "specifier": "./opentui-surface-state",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -27717,22 +27705,6 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
-      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-revision.ts",
-      "specifier": "../rendering/opentui-render-transcript-revision",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
-      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-window.ts",
-      "specifier": "../rendering/opentui-render-transcript-window",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-goal-controller.ts",
       "specifier": "./opentui-goal-controller",
       "kind": "import",
@@ -27773,6 +27745,22 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-thread-browser.ts",
+      "specifier": "./opentui-thread-browser",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "specifier": "./opentui-transcript-pane",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-welcome-controller.ts",
       "specifier": "./opentui-welcome-controller",
       "kind": "import",
@@ -27797,16 +27785,16 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-state.ts",
-      "specifier": "../../presentation/transcript/transcript-viewport-state",
+      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-protocol.ts",
+      "specifier": "../../presentation/transcript/transcript-viewport-protocol",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-virtual-index.ts",
-      "specifier": "../../presentation/transcript/transcript-virtual-index",
+      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-state.ts",
+      "specifier": "../../presentation/transcript/transcript-viewport-state",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -27823,38 +27811,6 @@
       "from": "packages/terminal/src/opentui/surface/opentui-surface-transcript-mount.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface-transcript-mount.ts",
-      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-revision.ts",
-      "specifier": "../rendering/opentui-render-transcript-revision",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface-transcript-mount.ts",
-      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-window.ts",
-      "specifier": "../rendering/opentui-render-transcript-window",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface-transcript-mount.ts",
-      "to": "packages/terminal/src/opentui/rendering/opentui-render-unit.ts",
-      "specifier": "../rendering/opentui-render-unit",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface-transcript-mount.ts",
-      "to": "packages/terminal/src/opentui/rendering/terminal-text-adapter.ts",
-      "specifier": "../rendering/terminal-text-adapter",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -27885,14 +27841,6 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-transcript-mount.ts",
-      "to": "packages/terminal/src/opentui/surface/opentui-surface-transcript-types.ts",
-      "specifier": "./opentui-surface-transcript-types",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface-transcript-mount.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-welcome-state.ts",
       "specifier": "./opentui-welcome-state",
       "kind": "import",
@@ -27903,22 +27851,6 @@
       "from": "packages/terminal/src/opentui/surface/opentui-surface-transcript-mount.ts",
       "to": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
       "specifier": "../../presentation/terminal/terminal-theme",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface-transcript-mount.ts",
-      "to": "packages/terminal/src/presentation/transcript/terminal-transcript-window.ts",
-      "specifier": "../../presentation/transcript/terminal-transcript-window",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface-transcript-mount.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-row.ts",
-      "specifier": "../../presentation/transcript/transcript-row",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -28077,6 +28009,30 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-thread-browser.ts",
+      "specifier": "./opentui-thread-browser",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-transcript-pane-geometry.ts",
+      "specifier": "./opentui-transcript-pane-geometry",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "specifier": "./opentui-transcript-pane",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-welcome-controller.ts",
       "specifier": "./opentui-welcome-controller",
       "kind": "import",
@@ -28093,16 +28049,72 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-viewport.ts",
-      "specifier": "../../presentation/transcript/transcript-viewport",
+      "to": "packages/terminal/src/state/model/terminal-layout-state.ts",
+      "specifier": "../../state/model/terminal-layout-state",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/terminal/src/opentui/surface/opentui-surface.ts",
-      "to": "packages/terminal/src/state/model/terminal-layout-state.ts",
-      "specifier": "../../state/model/terminal-layout-state",
+      "from": "packages/terminal/src/opentui/surface/opentui-thread-browser.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-thread-browser.ts",
+      "to": "packages/terminal/src/opentui/rendering/terminal-text-adapter.ts",
+      "specifier": "../rendering/terminal-text-adapter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-thread-browser.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-overlay-content.ts",
+      "specifier": "./opentui-overlay-content",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-thread-browser.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "specifier": "./opentui-transcript-pane",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-thread-browser.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
+      "specifier": "../../presentation/terminal/terminal-theme",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-thread-browser.ts",
+      "to": "packages/terminal/src/presentation/transcript/terminal-transcript-projection.ts",
+      "specifier": "../../presentation/transcript/terminal-transcript-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-thread-browser.ts",
+      "to": "packages/terminal/src/state/model/terminal-state.ts",
+      "specifier": "../../state/model/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-thread-browser.ts",
+      "to": "packages/terminal/src/state/model/terminal-thread-navigation.ts",
+      "specifier": "../../state/model/terminal-thread-navigation",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -28148,7 +28160,7 @@
       "production": true
     },
     {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane-geometry.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",
       "kind": "import",
@@ -28156,47 +28168,7 @@
       "production": true
     },
     {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
-      "to": "external:string-width",
-      "specifier": "string-width",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
-      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-revision.ts",
-      "specifier": "../rendering/opentui-render-transcript-revision",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
-      "to": "packages/terminal/src/opentui/rendering/opentui-render-unit.ts",
-      "specifier": "../rendering/opentui-render-unit",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
-      "to": "packages/terminal/src/opentui/surface/opentui-overlay-content.ts",
-      "specifier": "./opentui-overlay-content",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
-      "to": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
-      "specifier": "./opentui-surface-state",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane-geometry.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-surface-transcript-types.ts",
       "specifier": "./opentui-surface-transcript-types",
       "kind": "import",
@@ -28204,15 +28176,7 @@
       "production": true
     },
     {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
-      "to": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
-      "specifier": "../../presentation/terminal/terminal-theme",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane-geometry.ts",
       "to": "packages/terminal/src/presentation/transcript/terminal-transcript-window.ts",
       "specifier": "../../presentation/transcript/terminal-transcript-window",
       "kind": "import",
@@ -28220,87 +28184,7 @@
       "production": true
     },
     {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-record-order.ts",
-      "specifier": "../../presentation/transcript/transcript-record-order",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-tool-detail.ts",
-      "specifier": "../../presentation/transcript/transcript-tool-detail",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-tool-types.ts",
-      "specifier": "../../presentation/transcript/transcript-tool-types",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
-      "to": "packages/terminal/src/state/model/terminal-state.ts",
-      "specifier": "../../state/model/terminal-state",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
-      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-window.ts",
-      "specifier": "../rendering/opentui-render-transcript-window",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
-      "to": "packages/terminal/src/opentui/surface/opentui-surface-transcript-types.ts",
-      "specifier": "./opentui-surface-transcript-types",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
-      "to": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
-      "specifier": "./opentui-transcript-rendering",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
-      "to": "packages/terminal/src/presentation/transcript/terminal-transcript-window.ts",
-      "specifier": "../../presentation/transcript/terminal-transcript-window",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane-geometry.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-anchor-geometry.ts",
       "specifier": "../../presentation/transcript/transcript-anchor-geometry",
       "kind": "import",
@@ -28308,7 +28192,7 @@
       "production": true
     },
     {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane-geometry.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-viewport-metrics.ts",
       "specifier": "../../presentation/transcript/transcript-viewport-metrics",
       "kind": "import",
@@ -28316,23 +28200,7 @@
       "production": true
     },
     {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-protocol.ts",
-      "specifier": "../../presentation/transcript/transcript-viewport-protocol",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-reducer.ts",
-      "specifier": "../../presentation/transcript/transcript-viewport-reducer",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane-geometry.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-viewport-state.ts",
       "specifier": "../../presentation/transcript/transcript-viewport-state",
       "kind": "import",
@@ -28340,7 +28208,135 @@
       "production": true
     },
     {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-window.ts",
+      "specifier": "../rendering/opentui-render-transcript-window",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "packages/terminal/src/opentui/rendering/terminal-text-adapter.ts",
+      "specifier": "../rendering/terminal-text-adapter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-lifecycle-transcript.ts",
+      "specifier": "./opentui-lifecycle-transcript",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-surface-renderables.ts",
+      "specifier": "./opentui-surface-renderables",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-surface-transcript-types.ts",
+      "specifier": "./opentui-surface-transcript-types",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-transcript-pane-geometry.ts",
+      "specifier": "./opentui-transcript-pane-geometry",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "specifier": "./opentui-transcript-renderables",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-transcript-virtual-document.ts",
+      "specifier": "./opentui-transcript-virtual-document",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
+      "specifier": "../../presentation/terminal/terminal-theme",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "packages/terminal/src/presentation/transcript/terminal-transcript-window.ts",
+      "specifier": "../../presentation/transcript/terminal-transcript-window",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-metrics.ts",
+      "specifier": "../../presentation/transcript/transcript-viewport-metrics",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-protocol.ts",
+      "specifier": "../../presentation/transcript/transcript-viewport-protocol",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-reducer.ts",
+      "specifier": "../../presentation/transcript/transcript-viewport-reducer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-state.ts",
+      "specifier": "../../presentation/transcript/transcript-viewport-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-viewport.ts",
       "specifier": "../../presentation/transcript/transcript-viewport",
       "kind": "import",
@@ -28348,7 +28344,151 @@
       "production": true
     },
     {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-pane.ts",
+      "to": "packages/terminal/src/state/model/terminal-state.ts",
+      "specifier": "../../state/model/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "external:string-width",
+      "specifier": "string-width",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-revision.ts",
+      "specifier": "../rendering/opentui-render-transcript-revision",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-window.ts",
+      "specifier": "../rendering/opentui-render-transcript-window",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/opentui/rendering/opentui-render-unit.ts",
+      "specifier": "../rendering/opentui-render-unit",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/opentui/rendering/opentui-transcript-styled-lines.ts",
+      "specifier": "../rendering/opentui-transcript-styled-lines",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/opentui/rendering/terminal-text-adapter.ts",
+      "specifier": "../rendering/terminal-text-adapter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-surface-transcript-types.ts",
+      "specifier": "./opentui-surface-transcript-types",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
+      "specifier": "../../presentation/terminal/terminal-theme",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/presentation/transcript/terminal-transcript-window.ts",
+      "specifier": "../../presentation/transcript/terminal-transcript-window",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-record-order.ts",
+      "specifier": "../../presentation/transcript/transcript-record-order",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-row.ts",
+      "specifier": "../../presentation/transcript/transcript-row",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-tool-detail-types.ts",
+      "specifier": "../../presentation/transcript/transcript-tool-detail-types",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-tool-detail.ts",
+      "specifier": "../../presentation/transcript/transcript-tool-detail",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-tool-types.ts",
+      "specifier": "../../presentation/transcript/transcript-tool-types",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-renderables.ts",
+      "to": "packages/terminal/src/state/model/terminal-state.ts",
+      "specifier": "../../state/model/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-virtual-document.ts",
+      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-window.ts",
+      "specifier": "../rendering/opentui-render-transcript-window",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-virtual-document.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-virtual-index.ts",
       "specifier": "../../presentation/transcript/transcript-virtual-index",
       "kind": "import",
@@ -28356,7 +28496,7 @@
       "production": true
     },
     {
-      "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-virtual-document.ts",
       "to": "packages/terminal/src/state/model/terminal-state.ts",
       "specifier": "../../state/model/terminal-state",
       "kind": "import",
@@ -30373,14 +30513,6 @@
     },
     {
       "from": "packages/terminal/src/state/reducer/terminal-keyboard-picker.ts",
-      "to": "packages/terminal/src/state/model/terminal-loadable-state.ts",
-      "specifier": "../model/terminal-loadable-state",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/state/reducer/terminal-keyboard-picker.ts",
       "to": "packages/terminal/src/state/model/terminal-message.ts",
       "specifier": "../model/terminal-message",
       "kind": "import",
@@ -30423,14 +30555,6 @@
       "from": "packages/terminal/src/state/reducer/terminal-keyboard-prelude.ts",
       "to": "packages/terminal/src/state/model/terminal-composer-paste.ts",
       "specifier": "../model/terminal-composer-paste",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/state/reducer/terminal-keyboard-prelude.ts",
-      "to": "packages/terminal/src/state/model/terminal-loadable-state.ts",
-      "specifier": "../model/terminal-loadable-state",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -30567,14 +30691,6 @@
       "from": "packages/terminal/src/state/reducer/terminal-mode-reducer.ts",
       "to": "packages/terminal/src/state/model/terminal-layout-state.ts",
       "specifier": "../model/terminal-layout-state",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/state/reducer/terminal-mode-reducer.ts",
-      "to": "packages/terminal/src/state/model/terminal-loadable-state.ts",
-      "specifier": "../model/terminal-loadable-state",
       "kind": "import",
       "relationship": "runtime",
       "production": true

@@ -396,7 +396,7 @@ describe("Rika Server protocol", () => {
       { _tag: "NewThread" },
       { _tag: "SelectThread", threadId: "thread" },
       { _tag: "ReadQueue", threadId: "thread" },
-      { _tag: "PreviewThread", threadId: "thread" },
+      { _tag: "PreviewThread", threadId: "thread", requestId: 42 },
       { _tag: "ReopenThread" },
     ]
     for (const [index, command] of commands.entries()) {
