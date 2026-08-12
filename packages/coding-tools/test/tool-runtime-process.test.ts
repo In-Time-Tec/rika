@@ -40,9 +40,11 @@ describe("Runtime process tools", () => {
       const exact = yield* runtime.run({ _tag: "Bash", command: "exact-limit" })
       const multibyte = yield* runtime.run({ _tag: "Bash", command: "multibyte-limit" })
       const running = yield* runtime.run({ _tag: "Bash", command: "running", timeoutMillis: 0 })
-      const completed = yield* Effect.flip(
-        runtime.run({ _tag: "ShellCommandStatus", processId: ok.processId ?? "", waitMillis: 0 }),
-      )
+      const completed = yield* runtime.run({
+        _tag: "ShellCommandStatus",
+        processId: ok.processId ?? "",
+        waitMillis: 0,
+      })
       const failedStream = yield* runtime.run({ _tag: "Bash", command: "stream-failure" })
       const unicodeBoundary = yield* runtime.run({ _tag: "Bash", command: "unicode-boundary" })
 
@@ -67,12 +69,11 @@ describe("Runtime process tools", () => {
       expect(multibyte.truncated).toBe(true)
       expect(running.running).toBe(true)
       expect(completed).toMatchObject({
-        _tag: "ToolError",
-        tool: "shell_command_status",
-        category: "conflict",
-        recovery: "never",
+        text: "outerr",
+        running: false,
+        exitCode: 0,
+        processId: ok.processId,
       })
-      expect(completed.message).toContain("Process output already consumed")
       expect(failedStream).toMatchObject({ running: false, exitCode: 0, truncated: true })
       expect(bytesOf(unicodeBoundary.text)).toBe(16_384)
       expect(unicodeBoundary.text).toContain("of 40003 bytes")

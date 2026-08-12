@@ -35,7 +35,9 @@ interface Entry {
   readonly admission: Semaphore.Semaphore
 }
 
-type EntryState = { readonly _tag: "Active"; readonly entry: Entry } | { readonly _tag: "Consumed" }
+type EntryState =
+  | { readonly _tag: "Active"; readonly entry: Entry }
+  | { readonly _tag: "Terminal"; readonly output: Output }
 
 interface BoundedText {
   readonly text: string
@@ -51,6 +53,27 @@ interface PendingOutput {
 }
 
 export const pendingOutputLimit = 64 * 1024
+const terminalOutputLimit = 128
+
+const retainTerminalOutput = (
+  states: ReadonlyMap<string, EntryState>,
+  processId: string,
+  output: Output,
+): Map<string, EntryState> => {
+  const next = new Map(states)
+  next.delete(processId)
+  next.set(processId, { _tag: "Terminal", output })
+  let terminalCount = 0
+  for (const state of next.values()) if (state._tag === "Terminal") terminalCount += 1
+  if (terminalCount <= terminalOutputLimit) return next
+  for (const [id, state] of next) {
+    if (state._tag !== "Terminal") continue
+    next.delete(id)
+    terminalCount -= 1
+    if (terminalCount <= terminalOutputLimit) break
+  }
+  return next
+}
 
 const appendOutput = (pending: PendingOutput, channel: "stdout" | "stderr", text: string): PendingOutput => {
   const retainedBytes = RuntimeFilesystem.byteLength(pending.stdout) + RuntimeFilesystem.byteLength(pending.stderr)
@@ -90,8 +113,6 @@ export const collectBoundedText: {
 
 export class ProcessNotFound extends Data.TaggedError("ProcessNotFound")<{ readonly message: string }> {}
 
-export class ProcessOutputConsumed extends Data.TaggedError("ProcessOutputConsumed")<{ readonly message: string }> {}
-
 export interface Interface {
   readonly start: (
     command: string,
@@ -102,7 +123,7 @@ export interface Interface {
     processId: string,
     waitMillis: number,
     outputLimit: number,
-  ) => Effect.Effect<Output, ProcessNotFound | ProcessOutputConsumed>
+  ) => Effect.Effect<Output, ProcessNotFound>
   readonly cancel: (processId: string) => Effect.Effect<void, ProcessNotFound | PlatformError.PlatformError>
 }
 
@@ -182,20 +203,14 @@ export const layer = Layer.effect(
       poll: Effect.fn("ProcessRegistry.poll")(function* (processId, waitMillis, outputLimit) {
         const initial = (yield* Ref.get(entries)).get(processId)
         if (initial === undefined) return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
-        if (initial._tag === "Consumed")
-          return yield* new ProcessOutputConsumed({
-            message: `Process output already consumed for id: ${processId}`,
-          })
+        if (initial._tag === "Terminal") return initial.output
         const entry = initial.entry
         return yield* entry.admission.withPermits(1)(
           Effect.gen(function* () {
             const current = (yield* Ref.get(entries)).get(processId)
             if (current === undefined)
               return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
-            if (current._tag === "Consumed")
-              return yield* new ProcessOutputConsumed({
-                message: `Process output already consumed for id: ${processId}`,
-              })
+            if (current._tag === "Terminal") return current.output
             if (waitMillis > 0)
               yield* Deferred.await(entry.exit).pipe(Effect.timeout(`${waitMillis} millis`), Effect.ignore)
             const pendingExit = yield* Deferred.poll(entry.exit)
@@ -230,7 +245,7 @@ export const layer = Layer.effect(
               truncated: output.truncated || capacityTruncated,
             }
             if (Option.isSome(exit))
-              yield* Ref.update(entries, (states) => new Map(states).set(processId, { _tag: "Consumed" }))
+              yield* Ref.update(entries, (states) => retainTerminalOutput(states, processId, result))
             return result
           }),
         )
@@ -238,7 +253,7 @@ export const layer = Layer.effect(
       cancel: Effect.fn("ProcessRegistry.cancel")(function* (processId) {
         const state = (yield* Ref.get(entries)).get(processId)
         if (state === undefined) return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
-        if (state._tag === "Consumed")
+        if (state._tag === "Terminal")
           return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
         yield* state.entry.process.kill({ killSignal: "SIGTERM", forceKillAfter: "100 millis" })
         yield* Ref.update(entries, (current) => {
