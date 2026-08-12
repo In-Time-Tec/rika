@@ -1,24 +1,15 @@
 import { expect, it } from "@effect/vitest"
 import { ModelRegistry } from "@batonfx/core"
 import { TestModel } from "@batonfx/test"
-import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Layer, Random, Stream } from "effect"
-import type { Tool, Toolkit } from "effect/unstable/ai"
 import { layer } from "../src/baton-execution"
 
 const registryLayer = (...fixtures: ReadonlyArray<TestModel.Fixture>) =>
   ModelRegistry.layer(
     fixtures.map((fixture) => Effect.succeed({ ...fixture.registration, isAvailabilityFailure: () => false })),
   )
-
-const stubHandlers = <Tools extends Record<string, Tool.Any>>(toolkit: Toolkit.Toolkit<Tools>) =>
-  toolkit.toLayer(
-    Object.fromEntries(Object.keys(toolkit.tools).map((name) => [name, () => Effect.succeed({})])) as never,
-  )
-
-const agentServices = Layer.mergeAll(stubHandlers(RoleToolkits.root), stubHandlers(RoleToolkits.readThread))
 
 const testLayer = (options: Parameters<typeof layer>[0]) => layer(options)
 
@@ -80,7 +71,6 @@ it.live(
               testLayer({
                 filename,
                 modelServices: registryLayer(rootFixture),
-                agentServices: () => agentServices,
               }),
             )
             const gateway = Context.get(context, ExecutionGateway.Service)
@@ -136,7 +126,6 @@ it.live(
               testLayer({
                 filename,
                 modelServices: registryLayer(rootFixture, titleFixture),
-                agentServices: () => agentServices,
               }),
             )
             const gateway = Context.get(context, ExecutionGateway.Service)

@@ -56,6 +56,7 @@ export const decodeSettingsInput: {
     "providers",
     "modelAliases",
     "modelRoutes",
+    "subagents",
     "keymap",
     "extensionRoots",
     "mcp",
@@ -391,6 +392,19 @@ export const decodeSettingsInput: {
         roleRoute(`Model route agent ${agent}`, route)
     }
     if (value.modelRoutes.compaction !== undefined) roleRoute("Model route compaction", value.modelRoutes.compaction)
+  }
+  if (value.subagents !== undefined) {
+    if (!object(value.subagents))
+      throw ConfigurationSettingsFileError.make({ path, message: "Subagents must be an object" })
+    exactKeys(path, "Subagents", value.subagents, ["maxDepth", "maxSubagents"])
+    for (const key of ["maxDepth", "maxSubagents"] as const) {
+      const limit = value.subagents[key]
+      if (limit !== undefined && (!Number.isSafeInteger(limit) || (limit as number) < 0 || (limit as number) > 1_024))
+        throw ConfigurationSettingsFileError.make({
+          path,
+          message: `Subagents ${key} must be an integer between 0 and 1024`,
+        })
+    }
   }
   if (value.keymap !== undefined) stringMap(path, "Keymap", value.keymap)
   if (

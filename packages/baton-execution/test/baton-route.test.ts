@@ -46,7 +46,8 @@ it.effect("resolves complete ordered model candidates deterministically", () =>
       tokenBudget: 12_000,
     })
     expect(first).toEqual(second)
-    expect(first.version).toBe(1)
+    expect(first.version).toBe(2)
+    expect(first.subagents).toEqual({ maxDepth: 4, maxSubagents: 4 })
     expect(first.tokenBudget).toBe(12_000)
     expect(first.main.registrationIdentity).toMatch(/^rika:model:v1:[a-f0-9]{64}$/)
     expect(first.main.candidates).toHaveLength(Settings.Defaults.settingsDefaults.models.luna!.candidates.length)
@@ -105,13 +106,13 @@ it.effect("builds exact closed root and title executables with role-specific too
       "Surgeon",
       "Task",
     ])
-    expect(configured.resolverEntries).toHaveLength(16)
+    expect(configured.resolverEntries).toHaveLength(9)
     const rootResolution = configured.resolverEntries[0]!
     expect("agent" in rootResolution ? rootResolution.agent.model : undefined).toMatchObject({
       provider: "@batonfx/providers",
       model: "ordered-route",
     })
-    expect(configured.executable.manifest.version).toBe("1")
+    expect(configured.executable.manifest.version).toBe("2")
     const rootEntry = configured.executable.manifest.entries.find(({ pin }) => pin === configured.executable.ref.active)
     expect(rootEntry?._tag).toBe("Agent")
     expect(rootEntry?._tag === "Agent" ? rootEntry.manifest.children.map(({ selection }) => selection) : []).toEqual([
@@ -129,7 +130,8 @@ it.effect("builds exact closed root and title executables with role-specific too
     for (const profile of Object.values(configured.profiles)) {
       expect(profile.manifest.budget.totalTokens).toBe(10_000_000)
       expect(profile.manifest.budget.modelCalls).toBeGreaterThan(0)
-      expect(profile.manifest.budget.childRuns).toBe(6)
+      expect(profile.manifest.budget.childRuns).toBeUndefined()
+      expect(profile.manifest.budget.depth).toBeUndefined()
     }
     for (const name of conversationalProfiles) {
       expect(configured.profiles[name]!.manifest.tools.map(({ name: toolName }) => toolName)).toEqual([CellTool.name])
@@ -139,6 +141,7 @@ it.effect("builds exact closed root and title executables with role-specific too
       "Oracle",
       "Painter",
       "ReadThread",
+      "Review",
       "Surgeon",
       "Task",
     ])
@@ -147,6 +150,15 @@ it.effect("builds exact closed root and title executables with role-specific too
       expect(names).toEqual(profileNameOf(entry) === "title" ? [] : [CellTool.name])
       expect(entry.manifest.toolScheduling).toEqual({ maxConcurrency: 1, parallelSafe: [] })
     }
+    expect(configured.executable.manifest.profiles.map(({ selection }) => selection)).toEqual([
+      "Librarian",
+      "Oracle",
+      "Painter",
+      "ReadThread",
+      "Review",
+      "Surgeon",
+      "Task",
+    ])
     expect(rootEntry?._tag === "Agent" ? rootEntry.manifest.compaction : undefined).toMatchObject({
       contextWindow: executionRoute.main.compaction.contextWindow,
       keepRecentTokens: executionRoute.main.compaction.keepRecentTokens,
@@ -190,13 +202,6 @@ it.effect("builds exact closed root and title executables with role-specific too
         .filter(({ codec }) => codec === "rika-tool")
         .map(({ payload }) => (payload as { readonly name: string }).name),
     ).toContain(CellTool.name)
-    for (const name of ["run_child", "start_child_group", "await_child_group"]) {
-      expect(
-        configured.registrations.some(
-          ({ codec, payload }) => codec === "rika-tool" && (payload as { readonly name?: string }).name === name,
-        ),
-      ).toBe(false)
-    }
     const advertised = new Set(
       agentEntries(configured).flatMap((entry) => entry.manifest.tools.map(({ name }) => name)),
     )
@@ -404,17 +409,15 @@ it.effect("registers one stable payload per model registry pin regardless of whi
   }),
 )
 
-it.effect("advertises exactly one tool named typescript per conversational profile and none for Title", () =>
+it.effect("pins child authority without duplicating Baton-owned tools in host manifests", () =>
   Effect.gen(function* () {
     const configured = yield* configure({
       executionRoute: testExecutionRoute(),
       workspace: "/workspace",
       kernel,
     })
-    const advertised = new Map(
-      agentEntries(configured).map((entry) => [profileNameOf(entry), entry.manifest.tools.map(({ name }) => name)]),
-    )
-    expect([...advertised.keys()].toSorted()).toEqual([
+    const entries = agentEntries(configured)
+    expect([...new Set(entries.map(profileNameOf))].toSorted()).toEqual([
       "librarian",
       "oracle",
       "painter",
@@ -425,12 +428,12 @@ it.effect("advertises exactly one tool named typescript per conversational profi
       "task",
       "title",
     ])
-    expect(advertised.get("title")).toEqual([])
-    for (const [name, tools] of advertised) {
-      if (name === "title") continue
-      expect(tools).toEqual(["typescript"])
-      expect(tools).toHaveLength(1)
+    for (const entry of entries) {
+      const tools = entry.manifest.tools.map(({ name }) => name)
+      if (profileNameOf(entry) === "title") expect(tools).toEqual([])
+      else expect(tools).toEqual([CellTool.name])
     }
+    expect(configured.executable.manifest.profiles).toHaveLength(conversationalProfiles.length)
   }),
 )
 
@@ -587,63 +590,69 @@ it.effect("keeps parent-relative child selection authority pinned after the cell
       "Oracle",
       "Painter",
       "ReadThread",
+      "Review",
       "Surgeon",
       "Task",
     ])
     for (const name of ["Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon"] as const) {
-      expect(configured.profiles[name]!.manifest.children).toEqual([])
+      expect(configured.profiles[name]!.manifest.children.map(({ selection }) => selection)).toEqual([
+        "Librarian",
+        "Oracle",
+        "Painter",
+        "ReadThread",
+        "Review",
+        "Surgeon",
+        "Task",
+      ])
     }
     for (const entry of agentEntries(configured)) {
-      for (const child of entry.manifest.children) {
-        expect(configured.executable.manifest.entries.some(({ pin }) => pin === child.agent)).toBe(true)
-      }
+      if (profileNameOf(entry) === "title") continue
+      expect(entry.manifest.children).toEqual(
+        configured.executable.manifest.profiles.map(({ selection }) => ({ selection })),
+      )
+    }
+    for (const profile of configured.executable.manifest.profiles) {
+      expect(configured.executable.manifest.entries.some(({ pin }) => pin === profile.agent)).toBe(true)
     }
   }),
 )
 
-it.effect("keeps recursive Task authority available through Baton's exact depth budget", () =>
+it.effect("keeps one finite recursive profile registry for every configured depth", () =>
+  Effect.gen(function* () {
+    for (const maxDepth of [0, 1, 2, 1_024]) {
+      const configured = yield* configure({
+        executionRoute: { ...testExecutionRoute(), subagents: { maxDepth, maxSubagents: 3 } },
+        workspace: "/workspace",
+        kernel,
+      })
+      const root = agentEntries(configured).find(({ pin }) => pin === configured.executable.ref.active)!
+      expect(root.manifest.children).toHaveLength(conversationalProfiles.length)
+      expect(root.manifest.budget.childRuns).toBeUndefined()
+      expect(root.manifest.budget.depth).toBeUndefined()
+      expect(configured.profiles.Task!.manifest.children).toEqual(root.manifest.children)
+      expect(configured.executable.manifest.profiles).toHaveLength(conversationalProfiles.length)
+      expect(configured.executable.manifest.entries).toHaveLength(1 + conversationalProfiles.length)
+      expect(configured.resolverEntries).toHaveLength(2 + conversationalProfiles.length)
+      expect(() =>
+        ExecutableManifest.validateRef(configured.executable.ref, configured.executable.manifest),
+      ).not.toThrow()
+    }
+  }),
+)
+
+it.effect("leaves quota gating to the pinned runtime tree policy", () =>
   Effect.gen(function* () {
     const configured = yield* configure({
-      executionRoute: testExecutionRoute(),
+      executionRoute: { ...testExecutionRoute(), subagents: { maxDepth: 4, maxSubagents: 0 } },
       workspace: "/workspace",
       kernel,
     })
-    const entries = new Map(
-      configured.executable.manifest.entries.flatMap((entry) =>
-        entry._tag === "Agent" ? [[entry.pin, entry] as const] : [],
-      ),
-    )
     const root = agentEntries(configured).find(({ pin }) => pin === configured.executable.ref.active)!
-    const firstTask = configured.profiles.Task!
-    expect(root.manifest.children.find(({ selection }) => selection === "Task")?.agent).toBe(firstTask.pin)
-    const taskPins: Array<typeof firstTask.pin> = []
-    let current: typeof firstTask.pin | undefined = firstTask.pin
-    while (current !== undefined) {
-      taskPins.push(current)
-      const task: ReturnType<typeof agentEntries>[number] = entries.get(current)!
-      current = task.manifest.children.find(({ selection }) => selection === "Task")?.agent
-    }
-    expect(firstTask.manifest.budget.depth).toBe(8)
-    expect(taskPins).toHaveLength(firstTask.manifest.budget.depth!)
-    expect(new Set(taskPins).size).toBe(taskPins.length)
-    const resolvable = new Set(configured.resolverEntries.map(({ executable }) => executable.ref.active))
-    for (const [index, pin] of taskPins.entries()) {
-      const task = entries.get(pin)!
-      expect(task.manifest.name).toBe("rika-task")
-      expect(resolvable.has(pin)).toBe(true)
-      expect(task.manifest.children.map(({ selection }) => selection)).toEqual(
-        index === taskPins.length - 1
-          ? ["Librarian", "Oracle", "Painter", "ReadThread", "Surgeon"]
-          : ["Librarian", "Oracle", "Painter", "ReadThread", "Surgeon", "Task"],
-      )
-      if (index < taskPins.length - 1) {
-        expect(task.manifest.children.find(({ selection }) => selection === "Task")?.agent).toBe(taskPins[index + 1])
-      }
-    }
-    expect(configured.executable.manifest.entries).toHaveLength(15)
-    expect(() =>
-      ExecutableManifest.validateRef(configured.executable.ref, configured.executable.manifest),
-    ).not.toThrow()
+    expect(root.manifest.children).toHaveLength(conversationalProfiles.length)
+    expect(root.manifest.tools.map(({ name }) => name)).toEqual([CellTool.name])
+    expect(root.manifest.budget.childRuns).toBeUndefined()
+    expect(configured.executable.manifest.entries).toHaveLength(1 + conversationalProfiles.length)
+    expect(configured.resolverEntries).toHaveLength(2 + conversationalProfiles.length)
   }),
 )
 
@@ -745,11 +754,11 @@ it.effect("carries a harness refinement into the instructions the root agent is 
     const conversational = configured.resolverEntries.filter(
       (entry) => "agent" in entry && entry.agent.name !== "rika-title",
     )
-    expect(conversational).toHaveLength(15)
+    expect(conversational).toHaveLength(8)
     expect(
       conversational.every((entry) => (entry.agent.instructions ?? "").includes("PROOF_OF_A_CARRIED_REFINEMENT")),
     ).toBe(true)
-    expect(conversational.filter((entry) => entry.agent.name === "rika-task")).toHaveLength(8)
+    expect(conversational.filter((entry) => entry.agent.name === "rika-task")).toHaveLength(1)
   }),
 )
 
@@ -759,12 +768,13 @@ it("documents flat child groups and refuses local work delegated to web-only Lib
     expect(prompt).toContain("Librarian is web-only")
     expect(prompt).toContain("Refuse a mismatched Librarian spawn")
     expect(prompt).toContain("select Task or Oracle")
-    expect(prompt).toContain("{ members: [{ key, selection, prompt }], concurrency }")
+    expect(prompt).toContain("{ members: [{ key, selection, label?, prompt }], concurrency }")
+    expect(prompt).toContain("run_child_group")
+    expect(prompt).toContain("resume this same Run")
     expect(prompt).toContain("never JSON-stringify it or nest it under another members field")
   }
-  expect(profileInstructions.Task).toContain("another Task")
-  expect(profileInstructions.Task).toContain("Baton's depth budget")
-  expect(profileInstructions.Task).not.toContain("not another Task")
+  expect(profileInstructions.Task).toContain("delegate recursively")
+  expect(profileInstructions.Task).toContain("pinned tree policy")
   expect(profileInstructions.Librarian).toContain("Your tools are web-only")
   expect(profileInstructions.Librarian).toContain("refuse and tell the parent")
   expect(profileInstructions.Librarian).toContain("local-capable Task or Oracle child")

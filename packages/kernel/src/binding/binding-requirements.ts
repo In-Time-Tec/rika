@@ -6,7 +6,6 @@ import type * as McpDiscovery from "@rika/extensions/mcp-discovery"
 import type * as McpRuntime from "@rika/extensions/mcp-runtime"
 import type * as ThreadQuery from "@rika/product/thread-query-service"
 import type { GoalService } from "@rika/product/goal-service"
-import type { AgentPort } from "./agent-port"
 import type { ArtifactStore } from "./artifact-store"
 import type { Requirements } from "./nested-operation-envelope"
 
@@ -19,7 +18,6 @@ export type BindingRequirements =
   | HarnessStore.HarnessStore
   | Session.SessionStore
   | GoalService
-  | AgentPort
   | ArtifactStore
   | Requirements
 

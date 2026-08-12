@@ -1,0 +1,7 @@
+# A cell-first surface with native child control
+
+**Gain:** the provider sees one general capability schema instead of a per-role menu, so context is spent on the task rather than on declarations the model may never call. A cell composes: it can filter and partition Session history, Thread transcripts, and the continual harness locally and return only what it chose to print. The only native additions are Baton's blocking singleton and grouped child controls, which make recursive suspension restart-safe without restoring a JavaScript promise.
+
+**Cost:** operation-level read, write, and shell permission categories cannot be security controls against arbitrary TypeScript, so they are deleted rather than left as misleading UI. The kernel runs with the local user's OS authority. Ordinary capabilities must be mounted as bindings, while recursive control remains a separate model action rather than code inside the persistent environment.
+
+**Rejected:** keeping the broad many-tool route as a fallback means a permanent dual production path; putting blocking child waits inside cells cannot reconstruct the JavaScript continuation after a crash; detached cell admission needs a competing inbox and synthetic continuation; the QuickJS Code Mode Program path and `@rika/javascript-sandbox` bought partial isolation while still needing a separate binding surface; per-role OS isolation would require a capability-only Agent Program design, which is the correct answer only if isolation becomes a requirement.

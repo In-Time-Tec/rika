@@ -60,7 +60,8 @@ test(
           unit.content._tag === "Entry" ? [unit.content.text] : [],
         )
         expect(texts).toContain("GRANDCHILD_DONE")
-        expect(app.frame()).toContain("Subagent finished")
+        const completed = yield* app.waitFrame("Subagent finished", 30_000)
+        expect(completed).toContain("Subagent finished")
         yield* app.quit
       }),
     ),

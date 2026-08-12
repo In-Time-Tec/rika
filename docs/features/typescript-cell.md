@@ -1,6 +1,6 @@
 # TypeScript cell
 
-Every conversational Rika Agent advertises exactly one model-facing tool, `typescript({ code })`. The Title Agent advertises none. A call is one TypeScript cell evaluated by a persistent Bun kernel owned per Baton Session, so declarations, imports, and values made in one cell remain available to later cells of the same Thread.
+Every conversational Rika Agent advertises `typescript({ code })`. An Agent with recursive child authority also advertises Baton's blocking `run_child` and `run_child_group`; a depth-limited leaf advertises only `typescript`, and Title advertises none. A cell is evaluated by a persistent Bun kernel owned per Baton Session, so declarations, imports, and values made in one cell remain available to later cells of the same Thread. Child orchestration stays outside the cell because Baton must persist the wait and resume the same parent Run after settlement.
 
 Cells are never parallel-safe. One namespace means one cell at a time, and every call is an authored-order exclusive barrier. A cell returns its result value, `stdout`, `stderr`, duration, kernel epoch, sequence, and per-channel truncation counts. Source is bounded at 65,536 bytes, each output channel at 262,144 bytes, and one cell at a 120,000 millisecond deadline; a kernel released after five idle minutes is rebuilt on the next cell. Output beyond a bound is dropped and reported as dropped bytes and events rather than silently trimmed.
 

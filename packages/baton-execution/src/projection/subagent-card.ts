@@ -1,17 +1,10 @@
 import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import type { Block, Unit } from "@rika/product/execution-transcript-contract"
-import { childOrder, unitOrder } from "@rika/product/execution-transcript-contract"
 import { type Card, type Node } from "./model"
 import { type ProjectorCore } from "./persistence"
 import { bounded, record, optionalString, string } from "./values"
 import { projectorNames, toolTextLimit } from "./values"
 import { promptText } from "./decoding"
-
-export interface CellAttachment {
-  readonly blockId: string
-  readonly unitKey: string
-  readonly ordinal: number
-}
 
 export interface SubagentCardProjection {
   readonly cardFor: (
@@ -19,92 +12,75 @@ export interface SubagentCardProjection {
     rawInvocationId: string,
     selection: string,
     cardPrompt: string,
-    groupKey?: string,
+    label?: string,
+    memberKey?: string,
     orderPart?: number,
-    attachment?: CellAttachment,
   ) => Card
   readonly updateCard: (
     card: Card,
     status: "running" | "cancelling" | "complete" | "failed" | "cancelled",
     output?: string,
   ) => void
-  readonly groupCards: (node: Node, rawToolCallId: string, params: unknown) => void
-  readonly bindFanOut: (node: Node, fanOutId: string, memberCount: number) => void
+  readonly groupCards: (node: Node, rawToolCallId: string, params: unknown) => ReadonlyArray<Card>
   readonly bindChild: (
     parent: Node,
     childRawRunId: string,
-    invocationId: string,
-    selection: string,
-    linkedPrompt: unknown,
+    linked: {
+      readonly invocationId: string
+      readonly selection: string
+      readonly prompt: unknown
+      readonly key?: string
+      readonly label?: string
+      readonly origin?: { readonly parentToolCallId?: string }
+    },
   ) => void
 }
 
-interface PendingGroup {
-  readonly parentRawRunId: string
-  readonly toolCallId: string
-  readonly memberKeys: ReadonlyArray<string>
-}
-
 export interface SubagentCardProjectionInput {
-  readonly cellFor: (parent: Node, invocationId: string) => CellAttachment | undefined
   readonly core: ProjectorCore
   readonly units: Map<string, Unit>
   readonly nodes: Map<string, Node>
   readonly unitKeysByRun: Map<string, Set<string>>
   readonly cardsByInvocation: Map<string, Card>
   readonly cardsByChild: Map<string, Card>
-  readonly pendingGroups: Array<PendingGroup>
-  readonly fanOutTools: Map<string, PendingGroup>
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
   readonly put: (unit: Unit) => void
   readonly unit: (node: Node, key: string, content: Unit["content"], part?: number) => Unit
 }
 
 export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): SubagentCardProjection => {
-  const {
-    cellFor,
-    core,
-    units,
-    nodes,
-    unitKeysByRun,
-    cardsByInvocation,
-    cardsByChild,
-    pendingGroups,
-    fanOutTools,
-    localId,
-    put,
-    unit,
-  } = input
+  const { core, units, nodes, unitKeysByRun, cardsByInvocation, cardsByChild, localId, put, unit } = input
 
   const cardFor = (
     node: Node,
     rawInvocationId: string,
     selection: string,
     cardPrompt: string,
-    groupKey?: string,
+    label?: string,
+    memberKey?: string,
     orderPart = 0,
-    attachment?: CellAttachment,
   ): Card => {
     const invocationKey = `${node.rawRunId}\u0000${rawInvocationId}`
     const existing = cardsByInvocation.get(invocationKey)
     if (existing !== undefined) return existing
-    const publicId = localId("subagent", node.publicId, rawInvocationId, groupKey ?? "")
+    const publicId = localId("subagent", node.publicId, rawInvocationId, memberKey ?? "")
     const card: Card = {
       parentRawRunId: node.rawRunId,
       rawInvocationId,
       publicId,
       unitKey: localId("subagent-unit", publicId),
       blockId: publicId,
-      selection: Catalog.agentProfile(selection),
+      selection,
+      ...(label === undefined ? {} : { label }),
       prompt: bounded(cardPrompt, toolTextLimit),
       promptTruncated: cardPrompt.length > toolTextLimit,
-      ...(groupKey === undefined ? {} : { groupKey }),
+      ...(memberKey === undefined ? {} : { memberKey }),
     }
     cardsByInvocation.set(invocationKey, card)
     const block: Extract<Block, { readonly _tag: "SubagentCard" }> = {
       _tag: "SubagentCard",
       id: card.publicId,
-      name: card.selection,
+      name: card.label ?? Catalog.agentProfile(card.selection),
       prompt: card.prompt,
       promptTruncated: card.promptTruncated,
       summary: "",
@@ -112,18 +88,7 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
       activity: [],
     }
     const created = unit(node, card.unitKey, { _tag: "Block", block }, orderPart)
-    if (attachment === undefined) {
-      put(created)
-      return card
-    }
-    const anchor = units.get(attachment.unitKey)
-    put({
-      ...created,
-      parentId: attachment.blockId,
-      ...(anchor === undefined
-        ? {}
-        : { order: childOrder(anchor.order, attachment.blockId, unitOrder(card.unitKey, 0, attachment.ordinal)) }),
-    })
+    put(created)
     return card
   }
 
@@ -150,63 +115,41 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
 
   const groupCards = (node: Node, rawToolCallId: string, params: unknown) => {
     const value = record(params)
-    if (!Array.isArray(value.members)) return
-    const memberKeys: Array<string> = []
+    if (!Array.isArray(value.members)) return []
+    const cards: Array<Card> = []
     for (const [index, rawMember] of value.members.entries()) {
       const member = record(rawMember)
       const key = optionalString(member.key)
       const selection = string(member.selection, "Subagent")
+      const label = optionalString(member.label)
       const memberPrompt = optionalString(member.prompt)
       if (key.length === 0 || memberPrompt.length === 0) continue
-      memberKeys.push(key)
-      cardFor(node, `${rawToolCallId}:${key}`, selection, memberPrompt, key, index)
+      cards.push(cardFor(node, `${rawToolCallId}:${key}`, selection, memberPrompt, label || undefined, key, index))
     }
-    pendingGroups.push({ parentRawRunId: node.rawRunId, toolCallId: rawToolCallId, memberKeys })
-  }
-
-  const bindFanOut = (node: Node, fanOutId: string, memberCount: number) => {
-    const matching = (candidate: PendingGroup) => candidate.parentRawRunId === node.rawRunId
-    const index = pendingGroups.findIndex(
-      (candidate) => matching(candidate) && candidate.memberKeys.length === memberCount,
-    )
-    const resolved = index === -1 ? pendingGroups.findIndex(matching) : index
-    if (resolved === -1) return
-    const [candidate] = pendingGroups.splice(resolved, 1)
-    fanOutTools.set(fanOutId, candidate!)
-  }
-
-  const groupMemberCard = (parent: Node, invocationId: string): Card | undefined => {
-    const separator = invocationId.lastIndexOf(":")
-    if (separator === -1) return undefined
-    const key = invocationId.slice(separator + 1)
-    for (const [fanOutId, group] of fanOutTools) {
-      if (group.parentRawRunId !== parent.rawRunId || !invocationId.startsWith(`${fanOutId}:`)) continue
-      return cardsByInvocation.get(
-        `${parent.rawRunId}\u0000${group.toolCallId}:${invocationId.slice(fanOutId.length + 1)}`,
-      )
-    }
-    for (const group of pendingGroups) {
-      if (group.parentRawRunId !== parent.rawRunId || !group.memberKeys.includes(key)) continue
-      return cardsByInvocation.get(`${parent.rawRunId}\u0000${group.toolCallId}:${key}`)
-    }
-    return undefined
+    return cards
   }
 
   const bindChild = (
     parent: Node,
     childRawRunId: string,
-    invocationId: string,
-    selection: string,
-    linkedPrompt: unknown,
+    linked: {
+      readonly invocationId: string
+      readonly selection: string
+      readonly prompt: unknown
+      readonly key?: string
+      readonly label?: string
+      readonly origin?: { readonly parentToolCallId?: string }
+    },
   ) => {
-    let card = cardsByInvocation.get(`${parent.rawRunId}\u0000${invocationId}`) ?? groupMemberCard(parent, invocationId)
-    const displayPrompt = promptText(linkedPrompt)
-    const attachment = cellFor(parent, invocationId)
+    const parentToolCallId = linked.origin?.parentToolCallId
+    const invocationId =
+      linked.key === undefined || parentToolCallId === undefined
+        ? (parentToolCallId ?? linked.invocationId)
+        : `${parentToolCallId}:${linked.key}`
+    let card = cardsByInvocation.get(`${parent.rawRunId}\u0000${invocationId}`)
+    const displayPrompt = promptText(linked.prompt)
     if (card === undefined && invocationId !== projectorNames.titleInvocationId)
-      card =
-        attachment === undefined
-          ? cardFor(parent, invocationId, selection, displayPrompt)
-          : cardFor(parent, invocationId, selection, displayPrompt, undefined, attachment.ordinal, attachment)
+      card = cardFor(parent, invocationId, linked.selection, displayPrompt, linked.label, linked.key)
     if (card !== undefined && card.prompt.length === 0 && displayPrompt.length > 0) {
       card.prompt = bounded(displayPrompt, toolTextLimit)
       card.promptTruncated = displayPrompt.length > toolTextLimit
@@ -236,5 +179,5 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
     updateCard(card, "running")
   }
 
-  return { cardFor, updateCard, groupCards, bindFanOut, bindChild }
+  return { cardFor, updateCard, groupCards, bindChild }
 }

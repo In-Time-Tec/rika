@@ -27,8 +27,9 @@ const model = (role: string) => ({
 
 test("canonical route conversion preserves every branch and field", () => {
   const route = {
-    version: 1 as const,
+    version: 2 as const,
     mode: "default",
+    subagents: { maxDepth: 2, maxSubagents: 3 },
     compaction: { strategy: "default" as const, summaryPrompt: "Pinned summary prompt" },
     main: model("main"),
     oracle: model("oracle"),
@@ -59,8 +60,9 @@ test("preserves the pinned OpenAI account identity and rejects incomplete accoun
     })),
   })
   const route = {
-    version: 1 as const,
+    version: 2 as const,
     mode: "default",
+    subagents: { maxDepth: 4, maxSubagents: 4 },
     compaction: { strategy: "default" as const, summaryPrompt: "Pinned summary prompt" },
     main: accountModel("main"),
     oracle: accountModel("oracle"),
@@ -89,10 +91,10 @@ test("preserves the pinned OpenAI account identity and rejects incomplete accoun
 
 test("malformed, adapter-shaped, and future route branches are rejected", () => {
   expect(() => toExecutionRouteSnapshot({ mode: "default", main: model("main") })).toThrow("Malformed execution route")
-  expect(() => toExecutionRouteSnapshot({ version: 1, mode: "default", main: {}, oracle: model("oracle") })).toThrow(
+  expect(() => toExecutionRouteSnapshot({ version: 2, mode: "default", main: {}, oracle: model("oracle") })).toThrow(
     "Malformed execution route",
   )
-  expect(() => toExecutionRouteSnapshot({ ...routeWithModels(), version: 2 })).toThrow(
+  expect(() => toExecutionRouteSnapshot({ ...routeWithModels(), version: 1 })).toThrow(
     "Unsupported execution route version",
   )
   expect(() => toExecutionRouteSnapshot({ ...routeWithModels(), version: 99 })).toThrow(
@@ -107,8 +109,9 @@ test("malformed, adapter-shaped, and future route branches are rejected", () => 
 })
 
 const routeWithModels = () => ({
-  version: 1 as const,
+  version: 2 as const,
   mode: "default",
+  subagents: { maxDepth: 4, maxSubagents: 4 },
   compaction: { strategy: "default" as const, summaryPrompt: "Pinned summary prompt" },
   main: model("main"),
   oracle: model("oracle"),

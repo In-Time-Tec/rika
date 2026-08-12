@@ -1,9 +1,10 @@
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
-import { maxSpawnedSubagentsPerExecution } from "@rika/product/subagent-policy"
 
 const childGroupGuidance =
-  "Call start_child_group with one flat object: { members: [{ key, selection, prompt }], concurrency }. " +
-  "members must be an array of member objects; never JSON-stringify it or nest it under another members field."
+  "Use run_child when later work depends on one child. For independent work, call run_child_group with one flat " +
+  "object: { members: [{ key, selection, label?, prompt }], concurrency }. members must be an array of member " +
+  "objects; never JSON-stringify it or nest it under another members field. Child results resume this same Run; " +
+  "never poll for them or ask the user to continue."
 
 export const profileInstructions = {
   root:
@@ -20,7 +21,7 @@ export const profileInstructions = {
   Surgeon: "Implement the bounded code change, preserve unrelated work, and verify the result.",
   Task:
     "Complete the bounded task autonomously and return the result with verification evidence. " +
-    "You may spawn Oracle, Librarian, Painter, ReadThread, Surgeon, or another Task; recursive Task delegation is guarded by Baton's depth budget. " +
+    "You may delegate recursively while the model-visible child tools are available; Baton's pinned tree policy guards depth and direct-child admission. " +
     `${RoleToolkits.delegationCapabilityGuidance} ${childGroupGuidance}`,
 } as const
 
@@ -28,7 +29,5 @@ export const agentBudget = {
   modelCalls: 64,
   toolCalls: 256,
   totalTokens: 10_000_000,
-  childRuns: maxSpawnedSubagentsPerExecution,
   handoffs: 32,
-  depth: 8,
 } as const

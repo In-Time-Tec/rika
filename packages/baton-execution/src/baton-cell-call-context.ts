@@ -1,37 +1,25 @@
 import { NestedOperation, Session, ToolContext } from "@batonfx/core"
-import { Runtime } from "@batonfx/runtime"
 import type { HostBindingRegistry } from "@batonfx/repl"
 import { Context, Effect, Function, Layer, Option, Ref, Scope } from "effect"
 
 /**
  * The per-call services one executing cell owns: its durable operation identity and cancellation
- * signal, its nested-operation journal, the Session its history reads from, and the durable Runtime
- * its `agents` calls act through.
+ * signal, its nested-operation journal, and the Session its history reads from.
  *
  * The mounted binding surface is built once and shared by every Session a pool serves, so these
  * cannot be closed over when the surface is built. A cell registers them for the duration of its
  * own execution and the binding seam resolves them per request.
- *
- * The Runtime is here rather than read from the tool's own context because Baton hosts a tool with
- * `ChildRuns` and `NestedOperations` and never with the Runtime, so a cell that asked for it
- * ambiently would find nothing. The cell route supplies it around each call instead.
  */
-export type CellServices =
-  | ToolContext.ToolContext
-  | NestedOperation.NestedOperations
-  | Session.SessionStore
-  | Runtime.Runtime
+export type CellServices = ToolContext.ToolContext | NestedOperation.NestedOperations | Session.SessionStore
 
 const ambient: Effect.Effect<Context.Context<never>, never, never> = Effect.gen(function* () {
   const toolContext = yield* Effect.serviceOption(ToolContext.ToolContext)
   const nested = yield* Effect.serviceOption(NestedOperation.NestedOperations)
   const session = yield* Effect.serviceOption(Session.SessionStore)
-  const runtime = yield* Effect.serviceOption(Runtime.Runtime)
   let captured = Context.empty()
   if (toolContext._tag === "Some") captured = Context.add(captured, ToolContext.ToolContext, toolContext.value)
   if (nested._tag === "Some") captured = Context.add(captured, NestedOperation.NestedOperations, nested.value)
   if (session._tag === "Some") captured = Context.add(captured, Session.SessionStore, session.value)
-  if (runtime._tag === "Some") captured = Context.add(captured, Runtime.Runtime, runtime.value)
   return captured
 })
 

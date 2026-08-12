@@ -53,11 +53,10 @@ describe("mounted surface", () => {
   })
 
   it("names the values a field will accept when it accepts only a few", () => {
-    // A model spent a turn inventing a scope that does not exist, and another guessing at profiles.
+    // A model spent a turn inventing a scope that does not exist.
     // A field with a closed set of values is cheaper to name than to discover.
     const text = surfaceOf(make(options))
     expect(text).toContain('scope: "thread"|"workspace"|"global"')
-    expect(text).toContain('profile: "Oracle"')
   })
 
   it("refuses to describe an operation whose input is not a struct", () => {
@@ -108,8 +107,4 @@ it("states the kernel house rules from its mounted workspace and limits", () => 
   expect(text).toContain('Your workspace is "/actual/workspace" and it is empty.')
   expect(text).toContain("page big results at 16KB per page")
   expect(text).toContain("Run shell commands with rika.processes.start")
-  expect(text).toContain("at most 6 subagents across this execution tree")
-  expect(text).toContain("recursive Task delegation uses the same total")
-  expect(text).toContain("bounded settlements are delivered durably")
-  expect(text).toContain("Do not poll or sleep")
 })

@@ -32,7 +32,7 @@ describe("Baton tree projector", () => {
     ).toBe(prompt)
   })
 
-  it("chunks long assistant and reasoning output losslessly without truncation", () => {
+  it("preserves long assistant and reasoning output as complete logical responses", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-long-output", "chunk output")
     const assistantText = "assistant-".repeat(7_000)
@@ -52,12 +52,10 @@ describe("Baton tree projector", () => {
       .join("")
     expect(assistant).toBe(assistantText)
     expect(reasoning).toBe(reasoningText)
-    expect(
-      ordered.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant").length,
-    ).toBeGreaterThan(1)
+    expect(ordered.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant").length).toBe(1)
     expect(
       ordered.filter((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Reasoning").length,
-    ).toBeGreaterThan(1)
+    ).toBe(1)
   })
 
   it("marks bounded subagent prompts and authorization inputs as truncated", () => {

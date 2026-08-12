@@ -11,7 +11,7 @@ import {
   TurnPolicy,
 } from "@batonfx/core"
 import { ModelRoute } from "@batonfx/providers"
-import { Errors, ExecutableRegistration, ExecutableResolver, Runtime } from "@batonfx/runtime"
+import { Errors, ExecutableRegistration, ExecutableResolver } from "@batonfx/runtime"
 import type { HarnessState } from "@batonfx/harness"
 import { Cell, CellTool, KernelPool } from "@batonfx/repl"
 import * as CellCallContext from "./baton-cell-call-context"
@@ -20,7 +20,7 @@ import * as HarnessPromptSections from "@rika/kernel/harness-prompt-sections"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
-import { Context, Effect, Function, Layer, Option, Schema, Stream } from "effect"
+import { Context, Effect, Function, Layer, Schema, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import { agentBudget, profileInstructions } from "./baton-agent-profile"
 import * as CandidateRegistry from "./baton-candidate-registry"
@@ -183,7 +183,10 @@ const agentDefinition = (
       policy: TurnPolicy.both(TurnPolicy.recurs(80), TurnPolicy.forever),
       toolScheduling: tools.length === 0 ? { maxConcurrency: 1, parallelSafe: [] } : CellTool.scheduling,
       metadata: { productProfile: name },
-      budget: { ...agentBudget, ...(tokenBudget === undefined ? {} : { totalTokens: tokenBudget }) },
+      budget: {
+        ...agentBudget,
+        ...(tokenBudget === undefined ? {} : { totalTokens: tokenBudget }),
+      },
     }),
     tools,
   )
@@ -207,25 +210,7 @@ const agentDefinition = (
 }
 
 const rootChildNames = ["Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
-const taskSpecialistNames = ["Oracle", "Librarian", "Painter", "ReadThread", "Surgeon"] as const
-
-type RoleName = "Root" | "Title" | "Oracle" | "Librarian" | "Painter" | "ReadThread" | "Review" | "Surgeon" | "Task"
-
-/**
- * Every conversational profile advertises the one cell tool and nothing else. Title returns a
- * string and never acts, so it advertises no tool at all.
- */
-const roleTools: Readonly<Record<RoleName, ReadonlyArray<Tool.Any>>> = {
-  Root: [CellTool.tool],
-  Title: [],
-  Oracle: [CellTool.tool],
-  Librarian: [CellTool.tool],
-  Painter: [CellTool.tool],
-  ReadThread: [CellTool.tool],
-  Review: [CellTool.tool],
-  Surgeon: [CellTool.tool],
-  Task: [CellTool.tool],
-}
+type ChildProfileName = (typeof rootChildNames)[number]
 
 const missingKernel = (tool: string) =>
   ToolExecutor.FrameworkFailure.make({
@@ -273,48 +258,36 @@ const deadlinePool = (pool: KernelPool.Interface, deadlineMillis: number): Kerne
  * that answers `RcMap.get` with an interrupt rather than a worker.
  *
  * Only `enter` is scoped per call: it registers this cell's identity for the duration of this cell
- * and must be removed when it ends. The durable Runtime is supplied around it rather than awaited
- * before it, so a host with no Runtime still runs cells and only `rika.agents` reports its absence.
+ * and must be removed when it ends.
  */
 const cellExecutor = (
-  pool: Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>,
-  runtime: Effect.Effect<Option.Option<Runtime.Runtime["Service"]>> | undefined,
+  pool: Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext> | undefined,
   deadlineMillis: number,
 ): Layer.Layer<ToolExecutor.ToolExecutor> =>
   Layer.succeed(
     ToolExecutor.ToolExecutor,
     ToolExecutor.ToolExecutor.of({
-      execute: (request) =>
-        CellTool.route.matches(request)
-          ? Effect.scoped(
-              Effect.flatMap(runtime ?? Effect.succeedNone, (durable) =>
-                Context.get(pool, CellCallContext.CellCallContext)
-                  .enter(request.sessionId)
+      execute: (request) => {
+        if (!CellTool.route.matches(request) || pool === undefined) return missingKernel(request.call.name)
+        return Effect.scoped(
+          Context.get(pool, CellCallContext.CellCallContext)
+            .enter(request.sessionId)
+            .pipe(
+              Effect.andThen(
+                CellTool.route
+                  .execute(request)
                   .pipe(
-                    Option.isNone(durable) ? Function.identity : Effect.provideService(Runtime.Runtime, durable.value),
-                    Effect.andThen(
-                      CellTool.route
-                        .execute(request)
-                        .pipe(
-                          Effect.provideService(
-                            KernelPool.KernelPool,
-                            KernelPool.KernelPool.of(
-                              deadlinePool(Context.get(pool, KernelPool.KernelPool), deadlineMillis),
-                            ),
-                          ),
-                        ),
+                    Effect.provideService(
+                      KernelPool.KernelPool,
+                      KernelPool.KernelPool.of(deadlinePool(Context.get(pool, KernelPool.KernelPool), deadlineMillis)),
                     ),
                   ),
               ),
-            )
-          : missingKernel(request.call.name),
+            ),
+        )
+      },
     }),
   )
-
-const unavailableKernelExecutor: Layer.Layer<ToolExecutor.ToolExecutor> = Layer.succeed(
-  ToolExecutor.ToolExecutor,
-  ToolExecutor.ToolExecutor.of({ execute: (request) => missingKernel(request.call.name) }),
-)
 
 export const configure = (
   options: ConfigureOptions,
@@ -382,14 +355,10 @@ export const configure = (
         ? { capabilities: [], registrations: [] }
         : ExecutionPins.harness(options.harnessSnapshot)
     const pinnedCapabilities = { skills: skillPins.capabilities, services: harnessPins.capabilities }
-    const cellLayer =
-      options.kernelPool === undefined
-        ? unavailableKernelExecutor
-        : cellExecutor(
-            options.kernelPool,
-            options.durableRuntime,
-            options.kernel.limits?.cellDeadlineMillis ?? KernelProfileRegistration.defaultLimits.cellDeadlineMillis,
-          )
+    const cellLayer = cellExecutor(
+      options.kernelPool,
+      options.kernel.limits?.cellDeadlineMillis ?? KernelProfileRegistration.defaultLimits.cellDeadlineMillis,
+    )
     const environment = (name: keyof typeof routes): AgentEnvironment => {
       const model = routed[name].layer
       if (name === "Title" || name === "Compaction") return Layer.orDie(model)
@@ -418,7 +387,6 @@ export const configure = (
         ? agentInstructionsWith(cellSurface, own)
         : agentInstructionsWith(`${cellSurface}\n\n${supplemental}`, own)
     const roleInstructions = {
-      Title: profileInstructions.title,
       Oracle: profileInstructions.Oracle,
       Librarian: profileInstructions.Librarian,
       Painter: profileInstructions.Painter,
@@ -427,82 +395,60 @@ export const configure = (
       Surgeon: profileInstructions.Surgeon,
       Task: profileInstructions.Task,
     } as const
-    const leaf = (name: Exclude<keyof typeof roleInstructions, "Task">) =>
+    const childSelections = rootChildNames.map((selection) => ({ selection }))
+    const childDefinitionFor = (name: ChildProfileName): AgentDefinition =>
       agentDefinition(
         routes[name],
         routed[name],
         name,
         withSurface(roleInstructions[name]),
-        roleTools[name],
+        [CellTool.tool],
         environment(name),
-        [],
+        childSelections,
         contextPin,
-        name === "Title" ? undefined : compactionIdentity,
+        compactionIdentity,
         route.tokenBudget,
-        name === "Title" ? undefined : kernelProfilePin,
-        name === "Title" ? { skills: [], services: [] } : pinnedCapabilities,
+        kernelProfilePin,
+        pinnedCapabilities,
       )
-    const leafProfiles = {
-      Title: leaf("Title"),
-      Oracle: leaf("Oracle"),
-      Librarian: leaf("Librarian"),
-      Painter: leaf("Painter"),
-      ReadThread: leaf("ReadThread"),
-      Review: leaf("Review"),
-      Surgeon: leaf("Surgeon"),
-    }
-    const taskProfiles = Array.from({ length: agentBudget.depth }).reduce<ReadonlyArray<AgentDefinition>>(
-      (deeperProfiles) => {
-        const deeperTask = deeperProfiles[0]
-        const task = agentDefinition(
-          routes.Task,
-          routed.Task,
-          "Task",
-          withSurface(profileInstructions.Task),
-          roleTools.Task,
-          environment("Task"),
-          [
-            ...taskSpecialistNames.map((selection) => ({ selection, agent: leafProfiles[selection].pinned.pin })),
-            ...(deeperTask === undefined ? [] : [{ selection: "Task", agent: deeperTask.pinned.pin }]),
-          ],
-          contextPin,
-          compactionIdentity,
-          route.tokenBudget,
-          kernelProfilePin,
-          pinnedCapabilities,
-        )
-        return [task, ...deeperProfiles]
-      },
+    const title = agentDefinition(
+      routes.Title,
+      routed.Title,
+      "Title",
+      profileInstructions.title,
       [],
+      environment("Title"),
+      [],
+      contextPin,
+      undefined,
+      route.tokenBudget,
+      undefined,
+      { skills: [], services: [] },
     )
-    const task = taskProfiles[0]!
-    const profiles: Readonly<Record<keyof typeof roleInstructions, AgentDefinition>> = {
-      ...leafProfiles,
-      Task: task,
-    }
-    const profileNames = ["Title", "Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
-    const nestedNames = new Set<string>(rootChildNames)
+    const childDefinitions = Object.fromEntries(
+      rootChildNames.map((name) => [name, childDefinitionFor(name)]),
+    ) as unknown as Readonly<Record<ChildProfileName, AgentDefinition>>
     const root = agentDefinition(
       route.main,
       routed.Root,
       "Root",
       withSurface(profileInstructions.root),
-      roleTools.Root,
+      [CellTool.tool],
       environment("Root"),
-      rootChildNames.map((selection) => ({ selection, agent: profiles[selection].pinned.pin })),
+      childSelections,
       contextPin,
       compactionIdentity,
       route.tokenBudget,
       kernelProfilePin,
       pinnedCapabilities,
     )
-    const childEntries = rootChildNames.map((name) => agentEntry(profiles[name].pinned))
-    const nestedTaskEntries = taskProfiles.slice(1).map((profile) => agentEntry(profile.pinned))
-    const entries = [agentEntry(root.pinned), ...childEntries, ...nestedTaskEntries]
-    const executable = ExecutableManifest.make({ root: root.pinned.pin, entries })
+    const children = rootChildNames.map((name) => childDefinitions[name])
+    const entries = [agentEntry(root.pinned), ...children.map((child) => agentEntry(child.pinned))]
+    const profiles = rootChildNames.map((selection) => ({ selection, agent: childDefinitions[selection].pinned.pin }))
+    const executable = ExecutableManifest.make({ root: root.pinned.pin, profiles, entries })
     const titleExecutable = ExecutableManifest.make({
-      root: profiles.Title.pinned.pin,
-      entries: [agentEntry(profiles.Title.pinned)],
+      root: title.pinned.pin,
+      entries: [agentEntry(title.pinned)],
     })
     const registrationMap = new Map<string, ExecutableRegistration.ExecutableRegistration>()
     for (const model of [
@@ -549,14 +495,12 @@ export const configure = (
     for (const registration of [...skillPins.registrations, ...harnessPins.registrations]) {
       registrationMap.set(registration.pin, registration)
     }
-    const registeredToolkits: ReadonlyArray<Toolkit.Any> = [CellTool.toolkit]
-    for (const toolkit of registeredToolkits) {
-      for (const tool of Object.values(toolkit.tools)) {
-        registrationMap.set(
-          Registration.toolPin(tool),
-          Registration.make(Registration.codecs.tool, Registration.toolPin(tool), Registration.toolPayload(tool)),
-        )
-      }
+    const registeredTools = [CellTool.tool]
+    for (const tool of registeredTools) {
+      registrationMap.set(
+        Registration.toolPin(tool),
+        Registration.make(Registration.codecs.tool, Registration.toolPin(tool), Registration.toolPayload(tool)),
+      )
     }
     const registrations = yield* Effect.forEach(ExecutableRegistration.requiredPins(executable), (pin) => {
       const registration = registrationMap.get(pin)
@@ -587,29 +531,34 @@ export const configure = (
             },
           },
         },
-        ...profileNames.flatMap((name) => {
-          const definitions = name === "Task" ? taskProfiles : [profiles[name]]
-          return definitions.map((definition) => {
-            const resolved = {
-              executable: nestedNames.has(name)
-                ? ExecutableManifest.make({ root: root.pinned.pin, active: definition.pinned.pin, entries })
-                : ExecutableManifest.make({ root: definition.pinned.pin, entries: [agentEntry(definition.pinned)] }),
-              agent: definition.agent,
-            }
-            return name === "Title"
-              ? resolved
-              : Object.assign(resolved, {
-                  runOptions: {
-                    compaction: {
-                      contextWindow: route.main.compaction.contextWindow,
-                      reserveTokens: route.main.compaction.reserveTokens,
-                    },
-                  },
-                })
+        {
+          executable: titleExecutable,
+          agent: title.agent,
+        },
+        ...children.map((definition) => {
+          const resolved = {
+            executable: ExecutableManifest.make({
+              root: root.pinned.pin,
+              active: definition.pinned.pin,
+              profiles,
+              entries,
+            }),
+            agent: definition.agent,
+          }
+          return Object.assign(resolved, {
+            runOptions: {
+              compaction: {
+                contextWindow: route.main.compaction.contextWindow,
+                reserveTokens: route.main.compaction.reserveTokens,
+              },
+            },
           })
         }),
       ],
-      profiles: Object.fromEntries(Object.entries(profiles).map(([name, definition]) => [name, definition.pinned])),
+      profiles: {
+        Title: title.pinned,
+        ...Object.fromEntries(Object.entries(childDefinitions).map(([name, child]) => [name, child.pinned])),
+      },
     }
   })
 
@@ -627,12 +576,10 @@ export const makeResolver = (options: ResolverOptions): ExecutableResolver.Inter
           workspace: context.workspace,
           kernel: options.kernel,
           ...(options.kernelPool === undefined ? {} : { kernelPool: options.kernelPool }),
-          ...(options.durableRuntime === undefined ? {} : { durableRuntime: options.durableRuntime }),
           ...(options.skills === undefined ? {} : { skills: options.skills }),
           ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
           ...(options.credentialStore === undefined ? {} : { credentialStore: options.credentialStore }),
           ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
-          ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices(context.workspace) }),
           ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
         }).pipe(Effect.mapError(invalid))
         yield* Registration.verify({

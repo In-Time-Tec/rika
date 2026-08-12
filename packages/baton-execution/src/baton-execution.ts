@@ -11,13 +11,11 @@ import { ProviderCredentialStore, type ProviderCredentialStoreShape } from "@rik
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 export type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 export type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
-import { Cause, Context, Deferred, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
-import type { AgentToolHandlers, KernelOptions } from "./baton-route-options"
+import { Cause, Context, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
+import type { KernelOptions } from "./baton-route-options"
 import { configure, makeResolver } from "./baton-route"
 import * as PreviewAdapter from "./baton-preview-adapter"
 import { TreeProjector } from "./projection/tree"
-
-export type AgentToolServices = AgentToolHandlers
 
 /**
  * The runtime database always lives directly under the profile data root as `<dataRoot>/baton.db`,
@@ -48,7 +46,6 @@ export interface Options {
     | Context.Context<KernelPoolServices | KernelStateStore.KernelStateStore>
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: HarnessState.HarnessState
-  readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolServices, never, never>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry, never, never>
   readonly credentialStore?: Layer.Layer<ProviderCredentialStore, never, never>
   readonly openAiAccountAuth?: OpenAiAuth.ServiceInterface
@@ -114,14 +111,9 @@ const status = (value: Run.RunStatus): Status => {
   }
 }
 
-const make = (
-  options: Options,
-  credentialStore: ProviderCredentialStoreShape | undefined,
-  durableRuntimeSlot: Deferred.Deferred<Runtime.Runtime["Service"]> | undefined,
-) =>
+const make = (options: Options, credentialStore: ProviderCredentialStoreShape | undefined) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime.Runtime
-    if (durableRuntimeSlot !== undefined) yield* Deferred.succeed(durableRuntimeSlot, runtime)
     // A replayPolicy:"never" operation interrupted by cancellation parks the Run in
     // `needs-resolution` until it is explicitly resolved. Baton cannot decide the outcome of a
     // side-effecting operation on its own, so the product settles it as Failed and lets the Run
@@ -203,18 +195,17 @@ const make = (
             executionRoute: input.executionRoute,
             workspace: input.workspace,
             kernel: kernelOptions(options),
-            durableRuntime: Effect.succeedSome(runtime),
             ...(options.kernelPool === undefined ? {} : { kernelPool: options.kernelPool }),
             ...(options.skills === undefined ? {} : { skills: options.skills }),
             ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
             ...(credentialStore === undefined ? {} : { credentialStore }),
             ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
-            ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices(input.workspace) }),
             ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
           })
           const receipt = yield* runtime.start({
             executable: configured.executable,
             registrations: configured.registrations,
+            treePolicy: input.executionRoute.subagents,
             sessionId: input.threadId,
             idempotencyKey: input.turnId,
             prompt: prompt(input),
@@ -408,28 +399,15 @@ export const layer = (
         options.credentialStore === undefined
           ? undefined
           : Context.get(yield* Layer.build(options.credentialStore), ProviderCredentialStore)
-      /**
-       * Baton takes the resolver as an argument to the layer that BUILDS the Runtime, so the
-       * resolver cannot close over one. A cell needs it anyway: `rika.agents` acts through the
-       * durable Runtime, and Baton hosts a tool with `ChildRuns` rather than the Runtime. The
-       * resolver therefore reads this slot per Run, which is long after the layer filled it.
-       */
-      const durableRuntimeSlot = yield* Deferred.make<Runtime.Runtime["Service"]>()
-      const durableRuntime = Effect.flatMap(
-        Deferred.poll(durableRuntimeSlot),
-        Option.match({ onNone: () => Effect.succeedNone, onSome: Effect.map(Option.some) }),
-      )
       const runtimeLayer = Runtime.layerSqlite({
         filename: options.filename,
         resolver: makeResolver({
           kernel: kernelOptions(options),
-          durableRuntime,
           ...(options.kernelPool === undefined ? {} : { kernelPool: options.kernelPool }),
           ...(options.skills === undefined ? {} : { skills: options.skills }),
           ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
           ...(credentialStore === undefined ? {} : { credentialStore }),
           ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
-          ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices }),
           ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
         }),
         addresses: [],
@@ -437,9 +415,7 @@ export const layer = (
           ? {}
           : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
       })
-      const executionLayer = Layer.effectContext(make(options, credentialStore, durableRuntimeSlot)).pipe(
-        Layer.provide(runtimeLayer),
-      )
+      const executionLayer = Layer.effectContext(make(options, credentialStore)).pipe(Layer.provide(runtimeLayer))
       return executionLayer.pipe(
         Layer.catchCause((cause) =>
           Layer.effectContext(

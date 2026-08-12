@@ -1,4 +1,5 @@
 import * as InteractiveSession from "@rika/product/interactive-session"
+import type * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
@@ -10,14 +11,13 @@ import * as ThreadQuery from "@rika/product/thread-query-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Config, Context, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Scope } from "effect"
 import { performance } from "node:perf_hooks"
-import type { Prompt } from "effect/unstable/ai"
 import { interactiveTui } from "../src/interactive/process/interactive-process-loop"
 import {
   makeTuiAppRepositoryLayers,
   seedHistoricalTranscript,
   type HistoricalTranscriptFixture,
 } from "./tui-app-repositories"
-import type { Lane } from "./tui-app-model"
+import type { Lane, LaneModels, Profile } from "./tui-app-model"
 import { tuiToolRuntimeLayer } from "./tui-app-tool-runtime"
 import { backendLayer, kernelPoolFor } from "./tui-app-backend"
 import { laneExecutionRoute, makeLaneModels } from "./tui-app-model"
@@ -35,6 +35,7 @@ type SessionEvent = Parameters<Parameters<InteractiveSession.InteractiveSession[
 export interface TuiAppOptions {
   readonly script?: Lane["steps"]
   readonly lanes?: ReadonlyArray<Lane>
+  readonly subagents?: ExecutionRouteSnapshot.ExecutionRouteSnapshot["subagents"]
   readonly root?: string
   readonly initialThreadId?: string
   readonly idStart?: number
@@ -80,7 +81,8 @@ export interface TuiApp {
   readonly reload: Effect.Effect<void>
   readonly waitModelRequests: (count: number) => Effect.Effect<void>
   readonly modelRequestCount: Effect.Effect<number>
-  readonly modelPrompts: Effect.Effect<ReadonlyArray<Prompt.Prompt>>
+  readonly modelPrompts: ReturnType<LaneModels["promptsFor"]>
+  readonly modelToolNamesFor: (profile: Profile) => Effect.Effect<ReadonlyArray<ReadonlyArray<string>>>
   readonly close: () => void
   readonly done: Effect.Effect<void>
   readonly quit: Effect.Effect<void>
@@ -195,7 +197,10 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     defaultWorkspace: workspace,
     makeThreadId: Effect.sync(() => Thread.ThreadId.make(`tui-thread-${nextThread++}`)),
     makeTurnId: Effect.sync(() => Turn.TurnId.make(`tui-turn-${nextTurn++}`)),
-    resolveExecutionRoute: (mode) => Effect.succeed(laneExecutionRoute(mode)),
+    resolveExecutionRoute: (mode) => {
+      const route = laneExecutionRoute(mode)
+      return Effect.succeed(options.subagents === undefined ? route : { ...route, subagents: options.subagents })
+    },
     interactive: (settings, current) => {
       session = current
       return runInteractive(settings, {
@@ -321,6 +326,10 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     waitModelRequests: awaitModelRequests,
     modelRequestCount: laneModels.requestCountFor("Root"),
     modelPrompts: laneModels.promptsFor("Root"),
+    modelToolNamesFor: (profile) =>
+      laneModels
+        .requestsFor(profile)
+        .pipe(Effect.map((requests) => requests.map((request) => request.tools.map((tool) => tool.name).toSorted()))),
     close: () => setup.mockInput.pressCtrlC(),
     done: Fiber.join(operationFiber).pipe(Effect.asVoid, Effect.orDie),
     quit: Effect.gen(function* () {

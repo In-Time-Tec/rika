@@ -204,9 +204,10 @@ export const resolve: {
       ]),
     ) as NonNullable<ExecutionRouteSnapshot["agents"]>
     return {
-      version: 1,
+      version: 2,
       mode,
       ...(tuning?.tokenBudget === undefined ? {} : { tokenBudget: tuning.tokenBudget }),
+      subagents: settings.subagents,
       compaction: { strategy: "default", summaryPrompt: defaultCompactionSummaryPrompt },
       title: snapshot(ModelRouteResolution.resolveThreadTitleRoute(settings), "title", authentication),
       compactionSummary: snapshot(

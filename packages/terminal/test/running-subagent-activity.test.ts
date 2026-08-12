@@ -7,8 +7,8 @@ const cell = (id: string, status: string) => ({
   id,
   status,
   visual: "ts",
-  summary: "await rika.agents.spawn({})",
-  source: { text: "await rika.agents.spawn({})", lines: 1, truncated: false },
+  summary: "await work()",
+  source: { text: "await work()", lines: 1, truncated: false },
   output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
   epoch: 0,
   notices: [],
@@ -40,9 +40,7 @@ const activityOf = (blocks: ReadonlyArray<unknown>, items: ReadonlyArray<unknown
   formatActivity(runningToolsActivity(model(blocks, items)))
 
 describe("running subagent activity", () => {
-  test("counts a running subagent card, which is the only shape a delegating cell produces", () => {
-    // A cell spawns children, so the card IS the subagent; counting only agent-family ToolCalls
-    // reports zero while the user is plainly waiting on a subagent.
+  test("counts a running subagent card", () => {
     expect(activityOf([cell("k", "complete"), card("c", "running")], [block(0, "k"), block(1, "c", "k")])).toBe(
       "Running 1 subagent",
     )
@@ -58,7 +56,6 @@ describe("running subagent activity", () => {
   })
 
   test("leaves a nested child to the subagent that owns it", () => {
-    // root cell -> Task card -> Task's cell -> Oracle card. The user delegated once.
     expect(
       activityOf(
         [cell("k", "complete"), card("task", "running"), cell("tk", "complete"), card("oracle", "running")],

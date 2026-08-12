@@ -72,16 +72,6 @@ const callSource = (call: BindingCall): string =>
 
 const bindingSource = (call: BindingCall): string => `await ${callSource(call)}`
 
-const spawnCall = (child: SpawnRequest): BindingCall => ({
-  module: "agents",
-  operation: "spawn",
-  input: {
-    profile: child.profile,
-    prompt: child.prompt,
-    ...(child.name === undefined ? {} : { name: child.name }),
-  },
-})
-
 export const step = {
   text: (value: string, delayMillis?: number): Step =>
     TestModel.turn([TestModel.text(value)], delayMillis === undefined ? {} : { delay: `${delayMillis} millis` }),
@@ -106,18 +96,30 @@ export const step = {
   cell: (code: string, id: string): Part => TestModel.toolCall(CellTool.name, { code }, { id }),
   binding: (call: BindingCall, id: string): Part => step.cell(bindingSource(call), id),
   bindings: (calls: ReadonlyArray<BindingCall>, id: string): Part => step.cell(calls.map(bindingSource).join("\n"), id),
-  /**
-   * Several children are admitted concurrently, so the calls enter `Promise.all` UNAWAITED. An
-   * `await` inside the array literal settles each admission before the next begins, which is
-   * sequential delegation wearing the shape of parallel delegation.
-   */
   spawn: (children: ReadonlyArray<SpawnRequest>, id: string): Part =>
-    step.cell(
-      children.length === 1
-        ? bindingSource(spawnCall(children[0]!))
-        : `await Promise.all([${children.map((child) => callSource(spawnCall(child))).join(", ")}])`,
-      id,
-    ),
+    children.length === 1
+      ? TestModel.toolCall(
+          "run_child",
+          {
+            selection: children[0]!.profile,
+            prompt: children[0]!.prompt,
+            ...(children[0]!.name === undefined ? {} : { label: children[0]!.name }),
+          },
+          { id },
+        )
+      : TestModel.toolCall(
+          "run_child_group",
+          {
+            members: children.map((child, index) => ({
+              key: child.name ?? `${child.profile.toLowerCase()}-${index}`,
+              selection: child.profile,
+              prompt: child.prompt,
+              ...(child.name === undefined ? {} : { label: child.name }),
+            })),
+            concurrency: children.length,
+          },
+          { id },
+        ),
   failure: (description: string, delayMillis?: number): Step =>
     TestModel.failure(
       AiError.make({
@@ -171,6 +173,7 @@ export interface LaneModels {
   readonly registryLayer: Layer.Layer<ModelRegistry.ModelRegistry>
   readonly requestCount: Effect.Effect<number>
   readonly requestCountFor: (profile: Profile) => Effect.Effect<number>
+  readonly requestsFor: (profile: Profile) => Effect.Effect<ReadonlyArray<TestModel.Request>>
   readonly promptsFor: (profile: Profile) => Effect.Effect<ReadonlyArray<Prompt.Prompt>>
 }
 
@@ -206,6 +209,7 @@ export const makeLaneModels = Effect.fn("BatonTestHarness.makeLaneModels")(funct
     ),
     requestCountFor: (profile) =>
       fixtures[profiles.indexOf(profile)]!.requests.pipe(Effect.map((requests) => requests.length)),
+    requestsFor: (profile) => fixtures[profiles.indexOf(profile)]!.requests,
     promptsFor: (profile) => fixtures[profiles.indexOf(profile)]!.prompts,
   } satisfies LaneModels
 })

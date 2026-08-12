@@ -20,15 +20,6 @@ export interface ProjectorCheckpointInput {
   readonly nodes: Map<string, Node>
   readonly cardsByInvocation: Map<string, Card>
   readonly cardsByChild: Map<string, Card>
-  readonly pendingGroups: Array<{
-    readonly parentRawRunId: string
-    readonly toolCallId: string
-    readonly memberKeys: ReadonlyArray<string>
-  }>
-  readonly fanOutTools: Map<
-    string,
-    { readonly parentRawRunId: string; readonly toolCallId: string; readonly memberKeys: ReadonlyArray<string> }
-  >
   readonly authorizations: Map<string, AuthorizationState>
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
   readonly toolBlock: (node: Node, rawId: string) => Extract<Block, { readonly _tag: "ToolCall" }> | undefined
@@ -45,8 +36,6 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
     nodes,
     cardsByInvocation,
     cardsByChild,
-    pendingGroups,
-    fanOutTools,
     authorizations,
     localId,
     toolBlock,
@@ -133,8 +122,6 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
       ...usage.persist(),
       nodes: compact.nodes,
       cards: compact.cards,
-      pendingGroups: pendingGroups.slice(-64),
-      fanOutTools: [...fanOutTools].slice(-64),
       authorizations: [...authorizations].filter(([, pendingAuthorization]) =>
         compact.units.some(([key]) => key === pendingAuthorization.unitKey),
       ),
@@ -155,8 +142,6 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
       !Array.isArray(parsed.attemptStarts) ||
       !Array.isArray(parsed.settledAttemptKeys) ||
       !Array.isArray(parsed.modelCalls) ||
-      !Array.isArray(parsed.pendingGroups) ||
-      !Array.isArray(parsed.fanOutTools) ||
       !Array.isArray(parsed.authorizations) ||
       typeof parsed.activeAvailable !== "boolean" ||
       !Number.isSafeInteger(parsed.activeDepth) ||
@@ -225,9 +210,6 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
       cardsByInvocation.set(`${card.parentRawRunId}\u0000${card.rawInvocationId}`, card)
       if (card.rawChildRunId !== undefined) cardsByChild.set(card.rawChildRunId, card)
     }
-    pendingGroups.splice(0, pendingGroups.length, ...parsed.pendingGroups)
-    fanOutTools.clear()
-    for (const [key, value] of parsed.fanOutTools) fanOutTools.set(key, value)
     authorizations.clear()
     for (const [key, value] of parsed.authorizations) authorizations.set(key, value)
     core.checkpoint = resumeCheckpoint

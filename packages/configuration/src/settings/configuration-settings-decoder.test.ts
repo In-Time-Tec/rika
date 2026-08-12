@@ -23,6 +23,7 @@ describe("ConfigContract", () => {
       candidates: ["gpt-5.6-luna"],
       limits: { contextWindow: 272_000, maxInputTokens: 258_400, maxOutputTokens: 128_000, keepRecentTokens: 32_000 },
     })
+    expect(ConfigContract.defaults.subagents).toEqual({ maxDepth: 4, maxSubagents: 4 })
     expect(Models.catalog.gpt56Sol.limits.contextWindow).toBe(272_000)
     expect(ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")).toMatchObject({
       alias: "terra",
@@ -347,6 +348,40 @@ describe("ConfigContract", () => {
     expect(() =>
       ConfigContract.decodeSettingsInput("settings.json", { logging: { level: "info", file: "/tmp/rika.log" } }),
     ).toThrowError(/unknown key file/)
+  })
+
+  it("accepts non-negative recursive subagent limits and merges each setting by scope", () => {
+    const global = ConfigContract.decodeSettingsInput("global/settings.json", {
+      subagents: { maxDepth: 2, maxSubagents: 8 },
+    })
+    const workspace = ConfigContract.decodeSettingsInput("workspace/settings.json", {
+      subagents: { maxSubagents: 3 },
+    })
+    expect(ConfigContract.mergeConfigurationSettings({ global, workspace }).subagents).toEqual({
+      maxDepth: 2,
+      maxSubagents: 3,
+    })
+    expect(
+      ConfigContract.decodeSettingsInput("settings.json", { subagents: { maxDepth: 0, maxSubagents: 0 } }),
+    ).toEqual({
+      subagents: { maxDepth: 0, maxSubagents: 0 },
+    })
+    for (const subagents of [
+      { maxDepth: -1 },
+      { maxDepth: 1.5 },
+      { maxDepth: 1_025 },
+      { maxSubagents: 1_025 },
+      { maxSubagents: "4" },
+    ])
+      expect(() => ConfigContract.decodeSettingsInput("settings.json", { subagents })).toThrowError(
+        /integer between 0 and 1024/,
+      )
+    expect(
+      ConfigContract.decodeSettingsInput("settings.json", { subagents: { maxDepth: 1_024, maxSubagents: 1_024 } }),
+    ).toEqual({ subagents: { maxDepth: 1_024, maxSubagents: 1_024 } })
+    expect(() =>
+      ConfigContract.decodeSettingsInput("settings.json", { subagents: { maxDepth: 1, maxPerDepth: 4 } }),
+    ).toThrowError(/unknown key maxPerDepth/)
   })
 
   it.each([

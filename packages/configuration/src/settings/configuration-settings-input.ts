@@ -56,6 +56,7 @@ export interface ConfigurationSettingsInput {
   readonly providers?: Partial<Readonly<Record<ModelRoute.ProviderId, ModelRoute.ProviderOverride>>>
   readonly modelAliases?: Readonly<Record<string, ModelAliasInput>>
   readonly modelRoutes?: ModelRoutesInput
+  readonly subagents?: Partial<ConfigurationSettings["subagents"]>
   readonly keymap?: Readonly<Record<string, string>>
   readonly extensionRoots?: ReadonlyArray<string>
   readonly mcp?: Readonly<Record<string, McpDefinition>>

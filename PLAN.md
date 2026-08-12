@@ -1,27 +1,28 @@
-# PLAN: One model-facing TypeScript REPL for Rika on Baton
+# PLAN: A persistent TypeScript RLM with Baton-native child control
 
 ## Goal
 
-Give every conversational Rika Agent exactly one built-in tool — a persistent **Bun/TypeScript/Effect cell** — while preserving Rika's terminal product unchanged and Baton's durable execution authority unchanged.
+Give every conversational Rika Agent a persistent **Bun/TypeScript/Effect cell** for its RLM environment, plus Baton's blocking singleton and grouped child tools for restart-safe recursive control.
 
-The model works the way Prime Agent's model works: it writes code into a long-lived environment where everything it previously wrote is still there. Variables, functions, imports, parsed data, child handles, and analysis persist across cells, Rika Turns, and compaction. Session history, resolved context, and the continual harness are reachable as data from inside that environment, so the model can inspect, search, partition, and delegate over context that no longer fits its token window.
+The model works the way Prime Agent's model works: it writes code into a long-lived environment where everything it previously wrote is still there. Variables, functions, imports, parsed data, and analysis persist across cells, Rika Turns, and compaction. Session history, resolved context, and the continual harness are reachable as data from inside that environment, so the model can inspect, search, and partition context that no longer fits its token window. Delegation remains outside the JavaScript continuation: Baton suspends the parent Run on `run_child` or `run_child_group` and resumes that same Run durably after settlement.
 
 ```text
 Rika TUI / CLI
     │ Threads, Turns, projections, presentation (unchanged)
     ▼
 Baton Runtime
-    │ durable Runs, model turns, one Tool, children, events, cancellation, compaction (unchanged)
+    │ durable Runs, model turns, children, events, cancellation, compaction
+    ├── run_child / run_child_group (durable suspension and resumption)
     ▼
-typescript { code }
+typescript { code } (persistent RLM environment)
     │ persistent Bun worker per Baton Session, replMode transform + vm context
     ├── ordinary TypeScript with top-level await, imports, Bun.$ project commands
     ├── rika.* typed host modules (Effect-backed, host-authoritative)
-    ├── context / history / harness / agents variables (context as data)
-    └── Baton Child Runs, durable messages, artifacts
+    ├── context / history / harness variables (context as data)
+    └── artifacts
 ```
 
-The language changes from Prime's Python to TypeScript. The architecture that makes Prime work does not change: one programmatic action surface, a persistent control environment, a host-owned control plane, real isolated child agents, progressive skills, and honest recovery semantics.
+The language changes from Prime's Python to TypeScript. The architecture that makes Prime work remains: a persistent programmatic environment, a host-owned control plane, real isolated child agents, progressive skills, and honest recovery semantics. Child suspension is the deliberate native control boundary because a JavaScript promise cannot be reconstructed after process death.
 
 ## Why TypeScript instead of IPython
 
@@ -85,7 +86,6 @@ A working prototype (worker + host, ~200 lines, Bun 1.3.14, run against the real
 | `function summarize(...)` declared in cell 4, called in cell 10                | persists                                                                                                                                                                                                                                                                      |
 | `const { Effect } = await import("effect"); Effect.runPromise(...)`            | works via `importModuleDynamically: vm.constants.USE_MAIN_CONTEXT_DEFAULT_LOADER`                                                                                                                                                                                             |
 | `require(...)` resolved against the workspace                                  | works via `createRequire(workspaceRoot)`                                                                                                                                                                                                                                      |
-| `await rika.agents.spawn(...)` host request from an executing cell             | replies without deadlock when the worker read loop is never blocked behind the executing cell (Prime's control-channel lesson, restated for stdio)                                                                                                                            |
 | `await rika.context.historyPage({ limit: 50 })` then filter in TS              | context as data works                                                                                                                                                                                                                                                         |
 | `Bun.spawnSync(["bun", "--version"])`                                          | project-native commands work                                                                                                                                                                                                                                                  |
 | `throw new Error("boom")` in cell 9                                            | typed cell failure; cell 10 still sees all prior state                                                                                                                                                                                                                        |
@@ -118,10 +118,10 @@ Rika facts this plan replaces (verified): role toolkits assemble 0–14 tools pe
 
 - Ordinary typed `Tool.make` tools, Toolkits, `ToolExecutor` routes, approvals, and permissions remain first-class for every Baton application.
 - Agent Programs, `ProgramHost`, capability sandboxes, and `code_mode` remain the right answer where exact replay and capability-only authority matter.
-- Blocking `ChildRuns.invoke` and child groups remain alongside the new non-blocking admission.
+- Blocking `ChildRuns.invoke` and exact child groups remain the durable parent-continuation boundary.
 - The loop already supports mixed toolkits, so one Agent may advertise the `typescript` cell tool **and** ordinary typed tools together; hosts choose per Agent definition. Nested durable operations, history paging, and the inbox are generic Runtime features usable by tool-based agents too.
 
-The one-tool cutover in later phases is a **Rika product decision**, gated by the Phase 5 eval — not a Baton framework direction. Other Baton hosts (and any future Rika profile that wants a fixed typed menu) keep the old way unchanged.
+Rika's narrow tool surface is a **Rika product decision**, gated by the Phase 5 eval — not a Baton framework direction. The `typescript` cell owns the programmatic environment; `run_child` and `run_child_group` are the only native control operations because Baton must own their durable continuation. Other Baton hosts keep the broader framework unchanged.
 
 ### Ownership test
 
@@ -137,7 +137,7 @@ One rule decides placement: **if any Baton host building an agent product would 
   - The **host-binding seam** lives in the root export: a generic registry by which a host mounts named, Schema-typed modules into the kernel namespace (Rika mounts `rika.*`; another host mounts its own). The deadlock-free reply rule lives here, once.
 - **Continual harness (generic engine)** — Prime proves this is host-independent agent infrastructure, and any Baton host wants it: entry kinds (prompt note/memory/skill/subagent spec), versioned entries with before/after snapshots, refinement events, rollback proposals, scope merging, bounded prompt-overview formatting, and content-addressed snapshot pinning into executable registrations. Rika supplies the stores' locations, its scope policy (Thread/Workspace/global), and the `/refine` product flow.
 - Generic nested durable host operations under `ToolContext` (persisted certainty, digest checks, duplicate-return, approval suspension) — used by cell host-bindings and by ordinary tools alike.
-- Non-blocking singleton child admission, direct-child list/inspect/join/cancel, origin correlation into child-tree events (extends `ChildRuns`).
+- Root-pinned recursive tree policy, blocking singleton and atomic exact-group child admission, per-parent lifetime quota enforcement, and structured child correlation in tree events.
 - Read-only Session history paging/search over exact entries and compaction checkpoints — the generic "context as data" surface any host binds into its kernel.
 - **Addressable agent messaging (first-class, Baton-owned).** Baton already has the foundation — branded `Address`, a `Message` envelope with `to`/`from`/`inReplyTo`/`correlationId`/`idempotencyKey`, `Runtime.send`, `AddressBinding`, and a reserved `send` driver-operation kind — but the durable-driver docs state plainly that "addressed messaging is not wired". This migration wires it, because agent-to-agent communication is host-independent infrastructure every Baton product needs:
   - **Directory:** every Run (root and child) is addressable by a stable Address derived from authoritative identity, plus an optional host-assigned friendly name scoped to its parent. Sessions are addressable so messages can cross Rika Threads.
@@ -147,14 +147,14 @@ One rule decides placement: **if any Baton host building an agent product would 
   - **Authorization:** relationship-scoped by default (parent ↔ direct child, sibling ↔ sibling within a parent) with an explicit host policy seam for cross-session addressing; scope is enforced by Baton from authoritative identity, never from IDs supplied by model code.
   - **Discovery:** list reachable addresses for the current Run under that policy.
 
-  Rika binds this as `rika.agents.send/receive` and `rika.messages.*`; the mailbox, ordering, durability, and authorization all stay in Baton.
+  Any future Rika messaging surface delegates mailbox, ordering, durability, and authorization to Baton rather than combining them with child admission.
 
 - Skill-source remains Baton's existing seam (`SkillSource`, `@batonfx/skills`); executable TypeScript-backed skill packages extend that seam generically (import-name metadata, environment digest), with Rika owning only discovery locations and precedence.
 
 ### Rika owns (product)
 
 - **`@rika/kernel`** (thin): composes `@batonfx/repl/bun` with Rika's data root, workspace, limits, trust mode, and mounted bindings; doctor/install UX.
-- The `rika.*` binding surface and its Schema contracts — the product capability menu: workspace search/replace, processes, web, media, threads, agents, messages, context, harness. (The mounting mechanism is Baton's; the modules and their semantics are Rika's.)
+- The `rika.*` binding surface and its Schema contracts — the product capability menu: workspace search/replace, processes, web, media, threads, context, harness, and goals. (The mounting mechanism is Baton's; the modules and their semantics are Rika's.)
 - Kernel-profile registration content for Rika executables (Bun version, runtime digest, skills digest, workspace, trust mode).
 - Harness store locations, Rika's scope policy, refine UX, and audit presentation.
 - Skill discovery locations and precedence (global/Workspace), prompt metadata assembly.
@@ -186,7 +186,6 @@ rika.processes   start, status, stop            (long-running, streamed)
 rika.web         search, readPage               (credentialed, host-side)
 rika.media       attach                          (images into model context)
 rika.threads     search, read                    (cross-Thread retrieval)
-rika.agents      spawn, list, inspect, join, cancel, send
 rika.context     current, historyPage, searchHistory, compactions
 rika.harness     snapshot, createMemory/Skill/Subagent/PromptNote, update*, delete*, recordRefinement, rollback
 rika.artifacts   put, get                        (large values out of context)
@@ -209,19 +208,21 @@ Backed by Baton's exact `SessionStore` path — including entries behind compact
 
 ### Recursive agents (real Baton Child Runs)
 
-```ts
-const reviewer = await rika.agents.spawn({
-  profile: "Review",
-  name: "provider-reviewer",
-  prompt: "Review the provider boundary",
-  inputs: { files: await rika.artifacts.put(fileList) },
-})
-// admission handle only — never the answer
-const outcomes = await rika.agents.join([reviewer.runId])
-// join reports current durable state; it does not block. Admission handles never carry answers.
+```json
+{
+  "members": [
+    {
+      "key": "provider-review",
+      "selection": "Review",
+      "label": "Provider reviewer",
+      "prompt": "Review the provider boundary"
+    }
+  ],
+  "concurrency": 1
+}
 ```
 
-Admission is non-blocking and idempotent; the host derives parent/root/depth/budget from `ToolContext` (unforgeable from cell code); each child is a normal durable Baton Run with its own Session and lazy kernel; `list`/`inspect` rebuild from Baton state after kernel restart, compaction, or Server restart; child cards render from Baton child-tree events exactly as today. Detached `send`/reply messaging lands only after the durable inbox exists.
+`run_child_group` admits the exact group atomically and blocks the model tool operation until every member settles. Baton derives parent, root, depth, policy, and tool-call identity from `ToolContext`; each child is a normal durable Run with its own Session and lazy kernel. The root is depth zero. `maxDepth` bounds child edges, while `maxSubagents` is each parent's lifetime direct-child quota. Replay returns the same children before charging quota, terminal children do not refund slots, and each eligible child independently receives the same allowance. Child cards render from structured Baton child-tree events.
 
 ### Continual harness
 
@@ -232,7 +233,7 @@ Authority and timing:
 1. Cells and `/refine` propose edits through `rika.harness.*` host requests (validated, audited).
 2. Applied edits produce a new content-addressed harness snapshot.
 3. The snapshot is pinned in the executable registrations of the **next** Execution; a running model turn never has its system prompt silently rewritten. (Prime applies mid-session in a disconnected critical section; Rika's Baton-pinned variant is stricter and replays exactly.)
-4. The system prompt carries only the compact overview (bounded entries per kind, bounded content, subagent roster with native `rika.agents.spawn` call forms); full entries are read on demand via `rika.harness.snapshot()`.
+4. The system prompt carries only the compact overview (bounded entries per kind and bounded content); full entries are read on demand via `rika.harness.snapshot()`, while delegation uses Baton's pinned child selections.
 5. Rollback is a first-class operation using recorded before/after snapshots.
 
 ### Skills
@@ -297,7 +298,7 @@ The kernel runs with the Rika Server user's OS permissions. It is a lifecycle bo
 
 One new semantic block, everything else unchanged.
 
-**Cell block** (added to the transcript Block union): collapsed → status marker, `ts` label (or `$` visual language when the cell is a single `Bun.$`/process call), first meaningful line, line counts, duration, truncation; expanded → highlighted source, streamed stdout/stderr, result, collapsed traceback, restore/loss/epoch notices. Diffs from `rika.workspace.replace` render the existing diff presentation; images via `rika.media.attach` render the existing image block; processes render the existing process rows. Child Runs spawned from cells render today's SubagentCards from Baton child events with origin-cell correlation — never from parsing cell source. Approval and recovery cards extend the existing authorization presentation. Projection stays in `@rika/baton-execution` folding Baton events into semantic units; OpenTUI renders units; live and reloaded paths share the fold; checkpoint version bumps.
+**Cell block** (added to the transcript Block union): collapsed → status marker, `ts` label (or `$` visual language when the cell is a single `Bun.$`/process call), first meaningful line, line counts, duration, truncation; expanded → highlighted source, streamed stdout/stderr, result, collapsed traceback, restore/loss/epoch notices. Diffs from `rika.workspace.replace` render the existing diff presentation; images via `rika.media.attach` render the existing image block; processes render the existing process rows. Baton-native child calls render SubagentCards at their actual parent Run level, with descendants nested under the child that invoked them. Approval and recovery cards extend the existing authorization presentation. Projection stays in `@rika/baton-execution` folding Baton events into semantic units; OpenTUI renders units; live and reloaded paths share the fold; checkpoint version bumps.
 
 ## Package and source impact
 
@@ -306,13 +307,13 @@ One new semantic block, everything else unchanged.
 - New optional `@batonfx/repl`: root export carries cell/`KernelProfile`/event Schemas, snapshot-store port, host-binding registry, the one Tool, a test worker, docs (no process deps); the `@batonfx/repl/bun` subpath carries the full Bun kernel — worker pool + lease, replMode/vm evaluation, output capture/bounds, watchdog escalation, three-tier snapshot/restore + import replay, `@effect/platform` BunWorker transport. The only module with process dependencies.
 - New `@batonfx/harness` (or a `core` module if small enough): generic continual-harness engine — entry kinds, versions, before/after snapshots, refinement events, rollback, scope merge, prompt-overview formatting, content-addressed snapshot registration codec.
 - `@batonfx/core`: nested-operation port on `ToolContext`/`ToolExecutor` only.
-- `@batonfx/runtime`: nested-operation executor + stores; non-blocking singleton child admission/inspect/join/cancel; origin correlation in child-tree events; Session history paging/search; (later) durable family inbox. Memory + all-SQL parity; replace the greenfield SQL baseline rather than shimming.
+- `@batonfx/runtime`: nested-operation executor + stores; root-pinned recursive child policy; blocking singleton and exact-group admission with structured origin correlation; Session history paging/search; (later) durable family inbox. Memory + all-SQL parity; replace the greenfield SQL baseline rather than shimming.
 - `@batonfx/skills`: executable TypeScript-backed skill package metadata (import name, environment digest) extending the existing `SkillSource` seam.
 
 **Rika (after pinning released Baton):**
 
 - New thin `@rika/kernel`: composes `@batonfx/repl/bun` with Rika data root, workspace, limits, trust mode, mounted `rika.*` bindings; doctor probes.
-- `@rika/baton-execution`: one `typescript` tool per conversational manifest (Title stays tool-free); kernel-profile + harness-snapshot registrations; the `rika.*` binding implementations over existing Effect services; cell/recovery projections; delete role-toolkit assembly, child model tools, and Code Mode composition after cutover.
+- `@rika/baton-execution`: `typescript` in conversational manifests (Title stays tool-free), with Baton's Execution Host dynamically supplying `run_child` and `run_child_group` while recursive policy permits them; kernel-profile + harness-snapshot registrations; the `rika.*` binding implementations over existing Effect services; cell/recovery projections; delete broad role-toolkit assembly and Code Mode composition after cutover.
 - `@rika/coding-tools`: keep the bounded Effect operations and presentation results as `rika.*` backends and the direct human shell; delete model-facing `Tool.make` declarations and catalogs after cutover.
 - `@rika/extensions`: skill discovery locations/precedence, harness store locations and scope policy, refine UX.
 - `@rika/transcript` / `product-store` / `terminal`: Cell block, checkpoint version, recovery cards.
@@ -331,7 +332,7 @@ Must be demonstrated live and after reload, with recorded evidence (pilotty snap
 - file diffs from `rika.workspace.replace` rendering in the existing diff presentation
 - process rows and long-running command output
 - image attachments
-- subagent cards: spawn from a cell, live status transitions, expand/collapse, nested child activity, nested-child-of-child, exactly-once rendering, cancellation
+- subagent cards: native blocking singleton and group admission, live status transitions, expand/collapse, nested child activity, nested-child-of-child, exactly-once rendering, cancellation
 - agent messaging surfaced in the transcript (parent↔child, sibling↔sibling, cross-Thread)
 - approval and recovery cards, kernel restart notices, state-restored/state-lost notices
 - compaction, Thread reload, and Server restart producing identical presentation
@@ -374,21 +375,21 @@ Observed defect: the Rika Server sits near 100% CPU while idle. This must be dia
 
 **Phase 1 — `@batonfx/repl` + core port.** Contracts, tool, direct `Agent.stream` proof with the test worker and a real Bun worker: state across cells, exclusivity, authored order, error recovery, bounds, interruption, restore manifests, resource release.
 
-**Phase 2 — runtime primitives.** Nested operations (fault-injected across memory + all SQL backends), non-blocking children, history paging, hosted tool proof through SQLite Runtime with `replayPolicy: "never"` cells.
+**Phase 2 — runtime primitives.** Nested operations (fault-injected across memory + all SQL backends), blocking singleton and grouped children, tree policy, history paging, hosted tool proof through SQLite Runtime with `replayPolicy: "never"` cells.
 
-**Phase 3 — Rika vertical slice.** `@rika/kernel` + host router + profile/harness registrations + cell projection + recovery/restart controls. Root and one child profile on the one tool behind a dev flag. Exit: scripted `*.tui.test.ts` + Pilotty show state reuse across Turns, an edit diff, an image, parallel children, cancellation, reload, restart notice.
+**Phase 3 — Rika vertical slice.** `@rika/kernel` + host router + profile/harness registrations + cell projection + recovery/restart controls. Root and one child profile use the persistent cell and Baton-native child control behind a dev flag. Exit: scripted `*.tui.test.ts` + Pilotty show state reuse across Turns, an edit diff, an image, parallel children, cancellation, reload, restart notice.
 
 **Phase 4 — context, harness, skills, messaging.** History paging + cross-Thread APIs in the kernel; harness store/snapshot pinning/refine/rollback; TS-backed skills + MCP proxies; durable inbox + message presentation; doctor.
 
-**Phase 5 — comparative eval.** Frozen baseline vs one-tool candidate, identical models/prompts/budgets, multiple seeds, end-state scoring: repo discovery/edit, multi-file refactor + test repair, long output, web research, images, cross-Thread + post-compaction recovery, parallel/nested children, restarts mid-cell, prompt injection, dangerous commands. Cut over only if durability/cancellation/TUI contracts all pass, task quality does not meaningfully regress, action-failure and context overhead improve or hold, and packaging is green. Otherwise fix the programming model or stop.
+**Phase 5 — comparative eval.** Frozen baseline vs the cell-first candidate, identical models/prompts/budgets, multiple seeds, end-state scoring: repo discovery/edit, multi-file refactor + test repair, long output, web research, images, cross-Thread + post-compaction recovery, parallel/nested children, restarts mid-cell, prompt injection, dangerous commands. Cut over only if durability/cancellation/TUI contracts all pass, task quality does not meaningfully regress, action-failure and context overhead improve or hold, and packaging is green. Otherwise fix the programming model or stop.
 
-**Phase 6 — clean break.** Delete role toolkits, model-facing tool declarations, child model tools, Code Mode + QuickJS package, name-specific projection branches, unenforceable permission config; update CONTEXT/feature docs/graph/tests. No permanent dual production path.
+**Phase 6 — clean break.** Delete broad role toolkits, obsolete model-facing tool declarations, Code Mode + QuickJS package, name-specific projection branches, unenforceable permission config, and Rika-owned child admission; retain only the cell and Baton-native blocking child tools. Update CONTEXT/feature docs/graph/tests. No permanent dual production path.
 
 **Phase 7 — release.** Baton focused tests + check + package → publish → pin in Rika → remove aliases → Rika unit/TUI/proc + check + per-target package + release-smoke → Pilotty + Agent TTY evidence for cell, diff, error, image, cancel/kill-restore, compaction, children, Server-restart flows.
 
 ## Verification contracts
 
-- Provider sees exactly one `typescript` tool per conversational role; Title none: scripted request capture.
+- A recursively eligible provider sees exactly `typescript`, `run_child`, and `run_child_group`; a depth-limited conversational leaf sees only `typescript`; Title sees none: scripted request capture.
 - Declarations persist across cells and Turns but not across Sessions: real-worker + SQLite integration.
 - Cells exclusive and authored-order; host replies never deadlock an executing cell: concurrency tests + delayed-reply test.
 - Nested host effects keep exact certainty/approval: fault injection at every journal boundary, duplicate/digest tests, memory + all-SQL parity.
@@ -406,14 +407,14 @@ Observed defect: the Rika Server sits near 100% CPU while idle. This must be dia
 
 ## Stop conditions
 
-Stop and report rather than paper over: host replies to executing cells cannot be made deadlock-free; a supported target cannot run the worker reliably packaged; recovery requires replaying uncertain cell code; kernel state gets described as durable beyond the tested class; children bypass Baton admission/budgets/events/cancellation; preserving subagent cards requires parsing cell source; the eval shows an unrecovered quality regression; the design needs a permanent many-tool fallback.
+Stop and report rather than paper over: host replies to executing cells cannot be made deadlock-free; a supported target cannot run the worker reliably packaged; recovery requires replaying uncertain cell code; kernel state gets described as durable beyond the tested class; children bypass Baton admission/policy/events/cancellation; preserving subagent cards requires parsing cell source or opaque IDs; the eval shows an unrecovered quality regression; the design needs a permanent broad many-tool fallback.
 
 ## Final acceptance
 
-- Every conversational provider request advertises exactly one `typescript` tool.
+- Recursively eligible conversational requests advertise only `typescript`, `run_child`, and `run_child_group`; depth-limited leaves advertise only `typescript`; Title advertises none.
 - Variables, functions, and imports persist across cells, Rika Turns, and compaction in a live Server; restart restores serializable state or reports exact losses; uncertain cells are never replayed.
 - Session history, compaction checkpoints, cross-Thread transcripts, references, and the harness are queryable as data from cells with bounded results.
-- Child Runs from cells are durable Baton executions with unchanged Rika subagent presentation.
+- Child Runs use Baton-native blocking control, resume the same parent Run, and retain Rika's nested subagent presentation live and after reload.
 - Harness refinements are versioned, scoped, pinned per Execution, rollback-able, and visible in the TUI.
 - `rika.*` capabilities stay Schema-validated, Effect-interruptible, credential-free in the kernel, and nested-operation-journaled.
 - The TUI renders cells, output, errors, diffs, images, processes, messages, children, approvals, and recovery coherently live and reloaded.
