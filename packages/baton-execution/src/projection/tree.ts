@@ -683,6 +683,14 @@ const make = (
     },
     apply: (input) => applyAll([input]),
     applyAll: (inputs) => applyAll(inputs),
+    previewRunIds: () =>
+      [...cardsByChild].flatMap(([runId, card]) => {
+        const candidate = units.get(card.unitKey)
+        if (candidate?.content._tag !== "Block" || candidate.content.block._tag !== "SubagentCard") return [runId]
+        const status = candidate.content.block.status
+        return status === "complete" || status === "failed" || status === "cancelled" ? [] : [runId]
+      }),
+    previewParentId: (runId) => cardsByChild.get(runId)?.blockId,
     applyTitle,
   }
 }

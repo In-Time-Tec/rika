@@ -14,7 +14,6 @@ export type { ProviderCredentialStoreShape } from "@rika/product/provider-creden
 import { Cause, Context, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
 import type { KernelOptions } from "./baton-route-options"
 import { configure, makeResolver } from "./baton-route"
-import * as PreviewAdapter from "./baton-preview-adapter"
 import { TreeProjector } from "./projection/tree"
 
 /**
@@ -324,42 +323,85 @@ const make = (options: Options, credentialStore: ProviderCredentialStoreShape | 
               )
         let pendingTitle: Run.RunSnapshot | null | undefined
         let rootProjected = input?.checkpoint !== undefined
-        const projections = Stream.merge(rootEvents, titleEvents).pipe(
+        const projected = Stream.merge(rootEvents, titleEvents).pipe(
           Stream.map((event) => {
             if (event._tag === "title") {
               if (!rootProjected && pendingTitle === undefined) {
                 pendingTitle = event.snapshot ?? null
                 return []
               }
-              if (event.snapshot === undefined) return [projector.applyTitle(undefined, [])]
+              if (event.snapshot === undefined) {
+                const change = projector.applyTitle(undefined, [])
+                return change === undefined ? [] : [{ change }]
+              }
               const outcome = event.snapshot.outcome
               const text = outcome?._tag === "Succeeded" && "text" in outcome.result ? outcome.result.text : undefined
-              return [projector.applyTitle(text, event.snapshot.usage)]
+              const change = projector.applyTitle(text, event.snapshot.usage)
+              return change === undefined ? [] : [{ change }]
             }
             rootProjected = true
-            const patches: Array<ReturnType<typeof projector.apply> | undefined> = [projector.apply(event.event)]
+            const change = projector.apply(event.event)
+            const changes: Array<{
+              readonly change: ReturnType<typeof projector.apply>
+              readonly childRunId?: string
+            }> = [
+              {
+                change,
+                ...(event.event.event._tag === "ChildLinked" ? { childRunId: event.event.event.childRunId } : {}),
+              },
+            ]
             if (pendingTitle !== undefined) {
               const snapshot = pendingTitle
               pendingTitle = undefined
-              if (snapshot === null) patches.push(projector.applyTitle(undefined, []))
-              else {
+              if (snapshot === null) {
+                const titleChange = projector.applyTitle(undefined, [])
+                if (titleChange !== undefined) changes.push({ change: titleChange })
+              } else {
                 const outcome = snapshot.outcome
                 const text = outcome?._tag === "Succeeded" && "text" in outcome.result ? outcome.result.text : undefined
-                patches.push(projector.applyTitle(text, snapshot.usage))
+                const titleChange = projector.applyTitle(text, snapshot.usage)
+                if (titleChange !== undefined) changes.push({ change: titleChange })
               }
             }
-            return patches
+            return changes
           }),
           Stream.flatMap(Stream.fromIterable),
-          Stream.filter((patch): patch is NonNullable<typeof patch> => patch !== undefined),
           Stream.mapError((cause) => ExecutionGateway.WatchTurnFailure.make({ message: message(cause) })),
         )
-        const durable =
-          input?.checkpoint === undefined
-            ? Stream.concat(Stream.succeed(projector.snapshot()), projections)
-            : projections
-        const previews = (runtime as typeof runtime & PreviewAdapter.PreviewRuntime).previews({ runId: link.runId })
-        return PreviewAdapter.merge({ projections: durable, previews })
+        return Stream.unwrap(
+          Stream.broadcastN(projected, { n: 2, capacity: 64 }).pipe(
+            Effect.map(([projectionEvents, childEvents]) => {
+              const projections = Stream.map(projectionEvents, ({ change }) => change)
+              const durable =
+                input?.checkpoint === undefined
+                  ? Stream.concat(Stream.succeed(projector.snapshot()), projections)
+                  : projections
+              const previewRunIds = Stream.concat(
+                Stream.fromIterable([link.runId, ...projector.previewRunIds()]),
+                childEvents.pipe(
+                  Stream.flatMap(({ childRunId }) =>
+                    childRunId === undefined ? Stream.empty : Stream.succeed(childRunId),
+                  ),
+                ),
+              )
+              const previews = previewRunIds.pipe(
+                Stream.flatMap(
+                  (runId) => {
+                    const parentId = projector.previewParentId(runId)
+                    return runtime.previews({ runId }).pipe(
+                      Stream.map((event) => ({
+                        ...event,
+                        ...(parentId === undefined ? {} : { parentId }),
+                      })),
+                    )
+                  },
+                  { concurrency: "unbounded" },
+                ),
+              )
+              return Stream.merge(durable, previews, { haltStrategy: "left" })
+            }),
+          ),
+        )
       },
       inspectTurn: (link) =>
         RunTree.inspect(link.runId).pipe(

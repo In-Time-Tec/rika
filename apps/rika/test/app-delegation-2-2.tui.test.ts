@@ -45,13 +45,15 @@ test(
               ],
             },
           ],
+          subagents: { maxDepth: 2, maxSubagents: 4 },
           height: 48,
         })
         yield* Effect.promise(() => app.type("Delegate deep work."))
         app.pressEnter()
         const direct = yield* app.waitFrame("Parent survey working", 30_000)
         expect(direct).toContain("Running 1 subagent")
-        yield* app.clickText("Parent survey working")
+        app.pressKey("\t")
+        app.pressEnter()
         const recursive = yield* app.waitFrame("Nested survey finished", 30_000)
         expect(recursive).toContain("Parent survey")
         expect(recursive).toContain("Nested survey finished")

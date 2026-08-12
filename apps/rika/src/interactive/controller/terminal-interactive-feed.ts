@@ -18,9 +18,10 @@ const activeUnitActivity = (
   model: Model,
 ): Model["activity"] => {
   if (entry === undefined) return undefined
-  if (modelPreview?.turnId === String(entry.turn.id)) {
-    if (modelPreview.textBytes > 0) return { _tag: "Streaming", bytes: modelPreview.textBytes }
-    if (modelPreview.reasoningBytes > 0) return { _tag: "Thinking", bytes: modelPreview.reasoningBytes }
+  const previewActivity = ModelPreview.activity(modelPreview, String(entry.turn.id))
+  if (previewActivity !== undefined) {
+    if (previewActivity.textBytes > 0) return { _tag: "Streaming", bytes: previewActivity.textBytes }
+    if (previewActivity.reasoningBytes > 0) return { _tag: "Thinking", bytes: previewActivity.reasoningBytes }
   }
   const activity = transcriptActivity(model)
   return (activity.subagents ?? 0) === 0 && (activity.tools ?? 0) === 0 ? { _tag: "Waiting" } : activity

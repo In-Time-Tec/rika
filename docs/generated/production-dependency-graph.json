@@ -1998,15 +1998,6 @@
       "publicExports": ["./baton-execution"]
     },
     {
-      "id": "packages/baton-execution/src/baton-preview-adapter.ts",
-      "path": "packages/baton-execution/src/baton-preview-adapter.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
       "id": "packages/baton-execution/src/baton-provider-http.ts",
       "path": "packages/baton-execution/src/baton-provider-http.ts",
       "workspace": "@rika/baton-execution",
@@ -12702,14 +12693,6 @@
     },
     {
       "from": "packages/baton-execution/src/baton-execution.ts",
-      "to": "packages/baton-execution/src/baton-preview-adapter.ts",
-      "specifier": "./baton-preview-adapter",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-execution.ts",
       "to": "packages/baton-execution/src/baton-route-options.ts",
       "specifier": "./baton-route-options",
       "kind": "import",
@@ -12752,22 +12735,6 @@
       "from": "packages/baton-execution/src/baton-execution.ts",
       "to": "packages/product/src/authentication/provider-credential-store.ts",
       "specifier": "@rika/product/provider-credential-store",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-preview-adapter.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-preview-adapter.ts",
-      "to": "external:effect",
-      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true

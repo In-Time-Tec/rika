@@ -84,3 +84,48 @@ test(
     ),
   tuiTestTimeout,
 )
+
+test(
+  "streams a subagent answer before its model turn commits",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
+          lanes: [
+            {
+              steps: [
+                model.turn([model.spawn([{ profile: "Task", prompt: "STREAM_CHILD_PROMPT" }], "stream-child")]),
+                model.text("ROOT_AFTER_STREAM_CHILD"),
+              ],
+            },
+            {
+              profile: "Task",
+              steps: [
+                model.turn([model.part("CHILD_PREVIEW_FIRST"), model.part(" CHILD_PREVIEW_LAST")], {
+                  streamPartDelayMillis: 1_000,
+                }),
+              ],
+            },
+          ],
+          height: 36,
+        })
+
+        yield* Effect.promise(() => app.type("Stream the child answer."))
+        app.pressEnter()
+        yield* app.waitFrame("Subagent working")
+        app.pressKey("\t")
+        app.pressEnter()
+
+        const partial = yield* app.waitFrame("CHILD_PREVIEW_FIRST", 20_000)
+        expect(partial).not.toContain("CHILD_PREVIEW_LAST")
+        const durable = yield* app.transcript(Turn.TurnId.make("tui-turn-0"))
+        expect(durable?.units.some((unit) => JSON.stringify(unit.content).includes("CHILD_PREVIEW_FIRST"))).toBe(false)
+
+        const complete = yield* app.waitFrame("CHILD_PREVIEW_LAST", 20_000)
+        expect(complete).toContain("CHILD_PREVIEW_FIRST")
+        yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)

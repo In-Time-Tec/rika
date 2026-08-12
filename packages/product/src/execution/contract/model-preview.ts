@@ -4,6 +4,7 @@ const ModelPreviewMaxPayloadCharacters = 4_096
 
 const ModelPreviewIdentity = Schema.Struct({
   runId: Schema.String,
+  parentId: Schema.optionalKey(Schema.String),
   attemptFence: Schema.Int,
   turn: Schema.Int,
   modelCallId: Schema.String,
@@ -37,6 +38,7 @@ export type ModelPreviewFrame = typeof ModelPreviewFrame.Type
 const ModelPreviewCleared = Schema.Struct({
   _tag: Schema.tag("ModelPreviewCleared"),
   runId: Schema.String,
+  parentId: Schema.optionalKey(Schema.String),
   attemptFence: Schema.Int,
   generation: Schema.Int,
 })

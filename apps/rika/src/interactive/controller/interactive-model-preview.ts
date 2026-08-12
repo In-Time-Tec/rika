@@ -7,8 +7,7 @@ import { Function } from "effect"
 const retiredIdentityCapacity = 16
 const utf8Encoder = new TextEncoder()
 
-export interface Overlay {
-  readonly turnId: string
+export interface RunOverlay {
   readonly preview: ExecutionGateway.ModelPreviewFrame | undefined
   readonly identity: string | undefined
   readonly reasoning: string
@@ -20,7 +19,12 @@ export interface Overlay {
   readonly sequence: number
   readonly incomplete: boolean
   readonly retiredIdentities: ReadonlyArray<string>
-  readonly clearFences: ReadonlyMap<string, number>
+  readonly clearFence: number | undefined
+}
+
+export interface Overlay {
+  readonly turnId: string
+  readonly byRun: ReadonlyMap<string, RunOverlay>
 }
 
 const identity = (preview: ExecutionGateway.ModelPreviewFrame): string =>
@@ -55,7 +59,7 @@ const appendChanges = (
   textBytes: number,
   changes: ReadonlyArray<ExecutionGateway.ModelPreviewChange>,
 ):
-  | Pick<Overlay, "reasoning" | "text" | "reasoningLength" | "textLength" | "reasoningBytes" | "textBytes">
+  | Pick<RunOverlay, "reasoning" | "text" | "reasoningLength" | "textLength" | "reasoningBytes" | "textBytes">
   | undefined => {
   for (const change of changes) {
     const offset = change.channel === "reasoning" ? reasoningLength : textLength
@@ -82,7 +86,7 @@ const cleared = {
   textBytes: 0,
 } as const
 
-const retire = (current: Overlay): ReadonlyArray<string> =>
+const retire = (current: RunOverlay): ReadonlyArray<string> =>
   current.identity === undefined
     ? current.retiredIdentities
     : [current.identity, ...current.retiredIdentities.filter((value) => value !== current.identity)].slice(
@@ -90,13 +94,86 @@ const retire = (current: Overlay): ReadonlyArray<string> =>
         retiredIdentityCapacity,
       )
 
-const rememberClear = (current: ReadonlyMap<string, number>, runId: string, attemptFence: number) => {
-  const previous = current.get(runId)
-  if (previous !== undefined && previous >= attemptFence) return current
-  const next = new Map(current)
-  if (previous === undefined && next.size >= retiredIdentityCapacity) next.delete(next.keys().next().value!)
-  next.set(runId, attemptFence)
-  return next
+const replaceRun = (
+  current: RunOverlay | undefined,
+  incoming: ExecutionGateway.ModelPreviewEvent,
+): RunOverlay | undefined => {
+  if (incoming._tag === "ModelPreviewCleared") {
+    if (incoming.generation === 0) {
+      if (
+        current === undefined ||
+        current.preview === undefined ||
+        current.preview.attemptFence > incoming.attemptFence ||
+        current.incomplete
+      )
+        return current
+      return { ...current, ...cleared, incomplete: true }
+    }
+    const clearFence = Math.max(current?.clearFence ?? Number.NEGATIVE_INFINITY, incoming.attemptFence)
+    if (current === undefined)
+      return {
+        preview: undefined,
+        identity: undefined,
+        ...cleared,
+        sequence: -1,
+        incomplete: true,
+        retiredIdentities: [],
+        clearFence,
+      }
+    const invalidatesCurrent = current.preview !== undefined && current.preview.attemptFence <= incoming.attemptFence
+    if (!invalidatesCurrent) return clearFence === current.clearFence ? current : { ...current, clearFence }
+    if (current.incomplete && clearFence === current.clearFence) return current
+    return {
+      ...current,
+      ...cleared,
+      incomplete: true,
+      clearFence,
+    }
+  }
+  const preview = incoming
+  const nextIdentity = identity(preview)
+  if ((current?.clearFence ?? Number.NEGATIVE_INFINITY) >= preview.attemptFence) return current
+  if (current === undefined || current.preview === undefined) {
+    const appended = appendChanges("", "", 0, 0, 0, 0, preview.changes)
+    return {
+      preview,
+      identity: nextIdentity,
+      ...(preview.sequence === 0 && appended !== undefined ? appended : cleared),
+      sequence: preview.sequence,
+      incomplete: preview.sequence !== 0 || appended === undefined,
+      retiredIdentities: current?.retiredIdentities ?? [],
+      clearFence: current?.clearFence,
+    }
+  }
+  if (current.retiredIdentities.includes(nextIdentity)) return current
+  if (current.identity === nextIdentity) {
+    if (preview.sequence <= current.sequence || current.incomplete) return current
+    if (preview.sequence !== current.sequence + 1)
+      return { ...current, preview, ...cleared, sequence: preview.sequence, incomplete: true }
+    const appended = appendChanges(
+      current.reasoning,
+      current.text,
+      current.reasoningLength,
+      current.textLength,
+      current.reasoningBytes,
+      current.textBytes,
+      preview.changes,
+    )
+    return appended === undefined
+      ? { ...current, preview, ...cleared, sequence: preview.sequence, incomplete: true }
+      : { ...current, preview, ...appended, sequence: preview.sequence }
+  }
+  if (preview.attemptFence < current.preview.attemptFence) return current
+  const appended = appendChanges("", "", 0, 0, 0, 0, preview.changes)
+  return {
+    preview,
+    identity: nextIdentity,
+    ...(preview.sequence === 0 && appended !== undefined ? appended : cleared),
+    sequence: preview.sequence,
+    incomplete: preview.sequence !== 0 || appended === undefined,
+    retiredIdentities: retire(current),
+    clearFence: current.clearFence,
+  }
 }
 
 const replaceImpl = (
@@ -104,89 +181,14 @@ const replaceImpl = (
   turnId: string,
   incoming: ExecutionGateway.ModelPreviewEvent,
 ): Overlay | undefined => {
-  if (incoming._tag === "ModelPreviewCleared") {
-    if (incoming.generation === 0) {
-      if (
-        current === undefined ||
-        current.turnId !== turnId ||
-        current.preview?.runId !== incoming.runId ||
-        current.preview.attemptFence > incoming.attemptFence ||
-        current.incomplete
-      )
-        return current
-      return { ...current, ...cleared, incomplete: true }
-    }
-    if (current === undefined)
-      return {
-        turnId,
-        preview: undefined,
-        identity: undefined,
-        ...cleared,
-        sequence: -1,
-        incomplete: true,
-        retiredIdentities: [],
-        clearFences: new Map([[incoming.runId, incoming.attemptFence]]),
-      }
-    if (current.turnId !== turnId) return current
-    const clearFences = rememberClear(current.clearFences, incoming.runId, incoming.attemptFence)
-    const invalidatesCurrent =
-      current.preview?.runId === incoming.runId && current.preview.attemptFence <= incoming.attemptFence
-    if (!invalidatesCurrent) return clearFences === current.clearFences ? current : { ...current, clearFences }
-    if (current.incomplete && clearFences === current.clearFences) return current
-    return {
-      ...current,
-      ...cleared,
-      incomplete: true,
-      clearFences,
-    }
-  }
-  const preview = incoming
-  const nextIdentity = identity(preview)
   const previous = current?.turnId === turnId ? current : undefined
-  if ((previous?.clearFences.get(preview.runId) ?? Number.NEGATIVE_INFINITY) >= preview.attemptFence) return previous
-  if (previous === undefined || previous.preview === undefined) {
-    const appended = appendChanges("", "", 0, 0, 0, 0, preview.changes)
-    return {
-      turnId,
-      preview,
-      identity: nextIdentity,
-      ...(preview.sequence === 0 && appended !== undefined ? appended : cleared),
-      sequence: preview.sequence,
-      incomplete: preview.sequence !== 0 || appended === undefined,
-      retiredIdentities: previous?.retiredIdentities ?? [],
-      clearFences: previous?.clearFences ?? new Map(),
-    }
-  }
-  if (previous.retiredIdentities.includes(nextIdentity)) return previous
-  if (previous.identity === nextIdentity) {
-    if (preview.sequence <= previous.sequence || previous.incomplete) return previous
-    if (preview.sequence !== previous.sequence + 1)
-      return { ...previous, preview, ...cleared, sequence: preview.sequence, incomplete: true }
-    const appended = appendChanges(
-      previous.reasoning,
-      previous.text,
-      previous.reasoningLength,
-      previous.textLength,
-      previous.reasoningBytes,
-      previous.textBytes,
-      preview.changes,
-    )
-    return appended === undefined
-      ? { ...previous, preview, ...cleared, sequence: preview.sequence, incomplete: true }
-      : { ...previous, preview, ...appended, sequence: preview.sequence }
-  }
-  if (preview.runId === previous.preview.runId && preview.attemptFence < previous.preview.attemptFence) return previous
-  const appended = appendChanges("", "", 0, 0, 0, 0, preview.changes)
-  return {
-    turnId,
-    preview,
-    identity: nextIdentity,
-    ...(preview.sequence === 0 && appended !== undefined ? appended : cleared),
-    sequence: preview.sequence,
-    incomplete: preview.sequence !== 0 || appended === undefined,
-    retiredIdentities: retire(previous),
-    clearFences: previous.clearFences,
-  }
+  const before = previous?.byRun.get(incoming.runId)
+  const after = replaceRun(before, incoming)
+  if (after === before) return previous
+  if (after === undefined) return previous
+  const byRun = new Map(previous?.byRun)
+  byRun.set(incoming.runId, after)
+  return { turnId, byRun }
 }
 
 export const replace: {
@@ -209,6 +211,22 @@ export const reconcile: {
   (overlay: Overlay | undefined, view: ThreadView.ThreadViewSnapshot): Overlay | undefined
 } = Function.dual(2, reconcileImpl)
 
+const activityImpl = (overlay: Overlay | undefined, turnId: string) => {
+  if (overlay?.turnId !== turnId) return undefined
+  let textBytes = 0
+  let reasoningBytes = 0
+  for (const preview of overlay.byRun.values()) {
+    textBytes += preview.textBytes
+    reasoningBytes += preview.reasoningBytes
+  }
+  return { textBytes, reasoningBytes }
+}
+
+export const activity: {
+  (turnId: string): (overlay: Overlay | undefined) => ReturnType<typeof activityImpl>
+  (overlay: Overlay | undefined, turnId: string): ReturnType<typeof activityImpl>
+} = Function.dual(2, activityImpl)
+
 const unitsImpl = (
   overlay: Overlay | undefined,
   view: ThreadView.ThreadViewSnapshot,
@@ -217,28 +235,33 @@ const unitsImpl = (
   if (current === undefined) return []
   const turn = view.turns.find((candidate) => String(candidate.turn.id) === current.turnId)
   if (turn === undefined) return []
-  if (current.identity === undefined) return []
   const result: Array<TranscriptUnit.Unit> = []
-  const prefix = `tentative:${current.turnId}:${current.identity}`
-  if (current.reasoning.length > 0) {
-    const key = `${prefix}:reasoning`
-    result.push({
-      key,
-      turnId: current.turnId,
-      order: TranscriptOrdering.unitOrder(key, Number.MAX_SAFE_INTEGER, 0),
-      revision: current.sequence,
-      content: { _tag: "Block", block: { _tag: "Reasoning", text: current.reasoning } },
-    })
-  }
-  if (current.text.length > 0) {
-    const key = `${prefix}:assistant`
-    result.push({
-      key,
-      turnId: current.turnId,
-      order: TranscriptOrdering.unitOrder(key, Number.MAX_SAFE_INTEGER, 1),
-      revision: current.sequence,
-      content: { _tag: "Entry", role: "assistant", text: current.text },
-    })
+  for (const preview of current.byRun.values()) {
+    if (preview.identity === undefined) continue
+    const prefix = `tentative:${current.turnId}:${preview.identity}`
+    const parentId = preview.preview?.parentId
+    if (preview.reasoning.length > 0) {
+      const key = `${prefix}:reasoning`
+      result.push({
+        key,
+        turnId: current.turnId,
+        ...(parentId === undefined ? {} : { parentId }),
+        order: TranscriptOrdering.unitOrder(key, Number.MAX_SAFE_INTEGER, 0),
+        revision: preview.sequence,
+        content: { _tag: "Block", block: { _tag: "Reasoning", text: preview.reasoning } },
+      })
+    }
+    if (preview.text.length > 0) {
+      const key = `${prefix}:assistant`
+      result.push({
+        key,
+        turnId: current.turnId,
+        ...(parentId === undefined ? {} : { parentId }),
+        order: TranscriptOrdering.unitOrder(key, Number.MAX_SAFE_INTEGER, 1),
+        revision: preview.sequence,
+        content: { _tag: "Entry", role: "assistant", text: preview.text },
+      })
+    }
   }
   return result
 }

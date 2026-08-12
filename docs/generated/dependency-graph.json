@@ -2828,15 +2828,6 @@
       "publicExports": ["./baton-execution"]
     },
     {
-      "id": "packages/baton-execution/src/baton-preview-adapter.ts",
-      "path": "packages/baton-execution/src/baton-preview-adapter.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
       "id": "packages/baton-execution/src/baton-provider-http.ts",
       "path": "packages/baton-execution/src/baton-provider-http.ts",
       "workspace": "@rika/baton-execution",
@@ -3104,16 +3095,6 @@
     {
       "id": "packages/baton-execution/test/baton-model-effort.test.ts",
       "path": "packages/baton-execution/test/baton-model-effort.test.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/baton-execution/test/baton-preview-adapter.test.ts",
-      "path": "packages/baton-execution/test/baton-preview-adapter.test.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -21044,14 +21025,6 @@
     },
     {
       "from": "packages/baton-execution/src/baton-execution.ts",
-      "to": "packages/baton-execution/src/baton-preview-adapter.ts",
-      "specifier": "./baton-preview-adapter",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-execution.ts",
       "to": "packages/baton-execution/src/baton-route-options.ts",
       "specifier": "./baton-route-options",
       "kind": "import",
@@ -21118,38 +21091,6 @@
       "from": "packages/baton-execution/src/baton-execution.ts",
       "to": "packages/product/src/execution/contract/execution-status.ts",
       "specifier": "@rika/product/execution-status",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-preview-adapter.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-preview-adapter.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-preview-adapter.ts",
-      "to": "packages/product/src/execution/contract/execution-gateway.ts",
-      "specifier": "@rika/product/execution-gateway",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-preview-adapter.ts",
-      "to": "packages/product/src/execution/contract/execution-projection.ts",
-      "specifier": "@rika/product/execution-projection",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -22382,46 +22323,6 @@
       "from": "packages/baton-execution/test/baton-model-effort.test.ts",
       "to": "packages/product/src/execution/service/execution-route-resolution.ts",
       "specifier": "@rika/product/execution-route-resolution",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/baton-execution/test/baton-preview-adapter.test.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/baton-execution/test/baton-preview-adapter.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/baton-execution/test/baton-preview-adapter.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/baton-execution/test/baton-preview-adapter.test.ts",
-      "to": "packages/baton-execution/src/baton-preview-adapter.ts",
-      "specifier": "../src/baton-preview-adapter",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/baton-execution/test/baton-preview-adapter.test.ts",
-      "to": "packages/product/src/execution/contract/execution-projection.ts",
-      "specifier": "@rika/product/execution-projection",
       "kind": "import",
       "relationship": "test",
       "production": false
