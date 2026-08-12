@@ -48,11 +48,11 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                   }>()
                   const feed = yield* Effect.forkChild(
                     session.events((event) => {
-                      if (event._tag === "ExecutionModelPreviewed")
+                      if (event._tag === "ExecutionModelPreviewChanged" && event.preview._tag === "ModelPreview")
                         Queue.offerUnsafe(previews, {
-                          text: event.preview.text,
-                          revision: event.preview.revision,
-                          runId: event.preview.key.runId,
+                          text: event.preview.changes.map((change) => change.delta).join(""),
+                          revision: event.preview.sequence,
+                          runId: event.preview.runId,
                         })
                       return true
                     }),

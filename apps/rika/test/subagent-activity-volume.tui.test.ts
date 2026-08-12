@@ -28,7 +28,7 @@ test(
           ),
         )
         let reloadTurnIds: ReadonlyArray<string> = []
-        const olderPageCursors: Array<string> = []
+        const fixturePageCursors: Array<string> = []
         let reachedOldest = false
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
@@ -41,7 +41,12 @@ test(
               const oldest = event.snapshot.source.oldestCursor
               const cursor =
                 oldest === undefined ? undefined : `${oldest.createdAt}:${oldest.turnId}:${oldest.orderKey}`
-              if (cursor !== undefined && !olderPageCursors.includes(cursor)) olderPageCursors.push(cursor)
+              if (
+                cursor !== undefined &&
+                String(event.snapshot.thread.id) === threadId &&
+                !fixturePageCursors.includes(cursor)
+              )
+                fixturePageCursors.push(cursor)
               if (!event.snapshot.hasOlder) reachedOldest = true
             }
             return event
@@ -91,7 +96,9 @@ test(
         // The full timeline arrives in the initial snapshot: hasOlder is false immediately and no
         // page fetches exist to walk. PageUp travels the in-memory transcript to the seeded marker.
         expect(reachedOldest, "the full thread loads with hasOlder false").toBe(true)
-        expect(olderPageCursors.length, "one snapshot per load, no page fetches").toBe(2)
+        // The seeded history arrives complete in one snapshot: the fixture thread's window is
+        // assembled newest-first with a single true-oldest cursor, so no page fetches are needed.
+        expect(fixturePageCursors, "the fixture window has one true-oldest cursor").toHaveLength(1)
         const pagingDeadline = currentWallTime() + 20_000
         let paged = app.frame()
         let previous = ""

@@ -238,23 +238,19 @@ const program = Effect.gen(function* () {
                 if (kind === "preview-fanout")
                   return Effect.gen(function* () {
                     dispatch({
-                      _tag: "ExecutionModelPreviewed",
+                      _tag: "ExecutionModelPreviewChanged",
                       threadId: Thread.ThreadId.make("preview-thread"),
                       turnId: Turn.TurnId.make("preview-turn"),
                       preview: {
-                        _tag: "ModelPreviewed",
-                        key: {
-                          runId: "preview-run",
-                          attemptFence: 1,
-                          turn: 1,
-                          modelCallId: "preview-call",
-                          modelAttemptId: "preview-attempt",
-                          attempt: 1,
-                        },
-                        revision: 7,
-                        text: "shared preview text",
-                        reasoning: "shared reasoning",
-                        truncated: false,
+                        _tag: "ModelPreview",
+                        runId: "preview-run",
+                        attemptFence: 1,
+                        turn: 1,
+                        modelCallId: "preview-call",
+                        modelAttemptId: "preview-attempt",
+                        attempt: 1,
+                        sequence: 7,
+                        changes: [{ channel: "text", offset: 0, delta: "shared preview text" }],
                       },
                     })
                     return yield* Effect.never
