@@ -487,4 +487,59 @@ describe("Baton subagent card projection", () => {
       .units.find((value) => value.content._tag === "Entry" && value.content.text.includes("late child report"))
     expect(late?.parentId).toBeDefined()
   })
+
+  it("cancels descendant cards when the parent run settles cancelled, across resume", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-parent-cancel", "delegate this")
+    projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }))
+    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
+    projector.apply(
+      modelResponse("raw-root-run", {
+        type: "tool-call",
+        id: "provider-call-1",
+        name: "run_child",
+        params: { selection: "Task", prompt: "Inspect the tree" },
+        providerExecuted: false,
+        metadata: {},
+      }),
+    )
+    projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ChildLinked",
+        childRunId: "raw-child-run",
+        invocationId: "provider-call-1",
+      }),
+    )
+    projector.apply(
+      treeEvent(
+        "raw-child-run",
+        { _tag: "RunAttemptStarted", attempt: 1 },
+        { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
+      ),
+    )
+    projector.apply(
+      treeEvent(
+        "raw-child-run",
+        { _tag: "TurnStarted", turn: 0 },
+        { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
+      ),
+    )
+    const running = projector
+      .snapshot()
+      .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")
+    expect(running?.content).toEqual({ _tag: "Block", block: expect.objectContaining({ status: "running" }) })
+
+    const cancelled = projector.apply(treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "Cancelled by user" }))
+    expect(block(cancelled, "SubagentCard")).toEqual({
+      _tag: "Block",
+      block: expect.objectContaining({ status: "cancelled" }),
+    })
+
+    const settled = projector.snapshot()
+    const resumed = TreeProjector.make("turn-parent-cancel", "delegate this", settled.checkpoint, settled.units)
+    const restored = resumed
+      .snapshot()
+      .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")
+    expect(restored?.content).toEqual({ _tag: "Block", block: expect.objectContaining({ status: "cancelled" }) })
+  })
 })

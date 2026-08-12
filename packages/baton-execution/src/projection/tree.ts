@@ -1,4 +1,4 @@
-import type { Run, RunTree } from "@batonfx/runtime"
+import type { Run, RunEvent, RunTree } from "@batonfx/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import * as UnitOrder from "@rika/product/execution-transcript-contract"
 import type { Unit } from "@rika/product/execution-transcript-contract"
@@ -198,7 +198,7 @@ const make = (
     return created
   }
 
-  const settleNode = (node: Node, status: "completed" | "failed" | "cancelled", detail?: string) => {
+  const settleNodeState = (node: Node, status: "completed" | "failed" | "cancelled", detail?: string) => {
     node.status = status
     settleRunningCells(node, status === "completed" ? "cancelled" : status)
     for (const rawId of node.tools.keys())
@@ -210,6 +210,34 @@ const make = (
     const card = cardsByChild.get(node.rawRunId)
     if (card !== undefined) updateCard(card, status === "completed" ? "complete" : status, detail)
     if (node.parentRawRunId === undefined) core.rootStatus = status
+  }
+
+  const settleNode = (
+    node: Node,
+    status: "completed" | "failed" | "cancelled",
+    event: RunEvent.RunEvent,
+    detail?: string,
+  ) => {
+    settleNodeState(node, status, detail)
+    const descendants: Array<Node> = []
+    const collect = (id: string): void => {
+      for (const candidate of nodes.values())
+        if (candidate.parentRawRunId === id) {
+          descendants.push(candidate)
+          collect(candidate.rawRunId)
+        }
+    }
+    collect(node.rawRunId)
+    for (const candidate of descendants) {
+      if (candidate.status === "completed" || candidate.status === "failed" || candidate.status === "cancelled")
+        continue
+      if (candidate.lifecycle !== "terminal") {
+        deactivate(candidate, event, "terminal")
+        settleOpenAttempts(candidate)
+        settleAuthorizations(candidate, "cancelled")
+      }
+      settleNodeState(candidate, "cancelled")
+    }
   }
 
   const applyRunEvent = (treeEvent: SemanticTreeEvent) => {
@@ -486,7 +514,7 @@ const make = (
           if ("text" in event.result) core.title = { text: event.result.text }
           return
         }
-        return settleNode(node, "completed")
+        return settleNode(node, "completed", event)
       case "RunFailed":
         deactivate(node, event, "terminal")
         settleOpenAttempts(node)
@@ -499,7 +527,7 @@ const make = (
           status: "failed",
           ...(event.error.message.length === 0 ? {} : { reason: event.error.message }),
         })
-        return settleNode(node, "failed", event.error.message)
+        return settleNode(node, "failed", event, event.error.message)
       case "RunCancellationRequested": {
         const card = cardsByChild.get(node.rawRunId)
         if (card !== undefined) updateCard(card, "cancelling")
@@ -514,7 +542,7 @@ const make = (
           node.status = "cancelled"
           return
         }
-        return settleNode(node, "cancelled", event.reason)
+        return settleNode(node, "cancelled", event, event.reason)
       case "ProgramLog":
         if (event.level === "debug" || event.level === "info") return
         return event.level === "error"
