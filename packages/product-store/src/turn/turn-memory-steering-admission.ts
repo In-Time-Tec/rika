@@ -174,7 +174,7 @@ export const makeTurnMemorySteeringAdmission = ({
                       revision: queue.revision,
                       queuedCount: queue.queuedCount,
                       becameNonempty: false,
-                      change: { _tag: "Removed" as const, turnId: source },
+                      change: { _tag: "Updated" as const, turn: { ...existing.source!, delivery: "steer" as const } },
                     }
               return [
                 {
@@ -213,9 +213,9 @@ export const makeTurnMemorySteeringAdmission = ({
               ]
             const admission = pendingAdmission(target, input, sourceTurn, now)
             const previous = queueState(state, sourceTurn.threadId)
-            const next = { revision: previous.revision + 1, queuedCount: Math.max(0, previous.queuedCount - 1) }
-            const turns = new Map(state.turns)
-            turns.delete(source)
+            const next = { revision: previous.revision + 1, queuedCount: previous.queuedCount }
+            const nextTurn: AgentExecutionTurn = { ...sourceTurn, delivery: "steer" as const, updatedAt: now }
+            const turns = new Map(state.turns).set(source, nextTurn)
             const claims = new Map(state.claims)
             claims.delete(source)
             const admissions = new Map(state.steeringAdmissions).set(input.idempotencyKey, admission)
@@ -229,7 +229,7 @@ export const makeTurnMemorySteeringAdmission = ({
                     revision: next.revision,
                     queuedCount: next.queuedCount,
                     becameNonempty: false,
-                    change: { _tag: "Removed", turnId: source },
+                    change: { _tag: "Updated", turn: clone(nextTurn) },
                   },
                   queueChanged: true,
                 },
@@ -298,19 +298,24 @@ export const makeTurnMemorySteeringAdmission = ({
         let nextState = state
         let queue: Preparation["queue"] | undefined
         if (admission.source !== undefined) {
-          if (state.turns.has(admission.source.id))
-            return [{ _tag: "RepositoryError", message: `Turn ${admission.source.id} already exists` }, state]
-          const previous = queueState(state, admission.source.threadId)
-          const next = { revision: previous.revision + 1, queuedCount: previous.queuedCount + 1 }
-          const turn = clone(admission.source)
-          queue = {
-            threadId: turn.threadId,
-            revision: next.revision,
-            queuedCount: next.queuedCount,
-            becameNonempty: next.queuedCount === 1,
-            change: { _tag: "Added", turn },
+          const existing = state.turns.get(admission.source.id)
+          if (existing !== undefined && existing.status === "queued") {
+            const previous = queueState(state, admission.source.threadId)
+            const next = { revision: previous.revision + 1, queuedCount: previous.queuedCount }
+            const turn: AgentExecutionTurn = { ...existing, delivery: "followUp" as const }
+            queue = {
+              threadId: turn.threadId,
+              revision: next.revision,
+              queuedCount: next.queuedCount,
+              becameNonempty: false,
+              change: { _tag: "Updated", turn: clone(turn) },
+            }
+            nextState = withQueueState(
+              { ...state, turns: new Map(state.turns).set(turn.id, turn) },
+              turn.threadId,
+              next,
+            )
           }
-          nextState = withQueueState({ ...state, turns: new Map(state.turns).set(turn.id, turn) }, turn.threadId, next)
         }
         const rejected: SteeringAdmission = {
           ...admission,
@@ -335,28 +340,53 @@ export const makeTurnMemorySteeringAdmission = ({
     }),
     completeSteeringAdmission: Effect.fn("TurnRepository.completeSteeringAdmission")(
       function* (requestId, target, receipt) {
-        const result = yield* modifyState((state): readonly [PrepareResult<void>, MemoryState] => {
-          const steeringAdmission = state.steeringAdmissions.get(requestId)
-          if (steeringAdmission === undefined) return [{ _tag: "Ok", value: undefined }, state]
-          if (
-            steeringAdmission.outcome._tag !== "Accepted" ||
-            !equivalentTarget(steeringAdmission.target, target) ||
-            !equivalentReceipt(steeringAdmission.outcome.receipt, receipt)
-          )
-            return [
-              { _tag: "RepositoryError", message: `Steering admission ${requestId} disposition conflicts` },
-              state,
-            ]
-          const admissions = new Map(state.steeringAdmissions)
-          admissions.delete(requestId)
-          return [
-            { _tag: "Ok", value: undefined },
-            { ...state, steeringAdmissions: admissions },
-          ]
-        })
+        const result = yield* modifyState(
+          (state): readonly [PrepareResult<Preparation["queue"] | undefined>, MemoryState] => {
+            const steeringAdmission = state.steeringAdmissions.get(requestId)
+            if (steeringAdmission === undefined) return [{ _tag: "Ok", value: undefined }, state]
+            if (
+              steeringAdmission.outcome._tag !== "Accepted" ||
+              !equivalentTarget(steeringAdmission.target, target) ||
+              !equivalentReceipt(steeringAdmission.outcome.receipt, receipt)
+            )
+              return [
+                { _tag: "RepositoryError", message: `Steering admission ${requestId} disposition conflicts` },
+                state,
+              ]
+            const admissions = new Map(state.steeringAdmissions)
+            admissions.delete(requestId)
+            let nextState: MemoryState = { ...state, steeringAdmissions: admissions }
+            let queue: Preparation["queue"] | undefined
+            const source = steeringAdmission.source
+            if (source !== undefined) {
+              const existing = nextState.turns.get(source.id)
+              if (existing !== undefined && existing.status === "queued") {
+                const turns = new Map(nextState.turns)
+                turns.delete(source.id)
+                const claims = new Map(nextState.claims)
+                claims.delete(source.id)
+                const previous = queueState(nextState, source.threadId)
+                const next = {
+                  revision: previous.revision + 1,
+                  queuedCount: Math.max(0, previous.queuedCount - 1),
+                }
+                queue = {
+                  threadId: source.threadId,
+                  revision: next.revision,
+                  queuedCount: next.queuedCount,
+                  becameNonempty: false,
+                  change: { _tag: "Removed", turnId: source.id },
+                }
+                nextState = withQueueState({ ...nextState, turns, claims }, source.threadId, next)
+              }
+            }
+            return [{ _tag: "Ok", value: queue }, nextState]
+          },
+        )
         if (result._tag === "RepositoryError") return yield* RepositoryError.make({ message: result.message })
         if (result._tag === "Unavailable")
           return yield* RepositoryError.make({ message: `Steering admission ${requestId} is unavailable` })
+        return result.value
       },
     ),
     completeRejectedSteeringAdmission: Effect.fn("TurnRepository.completeRejectedSteeringAdmission")(
@@ -366,9 +396,6 @@ export const makeTurnMemorySteeringAdmission = ({
           if (steeringAdmission === undefined) return [{ _tag: "Ok", value: true }, state]
           if (steeringAdmission.outcome._tag !== "Rejected")
             return [{ _tag: "RepositoryError", message: `Steering admission ${requestId} was not rejected` }, state]
-          const source = steeringAdmission.source
-          if (source !== undefined && state.turns.get(source.id)?.status === "queued")
-            return [{ _tag: "Ok", value: false }, state]
           const admissions = new Map(state.steeringAdmissions)
           admissions.delete(requestId)
           return [

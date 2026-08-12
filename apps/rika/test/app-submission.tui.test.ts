@@ -79,7 +79,7 @@ test(
         yield* app.waitFrame("First slow prompt.")
         yield* app.waitModelRequests(1)
         yield* Effect.promise(() => app.type("Second queued prompt."))
-        app.pressEnter()
+        app.pressKey("\u001b[13;3u")
         const queuedFrame = yield* app.waitFrame("Second queued prompt.")
         expect(queuedFrame).toContain("First slow prompt.")
         expect(hasGreenText(app, "Second queued prompt.")).toBe(false)
@@ -104,7 +104,7 @@ test(
         app.pressEnter()
         yield* app.waitFrame("Hold the queue head.")
         yield* Effect.promise(() => app.type("Queued follow-up prompt."))
-        app.pressEnter()
+        app.pressKey("\u001b[13;3u")
         yield* app.waitFrame("Queued follow-up prompt.")
         yield* app.waitModelRequests(1)
         app.pressKey("c", { ctrl: true })
@@ -124,7 +124,7 @@ test(
 )
 
 test(
-  "steers selected queued messages with a pending lane and distinct delivered entries",
+  "steers entered prompts on the same queued row and delivers them into the turn",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -142,24 +142,17 @@ test(
         app.pressEnter()
         yield* app.waitFrame("Read the fixture slowly.")
         yield* app.waitFrame("Waiting")
-        const workingTitle = yield* app.waitTerminalTitle((title) => /^[⠀-⣿] /u.test(title))
-        yield* app.waitTerminalTitle((title) => /^[⠀-⣿] /u.test(title) && title !== workingTitle)
         yield* Effect.promise(() => app.type("Focus on the exact fixture text."))
         app.pressEnter()
+        yield* app.waitFrame("steering: Focus")
         yield* Effect.promise(() => app.type("Answer in one sentence."))
-        yield* app.waitFrame("Focus on the exact fixture text.")
-        app.pressKey("s", { ctrl: true })
-        yield* app.waitFrame("steering: Answer in one sentence.")
-        app.pressArrow("up")
-        yield* app.waitFrame("Enter to steer")
         app.pressEnter()
-        yield* app.waitFrame("steering: Focus on the exact fixture text.")
+        yield* app.waitFrame("steering: Answer")
         yield* app.waitFrame("ACTIVE_STEER_COMPLETE", 25_000)
         yield* app.settled
-        yield* app.waitTerminalTitle((title) => !/^[⠀-⣿] /u.test(title))
-        const consumed = yield* app.waitGone("steering: Answer in one sentence.")
+        const consumed = yield* app.waitGone("steering: Focus")
         expect(consumed).not.toContain("Execution failed")
-        expect(consumed).not.toContain("steering: Focus on the exact fixture text.")
+        expect(consumed).not.toContain("steering: Answer")
         expect(consumed.match(/Answer in one sentence\./g) ?? []).toHaveLength(1)
         expect(consumed.match(/Focus on the exact fixture text\./g) ?? []).toHaveLength(1)
         yield* app.quit

@@ -332,9 +332,7 @@ test("steers a queued row into the active turn while idle with a queue", () => {
     requestId: "request-idle",
   })
   expect(model.pendingSteering).toEqual([])
-  expect(model.steeringRequests).toEqual([
-    { requestId: "request-idle", turnId: "active", text: "two", origin: "queue" },
-  ])
+  expect(model.steeringRequests).toEqual([])
 })
 test("recalls composer history only when the queue is empty", () => {
   let model: Model = {

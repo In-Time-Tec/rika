@@ -408,7 +408,7 @@ it.effect("retries unknown steering admissions with one identity and journals de
           }),
       } as ExecutionGateway.Interface,
     )
-    expect(yield* retryingOwner.recoverSteeringAdmissions).toEqual({ accepted: [], rejected: [], pending: true })
+    expect(yield* retryingOwner.recoverSteeringAdmissions).toMatchObject({ accepted: [], rejected: [], pending: true })
     expect(yield* unknownRepository.listSteeringAdmissions).toHaveLength(1)
     expect(yield* retryingOwner.recoverSteeringAdmissions).toMatchObject({
       accepted: [
@@ -550,7 +550,7 @@ it.effect("persists the Baton receipt until exact accepted, consumed, or discard
     expect(attempts).toBe(1)
 
     projection = projectionState("opaque-entry")
-    expect(yield* owner.recoverSteeringAdmissions).toEqual({ accepted: [], rejected: [], pending: true })
+    expect(yield* owner.recoverSteeringAdmissions).toMatchObject({ accepted: [], rejected: [], pending: true })
     expect(admission?.outcome._tag).toBe("Accepted")
 
     projection = {
@@ -631,7 +631,7 @@ it.effect("persists the Baton receipt until exact accepted, consumed, or discard
         steering: { steeringMessages: 1, followUpMessages: 0 },
       },
     }
-    expect(yield* owner.recoverSteeringAdmissions).toEqual({ accepted: [], rejected: [], pending: false })
+    expect(yield* owner.recoverSteeringAdmissions).toMatchObject({ accepted: [], rejected: [], pending: false })
     expect(admission).toBeUndefined()
     expect(attempts).toBe(1)
 
@@ -661,7 +661,7 @@ it.effect("persists the Baton receipt until exact accepted, consumed, or discard
         },
       },
     }
-    expect(yield* owner.recoverSteeringAdmissions).toEqual({ accepted: [], rejected: [], pending: false })
+    expect(yield* owner.recoverSteeringAdmissions).toMatchObject({ accepted: [], rejected: [], pending: false })
     expect(admission).toBeUndefined()
   }),
 )

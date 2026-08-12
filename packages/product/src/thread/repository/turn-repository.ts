@@ -95,7 +95,7 @@ export interface Interface {
     requestId: string,
     target: import("@rika/product/execution-gateway").ExecutionLink,
     receipt: import("@rika/product/execution-gateway").SteeringReceipt,
-  ) => Effect.Effect<void, RepositoryError>
+  ) => Effect.Effect<import("./turn-repository-queue").QueueItemChange | undefined, RepositoryError>
   readonly completeRejectedSteeringAdmission: (requestId: string) => Effect.Effect<boolean, RepositoryError>
   readonly dequeue: (id: TurnId) => Effect.Effect<QueueItemChange, RepositoryError>
   readonly requeueAccepted: (

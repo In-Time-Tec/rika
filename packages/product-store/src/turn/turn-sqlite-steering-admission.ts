@@ -88,24 +88,6 @@ const insertAdmission = (sql: SqlClient, admission: SteeringAdmission) =>
         ${admission.target.threadId}, ${encoded}, 'pending', ${admission.preparedAt})`
   })
 
-const insertTurn = (sql: SqlClient, turn: NonNullable<SteeringAdmission["source"]>) =>
-  Effect.gen(function* () {
-    const promptParts =
-      turn.promptParts === undefined ? null : yield* Schema.encodeEffect(turnRowJson.promptParts)(turn.promptParts)
-    const route = yield* Schema.encodeEffect(turnRowJson.executionRoute)(turn.executionRoute)
-    const link =
-      turn.executionLink === undefined
-        ? null
-        : yield* Schema.encodeEffect(turnRowJson.executionLink)(turn.executionLink)
-    const author = yield* Schema.encodeEffect(turnRowJson.author)(turn.author)
-    const lineage = yield* Schema.encodeEffect(turnRowJson.lineage)(turn.lineage)
-    yield* sql`INSERT INTO rika_turns (
-      id, thread_id, turn_kind, prompt, prompt_parts_json, status, execution_route_json,
-      execution_link_json, author_json, lineage_json, created_at, updated_at
-    ) VALUES (${turn.id}, ${turn.threadId}, 'AgentExecution', ${turn.prompt}, ${promptParts}, 'queued',
-      ${route}, ${link}, ${author}, ${lineage}, ${turn.createdAt}, ${turn.updatedAt})`
-  })
-
 const preserveQueuedUnavailable = (error: unknown) =>
   Schema.is(QueuedTurnUnavailable)(error) ? error : repositoryError(error)
 
@@ -177,7 +159,10 @@ export const makeTurnSqliteSteeringAdmission = (
                         revision: queue?.revision ?? 0,
                         queuedCount: queue?.queued_count ?? 0,
                         becameNonempty: false,
-                        change: { _tag: "Removed" as const, turnId: source },
+                        change: {
+                          _tag: "Updated" as const,
+                          turn: { ...existing.source!, delivery: "steer" as const },
+                        },
                       },
               }
             }
@@ -199,11 +184,8 @@ export const makeTurnSqliteSteeringAdmission = (
               outcome: { _tag: "Pending" },
             }
             yield* insertAdmission(sql, admission)
-            const deleted = yield* sql`DELETE FROM rika_turns
-            WHERE id = ${source} AND turn_kind = 'AgentExecution' AND status = 'queued' RETURNING id`
-            if (deleted[0] === undefined) return yield* queuedTurnUnavailable(source)
             const queueRows = yield* sql`UPDATE rika_thread_queue_state
-            SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0)
+            SET revision = revision + 1
             WHERE thread_id = ${sourceTurn.threadId} RETURNING *`
             if (queueRows[0] === undefined)
               return yield* RepositoryError.make({ message: `Queue state ${sourceTurn.threadId} does not exist` })
@@ -215,7 +197,7 @@ export const makeTurnSqliteSteeringAdmission = (
                 revision: queue.revision,
                 queuedCount: queue.queued_count,
                 becameNonempty: false,
-                change: { _tag: "Removed" as const, turnId: source },
+                change: { _tag: "Updated" as const, turn: { ...sourceTurn, delivery: "steer" as const } },
               },
               queueChanged: true,
             }
@@ -270,24 +252,26 @@ export const makeTurnSqliteSteeringAdmission = (
           }
           let queue: Effect.Success<ReturnType<Interface["dequeue"]>> | undefined
           if (admission.source !== undefined) {
-            const existing = yield* sql`SELECT id FROM rika_turns WHERE id = ${admission.source.id}`
-            if (existing[0] !== undefined)
-              return yield* RepositoryError.make({ message: `Turn ${admission.source.id} already exists` })
-            const queueRows = yield* sql`UPDATE rika_thread_queue_state
-              SET revision = revision + 1, queued_count = queued_count + 1
-              WHERE thread_id = ${admission.source.threadId} RETURNING *`
-            if (queueRows[0] === undefined)
-              return yield* RepositoryError.make({
-                message: `Queue state ${admission.source.threadId} does not exist`,
-              })
-            yield* insertTurn(sql, admission.source)
-            const state = yield* decodeQueueState(queueRows[0])
-            queue = {
-              threadId: admission.source.threadId,
-              revision: state.revision,
-              queuedCount: state.queued_count,
-              becameNonempty: state.queued_count === 1,
-              change: { _tag: "Added", turn: admission.source },
+            const existingRows = yield* sql`SELECT * FROM rika_turns WHERE id = ${admission.source.id}`
+            if (existingRows[0] !== undefined) {
+              const existing = yield* decodeAgent(existingRows[0])
+              if (existing.status === "queued") {
+                const queueRows = yield* sql`UPDATE rika_thread_queue_state
+                  SET revision = revision + 1
+                  WHERE thread_id = ${admission.source.threadId} RETURNING *`
+                if (queueRows[0] === undefined)
+                  return yield* RepositoryError.make({
+                    message: `Queue state ${admission.source.threadId} does not exist`,
+                  })
+                const state = yield* decodeQueueState(queueRows[0])
+                queue = {
+                  threadId: admission.source.threadId,
+                  revision: state.revision,
+                  queuedCount: state.queued_count,
+                  becameNonempty: false,
+                  change: { _tag: "Updated", turn: { ...existing, delivery: "followUp" as const } },
+                }
+              }
             }
           }
           const rejected: SteeringAdmission = {
@@ -304,11 +288,11 @@ export const makeTurnSqliteSteeringAdmission = (
   }),
   completeSteeringAdmission: Effect.fn("TurnRepository.completeSteeringAdmission")(
     function* (requestId, target, receipt) {
-      yield* sql
+      return yield* sql
         .withTransaction(
           Effect.gen(function* () {
             const rows = yield* sql`SELECT * FROM rika_turn_steering_outbox WHERE request_id = ${requestId}`
-            if (rows[0] === undefined) return
+            if (rows[0] === undefined) return undefined
             const admission = yield* decodeAdmission(rows[0])
             if (
               admission.outcome._tag !== "Accepted" ||
@@ -319,6 +303,25 @@ export const makeTurnSqliteSteeringAdmission = (
                 message: `Steering admission ${requestId} disposition conflicts`,
               })
             yield* sql`DELETE FROM rika_turn_steering_outbox WHERE request_id = ${requestId}`
+            if (admission.source === undefined) return undefined
+            const queued = yield* sql`SELECT id FROM rika_turns
+            WHERE id = ${admission.source.id} AND turn_kind = 'AgentExecution' AND status = 'queued'`
+            if (queued[0] === undefined) return undefined
+            yield* sql`DELETE FROM rika_turns
+            WHERE id = ${admission.source.id} AND turn_kind = 'AgentExecution' AND status = 'queued'`
+            const queueRows = yield* sql`UPDATE rika_thread_queue_state
+              SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0)
+              WHERE thread_id = ${admission.source.threadId} RETURNING *`
+            if (queueRows[0] === undefined)
+              return yield* RepositoryError.make({ message: `Queue state ${admission.source.threadId} does not exist` })
+            const state = yield* decodeQueueState(queueRows[0])
+            return {
+              threadId: admission.source.threadId,
+              revision: state.revision,
+              queuedCount: state.queued_count,
+              becameNonempty: false,
+              change: { _tag: "Removed" as const, turnId: admission.source.id },
+            }
           }),
         )
         .pipe(Effect.mapError(repositoryError))
@@ -329,10 +332,6 @@ export const makeTurnSqliteSteeringAdmission = (
       return yield* Effect.gen(function* () {
         const deleted = yield* sql`DELETE FROM rika_turn_steering_outbox
         WHERE request_id = ${requestId} AND status = 'rejected'
-          AND (source_turn_id IS NULL OR NOT EXISTS (
-            SELECT 1 FROM rika_turns
-            WHERE id = rika_turn_steering_outbox.source_turn_id AND status = 'queued'
-          ))
         RETURNING request_id`
         if (deleted[0] !== undefined) return true
         const rows = yield* sql`SELECT * FROM rika_turn_steering_outbox WHERE request_id = ${requestId}`

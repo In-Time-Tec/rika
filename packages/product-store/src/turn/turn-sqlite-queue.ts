@@ -35,7 +35,16 @@ export const makeTurnSqliteQueue = (
           const state = stateRows[0] === undefined ? undefined : yield* decodeQueueState(stateRows[0])
           const rows =
             yield* sql`SELECT * FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status = 'queued' ORDER BY created_at ASC, rowid ASC`
-          const turns = yield* Effect.all(rows.map(decodeAgent))
+          const steeringRows =
+            yield* sql`SELECT source_turn_id FROM rika_turn_steering_outbox WHERE thread_id = ${threadId} AND source_turn_id IS NOT NULL AND status != 'rejected'`
+          const steering = new Set(
+            steeringRows.map((row) => String((row as { readonly source_turn_id: unknown }).source_turn_id)),
+          )
+          const turns = yield* Effect.all(rows.map(decodeAgent)).pipe(
+            Effect.map((decoded) =>
+              decoded.map((turn) => (steering.has(String(turn.id)) ? { ...turn, delivery: "steer" as const } : turn)),
+            ),
+          )
           return {
             threadId,
             revision: state?.revision ?? 0,
@@ -54,7 +63,9 @@ export const makeTurnSqliteQueue = (
       .withTransaction(
         Effect.gen(function* () {
           const rows = yield* sql`UPDATE rika_turns SET queue_claim_token = hex(randomblob(16))
-          WHERE id = (SELECT id FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status = 'queued' AND queue_claim_token IS NULL ORDER BY created_at ASC, rowid ASC LIMIT 1)
+          WHERE id = (SELECT id FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status = 'queued' AND queue_claim_token IS NULL
+            AND NOT EXISTS (SELECT 1 FROM rika_turn_steering_outbox WHERE source_turn_id = rika_turns.id AND status != 'rejected')
+            ORDER BY created_at ASC, rowid ASC LIMIT 1)
           AND turn_kind = 'AgentExecution'
           AND NOT EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status IN ('accepted', 'running', 'waiting', 'cancelling'))
           AND NOT EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND queue_claim_token IS NOT NULL)
@@ -189,20 +200,17 @@ export const makeTurnSqliteQueue = (
           const queueRows = yield* sql`UPDATE rika_thread_queue_state
           SET revision = revision + 1, queued_count = queued_count + 1
           WHERE thread_id = ${current.threadId}
-            AND queued_count + (SELECT COUNT(*) FROM rika_turn_steering_outbox WHERE thread_id = ${current.threadId} AND source_turn_id IS NOT NULL AND status = 'pending') < ${queueCapacity}
+            AND queued_count < ${queueCapacity}
           RETURNING *`
           if (queueRows[0] === undefined) {
             const stateRows = yield* sql`SELECT * FROM rika_thread_queue_state WHERE thread_id = ${current.threadId}`
             if (stateRows[0] === undefined)
               return yield* repositoryError(`Queue state ${current.threadId} does not exist`)
             const state = yield* decodeQueueState(stateRows[0])
-            const reservations =
-              yield* sql`SELECT COUNT(*) AS count FROM rika_turn_steering_outbox WHERE thread_id = ${current.threadId} AND source_turn_id IS NOT NULL AND status = 'pending'`
             return yield* QueueFull.make({
               threadId: current.threadId,
               capacity: queueCapacity,
-              count:
-                state.queued_count + Number((reservations[0] as { readonly count?: unknown } | undefined)?.count ?? 0),
+              count: state.queued_count,
             })
           }
           const updatedRows = yield* sql`UPDATE rika_turns SET status = 'queued', updated_at = ${now}

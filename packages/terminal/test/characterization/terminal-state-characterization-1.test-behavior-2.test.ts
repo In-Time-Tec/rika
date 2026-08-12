@@ -115,9 +115,7 @@ test("steering a selected queued message keeps the request local until authorita
     steeringRequestId: "request-1",
   })
   expect(steered.pendingSteering).toEqual([])
-  expect(steered.steeringRequests).toEqual([
-    { requestId: "request-1", turnId: "turn-a", text: "steer me please", origin: "queue" },
-  ])
+  expect(steered.steeringRequests).toEqual([])
   expect(steered.pendingAction).toEqual({
     _tag: "SteerQueued",
     id: "queued-1",

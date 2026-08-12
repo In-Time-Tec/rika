@@ -36,10 +36,9 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     threadSidebarVisible: boolean,
   ): void {
     const queue = model.queue as ReadonlyArray<QueueItem>
-    const pendingSteering = model.pendingSteering
     this.queueBox.marginLeft = contentWidth <= 4 ? 0 : 1
     this.queueBox.marginRight = contentWidth <= 4 ? 0 : 1
-    this.queueBox.visible = queue.length > 0 || pendingSteering.length > 0
+    this.queueBox.visible = queue.length > 0
     const queueTextWidth = queueContentWidth(model)
     const queueLength = queue.length
     const selectedIndex = queue.findIndex((item) => item.id === model.queueSelection)
@@ -58,14 +57,7 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       return [inline, ...remaining].join("\n")
     })
     const heights = labels.map((label) => wrappedRowCount(label, queueTextWidth))
-    const steeringLabels = pendingSteering.map((row) => {
-      const firstLine = row.text.split("\n")[0] ?? ""
-      const label = `steering: ${firstLine}`
-      return stringWidth(label) <= queueTextWidth
-        ? label
-        : `${truncateToWidth(label, Math.max(1, queueTextWidth - 1))}…`
-    })
-    const queueRows = heights.reduce((sum, rows) => sum + rows, 0) + steeringLabels.length
+    const queueRows = heights.reduce((sum, rows) => sum + rows, 0)
     const queueBoxHeight = Math.min(
       Math.max(1, model.height),
       Math.min(Math.max(3, model.height - renderedInputHeight - 2), Math.max(3, queueRows + 2)),
@@ -86,14 +78,6 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     const queueChunks: Array<TextChunk> = []
     let hintTop = 0
     let renderedRows = 0
-    for (const [steeringIndex, steeringLabel] of steeringLabels.entries()) {
-      if (renderedRows >= availableRows) break
-      queueChunks.push(fg(toOpenColor(colors.muted))(steeringLabel))
-      renderedRows += 1
-      if (steeringIndex < steeringLabels.length - 1 || queueLength > 0)
-        queueChunks.push(fg(toOpenColor(colors.text))("\n"))
-    }
-    hintTop = renderedRows
     for (const [offset, item] of queue.slice(start, end).entries()) {
       const index = start + offset
       const label = clampToRows(labels[index]!, availableRows)
@@ -110,7 +94,6 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     const queueChanged =
       previousModel === undefined ||
       previousModel.queue !== model.queue ||
-      previousModel.pendingSteering !== model.pendingSteering ||
       previousModel.queueSelection !== model.queueSelection ||
       previousModel.editingTurnId !== model.editingTurnId ||
       previousModel.mode !== model.mode ||
@@ -132,8 +115,8 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     if (hintSegments.length > 0) hintChunks.push(dim(fg(toOpenColor(colors.text))(" ")))
     if (queueChanged) this.queueHint.content = new StyledText(hintChunks)
     this.queueHint.visible = hintSegments.length > 0
-    this.queueLeftJoint.visible = queue.length > 0 || pendingSteering.length > 0
-    this.queueRightJoint.visible = queue.length > 0 || pendingSteering.length > 0
+    this.queueLeftJoint.visible = queue.length > 0
+    this.queueRightJoint.visible = queue.length > 0
     this.inputBox.borderColor = toOpenColor(colors.text)
     this.inputBox.title = ""
     this.modeLabel.right = sidebarWidth + 2

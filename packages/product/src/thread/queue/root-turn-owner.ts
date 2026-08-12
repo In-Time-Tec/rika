@@ -28,6 +28,9 @@ export interface SteeringAdmissionAcceptance {
 export interface SteeringAdmissionRecovery {
   readonly accepted: ReadonlyArray<SteeringAdmissionAcceptance>
   readonly rejected: ReadonlyArray<SteeringAdmissionRejection>
+  readonly completed: ReadonlyArray<
+    SteeringAdmissionAcceptance & { readonly queue?: TurnQueuePromotion.QueueItemChange }
+  >
   readonly pending: boolean
 }
 
@@ -46,7 +49,12 @@ type SteeringAdmissionOutcome =
     }
   | { readonly _tag: "Pending" }
   | { readonly _tag: "Observed" }
-  | { readonly _tag: "Completed" }
+  | {
+      readonly _tag: "Completed"
+      readonly admission: TurnRepositorySteering.SteeringAdmission
+      readonly receipt: ExecutionGateway.SteeringReceipt
+      readonly queue?: TurnQueuePromotion.QueueItemChange
+    }
 
 export interface Interface {
   readonly claim: (
@@ -250,8 +258,8 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           return yield* TurnRepository.RepositoryError.make({
             message: `Steering admission ${admission.input.idempotencyKey} has conflicting Baton disposition`,
           })
-        yield* turns.completeSteeringAdmission(admission.input.idempotencyKey, admission.target, receipt)
-        return { _tag: "Completed" as const }
+        const queue = yield* turns.completeSteeringAdmission(admission.input.idempotencyKey, admission.target, receipt)
+        return { _tag: "Completed" as const, admission, receipt, ...(queue === undefined ? {} : { queue }) }
       }
       const consumed = projection?.units.some(
         (unit) =>
@@ -265,8 +273,8 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           ),
       )
       if (consumed === true) {
-        yield* turns.completeSteeringAdmission(admission.input.idempotencyKey, admission.target, receipt)
-        return { _tag: "Completed" as const }
+        const queue = yield* turns.completeSteeringAdmission(admission.input.idempotencyKey, admission.target, receipt)
+        return { _tag: "Completed" as const, admission, receipt, ...(queue === undefined ? {} : { queue }) }
       }
       return {
         _tag: "Accepted" as const,
@@ -385,6 +393,17 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
                       ...(outcome.queue === undefined ? {} : { queue: outcome.queue }),
                       failure: outcome.failure,
                       notify: outcome.notify,
+                    },
+                  ]
+                : [],
+            ),
+            completed: outcomes.flatMap((outcome) =>
+              outcome._tag === "Completed"
+                ? [
+                    {
+                      admission: outcome.admission,
+                      receipt: outcome.receipt,
+                      ...(outcome.queue === undefined ? {} : { queue: outcome.queue }),
                     },
                   ]
                 : [],

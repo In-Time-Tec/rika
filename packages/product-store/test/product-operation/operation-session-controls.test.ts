@@ -358,7 +358,10 @@ describe("Operation", () => {
       expect(yield* turns.get(Turn.TurnId.make("active-control"))).toMatchObject({
         status: "cancelled",
       })
-      expect(yield* turns.get(Turn.TurnId.make("queued-control-2"))).toBeUndefined()
+      expect(yield* turns.get(Turn.TurnId.make("queued-control-2"))).toMatchObject({
+        status: "queued",
+        delivery: "steer",
+      })
       expect(yield* turns.get(Turn.TurnId.make("submitted-control"))).toMatchObject({ status: "completed" })
     }),
   )

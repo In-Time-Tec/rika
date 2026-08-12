@@ -11,11 +11,6 @@ import type { Interface } from "@rika/product/turn-repository"
 
 type QueueItemChange = Effect.Success<ReturnType<Interface["dequeue"]>>
 
-const reservedQueueSlots = (state: MemoryState, threadId: AgentExecutionTurn["threadId"]): number =>
-  [...state.steeringAdmissions.values()].filter(
-    (admission) => admission.source?.threadId === threadId && admission.outcome._tag === "Pending",
-  ).length
-
 export const makeTurnMemorySubmission = ({
   modifyState,
 }: TurnMemoryContext): Pick<Interface, "createForSubmission" | "copy"> => ({
@@ -29,7 +24,7 @@ export const makeTurnMemorySubmission = ({
           ExecutionStatus.occupiesQueue(turn.status),
       )
       const previousQueue = queueState(current, input.threadId)
-      const occupiedQueueSlots = previousQueue.queuedCount + reservedQueueSlots(current, input.threadId)
+      const occupiedQueueSlots = previousQueue.queuedCount
       if (active && occupiedQueueSlots >= input.queueCapacity)
         return [
           {
@@ -80,7 +75,7 @@ export const makeTurnMemorySubmission = ({
     const result = yield* modifyState((current): readonly [MemorySubmissionResult, MemoryState] => {
       if (current.turns.has(turn.id)) return [{ _tag: "Duplicate" as const }, current]
       const previousQueue = queueState(current, turn.threadId)
-      const occupiedQueueSlots = previousQueue.queuedCount + reservedQueueSlots(current, turn.threadId)
+      const occupiedQueueSlots = previousQueue.queuedCount
       if (turn.status === "queued" && occupiedQueueSlots >= queueCapacity)
         return [
           {

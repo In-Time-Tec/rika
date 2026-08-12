@@ -20,6 +20,7 @@ export const AgentExecutionTurn = Schema.TaggedStruct("AgentExecution", {
   executionLink: Schema.optionalKey(ExecutionLink),
   author: TurnAuthor,
   lineage: TurnLineage,
+  delivery: Schema.optionalKey(Schema.Literals(["steer", "followUp"])),
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
 })

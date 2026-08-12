@@ -119,6 +119,9 @@ export const makeInteractiveSupervision = (
                 threadId: Thread.ThreadId.make(acceptance.admission.target.threadId),
               })
             }
+            for (const completed of recovered.value.completed) {
+              if (completed.queue !== undefined) publishObserved(queueMutationEvent(completed.queue))
+            }
             for (const rejection of recovered.value.rejected) {
               const handled = yield* Effect.exit(
                 Effect.gen(function* () {

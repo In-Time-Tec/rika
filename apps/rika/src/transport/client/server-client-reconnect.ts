@@ -207,8 +207,8 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
             ),
           )
         }),
-      submit: (prompt, mode, parts, tuning, submissionId) =>
-        mutation((session) => session.submit(prompt, mode, parts, tuning, submissionId)),
+      submit: (prompt, mode, parts, tuning, submissionId, delivery) =>
+        mutation((session) => session.submit(prompt, mode, parts, tuning, submissionId, delivery)),
       shell: (threadId, command, incognito) =>
         Effect.gen(function* () {
           const launchSelection = yield* Ref.get(selected)

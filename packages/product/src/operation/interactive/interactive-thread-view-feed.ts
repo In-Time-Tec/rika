@@ -10,6 +10,7 @@ const pending = (items: ReadonlyArray<QueueItem>): ReadonlyArray<ThreadView.Thre
   items.slice(0, ThreadView.limits.pending).map((item) => ({
     id: item.id,
     prompt: item.prompt,
+    delivery: item.delivery,
     createdAt: item.createdAt,
   }))
 

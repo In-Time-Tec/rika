@@ -4,7 +4,7 @@ import type { Model } from "../../state/model/terminal-state"
 import type { QueueItem } from "../../state/model/terminal-queue-item"
 
 export const queueItemLabel = (item: QueueItem): string =>
-  `${item.prompt}${item.attachments?.map((path) => `\n  ▧ ${path}`).join("") ?? ""}`
+  `${item.delivery === "steer" ? "steering: " : ""}${item.prompt}${item.attachments?.map((path) => `\n  ▧ ${path}`).join("") ?? ""}`
 interface QueueHintSegment {
   readonly accent: string
   readonly suffix: string

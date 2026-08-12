@@ -55,9 +55,15 @@ const behavior = (repository: TurnContract.Interface) =>
       [],
       20,
     )
-    expect(yield* repository.get(first.id)).toBeUndefined()
+    expect(yield* repository.readQueue(threadId)).toMatchObject({
+      turns: [{ id: first.id, delivery: "steer" }],
+    })
     expect(prepared.queueChanged).toBe(true)
-    expect(prepared.queue).toMatchObject({ revision: before.revision + 1, queuedCount: 0 })
+    expect(prepared.queue).toMatchObject({
+      revision: before.revision + 1,
+      queuedCount: 1,
+      change: { _tag: "Updated", turn: { id: first.id, delivery: "steer" } },
+    })
     expect(yield* repository.listSteeringAdmissions).toMatchObject([
       { source: { id: first.id }, input: { idempotencyKey: "stable-a" }, outcome: { _tag: "Pending" } },
     ])
@@ -71,7 +77,6 @@ const behavior = (repository: TurnContract.Interface) =>
     )
     expect(retried.admission.preparedAt).toBe(prepared.admission.preparedAt)
     expect(retried.queueChanged).toBe(false)
-    expect(retried.queue).toMatchObject({ revision: before.revision + 1, queuedCount: 0 })
 
     const changed = yield* Effect.result(
       repository.prepareQueuedSteeringAdmission(
@@ -92,7 +97,6 @@ const behavior = (repository: TurnContract.Interface) =>
 
     const accepted = yield* repository.acceptSteeringAdmission("stable-a", { entryId: "opaque-a", sequence: 4 })
     expect(accepted.outcome).toEqual({ _tag: "Accepted", receipt: { entryId: "opaque-a", sequence: 4 } })
-    yield* repository.copy(reserved, 1)
 
     expect(
       yield* Effect.result(
@@ -117,7 +121,13 @@ const behavior = (repository: TurnContract.Interface) =>
         ),
       ),
     ).toMatchObject({ _tag: "Failure", failure: { _tag: "TurnRepositoryError" } })
-    yield* repository.completeSteeringAdmission("stable-a", target, { entryId: "opaque-a", sequence: 4 })
+    const consumedQueue = yield* repository.completeSteeringAdmission("stable-a", target, {
+      entryId: "opaque-a",
+      sequence: 4,
+    })
+    expect(consumedQueue).toMatchObject({ change: { _tag: "Removed", turnId: first.id }, queuedCount: 0 })
+    yield* repository.copy(reserved, 1)
+
     const direct = yield* repository.prepareSteeringAdmission(
       target,
       { text: "at capacity", idempotencyKey: "direct-capacity" },
@@ -140,6 +150,7 @@ const behavior = (repository: TurnContract.Interface) =>
       [],
       40,
     )
+    expect(queuedAdmission.queueChanged).toBe(true)
     const restored = yield* repository.rejectSteeringAdmission(
       "restore-b",
       ExecutionGateway.SteeringFailure.make({ kind: "rejected", message: "terminal" }),
@@ -149,10 +160,11 @@ const behavior = (repository: TurnContract.Interface) =>
       queue: {
         revision: queuedAdmission.queue.revision + 1,
         queuedCount: 1,
-        change: { _tag: "Added", turn: reserved },
+        change: { _tag: "Updated", turn: { id: reserved.id, delivery: "followUp" } },
       },
     })
-    expect(yield* repository.get(reserved.id)).toEqual(reserved)
+    const restoredQueue = yield* repository.readQueue(threadId)
+    expect(restoredQueue.turns.find((turn) => turn.id === reserved.id)?.delivery).not.toBe("steer")
     expect(
       yield* repository.prepareQueuedSteeringAdmission(
         reserved.id,
@@ -164,10 +176,8 @@ const behavior = (repository: TurnContract.Interface) =>
     ).toMatchObject({
       admission: { outcome: { _tag: "Rejected" } },
       queueChanged: false,
-      queue: { change: { _tag: "Added", turn: { id: reserved.id } } },
+      queue: { change: { _tag: "Updated", turn: { id: reserved.id, delivery: "followUp" } } },
     })
-    expect(yield* repository.completeRejectedSteeringAdmission("restore-b")).toBe(false)
-    yield* repository.dequeue(reserved.id)
     expect(yield* repository.completeRejectedSteeringAdmission("restore-b")).toBe(true)
 
     const foreign = source("foreign", otherThreadId)
@@ -323,8 +333,6 @@ describe("steering admission repository", () => {
                   outcome: { _tag: "Rejected", failure: { kind: "rejected" } },
                 },
               ])
-              expect(yield* turns.completeRejectedSteeringAdmission("persisted-rejection")).toBe(false)
-              yield* turns.dequeue(Turn.TurnId.make("persisted-source"))
               expect(yield* turns.completeRejectedSteeringAdmission("persisted-rejection")).toBe(true)
               const sql = yield* SqlClient
               yield* sql`DELETE FROM rika_threads WHERE id = ${threadId}`

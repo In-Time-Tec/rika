@@ -69,7 +69,12 @@ const reduceExecutionImpl = (
           ? {
               queue: [
                 ...model.queue,
-                { id: message.submissionId!, prompt: submittedPrompt, provisional: true as const },
+                {
+                  id: message.submissionId!,
+                  prompt: submittedPrompt,
+                  provisional: true as const,
+                  ...(message.delivery === undefined ? {} : { delivery: message.delivery }),
+                },
               ],
             }
           : {}),

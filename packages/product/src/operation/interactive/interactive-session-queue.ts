@@ -18,9 +18,13 @@ export const queueItem = (turn: Turn.AgentExecutionTurn): QueueItem => {
   const attachments = turn.promptParts
     ?.filter((part) => part.type === "image")
     .flatMap((part) => (part.filename === undefined ? [] : [part.filename]))
-  return attachments === undefined || attachments.length === 0
-    ? { id: turn.id, prompt: turn.prompt, createdAt: turn.createdAt }
-    : { id: turn.id, prompt: turn.prompt, createdAt: turn.createdAt, attachments }
+  const base = {
+    id: turn.id,
+    prompt: turn.prompt,
+    createdAt: turn.createdAt,
+    delivery: turn.delivery ?? "followUp",
+  }
+  return attachments === undefined || attachments.length === 0 ? base : { ...base, attachments }
 }
 
 export type InteractiveQueueInput = Pick<

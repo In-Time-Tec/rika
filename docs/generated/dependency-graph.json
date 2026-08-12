@@ -48894,14 +48894,6 @@
     },
     {
       "from": "packages/terminal/src/state/reducer/terminal-keyboard-picker.ts",
-      "to": "packages/terminal/src/state/model/terminal-composer-paste.ts",
-      "specifier": "../model/terminal-composer-paste",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/state/reducer/terminal-keyboard-picker.ts",
       "to": "packages/terminal/src/state/model/terminal-message.ts",
       "specifier": "../model/terminal-message",
       "kind": "import",

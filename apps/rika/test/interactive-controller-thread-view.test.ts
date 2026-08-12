@@ -169,8 +169,8 @@ describe("interactive ThreadView controller", () => {
 
   it("keeps editing a queued turn across snapshot re-projections", () => {
     const pending = [
-      { id: Turn.TurnId.make("q1"), prompt: "queued one", createdAt: 1 },
-      { id: Turn.TurnId.make("q2"), prompt: "queued two", createdAt: 2 },
+      { id: Turn.TurnId.make("q1"), prompt: "queued one", delivery: "followUp" as const, createdAt: 1 },
+      { id: Turn.TurnId.make("q2"), prompt: "queued two", delivery: "followUp" as const, createdAt: 2 },
     ]
     const loaded = InteractiveController.update(state(), {
       _tag: "ThreadViewSnapshot",
@@ -201,7 +201,7 @@ describe("interactive ThreadView controller", () => {
       snapshot: {
         ...snapshot(),
         turns: [],
-        pending: [{ id: Turn.TurnId.make("q1"), prompt: "queued one", createdAt: 1 }],
+        pending: [{ id: Turn.TurnId.make("q1"), prompt: "queued one", delivery: "followUp" as const, createdAt: 1 }],
       },
     })
     const model = {
@@ -367,7 +367,9 @@ describe("interactive ThreadView controller", () => {
         _tag: "ThreadViewSnapshot",
         snapshot: {
           ...snapshot(),
-          pending: [{ id: Turn.TurnId.make("queued-turn"), prompt: "follow up", createdAt: 2 }],
+          pending: [
+            { id: Turn.TurnId.make("queued-turn"), prompt: "follow up", delivery: "followUp" as const, createdAt: 2 },
+          ],
         },
       },
     )
@@ -377,7 +379,9 @@ describe("interactive ThreadView controller", () => {
         header: {
           thread: { ...snapshot().thread, title: "Renamed" },
           source: { projectionVersion: 1 },
-          pending: [{ id: Turn.TurnId.make("queued-turn"), prompt: "follow up", createdAt: 2 }],
+          pending: [
+            { id: Turn.TurnId.make("queued-turn"), prompt: "follow up", delivery: "followUp" as const, createdAt: 2 },
+          ],
           hasOlder: false,
           hasNewer: false,
           usage: snapshot().usage,

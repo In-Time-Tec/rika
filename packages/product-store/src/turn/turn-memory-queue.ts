@@ -30,13 +30,18 @@ export const makeTurnMemoryQueue = ({
   readQueue: Effect.fn("TurnRepository.readQueue")(function* (threadId) {
     const current = yield* readState
     const queue = queueState(current, threadId)
+    const steering = new Map(
+      [...current.steeringAdmissions.values()]
+        .filter((admission) => admission.source !== undefined && admission.outcome._tag !== "Rejected")
+        .map((admission) => [String(admission.source!.id), admission] as const),
+    )
     const turns = [...current.turns.values()]
       .filter(
         (turn): turn is AgentExecutionTurn =>
           TurnResult.isAgentExecution(turn) && turn.threadId === threadId && turn.status === "queued",
       )
       .toSorted((left, right) => left.createdAt - right.createdAt)
-      .map(clone)
+      .map((turn) => (steering.has(String(turn.id)) ? { ...clone(turn), delivery: "steer" as const } : clone(turn)))
     return { threadId, revision: queue.revision, queuedCount: queue.queuedCount, turns }
   }),
   claimNextQueued: Effect.fn("TurnRepository.claimNextQueued")(function* (threadId, _now) {
@@ -53,6 +58,7 @@ export const makeTurnMemoryQueue = ({
             TurnResult.isAgentExecution(turn) &&
             turn.threadId === threadId &&
             turn.status === "queued" &&
+            turn.delivery !== "steer" &&
             !current.claims.has(turn.id),
         )
         .toSorted((left, right) => left.createdAt - right.createdAt)[0]
@@ -187,17 +193,14 @@ export const makeTurnMemoryQueue = ({
       )
       if (hasOtherActive) return [{ _tag: "Unavailable" as const }, current]
       const previousQueue = queueState(current, turn.threadId)
-      const reserved = [...current.steeringAdmissions.values()].filter(
-        (admission) => admission.source?.threadId === turn.threadId && admission.outcome._tag === "Pending",
-      ).length
-      if (previousQueue.queuedCount + reserved >= queueCapacity)
+      if (previousQueue.queuedCount >= queueCapacity)
         return [
           {
             _tag: "Full" as const,
             error: QueueFull.make({
               threadId: turn.threadId,
               capacity: queueCapacity,
-              count: previousQueue.queuedCount + reserved,
+              count: previousQueue.queuedCount,
             }),
           },
           current,

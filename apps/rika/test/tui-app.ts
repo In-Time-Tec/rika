@@ -218,8 +218,8 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
         settings,
         {
           ...current,
-          submit: (prompt, mode, parts, tuning, submissionId) => {
-            const submitted = current.submit(prompt, mode, parts, tuning, submissionId)
+          submit: (prompt, mode, parts, tuning, submissionId, delivery) => {
+            const submitted = current.submit(prompt, mode, parts, tuning, submissionId, delivery)
             return options.holdSubmissionAdmission === undefined
               ? submitted
               : Deferred.await(options.holdSubmissionAdmission).pipe(Effect.andThen(submitted))

@@ -16,6 +16,7 @@ export type Action =
       readonly mode: Mode
       readonly tuning?: ModelTuning
       readonly submissionId?: string
+      readonly delivery?: "steer" | "followUp"
     }
   | { readonly _tag: "EditQueued"; readonly id: string; readonly prompt: string }
   | { readonly _tag: "Dequeue"; readonly id: string }
@@ -35,6 +36,7 @@ export interface Adapter {
     mode: Mode,
     tuning?: ModelTuning,
     submissionId?: string,
+    delivery?: "steer" | "followUp",
   ) => void
   readonly quit: () => void
   readonly editQueued?: (id: string, prompt: string) => void
@@ -59,7 +61,7 @@ export const execute: {
 } = Function.dual(2, (adapter: Adapter, action: Action): boolean => {
   switch (action._tag) {
     case "Submit":
-      adapter.submit(action.prompt, action.parts, action.mode, action.tuning, action.submissionId)
+      adapter.submit(action.prompt, action.parts, action.mode, action.tuning, action.submissionId, action.delivery)
       return true
     case "EditQueued":
       adapter.editQueued?.(action.id, action.prompt)
