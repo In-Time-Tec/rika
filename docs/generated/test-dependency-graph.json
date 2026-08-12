@@ -5120,6 +5120,14 @@
       "production": false
     },
     {
+      "from": "apps/rika/test/fixtures/server-client-commands.ts",
+      "to": "packages/product/src/operation/contract/product-operation.ts",
+      "specifier": "@rika/product/product-operation",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "apps/rika/test/fixtures/server-client.ts",
       "to": "apps/rika/test/fixtures/server-client-commands.ts",
       "specifier": "./server-client-commands",

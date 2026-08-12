@@ -235,6 +235,30 @@ const program = Effect.gen(function* () {
             return interactive(input, {
               events: (dispatch) => {
                 const kind = input.prompt[0]
+                if (kind === "preview-fanout")
+                  return Effect.gen(function* () {
+                    dispatch({
+                      _tag: "ExecutionModelPreviewed",
+                      threadId: Thread.ThreadId.make("preview-thread"),
+                      turnId: Turn.TurnId.make("preview-turn"),
+                      preview: {
+                        _tag: "ModelPreviewed",
+                        key: {
+                          runId: "preview-run",
+                          attemptFence: 1,
+                          turn: 1,
+                          modelCallId: "preview-call",
+                          modelAttemptId: "preview-attempt",
+                          attempt: 1,
+                        },
+                        revision: 7,
+                        text: "shared preview text",
+                        reasoning: "shared reasoning",
+                        truncated: false,
+                      },
+                    })
+                    return yield* Effect.never
+                  })
                 if (kind === "wire-limit-event")
                   return Effect.sync(() =>
                     dispatch({

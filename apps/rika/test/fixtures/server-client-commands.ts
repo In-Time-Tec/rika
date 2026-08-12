@@ -1,5 +1,6 @@
 import * as ViewState from "@rika/terminal/terminal-state"
 import * as TerminalMessage from "@rika/terminal/terminal-message"
+import * as ProductOperation from "@rika/product/product-operation"
 import * as ServerService from "@rika/product/server-service"
 import * as InteractiveController from "../../src/interactive/controller/interactive-controller"
 import { Clock, Deferred, Effect, FileSystem, Fiber, Path, Queue, Ref, Stdio, Stream } from "effect"
@@ -33,6 +34,48 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
             const until = clock.currentTimeMillisUnsafe() + 1_100
             while (clock.currentTimeMillisUnsafe() < until) {}
           }).pipe(Effect.andThen(connection.ping), Effect.andThen(emit({ type: "stall-survived" })))
+        if (command === "preview-fanout")
+          return connection.run(
+            { _tag: "Interactive", prompt: ["preview-fanout"], ephemeral: false, workspace },
+            {
+              interactive: (_input, session) =>
+                Effect.gen(function* () {
+                  yield* emit({ type: "interactive-callback", callbacks: 1 })
+                  const previews = yield* Queue.unbounded<{
+                    readonly text: string
+                    readonly revision: number
+                    readonly runId: string
+                  }>()
+                  const feed = yield* Effect.forkChild(
+                    session.events((event) => {
+                      if (event._tag === "ExecutionModelPreviewed")
+                        Queue.offerUnsafe(previews, {
+                          text: event.preview.text,
+                          revision: event.preview.revision,
+                          runId: event.preview.key.runId,
+                        })
+                      return true
+                    }),
+                  )
+                  const preview = yield* Queue.take(previews).pipe(
+                    Effect.timeout("8 seconds"),
+                    Effect.mapError(() =>
+                      ProductOperation.OperationUnavailable.make({
+                        operation: "preview-fanout",
+                        message: "no preview arrived",
+                      }),
+                    ),
+                  )
+                  yield* emit({
+                    type: "preview-received",
+                    text: preview.text,
+                    revision: preview.revision,
+                    runId: preview.runId,
+                  })
+                  yield* Fiber.interrupt(feed)
+                }),
+            },
+          )
         if (command === "reconnect-interactive")
           return connection
             .run(

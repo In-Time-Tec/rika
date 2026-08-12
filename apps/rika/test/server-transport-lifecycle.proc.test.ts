@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import { resolve } from "../src/server/process/server-endpoint"
 import { makeRoot, run, waitUntil } from "./server-transport-runtime"
 import { cleanRoot, fileExists, fileStat, readText } from "./server-transport-files"
-import { alive, attachedEffect, start } from "./server-transport-process"
+import { alive, attachedEffect, nextTypeEffect, start } from "./server-transport-process"
 import { killTrackedHosts } from "./server-process-exit"
 
 afterEach(() => killTrackedHosts())
@@ -41,6 +41,36 @@ describe("server WebSocket process transport", () => {
 
             yield* waitUntil(fileExists(`${root}/owner-finalizations.log`), 4_000)
             expect(yield* readText(`${root}/owner-finalizations.log`)).toBe(`${aEvent.hostPid}\n`)
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
+  )
+
+  test(
+    "fans the same live preview frame out to two simultaneous clients",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const [a, b] = yield* Effect.all([start(root), start(root)], { concurrency: 2 })
+            const [aEvent, bEvent] = yield* Effect.all([attachedEffect(a), attachedEffect(b)])
+            expect(aEvent.hostPid).toBe(bEvent.hostPid)
+            yield* a.send("preview-fanout")
+            yield* b.send("preview-fanout")
+            const [aPreview, bPreview] = yield* Effect.all(
+              [nextTypeEffect(a, "preview-received"), nextTypeEffect(b, "preview-received")],
+              { concurrency: 2 },
+            )
+            expect(aPreview.type).toBe("preview-received")
+            expect(bPreview.type).toBe("preview-received")
+            // Both clients observe the identical live frame: same run identity, revision, and text.
+            expect(aPreview).toMatchObject({ text: "shared preview text", revision: 7, runId: "preview-run" })
+            expect(bPreview).toMatchObject({ text: "shared preview text", revision: 7, runId: "preview-run" })
+            yield* Effect.all([a.closeEffect, b.closeEffect], { concurrency: 2 })
           } finally {
             yield* cleanRoot(root)
           }
