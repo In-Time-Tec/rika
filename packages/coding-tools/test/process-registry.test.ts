@@ -160,25 +160,34 @@ describe("ProcessRegistry", () => {
     )
   })
 
-  it.effect("bounds retained terminal results to the newest process ids", () => {
+  it.effect("bounds retained terminal results without evicting active processes", () => {
     const spawner = controlledSpawner([])
     return Effect.scoped(
       Effect.gen(function* () {
         const registry = yield* ProcessRegistry.Service
+        const activeId = yield* registry.start("active", [], "/workspace")
+        const activeProcess = spawner.spawned[0]!
         const processIds: Array<string> = []
         for (let index = 0; index <= 128; index++) {
           const processId = yield* registry.start("fast", [String(index)], "/workspace")
           processIds.push(processId)
-          const process = spawner.spawned[index]!
+          const process = spawner.spawned[index + 1]!
           yield* Queue.offer(process.stdout, bytes(String(index)))
           yield* Effect.yieldNow
           yield* finish(process)
           yield* registry.poll(processId, 1_000, 100)
         }
 
+        yield* Queue.offer(activeProcess.stdout, bytes("still active"))
+        yield* Effect.yieldNow
+
         expect(yield* Effect.result(registry.poll(processIds[0]!, 0, 100))).toMatchObject({
           _tag: "Failure",
           failure: { _tag: "ProcessNotFound" },
+        })
+        expect(yield* registry.poll(activeId, 0, 100)).toMatchObject({
+          stdout: "still active",
+          running: true,
         })
         expect(yield* registry.poll(processIds.at(-1)!, 0, 100)).toMatchObject({
           stdout: "128",
