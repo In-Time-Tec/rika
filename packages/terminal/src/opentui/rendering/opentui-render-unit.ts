@@ -389,7 +389,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     const failed = block.status === "failed"
     const cancelled = block.status === "cancelled"
     const label = subagentPhrase(block.name, block.status)
-    append(statusIcon(failed, running, cancelled))
+    append(block.status === "queued" ? fg(colors.subtle)("◷") : statusIcon(failed, running, cancelled))
     append(fg(colors.text)(` ${label}`))
     append(marker(expanded))
     if (!expanded) return

@@ -213,14 +213,6 @@ const tagOf = (cause: unknown) =>
 
 const operationError = (cause: unknown): RuntimeOperationError => {
   if (cause instanceof RuntimeOperationError) return cause
-  if (cause instanceof ProcessRegistry.ProcessOutputConsumed)
-    return runtimeError({
-      category: "conflict",
-      message: cause.message,
-      outcome: "known",
-      recovery: "never",
-      nextAction: "Use the output returned by the completed bash or shell_command_status call",
-    })
   if (cause instanceof ProcessRegistry.ProcessNotFound)
     return runtimeError({
       category: "not_found",

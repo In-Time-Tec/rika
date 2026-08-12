@@ -16,7 +16,7 @@ export const Request = Schema.Struct({
 })
 export const tool = Tool.make("shell_command_status", {
   description:
-    "Return new output and elapsedMillis, waiting at most 10000 ms; completed output is readable exactly once",
+    "Return new output and elapsedMillis, waiting at most 10000 ms; completed results remain readable through repeated status checks",
   parameters: Schema.Struct({
     processId: Schema.String,
     waitMillis: Schema.optionalKey(Schema.NullOr(WaitMillis)),

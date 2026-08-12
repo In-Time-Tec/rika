@@ -8,7 +8,7 @@ const leafTools = ["typescript"]
 
 test.each([
   { name: "zero depth", subagents: { maxDepth: 0, maxSubagents: 4 } },
-  { name: "zero direct-child quota", subagents: { maxDepth: 4, maxSubagents: 0 } },
+  { name: "zero direct-child capacity", subagents: { maxDepth: 4, maxSubagents: 0 } },
 ])("gives the root only ordinary tools at $name", ({ subagents }) =>
   TuiApp.run(
     Effect.gen(function* () {
@@ -81,7 +81,7 @@ test("keeps depth one child-capable and makes depth two a leaf", () =>
     }),
   ))
 
-test("removes child tools from a parent after its lifetime quota is exhausted", () =>
+test("restores child tools after active capacity becomes available", () =>
   TuiApp.run(
     Effect.gen(function* () {
       const app = yield* TuiApp.tuiApp({
@@ -100,7 +100,7 @@ test("removes child tools from a parent after its lifetime quota is exhausted", 
       app.pressEnter()
       yield* app.waitFrame("QUOTA_ROOT_DONE", 20_000)
       yield* app.settled
-      expect(yield* app.modelToolNamesFor("Root")).toEqual([childTools, leafTools])
+      expect(yield* app.modelToolNamesFor("Root")).toEqual([childTools, childTools])
       yield* app.quit
     }),
   ))

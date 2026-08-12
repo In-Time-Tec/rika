@@ -2,7 +2,7 @@
 
 Rika reads global settings from `~/.config/rika/settings.json` and Workspace settings from `.rika/settings.json`. Workspace values take precedence over global values, with map-shaped settings merged by key; invalid files or unsupported fields fail configuration loading instead of being ignored.
 
-Recursive delegation defaults to four direct children per parent and four child levels. `maxDepth` counts edges from the root, so `0` disables subagents, `1` permits only root children, and `2` also permits grandchildren. `maxSubagents` is each parent's cumulative direct-child allowance; completed and cancelled children continue to occupy their admission slots. Both settings accept integers from 0 through 1024.
+Recursive delegation defaults to four active direct children per parent and four child levels. `maxDepth` counts edges from the root, so `0` disables subagents, `1` permits only root children, and `2` also permits grandchildren. `maxSubagents` is each parent's concurrent direct-child capacity, not a lifetime or tree-wide limit. Excess members of an admitted group wait in a durable queue and start as that parent's children settle; every recursively capable child receives the same independent capacity. Both settings accept integers from 0 through 1024.
 
 ```json
 {

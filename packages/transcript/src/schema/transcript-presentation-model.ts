@@ -88,7 +88,7 @@ const SubagentCard = Schema.TaggedStruct("SubagentCard", {
   prompt: Schema.String,
   promptTruncated: Schema.Boolean,
   summary: Schema.String,
-  status: Schema.Literals(["running", "waiting", "cancelling", "complete", "failed", "cancelled"]),
+  status: Schema.Literals(["queued", "running", "waiting", "cancelling", "complete", "failed", "cancelled"]),
   activity: Schema.Array(Schema.String),
 })
 const AuthorizationCard = Schema.TaggedStruct("AuthorizationCard", {

@@ -753,6 +753,16 @@
       "testKind": "tui-test"
     },
     {
+      "id": "apps/rika/test/subagent-capacity-queue.tui.test.ts",
+      "path": "apps/rika/test/subagent-capacity-queue.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
       "id": "apps/rika/test/subagent-live-stream-2.tui.test.ts",
       "path": "apps/rika/test/subagent-live-stream-2.tui.test.ts",
       "workspace": "@rika/cli",
@@ -6381,6 +6391,22 @@
     },
     {
       "from": "apps/rika/test/subagent-activity.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-capacity-queue.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/subagent-capacity-queue.tui.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

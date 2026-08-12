@@ -231,6 +231,8 @@ const make = (
         node.attempt = event.attempt
         if (node.lifecycle === "active") observeLifecycleAt(event)
         else activate(node, event)
+        const activeCard = cardsByChild.get(node.rawRunId)
+        if (activeCard !== undefined) updateCard(activeCard, "running")
         return
       case "TurnStarted":
         node.phase += 1
