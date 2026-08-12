@@ -75,6 +75,44 @@ describe("semantic subagent and authorization transcript rows", () => {
     expect(output).toContain("Checking this now")
   })
 
+  test("renders a nested subagent card on its parent's recursive timeline", () => {
+    const base = model()
+    const nested: Model = {
+      ...base,
+      blocks: [
+        ...base.blocks,
+        {
+          _tag: "SubagentCard",
+          id: "nested-subagent",
+          name: "Nested survey",
+          prompt: "Inspect the nested boundary",
+          promptTruncated: false,
+          summary: "",
+          status: "queued",
+          activity: [],
+        },
+      ],
+      items: [
+        ...base.items,
+        {
+          _tag: "Block",
+          index: base.blocks.length,
+          id: "nested-subagent-unit",
+          turnId: "turn",
+          parentId: "subagent-local",
+        },
+      ],
+      expandedRowKeys: ["subagent:subagent-local"],
+    }
+    const parent = transcriptUnits(nested).find((unit) => unit.kind === "subagent")
+    expect(parent).toMatchObject({
+      kind: "subagent",
+      children: [{ kind: "tool" }, { kind: "subagent", block: 3, children: [] }],
+    })
+    expect(expandableRowIds(nested)).toContain("subagent:nested-subagent")
+    expect(rendered(nested)).toContain("◷ Nested survey queued")
+  })
+
   test("only a selected pending authorization with an empty composer offers typed controls", () => {
     const collapsed = model()
     const collapsedOutput = rendered(collapsed)

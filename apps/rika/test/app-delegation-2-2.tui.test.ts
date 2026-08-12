@@ -20,7 +20,7 @@ test(
           lanes: [
             {
               steps: [
-                model.turn([model.spawn([{ profile: "Task", prompt: "L1" }], "l1")]),
+                model.turn([model.spawn([{ profile: "Task", prompt: "L1", name: "Parent survey" }], "l1")]),
                 model.text("ROOT_DEEP_DONE"),
                 model.text("ROOT_DEEP_SETTLEMENT_ACKNOWLEDGED"),
                 model.text("ROOT_DEEP_SETTLEMENT_RETRY_ACKNOWLEDGED"),
@@ -29,7 +29,7 @@ test(
             {
               profile: "Task",
               steps: [
-                model.turn([model.spawn([{ profile: "Oracle", prompt: "L2" }], "l2")]),
+                model.turn([model.spawn([{ profile: "Oracle", prompt: "L2", name: "Nested survey" }], "l2")]),
                 model.text("CHILD_DEEP_DONE"),
                 model.text("CHILD_DEEP_SETTLEMENT_ACKNOWLEDGED"),
                 model.text("CHILD_DEEP_SETTLEMENT_RETRY_ACKNOWLEDGED"),
@@ -41,7 +41,7 @@ test(
                 model.turn([
                   model.binding({ module: "workspace", operation: "read", input: { path: "deep.txt" } }, "deep-read"),
                 ]),
-                model.text("GRANDCHILD_DONE"),
+                model.text("GRANDCHILD_DONE", 2_000),
               ],
             },
           ],
@@ -49,6 +49,14 @@ test(
         })
         yield* Effect.promise(() => app.type("Delegate deep work."))
         app.pressEnter()
+        const direct = yield* app.waitFrame("Parent survey working", 30_000)
+        expect(direct).toContain("Running 1 subagent")
+        yield* app.clickText("Parent survey working")
+        const recursive = yield* app.waitFrame("Nested survey finished", 30_000)
+        expect(recursive).toContain("Parent survey working")
+        expect(recursive).toContain("Nested survey finished")
+        expect(recursive).toContain("Running 1 subagent")
+        expect(recursive).not.toContain("Running 2 subagents")
         yield* app.waitFrame("ROOT_DEEP_DONE", 30_000)
         const durable = yield* app.waitTranscript(
           Turn.TurnId.make("tui-turn-0"),
@@ -60,8 +68,8 @@ test(
           unit.content._tag === "Entry" ? [unit.content.text] : [],
         )
         expect(texts).toContain("GRANDCHILD_DONE")
-        const completed = yield* app.waitFrame("Subagent finished", 30_000)
-        expect(completed).toContain("Subagent finished")
+        const completed = yield* app.waitFrame("Parent survey finished", 30_000)
+        expect(completed).toContain("Nested survey finished")
         yield* app.quit
       }),
     ),
