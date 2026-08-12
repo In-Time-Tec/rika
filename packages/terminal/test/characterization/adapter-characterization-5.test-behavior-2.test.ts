@@ -266,7 +266,7 @@ it.effect("clears usage hover when a narrower selector moves away from the point
     surface.modeLabel.onMouseOver?.({ x: 20 } as never)
     expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("pointer")
 
-    surface.update(model({ usageCost: { _tag: "Available", usd: 0, unpricedAttempts: 0 } }))
+    surface.update(model({ usageCost: { _tag: "Available", usd: 0, unpricedAttempts: 0, includedAttempts: 0 } }))
     expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("default")
     expect(
       (surface.modeLabel.content as { chunks: ReadonlyArray<{ attributes?: number }> }).chunks[0]?.attributes,

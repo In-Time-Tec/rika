@@ -293,6 +293,7 @@ const make = (options: Options, credentialStore: ProviderCredentialStoreShape | 
             input?.checkpoint,
             input?.units ?? [],
             link.titleRunId !== undefined,
+            input?.pricing,
           )
         } catch (cause) {
           return Stream.fail(ExecutionGateway.WatchTurnFailure.make({ message: message(cause) }))

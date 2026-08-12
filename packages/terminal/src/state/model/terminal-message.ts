@@ -88,7 +88,6 @@ type Message =
   | { readonly _tag: "ThreadTitleChanged"; readonly threadId: string; readonly title: string }
   | { readonly _tag: "FilesReplaced"; readonly files: ReadonlyArray<string> }
   | { readonly _tag: "BranchDetected"; readonly branch: string }
-  | { readonly _tag: "UsageReported"; readonly costUsd?: number }
   | { readonly _tag: "WorkspaceFilesToggled" }
   | { readonly _tag: "ThreadSidebarSelectionMoved"; readonly offset: number }
   | { readonly _tag: "ThreadSidebarSelectionConfirmed"; readonly index?: number }

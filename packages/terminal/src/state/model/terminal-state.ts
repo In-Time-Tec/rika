@@ -134,7 +134,6 @@ export const Model = Schema.Struct({
   busy: Schema.Boolean,
   activity: Schema.optional(Activity),
   connectionStatus: Schema.optional(Schema.Literals(["Connecting", "Reconnecting"])),
-  costUsd: Schema.optional(Schema.Finite),
   contextUsage: Schema.optional(ContextUsage),
   goal: Schema.optional(GoalIndicator),
   contextAnimation: ContextAnimationSchema,
@@ -155,7 +154,13 @@ export const Model = Schema.Struct({
     Schema.Union([
       Schema.Struct({ _tag: Schema.tag("Loading") }),
       Schema.Struct({ _tag: Schema.tag("Unavailable") }),
-      Schema.Struct({ _tag: Schema.tag("Available"), usd: Schema.Finite, unpricedAttempts: Schema.Int }),
+      Schema.Struct({ _tag: Schema.tag("Included"), includedAttempts: Schema.Int }),
+      Schema.Struct({
+        _tag: Schema.tag("Available"),
+        usd: Schema.Finite,
+        unpricedAttempts: Schema.Int,
+        includedAttempts: Schema.Int,
+      }),
     ]),
   ),
   paletteOpen: Schema.Boolean,

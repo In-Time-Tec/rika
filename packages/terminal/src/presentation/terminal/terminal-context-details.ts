@@ -9,8 +9,8 @@ import { colors } from "./terminal-theme"
 import { truncateToWidth } from "./terminal-format"
 
 const cost = (model: Model): string => {
+  if (model.usageCost?._tag === "Included") return "Included in subscription"
   if (model.usageCost?._tag === "Available") return `$${model.usageCost.usd.toFixed(2)}`
-  if (model.costUsd !== undefined) return `$${model.costUsd.toFixed(2)}`
   if (model.usageCost?._tag === "Loading" || model.busy) return "····"
   return "—"
 }

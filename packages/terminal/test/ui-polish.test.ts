@@ -65,6 +65,21 @@ test("renders honest empty states instead of Unknown when no usage exists yet", 
   expect(loading).not.toContain("Unknown")
   expect(loading).toContain("Used        ····")
   expect(loading).toContain("Cost       ····")
+
+  const included = text(
+    contextDetails(
+      {
+        ...base,
+        contextUsage: { _tag: "Available", inputTokens: 10, contextWindow: 100, reserveTokens: 10 },
+        usageCost: { _tag: "Included", includedAttempts: 2 },
+      },
+      54,
+      16,
+      0,
+    ).chunks,
+  )
+  expect(included).toContain("Cost       Included in subscription")
+  expect(included).not.toContain("$0.00")
 })
 
 test("uses a wider file sidebar with mode-accented title geometry and neutral content", () => {

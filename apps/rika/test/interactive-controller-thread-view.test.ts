@@ -258,11 +258,43 @@ describe("interactive ThreadView controller", () => {
       },
     })
     expect(loaded.state.model).toMatchObject({
-      costUsd: 0.375,
-      usageCost: { _tag: "Available", usd: 0.375, unpricedAttempts: 1 },
+      usageCost: { _tag: "Available", usd: 0.375, unpricedAttempts: 1, includedAttempts: 0 },
       usageTokens: { _tag: "Available", total: 42, uncountedAttempts: 1 },
       usageTime: { _tag: "Available", accumulatedMillis: 900, activeSince: 1_000 },
       contextUsage: { _tag: "Available", inputTokens: 30, contextWindow: 100, reserveTokens: 10 },
+    })
+  })
+
+  it("labels account-backed usage as included instead of unpriced", () => {
+    const loaded = InteractiveController.update(state(), {
+      _tag: "ThreadViewSnapshot",
+      snapshot: {
+        ...snapshot(),
+        usage: {
+          state: {
+            tokens: {
+              total: 8,
+              input: { total: 6, cacheRead: 2 },
+              output: { total: 2, reasoning: 1 },
+              failedProviderTotal: 0,
+            },
+            pricedAttempts: 0,
+            unpricedAttempts: 0,
+            includedAttempts: 2,
+            countedAttempts: 2,
+            uncountedAttempts: 0,
+            sourceComplete: true,
+            context: { requestOrdinal: 1, purpose: "conversation", inputTokens: 6 },
+            contextPending: false,
+            active: { _tag: "Available", accumulatedMillis: 10 },
+          },
+          contextCapacity: { contextWindow: 100, reserveTokens: 10 },
+        },
+      },
+    })
+    expect(loaded.state.model).toMatchObject({
+      usageCost: { _tag: "Included", includedAttempts: 2 },
+      usageTokens: { _tag: "Available", total: 8, uncountedAttempts: 0 },
     })
   })
 

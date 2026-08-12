@@ -32,7 +32,12 @@ export interface Interface {
   readonly denyTurn: (link: ExecutionLink, input: AuthorizationResponse) => Effect.Effect<void, ApprovalResponseFailure>
   readonly watchTurn: (
     link: ExecutionLink,
-    input?: { readonly prompt?: string; readonly checkpoint?: Checkpoint; readonly units?: ReadonlyArray<Unit> },
+    input?: {
+      readonly prompt?: string
+      readonly checkpoint?: Checkpoint
+      readonly units?: ReadonlyArray<Unit>
+      readonly pricing?: "included" | "metered"
+    },
   ) => Stream.Stream<WatchEvent, WatchTurnFailure>
   readonly inspectTurn: (
     link: ExecutionLink,

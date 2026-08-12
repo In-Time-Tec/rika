@@ -370,6 +370,7 @@ it.effect("aggregates semantic projection usage from decoded SQLite transcript s
               },
               pricedAttempts: 1,
               unpricedAttempts: 1,
+              includedAttempts: 0,
               countedAttempts: 2,
               uncountedAttempts: 0,
               sourceComplete: true,

@@ -126,6 +126,7 @@ const nextThreadUsage = (
       : { tokens: tokenDifference(next.tokens, previous?.tokens)! }),
     pricedAttempts: Math.max(0, next.pricedAttempts - (previous?.pricedAttempts ?? 0)),
     unpricedAttempts: Math.max(0, next.unpricedAttempts - (previous?.unpricedAttempts ?? 0)),
+    includedAttempts: Math.max(0, (next.includedAttempts ?? 0) - (previous?.includedAttempts ?? 0)),
     countedAttempts: Math.max(0, next.countedAttempts - (previous?.countedAttempts ?? 0)),
     uncountedAttempts: Math.max(0, next.uncountedAttempts - (previous?.uncountedAttempts ?? 0)),
     sourceComplete: next.sourceComplete,

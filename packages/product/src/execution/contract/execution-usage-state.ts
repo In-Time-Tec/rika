@@ -25,6 +25,7 @@ export const UsageState = Schema.Struct({
   tokens: Schema.optionalKey(TokenTotals),
   pricedAttempts: Count,
   unpricedAttempts: Count,
+  includedAttempts: Schema.optionalKey(Count),
   countedAttempts: Count,
   uncountedAttempts: Count,
   sourceComplete: Schema.Boolean,
@@ -37,6 +38,7 @@ export type UsageState = typeof UsageState.Type
 export const emptyUsageState = (): UsageState => ({
   pricedAttempts: 0,
   unpricedAttempts: 0,
+  includedAttempts: 0,
   countedAttempts: 0,
   uncountedAttempts: 0,
   sourceComplete: false,
@@ -57,6 +59,7 @@ export const aggregateUsage = (values: ReadonlyArray<UsageState>): UsageState =>
       : { tokens: sumTokenTotals(values.map((value) => value.tokens))! }),
     pricedAttempts,
     unpricedAttempts: values.reduce((total, value) => total + value.unpricedAttempts, 0),
+    includedAttempts: values.reduce((total, value) => total + (value.includedAttempts ?? 0), 0),
     countedAttempts: values.reduce((total, value) => total + value.countedAttempts, 0),
     uncountedAttempts: values.reduce((total, value) => total + value.uncountedAttempts, 0),
     sourceComplete: values.every((value) => value.sourceComplete),

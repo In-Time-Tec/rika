@@ -193,6 +193,7 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
             attempts: {
               priced: usage.pricedAttempts,
               unpriced: usage.unpricedAttempts,
+              included: usage.includedAttempts ?? 0,
               counted: usage.countedAttempts,
               uncounted: usage.uncountedAttempts,
             },

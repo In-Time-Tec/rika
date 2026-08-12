@@ -411,10 +411,16 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           })
         const executionLink = turn.executionLink
         const projection = yield* transcripts.get(turnId)
+        const pricing = turn.executionRoute.main.candidates.some(
+          (candidate) => candidate.providerConnection.authentication === "account",
+        )
+          ? "included"
+          : "metered"
         let latestChange: ExecutionProjection.Change | undefined
         yield* backend
           .watchTurn(executionLink, {
             prompt: turn.prompt,
+            pricing,
             ...(projection === undefined ? {} : { units: projection.units }),
             ...(projection?.projectorCheckpoint === undefined ? {} : { checkpoint: projection.projectorCheckpoint }),
           })

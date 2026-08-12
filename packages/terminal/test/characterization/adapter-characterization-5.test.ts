@@ -320,23 +320,11 @@ it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =
         }),
       )
     }
-    surface.update(model({ mode: "medium", busy: false, costUsd: 0.0074 }))
-    expect(modeLabelText()).toBe(" $0.007 ─ medium ")
     surface.update(
       model({
         mode: "medium",
         busy: false,
-        costUsd: 5.4449,
-        usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 2 },
-      }),
-    )
-    expect(modeLabelText()).toBe(" $1.25 ─ medium ")
-    surface.update(
-      model({
-        mode: "medium",
-        busy: false,
-        costUsd: 0.0074,
-        usageCost: { _tag: "Available", usd: 0.0074, unpricedAttempts: 1 },
+        usageCost: { _tag: "Available", usd: 0.0074, unpricedAttempts: 1, includedAttempts: 0 },
       }),
     )
     expect(modeLabelText()).toBe(" $0.007 ─ medium ")
@@ -344,15 +332,46 @@ it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =
       model({
         mode: "medium",
         busy: false,
-        usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 2 },
+        usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 2, includedAttempts: 0 },
       }),
     )
     expect(modeLabelText()).toBe(" $1.25 ─ medium ")
-    surface.update(model({ mode: "medium", busy: false, costUsd: 5.4449, fastMode: true }))
+    surface.update(
+      model({
+        mode: "medium",
+        busy: false,
+        usageCost: { _tag: "Available", usd: 0.0074, unpricedAttempts: 1, includedAttempts: 0 },
+      }),
+    )
+    expect(modeLabelText()).toBe(" $0.007 ─ medium ")
+    surface.update(
+      model({
+        mode: "medium",
+        busy: false,
+        usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 2, includedAttempts: 0 },
+      }),
+    )
+    expect(modeLabelText()).toBe(" $1.25 ─ medium ")
+    surface.update(
+      model({
+        mode: "medium",
+        busy: false,
+        fastMode: true,
+        usageCost: { _tag: "Available", usd: 5.4449, unpricedAttempts: 0, includedAttempts: 0 },
+      }),
+    )
     expect(modeLabelText()).toBe(" $5.44 ─ ↯medium ")
     const globalTotalUsd = 12.34
-    surface.update(model({ mode: "medium", busy: false, costUsd: globalTotalUsd }))
+    surface.update(
+      model({
+        mode: "medium",
+        busy: false,
+        usageCost: { _tag: "Available", usd: globalTotalUsd, unpricedAttempts: 0, includedAttempts: 0 },
+      }),
+    )
     expect(modeLabelText()).toBe(" $12.34 ─ medium ")
+    surface.update(model({ mode: "medium", usageCost: { _tag: "Included", includedAttempts: 3 } }))
+    expect(modeLabelText()).toBe(" Included ─ medium ")
     surface.update(model({ mode: "medium", usageCost: { _tag: "Loading" } }))
     expect(modeLabelText()).toBe(" $···· ─ medium ")
     surface.update(model({ mode: "medium", usageCost: { _tag: "Unavailable" } }))
@@ -424,7 +443,7 @@ it.effect("routes usage-label clicks to the local display toggle", () =>
   Effect.gen(function* () {
     const usageToggle = vi.fn()
     const { surface } = yield* createScoped({ ...handlers(), usageToggle })
-    surface.update(model({ usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0 } }))
+    surface.update(model({ usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0, includedAttempts: 0 } }))
     Object.assign(surface.modeLabel, { screenX: 20 })
     surface.modeLabel.onMouseDown?.({ x: 20 } as never)
     expect(usageToggle).toHaveBeenCalledOnce()

@@ -283,8 +283,6 @@ const reduceOverlayImpl = (
         activeTurnId: undefined,
       }
     }
-    case "UsageReported":
-      return message.costUsd === undefined ? model : { ...model, costUsd: (model.costUsd ?? 0) + message.costUsd }
     case "DetailMoved": {
       const ids = expandableRowIds(model)
       const count = ids.length

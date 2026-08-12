@@ -146,15 +146,18 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot, modelPre
     return { _tag: "Unavailable" as const }
   })()
   next = updateModel(next, { _tag: "ContextUsageReplaced", contextUsage })
+  const includedAttempts = usage.includedAttempts ?? 0
   const costUsd = usage.costNanoUsd === undefined ? undefined : usage.costNanoUsd / 1_000_000_000
+  const usageCost = ((): NonNullable<Model["usageCost"]> => {
+    if (costUsd !== undefined)
+      return { _tag: "Available", usd: costUsd, unpricedAttempts: usage.unpricedAttempts, includedAttempts }
+    if (includedAttempts > 0) return { _tag: "Included", includedAttempts }
+    return { _tag: "Unavailable" }
+  })()
   return trimTranscriptTimeline(
     {
       ...next,
-      costUsd,
-      usageCost:
-        costUsd === undefined
-          ? { _tag: "Unavailable" }
-          : { _tag: "Available", usd: costUsd, unpricedAttempts: usage.unpricedAttempts },
+      usageCost,
       usageTokens:
         usage.tokens?.total === undefined
           ? { _tag: "Unavailable" }

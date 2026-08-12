@@ -29,10 +29,11 @@ const make = (
   resume?: Projection.Checkpoint,
   baselineUnits: ReadonlyArray<Unit> = [],
   titleExpected = false,
+  pricing: "included" | "metered" = "metered",
 ): Projector => {
   const localId = (family: string, ...parts: ReadonlyArray<string | number>): string =>
     scopedId(family, turnId, ...parts)
-  const usage = makeUsageAccounting()
+  const usage = makeUsageAccounting(pricing)
   const { attemptStarts, modelCalls, observeLifecycleAt, activate, deactivate, recordAttempt, settleOpenAttempts } =
     usage
   const core: ProjectorCore = {

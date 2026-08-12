@@ -89,6 +89,63 @@ it.effect("returns stored terminal state and units when checkpoint resume yields
   }),
 )
 
+it.effect("passes the included pricing class to the backend for an OpenAI account route", () =>
+  Effect.gen(function* () {
+    const route = ExecutionRouteSnapshot.testExecutionRoute()
+    const accountTurn: Turn.AgentExecutionTurn = {
+      ...turn,
+      executionRoute: {
+        ...route,
+        main: {
+          ...route.main,
+          candidates: [
+            {
+              ...route.main.candidates[0]!,
+              providerConnection: {
+                provider: "openai",
+                protocol: "openai",
+                baseUrl: "https://api.openai.com/v1",
+                authentication: "account",
+                credentialIdentity: "fingerprint",
+              },
+            },
+          ],
+        },
+      },
+    }
+    const completed = { ...accountTurn, status: "completed" as const }
+    const projection = {
+      turn: completed,
+      units: [],
+      checkpointGeneration: 1,
+      revision: 1,
+      state: {
+        status: "completed" as const,
+        usage: ExecutionProjection.emptyUsageState(),
+        steering: { steeringMessages: 0, followUpMessages: 0 },
+      },
+      projectionVersion: ExecutionProjection.projectionVersion,
+    }
+    let receivedPricing: string | undefined
+    const owner = yield* make(
+      { get: () => Effect.succeed(completed) } as TurnRepository.Interface,
+      {
+        get: () => Effect.succeed(projection),
+        commitProjection: () => Effect.succeed("committed" as const),
+      } as TranscriptRepository.Interface,
+      {
+        watchTurn: (_link, input) => {
+          receivedPricing = input?.pricing
+          return Stream.empty
+        },
+        inspectTurn: () => Effect.succeed({ status: "completed" as const }),
+      } as ExecutionGateway.Interface,
+    )
+    yield* owner.watchTurn(accountTurn.id)
+    expect(receivedPricing).toBe("included")
+  }),
+)
+
 it.effect("commits and delivers each live change once without retaining or redelivering completion", () =>
   Effect.gen(function* () {
     const running: ExecutionProjection.Change = {
