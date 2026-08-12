@@ -3,17 +3,15 @@ import { makeInteractiveSessionControls } from "./interactive-session-interface-
 import { makeInteractiveSessionEvents } from "./interactive-session-interface-events"
 import { makeInteractiveSessionSelection } from "./interactive-session-interface-selection"
 import type { makeInteractiveExecution } from "./interactive-session-execution"
-import type { makeInteractiveFollowing } from "./interactive-session-following"
 import type { makeInteractiveTranscript } from "./interactive-session-transcript-runtime"
-import type { makeInteractiveSupervisionComponents } from "./interactive-session-runtime-components"
+import type { makeInteractiveControlComponents } from "./interactive-session-runtime-components"
 import type { InteractiveRuntimeContext } from "./interactive-session-runtime"
 import type { SelectionEpochState } from "./interactive-thread-selection"
 
 export type InteractiveImplementationInput = InteractiveRuntimeContext &
   ReturnType<typeof makeInteractiveExecution> &
-  ReturnType<typeof makeInteractiveFollowing> &
   ReturnType<typeof makeInteractiveTranscript> &
-  ReturnType<typeof makeInteractiveSupervisionComponents> & {
+  ReturnType<typeof makeInteractiveControlComponents> & {
     readonly getCurrentSelectionEpoch: () => number
     readonly getSelectedThreadId: () => string | undefined
     readonly getActiveSelectionState: () => SelectionEpochState | undefined

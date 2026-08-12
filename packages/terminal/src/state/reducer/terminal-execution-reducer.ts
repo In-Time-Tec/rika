@@ -65,7 +65,12 @@ const reduceExecutionImpl = (
           ? {
               queue: [
                 ...model.queue,
-                { id: message.submissionId!, prompt: submittedPrompt, provisional: true as const },
+                {
+                  id: message.submissionId!,
+                  prompt: submittedPrompt,
+                  provisional: true as const,
+                  ...(model.currentThreadId === undefined ? {} : { threadId: model.currentThreadId }),
+                },
               ],
             }
           : {}),
@@ -75,6 +80,7 @@ const reduceExecutionImpl = (
             input: model.input,
             attachments: model.pastedText,
             cursor: model.cursor,
+            ...(model.currentThreadId === undefined ? {} : { threadId: model.currentThreadId }),
             ...(message.submissionId === undefined ? {} : { submissionId: message.submissionId }),
           },
         ],
@@ -97,7 +103,12 @@ const reduceExecutionImpl = (
           ...model,
           queue,
           queueSelection: validQueueSelection(model.queueSelection, queue),
-          submittedDrafts: bindSubmittedDraft(model.submittedDrafts, message.turnId, message.submissionId),
+          submittedDrafts: bindSubmittedDraft(
+            model.submittedDrafts,
+            message.turnId,
+            message.submissionId,
+            message.threadId,
+          ),
         },
         {
           turnId: message.turnId,

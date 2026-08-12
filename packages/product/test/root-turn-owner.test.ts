@@ -1,17 +1,13 @@
-import * as ExecutionProjection from "@rika/product/execution-projection"
-import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as Thread from "@rika/product/thread-record"
-import type { Projection } from "@rika/product/transcript-page"
-import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
-import { Deferred, Effect, Fiber, Schema, Stream } from "effect"
-import { unitOrder } from "@rika/transcript/transcript-unit-order"
+import { expect, it } from "@effect/vitest"
+import { Deferred, Effect, Fiber, Schema } from "effect"
+import { make } from "../src/thread/queue/root-turn-owner"
 
 const encodeStartTurn = Schema.encodeSync(Schema.fromJsonString(ExecutionGateway.StartTurn))
-import { make } from "../src/thread/queue/root-turn-owner"
 
 const link = { runId: "root-run", threadId: "thread", turnId: "turn" }
 
@@ -29,129 +25,37 @@ const turn: Turn.AgentExecutionTurn = {
   updatedAt: 0,
 }
 
-it.effect("returns stored terminal state and units when checkpoint resume yields no new changes", () =>
+it.effect("claims an admissible turn once and refuses a second claim", () =>
   Effect.gen(function* () {
-    const completed = { ...turn, status: "completed" as const }
-    const units = [
-      {
-        key: "assistant:stored",
-        turnId: turn.id,
-        order: unitOrder("assistant:stored", 0),
-        revision: 3,
-        content: { _tag: "Entry" as const, role: "assistant" as const, text: "stored answer" },
-      },
-    ]
-    const projection = {
-      turn: completed,
-      units,
-      checkpointGeneration: 2,
-      revision: 3,
-      state: {
-        status: "completed" as const,
-        usage: ExecutionProjection.emptyUsageState(),
-        steering: { steeringMessages: 0, followUpMessages: 0 },
-      },
-      projectorCheckpoint: { version: ExecutionProjection.projectionVersion, cursor: "stored-cursor", state: "{}" },
-      projectionVersion: 1,
-    }
     const owner = yield* make(
-      { get: () => Effect.succeed(completed) } as TurnRepository.Interface,
-      {
-        get: () => Effect.succeed(projection),
-        commitProjection: () => Effect.succeed("committed" as const),
-      } as TranscriptRepository.Interface,
-      { watchTurn: () => Stream.empty } as ExecutionGateway.Interface,
+      { get: () => Effect.succeed(turn) } as import("@rika/product/turn-repository").Interface,
+      {} as import("@rika/product/transcript-repository").Interface,
+      {} as ExecutionGateway.Interface,
     )
-    const result = yield* owner.watchTurn(turn.id)
-    expect(result).toMatchObject({
-      status: "completed",
-      state: { status: "completed" },
-      units: [{ content: { text: "stored answer" } }],
-      checkpoint: { cursor: "stored-cursor" },
-    })
-    expect(Object.hasOwn(result, "changes")).toBe(false)
+    expect(yield* owner.claim(turn.id, "running")).toBe(true)
+    expect(yield* owner.claim(turn.id, "running")).toBe(false)
+    expect(yield* owner.release(turn.id)).toBe(true)
+    expect(yield* owner.claim(turn.id, "running")).toBe(true)
   }),
 )
 
-it.effect("commits and delivers each live change once without retaining or redelivering completion", () =>
+it.effect("refuses claims for queued, terminal, and mismatched turns", () =>
   Effect.gen(function* () {
-    const running: ExecutionProjection.Change = {
-      _tag: "ProjectionSnapshot",
-      revision: 1,
-      checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "running", state: "{}" },
-      units: [],
-      hasOlder: false,
-      state: {
-        status: "running",
-        usage: ExecutionProjection.emptyUsageState(),
-        steering: { steeringMessages: 0, followUpMessages: 0 },
-      },
+    const statuses = ["queued", "completed", "failed", "cancelled"] as const
+    for (const status of statuses) {
+      const owner = yield* make(
+        { get: () => Effect.succeed({ ...turn, status }) } as import("@rika/product/turn-repository").Interface,
+        {} as import("@rika/product/transcript-repository").Interface,
+        {} as ExecutionGateway.Interface,
+      )
+      expect(yield* owner.claim(turn.id, status)).toBe(false)
     }
-    const completed: ExecutionProjection.Change = {
-      _tag: "ProjectionPatch",
-      baseRevision: 1,
-      revision: 2,
-      checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "completed", state: "{}" },
-      upsert: [],
-      remove: [],
-      state: {
-        status: "completed",
-        usage: ExecutionProjection.emptyUsageState(),
-        steering: { steeringMessages: 0, followUpMessages: 0 },
-      },
-    }
-    let stored: Projection | undefined
-    const commits: Array<ExecutionProjection.Change> = []
-    const trace: Array<string> = []
-    let watches = 0
     const owner = yield* make(
-      { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
-      {
-        get: () => Effect.succeed(stored),
-        commitProjection: (_turn, change) =>
-          Effect.sync(() => {
-            commits.push(change)
-            trace.push(`commit:${change.revision}`)
-            stored = {
-              turn,
-              units: [],
-              checkpointGeneration: commits.length,
-              revision: change.revision,
-              state: change.state,
-              ...(change.checkpoint === undefined ? {} : { projectorCheckpoint: change.checkpoint }),
-              projectionVersion: ExecutionProjection.projectionVersion,
-            }
-            return "committed" as const
-          }),
-      } as TranscriptRepository.Interface,
-      {
-        watchTurn: () => {
-          watches += 1
-          return watches === 1 ? Stream.fromIterable([running, completed]) : Stream.empty
-        },
-      } as ExecutionGateway.Interface,
+      { get: () => Effect.succeed(turn) } as import("@rika/product/turn-repository").Interface,
+      {} as import("@rika/product/transcript-repository").Interface,
+      {} as ExecutionGateway.Interface,
     )
-    const delivered: Array<ExecutionProjection.Change> = []
-    const first = yield* owner.watchTurn(turn.id, (change) => {
-      delivered.push(change)
-      trace.push(`callback:${change.revision}`)
-    })
-    expect(commits).toEqual([running, completed])
-    expect(delivered).toEqual([running, completed])
-    expect(trace).toEqual(["commit:1", "callback:1", "commit:2", "callback:2"])
-    expect(first).toMatchObject({
-      status: "completed",
-      state: { status: "completed" },
-      checkpoint: { cursor: "completed" },
-    })
-    expect(Object.hasOwn(first, "changes")).toBe(false)
-
-    const completionDeliveries: Array<ExecutionProjection.Change> = []
-    const resumed = yield* owner.watchTurn(turn.id, (change) => completionDeliveries.push(change))
-    expect(completionDeliveries).toEqual([])
-    expect(commits).toHaveLength(2)
-    expect(resumed.status).toBe("completed")
-    expect(Object.hasOwn(resumed, "changes")).toBe(false)
+    expect(yield* owner.claim(turn.id, "accepted")).toBe(false)
   }),
 )
 
@@ -164,8 +68,8 @@ it.effect("persists the execution link before accepting interruption", () =>
       {
         prepareExecutionAdmission: (input) => Effect.succeed(input),
         attachExecutionLink: () => Deferred.succeed(attached, undefined),
-      } as TurnRepository.Interface,
-      {} as TranscriptRepository.Interface,
+      } as import("@rika/product/turn-repository").Interface,
+      {} as import("@rika/product/transcript-repository").Interface,
       {
         startTurn: () =>
           Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(releaseStart)), Effect.as(link)),
@@ -212,7 +116,9 @@ it.effect("recovers every dual-database admission crash window into one idempote
           Effect.gen(function* () {
             const encoded = encodeStartTurn(candidate)
             if (persistedInput !== undefined && encodeStartTurn(persistedInput) !== encoded)
-              return yield* TurnRepository.RepositoryError.make({ message: "changed prepared admission" })
+              return yield* TurnRepository.RepositoryError.make({
+                message: "changed prepared admission",
+              })
             persistedInput ??= structuredClone(candidate)
             return structuredClone(persistedInput)
           }),
@@ -223,12 +129,14 @@ it.effect("recovers every dual-database admission crash window into one idempote
           Effect.gen(function* () {
             if (failAttach) {
               failAttach = false
-              return yield* TurnRepository.RepositoryError.make({ message: "simulated process loss before link" })
+              return yield* TurnRepository.RepositoryError.make({
+                message: "simulated process loss before link",
+              })
             }
             persistedLink = structuredClone(candidate)
             return { ...turn, executionLink: persistedLink }
           }),
-      } as unknown as TurnRepository.Interface
+      } as unknown as import("@rika/product/turn-repository").Interface
       const gateway = {
         startTurn: (candidate: ExecutionGateway.StartTurn) =>
           Effect.gen(function* () {
@@ -249,10 +157,10 @@ it.effect("recovers every dual-database admission crash window into one idempote
             return executionLink
           }),
       } as unknown as ExecutionGateway.Interface
-      const owner = yield* make(repository, {} as TranscriptRepository.Interface, gateway)
+      const owner = yield* make(repository, {} as import("@rika/product/transcript-repository").Interface, gateway)
       if (window === "before-start") yield* repository.prepareExecutionAdmission(input, 1)
       else yield* Effect.result(owner.startTurn(input))
-      const recovered = yield* make(repository, {} as TranscriptRepository.Interface, gateway)
+      const recovered = yield* make(repository, {} as import("@rika/product/transcript-repository").Interface, gateway)
       yield* recovered.recoverExecutionAdmissions
       expect(runs.size).toBe(1)
       expect(persistedInput).toEqual(input)
@@ -265,127 +173,49 @@ it.effect("recovers every dual-database admission crash window into one idempote
   }),
 )
 
-it.effect("settles a turn whose backend run is terminal when the watch stream yields no changes", () =>
+it.effect("keeps late claims behind a quiesced Thread fence", () =>
   Effect.gen(function* () {
-    const owner = yield* make(
-      { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
-      { get: () => Effect.void } as TranscriptRepository.Interface,
-      {
-        watchTurn: () => Stream.empty,
-        inspectTurn: () => Effect.succeed({ status: "completed" as const }),
-      } as ExecutionGateway.Interface,
-    )
-    const result = yield* owner.watchTurn(turn.id)
-    expect(result.status).toBe("completed")
-    expect(result.state.status).toBe("completed")
-  }),
-)
-
-it.effect("falls back to the persisted running status when the backend run is unavailable", () =>
-  Effect.gen(function* () {
-    const owner = yield* make(
-      { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
-      { get: () => Effect.void } as TranscriptRepository.Interface,
-      {
-        watchTurn: () => Stream.empty,
-        inspectTurn: () => Effect.succeed({ status: "unavailable" as const }),
-      } as ExecutionGateway.Interface,
-    )
-    const result = yield* owner.watchTurn(turn.id)
-    expect(result.status).toBe("running")
-    expect(result.state.status).toBe("running")
-  }),
-)
-
-it.effect("keeps preview traffic out of the transcript repository and final result", () =>
-  Effect.gen(function* () {
-    const completed: ExecutionProjection.Change = {
-      _tag: "ProjectionSnapshot",
-      revision: 1,
-      units: [],
-      hasOlder: false,
-      state: {
-        status: "completed",
-        usage: ExecutionProjection.emptyUsageState(),
-        steering: { steeringMessages: 0, followUpMessages: 0 },
-      },
-    }
-    const previews: ReadonlyArray<ExecutionGateway.ModelPreviewed> = Array.from({ length: 100 }, (_, index) => ({
-      _tag: "ModelPreviewed",
-      key: {
-        runId: link.runId,
-        attemptFence: 1,
-        turn: 0,
-        modelCallId: "call",
-        modelAttemptId: "attempt",
-        attempt: 0,
-      },
-      revision: index + 1,
-      text: "x".repeat(index + 1),
-      reasoning: "",
-      truncated: false,
-    }))
-    const execute = Effect.fn("RootTurnOwner.testPreviewNonAuthority")(function* (enabled: boolean) {
-      let stored: Projection | undefined
-      const commits: Array<ExecutionProjection.Change> = []
-      const delivered: Array<ExecutionProjection.Change | ExecutionGateway.ModelPreviewed> = []
-      const owner = yield* make(
-        { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
-        {
-          get: () => Effect.succeed(stored),
-          commitProjection: (_turn, change) =>
-            Effect.sync(() => {
-              commits.push(change)
-              stored = {
-                turn,
-                units: change._tag === "ProjectionSnapshot" ? change.units : change.upsert,
-                checkpointGeneration: commits.length,
-                revision: change.revision,
-                state: change.state,
-                ...(change.checkpoint === undefined ? {} : { projectorCheckpoint: change.checkpoint }),
-                projectionVersion: ExecutionProjection.projectionVersion,
-              }
-              return "committed" as const
-            }),
-        } as TranscriptRepository.Interface,
-        {
-          watchTurn: () => Stream.fromIterable(enabled ? [...previews, completed] : [completed]),
-        } as ExecutionGateway.Interface,
-      )
-      const result = yield* owner.watchTurn(
-        turn.id,
-        (change) => delivered.push(change),
-        (preview) => delivered.push(preview),
-      )
-      return { commits, delivered, result }
-    })
-
-    const observed = yield* execute(true)
-    const baseline = yield* execute(false)
-    expect(observed.delivered).toHaveLength(101)
-    expect(observed.delivered.filter((event) => event._tag === "ModelPreviewed")).toHaveLength(100)
-    expect(observed.commits).toEqual([completed])
-    expect(baseline.commits).toEqual([completed])
-    expect(observed.result).toEqual(baseline.result)
-  }),
-)
-
-it.effect("keeps late accepted callbacks behind a quiesced Thread fence", () =>
-  Effect.gen(function* () {
-    let launches = 0
     const owner = yield* make(
       {
         get: () => Effect.succeed(turn),
         list: () => Effect.succeed([turn]),
-      } as TurnRepository.Interface,
-      {} as TranscriptRepository.Interface,
+      } as import("@rika/product/turn-repository").Interface,
+      {} as import("@rika/product/transcript-repository").Interface,
       {} as ExecutionGateway.Interface,
     )
-    yield* owner.install({ run: () => Effect.sync(() => (launches += 1)).pipe(Effect.asVoid) })
     expect(yield* owner.claim(turn.id, "running")).toBe(true)
     yield* owner.quiesceThread(turn.threadId)
-    yield* owner.accepted(turn.id)
-    yield* Effect.yieldNow
-    expect(launches).toBe(0)
+    expect(yield* owner.claim(turn.id, "running")).toBe(false)
+  }),
+)
+
+it.effect("refuses queued claims for a quiesced Thread and releases them", () =>
+  Effect.gen(function* () {
+    const queued = { ...turn, status: "queued" as const, executionLink: undefined }
+    const claim = { turn: queued, token: "token" }
+    let released = false
+    const owner = yield* make(
+      {
+        claimNextQueued: () => Effect.succeed(claim),
+        releaseQueuedClaim: () =>
+          Effect.sync(() => {
+            released = true
+          }),
+        list: () => Effect.succeed([queued]),
+      } as unknown as import("@rika/product/turn-repository").Interface,
+      {} as import("@rika/product/transcript-repository").Interface,
+      {} as ExecutionGateway.Interface,
+    )
+    yield* owner.quiesceThread(Thread.ThreadId.make("thread"))
+    expect(yield* owner.claimQueued(Thread.ThreadId.make("thread"), 0)).toBeUndefined()
+    expect(released).toBe(false)
+    const open = yield* make(
+      {
+        claimNextQueued: () => Effect.succeed(claim),
+      } as unknown as import("@rika/product/turn-repository").Interface,
+      {} as import("@rika/product/transcript-repository").Interface,
+      {} as ExecutionGateway.Interface,
+    )
+    expect(yield* open.claimQueued(Thread.ThreadId.make("thread"), 0)).toEqual(claim)
   }),
 )

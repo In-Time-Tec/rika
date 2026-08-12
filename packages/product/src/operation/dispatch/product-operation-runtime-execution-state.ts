@@ -43,22 +43,16 @@ type InteractiveEvent = import("../interactive/interactive-runtime-event").Inter
 type OperationError = import("../operation-error").OperationError
 type InteractiveDependencyContext = import("../interactive/interactive-session-runtime").InteractiveDependencyContext
 type InteractiveExecutionContext = import("../interactive/interactive-session-runtime").InteractiveExecutionContext
-
-const watchedThreadIds = (sessionThreadViews: Map<number, () => string | undefined>) =>
-  new Set(
-    [...sessionThreadViews.values()].flatMap((view) => {
-      const id = view()
-      return id === undefined ? [] : [id]
-    }),
-  )
+type LiveThreadProjectionInterface = import("../../thread/projection/live-thread-projection").Interface
 
 export interface ProductOperationExecutionStateInput {
   readonly options: ProductLayerOptions<Error, Error, Error, Error, Error>
   readonly ownerScope: Scope.Scope
+  readonly hub: LiveThreadProjectionInterface
+  readonly submissionRegistry: import("../../execution/service/execution-ingest").SubmissionRegistry
   readonly publishInteractiveActivity: (origin: number, event: InteractiveEvent) => InteractiveEvent
   readonly publishTurnSettled: (turn: TurnTurn, responseArrived?: boolean) => Effect.Effect<void, never, never>
   readonly interactiveSinks: Map<number, (origin: number, event: InteractiveEvent) => void>
-  readonly sessionThreadViews: Map<number, () => string | undefined>
   readonly activitySequence: number
   readonly unavailable: (input: Input, message?: string) => OperationUnavailable
   readonly operationError: typeof operationError
@@ -71,7 +65,8 @@ export interface ProductOperationExecutionStateInput {
 export interface ProductOperationExecutionState extends ProductOperationExecution {
   readonly ownerScope: Scope.Scope
   readonly pendingTurnCapacity: number
-  readonly watchedThreadIds: () => Set<string>
+  readonly hub: LiveThreadProjectionInterface
+  readonly submissionRegistry: import("../../execution/service/execution-ingest").SubmissionRegistry
   readonly queueMutationEvent: queueMutationEvent
   readonly turnMutationAdmission: Semaphore.Semaphore
   readonly turnChanges: PubSub.PubSub<void>
@@ -123,20 +118,17 @@ export const buildProductOperationExecutionState = (
   input: ProductOperationExecutionStateInput,
 ): Effect.Effect<ProductOperationExecutionState, Error, never> =>
   Effect.gen(function* () {
-    const {
-      options,
-      ownerScope: rawOwnerScope,
-      publishInteractiveActivity,
-      publishTurnSettled,
-      sessionThreadViews,
-    } = input
+    const { options, ownerScope: rawOwnerScope, publishInteractiveActivity, publishTurnSettled } = input
     const ownerScope: Scope.Scope = rawOwnerScope
     const pendingTurnCapacity = Math.max(0, Math.floor(options.pendingTurnCapacity ?? 64))
     const turnMutationAdmission = yield* Semaphore.make(1)
     const turnChanges = yield* PubSub.sliding<void>(1)
     const dirtyTurnObservers = new Set<TurnId>()
-    const watched = () => watchedThreadIds(sessionThreadViews)
-    const foundation = yield* makeProductOperationFoundation({ options, ownerScope }).pipe(
+    const foundation = yield* makeProductOperationFoundation({
+      options,
+      ownerScope,
+      hub: input.hub,
+    }).pipe(
       Effect.provideService(Scope.Scope, ownerScope),
       Effect.mapError((error) => operationError(String(error), error)),
     )
@@ -154,14 +146,6 @@ export const buildProductOperationExecutionState = (
       dependencyContext,
       executionDependencies,
     } = foundation
-    const threadDeletion = ThreadDeletion.make({
-      threads: Context.get(dependencyContext, ThreadRepository.Service),
-      turns: Context.get(dependencyContext, TurnRepository.Service),
-      sessions: executionSessionLifecycle,
-      rootTurns: rootTurnOwner,
-      turnMutationAdmission,
-    })
-    yield* threadDeletion.reconcile
     const threadRepository = Context.get(dependencyContext, ThreadRepository.Service)
     const requireAdmission = Effect.fn("ProductOperation.requireThreadAdmission")(function* (threadId: ThreadId) {
       const thread = yield* threadRepository
@@ -196,9 +180,9 @@ export const buildProductOperationExecutionState = (
       Effect.gen(function* () {
         yield* requireAdmission(submission.threadId)
         const turn = yield* turns.createForSubmission(submission)
-        return turn.status === "queued"
-          ? { turn, claimed: false }
-          : { turn, claimed: yield* rootTurnOwner.claim(turn.id, turn.status) }
+        // The server-scope execution coordinator claims and watches every admitted turn; the
+        // admitting path only creates the durable submission and notifies the coordinator.
+        return { turn, claimed: false }
       }).pipe(turnMutationAdmission.withPermits(1))
     const claimQueuedTurn = (threadId: ThreadId, now: number) =>
       requireAdmission(threadId).pipe(Effect.andThen(rootTurnOwner.claimQueued(threadId, now)))
@@ -223,16 +207,34 @@ export const buildProductOperationExecutionState = (
       releaseTurnObserver,
       claimQueuedTurn,
       backendLayer,
+      hub: input.hub,
+      queueMutationEvent: input.queueMutationEvent ?? queueMutationEventValue,
+      staleQueuedTurnsError: input.staleQueuedTurnsError,
+      queuedTurnPromoteMaxAgeMs: input.queuedTurnPromoteMaxAgeMs,
       acquiredDependencies,
       executionStartFailureMessage,
       unavailable: input.unavailable,
       temporaryThreadTitle,
       encodeJson: input.encodeJson,
     })
+
+    const threadDeletion = ThreadDeletion.make({
+      threads: Context.get(dependencyContext, ThreadRepository.Service),
+      turns: Context.get(dependencyContext, TurnRepository.Service),
+      sessions: executionSessionLifecycle,
+      rootTurns: rootTurnOwner,
+      ingest: {
+        quiesceThread: (threadId) =>
+          execution.ingest.quiesceThread(threadId).pipe(Effect.provide(executionDependencies)),
+      },
+      turnMutationAdmission,
+    })
+    yield* threadDeletion.reconcile
     return {
       ownerScope,
       pendingTurnCapacity,
-      watchedThreadIds: watched,
+      hub: input.hub,
+      submissionRegistry: input.submissionRegistry,
       queueMutationEvent: input.queueMutationEvent ?? queueMutationEventValue,
       turnMutationAdmission,
       turnChanges,

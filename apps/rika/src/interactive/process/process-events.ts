@@ -48,12 +48,14 @@ export const makeEventRouter = (runtime: Runtime) => {
         {
           model: loop.model,
           ...(loop.threadView === undefined ? {} : { view: loop.threadView }),
+          viewGeneration: loop.viewGeneration,
           ...(loop.modelPreview === undefined ? {} : { modelPreview: loop.modelPreview }),
         },
         event,
       )
       loop.model = controlled.state.model
       loop.threadView = controlled.state.view
+      loop.viewGeneration = controlled.state.viewGeneration ?? loop.viewGeneration
       loop.modelPreview = controlled.state.modelPreview
       if (event._tag === "ThreadViewSnapshot") {
         loop.requestedThreadId = String(event.snapshot.thread.id)
@@ -77,6 +79,7 @@ export const makeEventRouter = (runtime: Runtime) => {
           _tag: "SubmissionAdmitted",
           turnId: event.turnId,
           status: event.status,
+          threadId: String(event.threadId),
           ...(event.submissionId === undefined ? {} : { submissionId: event.submissionId }),
         })
     } else if (event._tag === "ThreadsListed") {

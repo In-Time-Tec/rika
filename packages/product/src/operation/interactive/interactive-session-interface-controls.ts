@@ -16,10 +16,8 @@ export const makeInteractiveSessionControls = (
   const {
     safe,
     active,
-    threadForTurn,
     createForSubmission,
     ensureTurnSummary,
-    drainQueued,
     notifyThreadSummaries,
     notifyTurnChanged,
     publishTurnSettled,
@@ -40,7 +38,6 @@ export const makeInteractiveSessionControls = (
         const turns = yield* TurnRepository.Service
         const backend = yield* ExecutionGateway.Service
         const turn = yield* active
-        const thread = yield* threadForTurn(turn)
         const pending = yield* createForSubmission(turns, {
           id: yield* options.makeTurnId,
           threadId: turn.threadId,
@@ -53,7 +50,6 @@ export const makeInteractiveSessionControls = (
         if (pending.status === "accepted") {
           const requeued = yield* turns.requeueAccepted(pending.id, pendingTurnCapacity, yield* Clock.currentTimeMillis)
           emit(sessionDispatch, queueMutationEvent(requeued.queue))
-          yield* drainQueued(thread, sessionDispatch)
           return
         }
         if (pending.status !== "queued") return yield* operationError("Pending turn was not queued")
@@ -72,7 +68,6 @@ export const makeInteractiveSessionControls = (
             return yield* operationError(`Turn ${turn.id} has no persisted execution link`)
           yield* backend.cancelTurn(turn.executionLink, userCancellationReason)
         }
-        yield* drainQueued(thread, sessionDispatch)
       }),
     )
   const cancel = safe(

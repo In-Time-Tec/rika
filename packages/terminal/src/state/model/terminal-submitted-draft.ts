@@ -3,6 +3,7 @@ import type { ComposerDraft } from "./terminal-composer-state"
 
 interface SubmittedDraft extends ComposerDraft {
   readonly cursor: number
+  readonly threadId?: string
   readonly submissionId?: string
   readonly turnId?: string
 }
@@ -12,14 +13,21 @@ const bindSubmittedDraftImpl = (
   drafts: ReadonlyArray<SubmittedDraft>,
   turnId: string,
   submissionId?: string,
+  threadId?: string,
 ): ReadonlyArray<SubmittedDraft> => {
   if (drafts.some((draft) => draft.turnId === turnId)) return drafts
+  const scoped =
+    threadId === undefined
+      ? drafts
+      : drafts.filter((draft) => draft.threadId === undefined || draft.threadId === threadId)
   const index =
     submissionId === undefined
-      ? drafts.findIndex((draft) => draft.turnId === undefined)
-      : drafts.findIndex((draft) => draft.submissionId === submissionId && draft.turnId === undefined)
+      ? scoped.findIndex((draft) => draft.turnId === undefined)
+      : scoped.findIndex((draft) => draft.submissionId === submissionId && draft.turnId === undefined)
   if (index < 0) return drafts
-  return drafts.map((draft, position) => (position === index ? { ...draft, turnId } : draft))
+  const target = scoped[index]!
+  const position = drafts.indexOf(target)
+  return drafts.map((draft, candidate) => (candidate === position ? { ...draft, turnId } : draft))
 }
 
 export const bindSubmittedDraft: {
@@ -27,10 +35,12 @@ export const bindSubmittedDraft: {
     arg0: Parameters<typeof bindSubmittedDraftImpl>[0],
     arg1: Parameters<typeof bindSubmittedDraftImpl>[1],
     arg2?: Parameters<typeof bindSubmittedDraftImpl>[2],
+    arg3?: Parameters<typeof bindSubmittedDraftImpl>[3],
   ): ReturnType<typeof bindSubmittedDraftImpl>
   (
     arg1: Parameters<typeof bindSubmittedDraftImpl>[1],
     arg2?: Parameters<typeof bindSubmittedDraftImpl>[2],
+    arg3?: Parameters<typeof bindSubmittedDraftImpl>[3],
   ): (arg0: Parameters<typeof bindSubmittedDraftImpl>[0]) => ReturnType<typeof bindSubmittedDraftImpl>
 } = Function.dual((args) => Array.isArray(args[0]), bindSubmittedDraftImpl)
 

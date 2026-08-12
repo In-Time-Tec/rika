@@ -194,6 +194,8 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
           )
         }),
       submit: (prompt, mode, parts, tuning, submissionId) =>
+        // A submit is a mutation: it is never re-issued on a disconnect, and the ambiguous outcome
+        // is reported as a failure so the caller can reconcile it via the durable admitted turn.
         mutation((session) => session.submit(prompt, mode, parts, tuning, submissionId)),
       shell: (threadId, command, incognito) =>
         Effect.gen(function* () {
@@ -221,8 +223,10 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
       ),
       selectThread: (threadId) =>
         Effect.gen(function* () {
-          yield* Ref.set(selected, { _tag: "thread" as const, threadId })
+          // The stable selection is committed only after the remote selection succeeded, so a
+          // failed selection is never re-applied on the next reconnect.
           yield* retryRead((session) => session.selectThread(threadId))
+          yield* Ref.set(selected, { _tag: "thread" as const, threadId })
         }),
       readQueue: (threadId) => retryRead((session) => session.readQueue(threadId)),
       previewThread: (threadId) => retryRead((session) => session.previewThread(threadId)),

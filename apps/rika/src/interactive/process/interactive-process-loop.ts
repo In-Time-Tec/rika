@@ -44,6 +44,7 @@ export const interactiveTui =
         const loop: InteractiveLoop = {
           model: initial(input.workspace ?? process.cwd(), input.mode ?? "medium"),
           threadView: undefined,
+          viewGeneration: 0,
           modelPreview: undefined,
           requestedThreadId: input.threadId,
           workingFrame: undefined as string | undefined,

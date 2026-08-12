@@ -30,19 +30,19 @@ test(
         const baton = new Database(path.join(root, "baton.db"), { readonly: true })
         try {
           const unitRows = rika
-            .query<{ readonly n: number }>("SELECT COUNT(*) AS n FROM rika_transcript_units")
+            .query<{ readonly n: number }, []>("SELECT COUNT(*) AS n FROM rika_transcript_units")
             .get()!.n
           const checkpointRows = rika
-            .query<{ readonly n: number }>("SELECT COUNT(*) AS n FROM rika_transcript_checkpoints")
+            .query<{ readonly n: number }, []>("SELECT COUNT(*) AS n FROM rika_transcript_checkpoints")
             .get()!.n
-          const turnRows = rika.query<{ readonly n: number }>("SELECT COUNT(*) AS n FROM rika_turns").get()!.n
+          const turnRows = rika.query<{ readonly n: number }, []>("SELECT COUNT(*) AS n FROM rika_turns").get()!.n
           // Exactly the prompt + one durable answer unit, one checkpoint, one turn.
           expect(unitRows).toBe(2)
           expect(checkpointRows).toBe(1)
           expect(turnRows).toBe(1)
 
           const unitTexts = rika
-            .query<{ readonly unit_json: string }>("SELECT unit_json FROM rika_transcript_units")
+            .query<{ readonly unit_json: string }, []>("SELECT unit_json FROM rika_transcript_units")
             .all()
             .map((row) => row.unit_json)
 
@@ -50,10 +50,10 @@ test(
           expect(unitTexts.some((text) => text.includes("preview") || text.includes("tentative"))).toBe(false)
 
           const eventCount = baton
-            .query<{ readonly n: number }>("SELECT COUNT(*) AS n FROM baton_run_events")
+            .query<{ readonly n: number }, []>("SELECT COUNT(*) AS n FROM baton_run_events")
             .get()!.n
           const events = baton
-            .query<{ readonly event_json: string }>("SELECT event_json FROM baton_run_events")
+            .query<{ readonly event_json: string }, []>("SELECT event_json FROM baton_run_events")
             .all()
             .map((row) => row.event_json)
           // Baton stored semantic events only: at least the committed response, and nothing that

@@ -8,7 +8,8 @@ import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import { Deferred, Effect, Layer, Ref, Stream } from "effect"
+import { Deferred, Duration, Effect, Layer, Ref, Stream } from "effect"
+import { TestClock } from "effect/testing"
 import * as Scope from "effect/Scope"
 
 import { executionSessionLifecycleLayerTest, productLayer, provideLayer } from "../support/operation-layer-harness"
@@ -66,23 +67,27 @@ describe("Operation queue drain", () => {
       const repository = yield* ThreadRepository.makeMemory([thread])
       const turns = yield* TurnRepository.makeMemory()
       const failFirst = yield* Deferred.make<void>()
+      let turnOneWatchAttempts = 0
       const failingBackend = ExecutionGateway.Service.of({
         ...backend,
-        watchTurn: (link) =>
-          link.turnId === "turn-1"
-            ? Stream.concat(
-                Stream.make(projectionSnapshot(link.turnId, "running", "turn-1-running")),
-                Stream.fromEffect(Deferred.await(failFirst)).pipe(
-                  Stream.flatMap(() =>
-                    Stream.fail(
-                      ExecutionGateway.WatchTurnFailure.make({
-                        message: "The model provider rate-limited the request. Wait a moment, then try again.",
-                      }),
-                    ),
+        watchTurn: (link) => {
+          if (link.turnId !== "turn-1") return backend.watchTurn(link)
+          turnOneWatchAttempts += 1
+          if (turnOneWatchAttempts === 1)
+            return Stream.concat(
+              Stream.make(projectionSnapshot(link.turnId, "running", "turn-1-running")),
+              Stream.fromEffect(Deferred.await(failFirst)).pipe(
+                Stream.flatMap(() =>
+                  Stream.fail(
+                    ExecutionGateway.WatchTurnFailure.make({
+                      message: "The model provider rate-limited the request. Wait a moment, then try again.",
+                    }),
                   ),
                 ),
-              )
-            : backend.watchTurn(link),
+              ),
+            )
+          return Stream.make(projectionSnapshot(link.turnId, "failed", "turn-1-failed"))
+        },
       })
       const layer = productLayer({
         executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
@@ -106,9 +111,13 @@ describe("Operation queue drain", () => {
         yield* session.submit("third")
         while ((yield* turns.readQueue(thread.id)).queuedCount !== 2) yield* Effect.yieldNow
         yield* Deferred.succeed(failFirst, undefined)
+        // The ingest re-arms the failed watch instead of settling the turn; the second watch
+        // reports the durable failure, which then drains the queue.
+        yield* TestClock.adjust(Duration.millis(500))
         yield* waitForStatus(turns, "turn-3", "completed")
         yield* settleEvents
       }).pipe(provideLayer(layer))
+      expect(turnOneWatchAttempts).toBe(2)
       expect(yield* turns.get(Turn.TurnId.make("turn-1"))).toMatchObject({ status: "failed" })
       expect(yield* turns.get(Turn.TurnId.make("turn-2"))).toMatchObject({ status: "completed" })
       expect(yield* turns.get(Turn.TurnId.make("turn-3"))).toMatchObject({ status: "completed" })

@@ -68,6 +68,11 @@ export const isCritical = (event: InteractiveEvent): boolean => {
     case "SubmissionAdmitted":
     case "SelectionLoaded":
     case "ThreadActivated":
+    case "ThreadViewHubBase":
+    case "ThreadViewHubPatch":
+    case "ThreadViewHubLive":
+    case "ThreadViewHubLiveCleared":
+    case "ThreadViewHubGeneration":
       return false
   }
 }
@@ -88,6 +93,11 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
     case "ExecutionProjectionResyncRequired":
     case "TurnStarted":
     case "SelectionLoaded":
+    case "ThreadViewHubBase":
+    case "ThreadViewHubPatch":
+    case "ThreadViewHubLive":
+    case "ThreadViewHubLiveCleared":
+    case "ThreadViewHubGeneration":
       if (id !== undefined) rememberThread(state, state.transcriptThreadIds, id)
       return
     case "QueueUpdated":

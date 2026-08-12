@@ -63,14 +63,11 @@ const recordedShellStartedEventImpl = (
   change: recordedShellChange(turn, projection),
 })
 
+type RecordedShellEvent = Extract<InteractiveEvent, { readonly _tag: "ExecutionProjectionChanged" }>
+
 export const recordedShellStartedEvent: {
-  (
-    arg1: TranscriptPage.Projection,
-  ): (arg0: ThreadResult.RunningRecordedShellTurn) => ReturnType<typeof recordedShellStartedEventImpl>
-  (
-    arg0: ThreadResult.RunningRecordedShellTurn,
-    arg1: TranscriptPage.Projection,
-  ): ReturnType<typeof recordedShellStartedEventImpl>
+  (arg1: TranscriptPage.Projection): (arg0: ThreadResult.RunningRecordedShellTurn) => RecordedShellEvent
+  (arg0: ThreadResult.RunningRecordedShellTurn, arg1: TranscriptPage.Projection): RecordedShellEvent
 } = Function.dual(2, recordedShellStartedEventImpl)
 
 const recordedShellSettledEventsImpl = (
@@ -86,13 +83,8 @@ const recordedShellSettledEventsImpl = (
 ]
 
 export const recordedShellSettledEvents: {
-  (
-    arg1: TranscriptPage.Projection,
-  ): (arg0: ThreadResult.TerminalRecordedShellTurn) => ReturnType<typeof recordedShellSettledEventsImpl>
-  (
-    arg0: ThreadResult.TerminalRecordedShellTurn,
-    arg1: TranscriptPage.Projection,
-  ): ReturnType<typeof recordedShellSettledEventsImpl>
+  (arg1: TranscriptPage.Projection): (arg0: ThreadResult.TerminalRecordedShellTurn) => readonly [RecordedShellEvent]
+  (arg0: ThreadResult.TerminalRecordedShellTurn, arg1: TranscriptPage.Projection): readonly [RecordedShellEvent]
 } = Function.dual(2, recordedShellSettledEventsImpl)
 
 export const temporaryThreadTitle = (prompt: string) => clampThreadTitle(prompt) || "New thread"

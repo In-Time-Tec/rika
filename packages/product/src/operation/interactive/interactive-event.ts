@@ -6,9 +6,15 @@ import * as ExecutionGateway from "../../execution/contract/execution-gateway"
 import { Schema } from "effect"
 import { Failure } from "../operation-failure"
 
+const Generation = Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))
+
 export const InteractiveEventSchema = Schema.Union([
-  Schema.Struct({ _tag: Schema.tag("ThreadViewSnapshot"), snapshot: ThreadView.ThreadViewSnapshot }),
-  Schema.Struct({ _tag: Schema.tag("ThreadViewPatch"), patch: ThreadView.ThreadViewPatch }),
+  Schema.Struct({
+    _tag: Schema.tag("ThreadViewSnapshot"),
+    generation: Generation,
+    snapshot: ThreadView.ThreadViewSnapshot,
+  }),
+  Schema.Struct({ _tag: Schema.tag("ThreadViewPatch"), generation: Generation, patch: ThreadView.ThreadViewPatch }),
   ThreadView.ResyncRequired,
   Schema.Struct({ _tag: Schema.tag("ThreadsListed"), threads: Schema.Array(ThreadSummary.ThreadSummary) }),
   Schema.Struct({
@@ -24,6 +30,13 @@ export const InteractiveEventSchema = Schema.Union([
     runId: Schema.String,
     attemptFence: Schema.Int,
     generation: Schema.Int,
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("TurnStarted"),
+    threadId: Thread.ThreadId,
+    turnId: Turn.TurnId,
+    prompt: Schema.String,
+    submissionId: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({
     _tag: Schema.tag("ContextDiagnostics"),

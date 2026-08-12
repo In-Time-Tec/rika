@@ -4,11 +4,11 @@ import { makeInteractiveSessionComposition } from "./interactive-session-composi
 import { makeInteractiveImplementation } from "./interactive-session-interface"
 import {
   makeInteractiveExecutionComponents,
-  makeInteractiveFollowingComponents,
   makeInteractiveTranscriptComponents,
-  makeInteractiveSupervisionComponents,
+  makeInteractiveControlComponents,
 } from "./interactive-session-runtime-components"
-import { ignoreInteractiveEvent } from "./interactive-session-following"
+import type * as LiveThreadProjection from "../../thread/projection/live-thread-projection"
+import type * as SubmissionRegistry from "../../execution/service/execution-ingest"
 
 type ThreadId = import("@rika/product/thread-record").ThreadId
 type TurnId = import("@rika/product/turn-record").TurnId
@@ -41,6 +41,12 @@ type ProductLayerOptions<
   TranscriptError
 >
 type InteractiveOperationFeed = import("./interactive-operation-feed").InteractiveOperationFeed
+
+const interactiveEventThreadId = (event: InteractiveEvent): string | undefined => {
+  if (event._tag === "SelectionLoaded") return String(event.thread.id)
+  if ("threadId" in event && event.threadId !== undefined) return String(event.threadId)
+  return undefined
+}
 type SelectionEpochState = import("./interactive-thread-selection").SelectionEpochState
 type OperationError = import("../operation-error").OperationError
 type operationError = typeof import("../operation-error").operationError
@@ -152,8 +158,9 @@ export interface InteractiveSessionInput {
     now: number,
   ) => Effect.Effect<QueueClaim | undefined, TurnRepositoryError, never>
   readonly dependencyContext: InteractiveDependencyContext
-  readonly sessionThreadViews: Map<number, () => string | undefined>
   readonly interactiveSinks: Map<number, (origin: number, event: InteractiveEvent) => void>
+  readonly hub: LiveThreadProjection.Interface
+  readonly submissionRegistry: SubmissionRegistry.SubmissionRegistry
   readonly encodeJson: (value: unknown) => string
   readonly isTerminalStatus: (status: ExecutionStatusStatus) => boolean
   readonly executionStartFailureMessage: string
@@ -187,28 +194,6 @@ export type InteractiveRuntimeContext = InteractiveSessionInput &
 
 export interface InteractiveSessionRuntimeResult {
   readonly session: InteractiveSession
-  readonly supervise: Effect.Effect<
-    void,
-    | OperationError
-    | import("@rika/product/execution-gateway").StartTurnFailure
-    | import("@rika/product/execution-gateway").WatchTurnFailure
-    | import("@rika/product/execution-gateway").InspectTurnFailure
-    | TurnRepositoryError
-    | import("@rika/product/transcript-repository").RepositoryError,
-    never
-  >
-  readonly watchClaimed: (
-    turnId: TurnId,
-  ) => Effect.Effect<
-    void,
-    | OperationError
-    | import("@rika/product/execution-gateway").WatchTurnFailure
-    | TurnRepositoryError
-    | import("@rika/product/transcript-repository").RepositoryError
-    | import("@rika/product/thread-summary-repository").RepositoryError
-    | import("@rika/product/thread-repository").RepositoryError,
-    InteractiveExecutionContextServices
-  >
   readonly close: Effect.Effect<void, never, never>
 }
 
@@ -229,13 +214,12 @@ export const makeInteractiveSession = (
       activitySequence: input.activitySequence,
       options: input.options,
       initialThreadId: settings.initialThreadId,
-      serverOwner: settings.serverOwner ?? false,
+      hub: input.hub,
     })
     const typedLifecycleAdmission: Semaphore.Semaphore = state.lifecycleAdmission
     const typedGetLifecycle: () => "open" | "closed" = state.getLifecycle
     const typedSetLifecycle: (value: "open" | "closed") => void = state.setLifecycle
     const typedInteractiveSinks: Map<number, unknown> = input.interactiveSinks
-    const typedSessionThreadViews: Map<number, unknown> = input.sessionThreadViews
     const typedOperationFeed: InteractiveOperationFeed = state.operationFeed
     const typedSessionScope: Scope.Scope = state.sessionScope
     const runtimeInput = {
@@ -250,16 +234,27 @@ export const makeInteractiveSession = (
       admitLocal: state.composition.admitLocal,
       attachFeed: state.composition.attachFeed,
     }
+    // Every session receives server-scope activity (coordinator watches, queue drains, retries)
+    // through the shared activity sinks; the feed filters it to the selected thread.
+    typedInteractiveSinks.set(sessionId, (_origin: number, event: InteractiveEvent) => {
+      const threadId = interactiveEventThreadId(event)
+      if (threadId !== undefined && typedOperationFeed.bufferSelectionEvent(event) === true) return
+      // Before any selection exists, the session sees all thread activity (thread-list mode);
+      // once a thread is selected, thread-scoped events are filtered to it.
+      const selected = state.getSelectedThreadId()
+      if (threadId === undefined || selected === undefined || threadId === selected)
+        typedOperationFeed.deliver(event, {
+          selectedThreadOnly: threadId !== undefined && selected !== undefined,
+        })
+    })
     const execution = makeInteractiveExecutionComponents(runtimeInput, state)
-    const following = makeInteractiveFollowingComponents(runtimeInput, execution)
     const transcript = makeInteractiveTranscriptComponents(runtimeInput, state)
-    const supervision = makeInteractiveSupervisionComponents(runtimeInput, state, following, execution)
+    const control = makeInteractiveControlComponents(runtimeInput, execution)
     const implementation = makeInteractiveImplementation({
       ...runtimeInput,
       ...execution,
-      ...following,
       ...transcript,
-      ...supervision,
+      ...control,
       getCurrentSelectionEpoch: state.getCurrentSelectionEpoch,
       getSelectedThreadId: state.getSelectedThreadId,
       getActiveSelectionState: state.getActiveSelectionState,
@@ -291,14 +286,11 @@ export const makeInteractiveSession = (
     }
     return {
       session,
-      supervise: supervision.supervise,
-      watchClaimed: (turnId: TurnId) => following.watchClaimedTurn(turnId, ignoreInteractiveEvent),
       close: typedLifecycleAdmission.withPermits(1)(
         Effect.suspend(() => {
           if (typedGetLifecycle() === "closed") return Effect.void
           typedSetLifecycle("closed")
           typedInteractiveSinks.delete(sessionId)
-          typedSessionThreadViews.delete(sessionId)
           return typedOperationFeed.close.pipe(Effect.andThen(Scope.close(typedSessionScope, Exit.void)))
         }),
       ),

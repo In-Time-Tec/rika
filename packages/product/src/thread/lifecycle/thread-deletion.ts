@@ -16,6 +16,7 @@ export const make = (input: {
   readonly turns: TurnRepository.Interface
   readonly sessions: ExecutionSessionLifecycle.Interface
   readonly rootTurns: RootTurnOwner.Interface
+  readonly ingest: { readonly quiesceThread: (threadId: Thread.ThreadId) => Effect.Effect<void> }
   readonly turnMutationAdmission: Semaphore.Semaphore
 }): Interface => {
   // Title Runs live in their own isolated Sessions (one per ExecutionLink), so thread deletion
@@ -43,6 +44,7 @@ export const make = (input: {
   })
   const cleanup = Effect.fn("ThreadDeletion.cleanup")(function* (threadId: Thread.ThreadId) {
     yield* input.rootTurns.quiesceThread(threadId)
+    yield* input.ingest.quiesceThread(threadId)
     yield* input.sessions.requestCancellation({ sessionId: String(threadId), reason: "Thread deleted" })
     yield* settleTitleSessions(threadId)
     yield* input.sessions.awaitTerminal({ sessionId: String(threadId) })

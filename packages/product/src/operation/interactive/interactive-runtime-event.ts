@@ -1,11 +1,13 @@
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadSummary from "@rika/product/thread-summary"
+import * as ThreadView from "@rika/product/thread-view"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as Turn from "@rika/product/turn-record"
 import { Schema } from "effect"
 import { Failure } from "../operation-failure"
 import * as ExecutionProjection from "../../execution/contract/execution-projection"
 import * as ExecutionGateway from "../../execution/contract/execution-gateway"
+import type * as LiveThreadProjection from "../../thread/projection/live-thread-projection"
 
 export interface QueueItem {
   readonly id: Turn.TurnId
@@ -52,6 +54,39 @@ export type InteractiveEvent =
   | {
       readonly _tag: "ExecutionProjectionResyncRequired"
       readonly threadId: Thread.ThreadId
+    }
+  | {
+      readonly _tag: "ThreadViewHubBase"
+      readonly threadId: Thread.ThreadId
+      readonly generation: number
+      readonly base: ThreadView.ThreadViewSnapshot | undefined
+      readonly live: LiveThreadProjection.HubLive | undefined
+    }
+  | {
+      readonly _tag: "ThreadViewHubPatch"
+      readonly threadId: Thread.ThreadId
+      readonly generation: number
+      readonly patch: ThreadView.ThreadViewPatch
+    }
+  | {
+      readonly _tag: "ThreadViewHubLive"
+      readonly threadId: Thread.ThreadId
+      readonly generation: number
+      readonly preview: LiveThreadProjection.HubLive
+    }
+  | {
+      readonly _tag: "ThreadViewHubLiveCleared"
+      readonly threadId: Thread.ThreadId
+      readonly generation: number
+      readonly turnId: Turn.TurnId
+      readonly runId: string
+      readonly attemptFence: number
+      readonly previewGeneration: number
+    }
+  | {
+      readonly _tag: "ThreadViewHubGeneration"
+      readonly threadId: Thread.ThreadId
+      readonly generation: number
     }
   | {
       readonly _tag: "ThreadRefolding"
@@ -216,6 +251,47 @@ export const InteractiveEventSchema = Schema.Union([
   Schema.Struct({
     _tag: Schema.tag("ExecutionProjectionResyncRequired"),
     threadId: Thread.ThreadId,
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("ThreadViewHubBase"),
+    threadId: Thread.ThreadId,
+    generation: Schema.Int,
+    base: Schema.optionalKey(ThreadView.ThreadViewSnapshot),
+    live: Schema.optionalKey(
+      Schema.Struct({
+        turnId: Turn.TurnId,
+        preview: ExecutionGateway.ModelPreviewed,
+      }),
+    ),
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("ThreadViewHubPatch"),
+    threadId: Thread.ThreadId,
+    generation: Schema.Int,
+    patch: ThreadView.ThreadViewPatch,
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("ThreadViewHubLive"),
+    threadId: Thread.ThreadId,
+    generation: Schema.Int,
+    preview: Schema.Struct({
+      turnId: Turn.TurnId,
+      preview: ExecutionGateway.ModelPreviewed,
+    }),
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("ThreadViewHubLiveCleared"),
+    threadId: Thread.ThreadId,
+    generation: Schema.Int,
+    turnId: Turn.TurnId,
+    runId: Schema.String,
+    attemptFence: Schema.Int,
+    previewGeneration: Schema.Int,
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("ThreadViewHubGeneration"),
+    threadId: Thread.ThreadId,
+    generation: Schema.Int,
   }),
   Schema.Struct({
     _tag: Schema.tag("ThreadRefolding"),

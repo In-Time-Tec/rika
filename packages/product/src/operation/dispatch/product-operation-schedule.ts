@@ -2,19 +2,17 @@ import { Effect } from "effect"
 import type { OperationError } from "../operation-error"
 import type { ProductOperationRuntimeState } from "./product-operation-runtime-state"
 import type { ProductLayerOptions } from "./product-operation-options"
-import type { ProductOperationInteractiveSessionFactory } from "./product-operation-runtime-session"
-import type { InteractiveSessionRuntimeResult } from "../interactive/interactive-session-runtime"
+import type { ExecutionIngest } from "../../execution/service/execution-ingest"
 
 export interface ProductOperationScheduleInput {
   readonly options: ProductLayerOptions<Error, Error, Error, Error, Error>
   readonly ownerScope: import("effect").Scope.Scope
-  readonly makeInteractiveSession: ProductOperationRuntimeState["makeInteractiveSession"]
+  readonly ingest: ExecutionIngest
   readonly repairThreadSummaries: ProductOperationRuntimeState["repairThreadSummaries"]
   readonly executionDependencies: ProductOperationRuntimeState["executionDependencies"]
 }
 
 export interface ProductOperationSchedule {
-  readonly owner: InteractiveSessionRuntimeResult
   readonly repairSummariesOnce: Effect.Effect<void, never, never>
 }
 
@@ -22,9 +20,10 @@ export const makeProductOperationSchedule = (
   input: ProductOperationScheduleInput,
 ): Effect.Effect<ProductOperationSchedule, OperationError> =>
   Effect.gen(function* () {
-    const makeInteractiveSession: ProductOperationInteractiveSessionFactory = input.makeInteractiveSession
-    const owner = yield* makeInteractiveSession(input.options.defaultWorkspace, { serverOwner: true })
-    yield* Effect.forkIn(owner.supervise, input.ownerScope)
+    // The server-scope execution coordinator owns every active-turn watch for every path:
+    // interactive submits, queued promotion, retries, noninteractive runs, and recovery. It
+    // outlives any client session, so execution never dies with the client that asked for it.
+    yield* Effect.forkIn(input.ingest.supervise, input.ownerScope)
     const repairSummariesOnce = yield* Effect.cached(
       input.repairThreadSummaries.pipe(
         Effect.provide(input.executionDependencies),
@@ -33,5 +32,5 @@ export const makeProductOperationSchedule = (
         ),
       ),
     )
-    return { owner, repairSummariesOnce }
+    return { repairSummariesOnce }
   })

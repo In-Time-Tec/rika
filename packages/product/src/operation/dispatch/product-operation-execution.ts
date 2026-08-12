@@ -1,4 +1,6 @@
 import * as TurnRepository from "@rika/product/turn-repository"
+import * as TranscriptRepository from "@rika/product/transcript-repository"
+import * as ExecutionIngest from "../../execution/service/execution-ingest"
 import { Context, Effect, Layer, PlatformError, PubSub, Scope, Semaphore } from "effect"
 import { operationError } from "../operation-error"
 import { makeExecutionLifecycle } from "./product-operation-execution-lifecycle"
@@ -28,6 +30,7 @@ type InteractiveDependencyContext = import("../interactive/interactive-session-r
 type InteractiveExecutionContext = import("../interactive/interactive-session-runtime").InteractiveExecutionContext
 type PreparedTurn = import("../interactive/interactive-session-runtime").PreparedTurn
 type temporaryThreadTitle = typeof import("../interactive/interactive-operation-leaves").temporaryThreadTitle
+type LiveThreadProjectionInterface = import("../../thread/projection/live-thread-projection").Interface
 
 export interface ProductOperationExecution {
   readonly stopActiveExecutionWorkWithProjection: Effect.Effect<
@@ -55,6 +58,7 @@ export interface ProductOperationExecution {
     OperationError | import("@rika/product/thread-summary-repository").RepositoryError,
     import("@rika/product/thread-summary-repository").Service
   >
+  readonly ingest: ExecutionIngest.ExecutionIngest
   readonly setTurnStatus: (
     id: TurnId,
     status: ExecutionStatusStatus,
@@ -140,6 +144,10 @@ export interface ProductOperationExecutionInput {
     now: number,
   ) => Effect.Effect<QueueClaim | undefined, TurnRepositoryError, never>
   readonly backendLayer: Layer.Layer<import("@rika/product/execution-gateway").Service>
+  readonly hub: LiveThreadProjectionInterface
+  readonly queueMutationEvent: typeof import("./product-operation-runtime-support").queueMutationEvent
+  readonly staleQueuedTurnsError: typeof import("../../thread/queue/pending-turn-policy").staleQueuedTurnsError
+  readonly queuedTurnPromoteMaxAgeMs: number
   readonly acquiredDependencies: Layer.Layer<
     | import("@rika/product/thread-repository").Service
     | TurnRepository.Service
@@ -168,5 +176,29 @@ export const makeProductOperationExecution = (
     const context = yield* makeExecutionContext({
       options: input.options,
     })
-    return { ...lifecycle, ...projection, ...context }
+    const execution: Omit<ProductOperationExecution, "ingest"> = { ...lifecycle, ...projection, ...context }
+    const ingest = yield* ExecutionIngest.make({
+      turns: Context.get(input.dependencyContext, TurnRepository.Service),
+      transcripts: Context.get(input.dependencyContext, TranscriptRepository.Service),
+      backend: input.acquiredBackend,
+      rootTurnOwner: input.rootTurnOwner,
+      hub: input.hub,
+      turnChanges: input.turnChanges,
+      dirtyTurnObservers: input.dirtyTurnObservers,
+      publishInteractiveActivity: input.publishInteractiveActivity,
+      prepareExecution: (turn, workspace, persist) =>
+        execution.prepareExecution(turn, workspace, persist).pipe(Effect.provide(input.executionDependencies)),
+      setTurnStatus: (id, status, now, responseArrived) =>
+        execution.setTurnStatus(id, status, now, responseArrived).pipe(Effect.provide(input.executionDependencies)),
+      ensureTurnSummary: (turn) => execution.ensureTurnSummary(turn).pipe(Effect.provide(input.executionDependencies)),
+      notifyThreadSummaries: execution.notifyThreadSummaries.pipe(Effect.provide(input.executionDependencies)),
+      makeTurnId: input.options.makeTurnId,
+      pendingTurnCapacity: input.pendingTurnCapacity,
+      queueMutationEvent: input.queueMutationEvent,
+      staleQueuedTurnsError: input.staleQueuedTurnsError,
+      queuedTurnPromoteMaxAgeMs: input.queuedTurnPromoteMaxAgeMs,
+      temporaryThreadTitle: input.temporaryThreadTitle,
+      executionDependencies: input.executionDependencies,
+    })
+    return { ...execution, ingest }
   }).pipe(Effect.mapError((error) => operationError(String(error), error)))

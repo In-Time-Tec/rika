@@ -31,6 +31,7 @@ it.effect("keeps a failed cleanup tombstoned and retries the exact cleanup seque
       turns,
       sessions,
       rootTurns,
+      ingest: { quiesceThread: () => Effect.void },
       turnMutationAdmission: yield* Semaphore.make(1),
     })
     expect((yield* Effect.exit(saga.request(threadId)))._tag).toBe("Failure")
@@ -89,6 +90,7 @@ it.effect(
         turns,
         sessions,
         rootTurns,
+        ingest: { quiesceThread: () => Effect.void },
         turnMutationAdmission: yield* Semaphore.make(1),
       })
       yield* saga.request(threadId)

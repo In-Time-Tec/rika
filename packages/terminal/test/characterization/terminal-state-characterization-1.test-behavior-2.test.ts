@@ -25,7 +25,7 @@ test("admission rebinds a queued provisional row and the real delta replaces it 
     status: "queued",
     submissionId: "sub-1",
   })
-  expect(admitted.queue).toEqual([{ id: "turn-b", prompt: "queued prompt", provisional: true }])
+  expect(admitted.queue).toEqual([{ id: "turn-b", prompt: "queued prompt", provisional: true, threadId: "thread" }])
   const applied = applyQueueDelta(admitted, "thread", 4, {
     _tag: "Added",
     item: { id: "turn-b", prompt: "queued prompt" },

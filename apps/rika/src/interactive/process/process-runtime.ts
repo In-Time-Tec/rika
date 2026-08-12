@@ -268,7 +268,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
   }
   requestSelectionResync = (threadId) => {
     if (loop.model.currentThreadId !== threadId && loop.requestedThreadId !== threadId) return
-    const key = `${threadId}:${loop.threadView?.revision ?? "missing"}`
+    const key = `${threadId}:${loop.viewGeneration ?? 0}:${loop.threadView?.revision ?? "missing"}`
     if (loop.selectionResyncs.has(key)) return
     loop.selectionResyncs.add(key)
     startSelection(() =>

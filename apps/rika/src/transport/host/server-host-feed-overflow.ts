@@ -29,6 +29,7 @@ const resync = (event: Extract<Event, { readonly _tag: "ThreadViewPatch" }>): Vi
 
 const mergePatch = (current: PatchEvent, next: PatchEvent): PatchEvent | undefined => {
   if (
+    (current.generation ?? 0) !== (next.generation ?? 0) ||
     String(current.patch.threadId) !== String(next.patch.threadId) ||
     current.patch.revision !== next.patch.baseRevision
   )
@@ -83,9 +84,11 @@ const degrade = (state: State, event: Event) => {
 }
 
 const viewId = (event: ViewEvent): string => {
-  if (event._tag === "ThreadViewSnapshot") return String(event.snapshot.thread.id)
+  // A generation is part of the namespace identity: a new generation replaces the old one, so
+  // patches of different generations never merge into one recovery view.
+  if (event._tag === "ThreadViewSnapshot") return `${event.snapshot.thread.id}:${event.generation ?? 0}`
   if (event._tag === "ResyncRequired") return String(event.threadId)
-  return String(event.patch.threadId)
+  return `${event.patch.threadId}:${event.generation ?? 0}`
 }
 
 const rememberView = (state: State, event: ViewEvent) => {
@@ -105,10 +108,28 @@ const rememberView = (state: State, event: ViewEvent) => {
     state.views.set(id, mergePatch(current, event) ?? resync(event))
     return
   }
+  if ((event.generation ?? 0) !== (current.generation ?? 0)) {
+    state.views.set(
+      id,
+      ThreadView.ResyncRequired.make({
+        threadId: event.patch.threadId,
+        expectedRevision: event.patch.revision,
+        receivedBaseRevision: event.patch.baseRevision,
+        currentRevision: event.patch.baseRevision,
+      }),
+    )
+    return
+  }
   const applied = ThreadView.apply(current.snapshot, event.patch)
   state.views.set(
     id,
-    Result.isFailure(applied) ? resync(event) : { _tag: "ThreadViewSnapshot", snapshot: applied.success },
+    Result.isFailure(applied)
+      ? resync(event)
+      : {
+          _tag: "ThreadViewSnapshot",
+          ...(event.generation === undefined ? {} : { generation: event.generation }),
+          snapshot: applied.success,
+        },
   )
 }
 

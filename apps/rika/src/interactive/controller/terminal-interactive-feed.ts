@@ -92,7 +92,11 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot, modelPre
     next = overlayPendingSubmissions(next, model)
   if (active === undefined && model.activeTurnId !== undefined) {
     const settled = snapshot.turns.find((entry) => String(entry.turn.id) === model.activeTurnId)?.turn
-    if (settled?.status === "completed") next = updateModel(next, { _tag: "ExecutionCompleted", turnId: settled.id })
+    // The reducer's completion guards on the model's active turn, so dispatch against a model
+    // that still names the settled turn; the reducer then clears activeTurnId and drops drafts.
+    const settling = { ...next, activeTurnId: model.activeTurnId }
+    if (settled?.status === "completed")
+      next = updateModel(settling, { _tag: "ExecutionCompleted", turnId: settled.id })
     if (settled?.status === "failed") {
       // The snapshot carries the run's real failure in the last Error unit; a generic status
       // sentence would discard it at the same boundary the wire schema was built to protect.
@@ -225,8 +229,12 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
       rejection: state.view !== undefined && event.threadId !== state.view.thread.id ? "thread" : "gap",
     }
   if (event._tag === "ThreadViewSnapshot") {
+    const generation = event.generation ?? 0
     const sameThread = state.view?.thread.id === event.snapshot.thread.id
-    if (sameThread && state.view !== undefined && event.snapshot.revision < state.view.revision) return unchanged(state)
+
+    // A new generation replaces the old namespace outright; only an older generation of the same
+    // thread is stale. Revisions restart with each generation, so they never gate a snapshot.
+    if (sameThread && state.view !== undefined && generation < (state.viewGeneration ?? 0)) return unchanged(state)
     const modelPreview = ModelPreview.reconcile(state.modelPreview, event.snapshot)
     const retired = state.modelPreviewRetired ?? []
     const nextRetired =
@@ -237,6 +245,7 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
       state: {
         ...state,
         view: event.snapshot,
+        viewGeneration: generation,
         modelPreview,
         ...(nextRetired === retired ? {} : { modelPreviewRetired: nextRetired }),
         model: project(state.model, event.snapshot, modelPreview),
@@ -245,6 +254,12 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
     }
   }
   if (state.view === undefined) return { state, preserveAnchor: false, resync: true, rejection: "gap" }
+  const generation = event.generation ?? 0
+  // A patch from an older generation is stale: the namespace was replaced by a newer base, so
+  // drop it instead of resyncing (a resync loop would re-select forever).
+  if (generation < (state.viewGeneration ?? 0)) return unchanged(state)
+  if (generation !== (state.viewGeneration ?? 0))
+    return { state, preserveAnchor: false, resync: true, rejection: "revision" }
   const applied = ThreadView.apply(state.view, event.patch)
   if (Result.isFailure(applied))
     return {

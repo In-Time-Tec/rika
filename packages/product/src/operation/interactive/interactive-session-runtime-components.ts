@@ -1,13 +1,10 @@
-import { Function } from "effect"
+import { Context, Function } from "effect"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import { Context } from "effect"
 import { makeInteractiveExecution } from "./interactive-session-execution"
-import { makeInteractiveFollowing } from "./interactive-session-following"
 import { makeInteractiveTranscript } from "./interactive-session-transcript-runtime"
-import { makeInteractiveSupervision } from "./interactive-session-supervision"
 import { makeInteractiveControl } from "./interactive-control"
-import type { InteractiveRuntimeContext, InteractiveSessionInput } from "./interactive-session-runtime"
+import type { InteractiveRuntimeContext } from "./interactive-session-runtime"
 import type { InteractiveSessionState } from "./interactive-session-state"
 
 const makeInteractiveExecutionComponentsImpl = (input: InteractiveRuntimeContext, state: InteractiveSessionState) => {
@@ -59,29 +56,6 @@ export const makeInteractiveExecutionComponents: {
   ): ReturnType<typeof makeInteractiveExecutionComponentsImpl>
 } = Function.dual(2, makeInteractiveExecutionComponentsImpl)
 
-const makeInteractiveFollowingComponentsImpl = (
-  input: InteractiveSessionInput,
-  execution: ReturnType<typeof makeInteractiveExecution>,
-) =>
-  makeInteractiveFollowing({
-    rootTurnOwner: input.rootTurnOwner,
-    setTurnStatus: input.setTurnStatus,
-    settleThread: execution.settleThread,
-    threadForTurn: execution.threadForTurn,
-    claimTurnObserver: input.claimTurnObserver,
-    releaseTurnObserver: input.releaseTurnObserver,
-  })
-
-export const makeInteractiveFollowingComponents: {
-  (
-    arg1: ReturnType<typeof makeInteractiveExecution>,
-  ): (arg0: InteractiveSessionInput) => ReturnType<typeof makeInteractiveFollowingComponentsImpl>
-  (
-    arg0: InteractiveSessionInput,
-    arg1: ReturnType<typeof makeInteractiveExecution>,
-  ): ReturnType<typeof makeInteractiveFollowingComponentsImpl>
-} = Function.dual(2, makeInteractiveFollowingComponentsImpl)
-
 const makeInteractiveTranscriptComponentsImpl = (input: InteractiveRuntimeContext, state: InteractiveSessionState) =>
   makeInteractiveTranscript({
     ...input,
@@ -104,31 +78,10 @@ export const makeInteractiveTranscriptComponents: {
   ): ReturnType<typeof makeInteractiveTranscriptComponentsImpl>
 } = Function.dual(2, makeInteractiveTranscriptComponentsImpl)
 
-const makeInteractiveSupervisionComponentsImpl = (
+const makeInteractiveControlComponentsImpl = (
   input: InteractiveRuntimeContext,
-  state: InteractiveSessionState,
-  following: ReturnType<typeof makeInteractiveFollowing>,
   execution: ReturnType<typeof makeInteractiveExecution>,
 ) => {
-  const supervise = makeInteractiveSupervision({
-    acquiredBackend: input.acquiredBackend,
-    rootTurnOwner: input.rootTurnOwner,
-    executionDependencies: input.executionDependencies,
-    turnChanges: input.turnChanges,
-    dirtyTurnObservers: input.dirtyTurnObservers,
-    isTerminalStatus: input.isTerminalStatus,
-    setTurnStatus: input.setTurnStatus,
-    settleThread: execution.settleThread,
-    notifyTurnChanged: input.notifyTurnChanged,
-    claimTurnObserver: input.claimTurnObserver,
-    observeTurn: following.observeTurn,
-    serverOwner: input.serverOwner,
-    sessionThreadViews: input.sessionThreadViews,
-    sessionId: input.sessionId,
-    getSelectedThreadId: state.getSelectedThreadId,
-    interactiveSinks: input.interactiveSinks,
-    operationFeed: state.operationFeed,
-  })
   let steeringIdentitySequence = 0
   const nextSteeringIdentity = (turnId: string) => `rika:interactive-steer:${turnId}:${steeringIdentitySequence++}`
   const control = makeInteractiveControl({
@@ -137,25 +90,21 @@ const makeInteractiveSupervisionComponentsImpl = (
     backend: input.acquiredBackend,
     pendingCapacity: input.pendingTurnCapacity,
     active: execution.active,
-    dispatch: state.sessionDispatch,
+    dispatch: input.sessionDispatch,
     queueMutation: input.queueMutationEvent,
     nextSteeringIdentity,
     notifyTurnChanged: input.notifyTurnChanged,
     fail: input.operationError,
   })
-  return { supervise, nextSteeringIdentity, control }
+  return { control, nextSteeringIdentity }
 }
 
-export const makeInteractiveSupervisionComponents: {
+export const makeInteractiveControlComponents: {
   (
-    arg1: InteractiveSessionState,
-    arg2: ReturnType<typeof makeInteractiveFollowing>,
-    arg3: ReturnType<typeof makeInteractiveExecution>,
-  ): (arg0: InteractiveRuntimeContext) => ReturnType<typeof makeInteractiveSupervisionComponentsImpl>
+    arg1: ReturnType<typeof makeInteractiveExecution>,
+  ): (arg0: InteractiveRuntimeContext) => ReturnType<typeof makeInteractiveControlComponentsImpl>
   (
     arg0: InteractiveRuntimeContext,
-    arg1: InteractiveSessionState,
-    arg2: ReturnType<typeof makeInteractiveFollowing>,
-    arg3: ReturnType<typeof makeInteractiveExecution>,
-  ): ReturnType<typeof makeInteractiveSupervisionComponentsImpl>
-} = Function.dual(4, makeInteractiveSupervisionComponentsImpl)
+    arg1: ReturnType<typeof makeInteractiveExecution>,
+  ): ReturnType<typeof makeInteractiveControlComponentsImpl>
+} = Function.dual(2, makeInteractiveControlComponentsImpl)

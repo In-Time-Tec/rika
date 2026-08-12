@@ -150,11 +150,20 @@ export const overlayPendingSubmissions: {
   (arg1: Model): (arg0: Model) => Model
 } = Function.dual(2, (model: Model, previous: Model): Model => {
   let next = model
+  const threadId = next.currentThreadId
   const queue = [...next.queue]
+  // A provisional queue item belongs to the thread it was submitted on; a snapshot for another
+  // thread must never overlay it (a B-thread patch cannot carry an A-thread submission).
   for (const item of previous.queue) {
-    if (item.provisional === true && !queue.some((candidate) => candidate.id === item.id)) queue.push(item)
+    if (
+      item.provisional === true &&
+      (item.threadId === undefined || item.threadId === threadId) &&
+      !queue.some((candidate) => candidate.id === item.id)
+    )
+      queue.push(item)
   }
   for (const draft of previous.submittedDrafts) {
+    if (draft.threadId !== undefined && draft.threadId !== threadId) continue
     const bound = draft.turnId !== undefined
     const authoritative = bound && next.entries.some((entry) => entry.role === "user" && entry.turnId === draft.turnId)
     if (authoritative) continue

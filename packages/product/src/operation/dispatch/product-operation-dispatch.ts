@@ -2,7 +2,9 @@ import * as Thread from "@rika/product/thread-record"
 import * as AuthenticationOperation from "./authentication-operation-dispatch"
 import * as ExtensionOperations from "./../contract/extension-operation"
 import * as ConfigOperations from "./../contract/configuration-operation"
-import { Console, Effect, FileSystem, Layer, Option, Path, Schema, Scope } from "effect"
+import * as LiveThreadProjection from "../../thread/projection/live-thread-projection"
+import * as ExecutionIngest from "../../execution/service/execution-ingest"
+import { Clock, Console, Effect, FileSystem, Layer, Option, Path, Schema, Scope } from "effect"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
 import { OperationUnavailable } from "../contract/product-operation"
 import { Service } from "../contract/product-operation-service"
@@ -80,8 +82,10 @@ export const productLayer = <
       const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem)
       const path = yield* Effect.serviceOption(Path.Path)
       let activitySequence = 0
+      const clock = yield* Clock.Clock
       const interactiveSinks = new Map<number, (origin: number, event: InteractiveEvent) => void>()
-      const sessionThreadViews = new Map<number, () => string | undefined>()
+      const hub = yield* LiveThreadProjection.make(() => clock.currentTimeMillisUnsafe())
+      const submissionRegistry = ExecutionIngest.makeSubmissionRegistry()
       const publishInteractiveActivity = (origin: number, event: InteractiveEvent): InteractiveEvent => {
         const published =
           event._tag === "TurnStarted" || event._tag === "TurnSettled"
@@ -135,10 +139,11 @@ export const productLayer = <
       const state = yield* makeProductOperationRuntimeState({
         options,
         ownerScope,
+        hub,
+        submissionRegistry,
         publishInteractiveActivity,
         publishTurnSettled,
         interactiveSinks,
-        sessionThreadViews,
         activitySequence,
         unavailable,
         operationError,
@@ -149,11 +154,10 @@ export const productLayer = <
       const schedule = yield* makeProductOperationSchedule({
         options,
         ownerScope,
-        makeInteractiveSession: state.makeInteractiveSession,
+        ingest: state.ingest,
         repairThreadSummaries: state.repairThreadSummaries,
         executionDependencies: state.executionDependencies,
       })
-      yield* state.rootTurnOwner.install({ run: () => Effect.void })
       return makeProductOperationService({
         options,
         state,

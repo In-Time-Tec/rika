@@ -117,19 +117,8 @@ const runNoninteractiveOperationImpl = (
     createObservedSubmission: (turns, submission) =>
       factory.createObservedSubmission(turns, submission).pipe(Effect.provide(typedExecutionDependencies)),
     ensureTurnSummary: (turn) => factory.ensureTurnSummary(turn).pipe(Effect.provide(typedExecutionDependencies)),
-    setTurnStatus: (id, status, now) =>
-      factory.setTurnStatus(id, status, now).pipe(Effect.provide(typedExecutionDependencies)),
-    publishInteractiveActivity: factory.publishInteractiveActivity,
-    rootTurnOwner: factory.rootTurnOwner,
-    prepareExecution: (turn, workspace) =>
-      factory.prepareExecution(turn, workspace).pipe(Effect.provide(typedExecutionDependencies)),
-    claimQueuedTurn: (threadId, now) =>
-      factory.claimQueuedTurn(threadId, now).pipe(Effect.provide(typedExecutionDependencies)),
-    releaseTurnObserver: factory.releaseTurnObserver,
-    queueMutationEvent: factory.queueMutationEvent,
+    ingest: factory.ingest,
     executionDependencies: typedExecutionDependencies,
-    staleQueuedTurnsError: factory.staleQueuedTurnsError,
-    queuedTurnPromoteMaxAgeMs: factory.queuedTurnPromoteMaxAgeMs,
     operationError: factory.operationError,
     unavailable: (operationInput: Input, message: string) => unavailable(factory, operationInput, message),
   })

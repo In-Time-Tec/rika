@@ -492,7 +492,7 @@ test("submitting while busy echoes a provisional queue row immediately", () => {
     [],
   )
   const submitted = update(busy, { _tag: "Submitted", submissionId: "sub-1" })
-  expect(submitted.queue).toEqual([{ id: "sub-1", prompt: "queued prompt", provisional: true }])
+  expect(submitted.queue).toEqual([{ id: "sub-1", prompt: "queued prompt", provisional: true, threadId: "thread" }])
   expect(submitted.queueRevision).toBe(3)
   expect(submitted.input).toBe("")
 })

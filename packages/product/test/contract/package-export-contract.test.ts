@@ -114,6 +114,7 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "interactive-event",
     "interactive-session",
     "interactive-thread-view-feed",
+    "live-thread-projection",
     "server-interactive-feed",
     "server-operation-request",
     "server-service-handshake",

@@ -29,6 +29,7 @@
     "./interactive-operation": "./src/operation/contract/interactive-operation.ts",
     "./interactive-session": "./src/operation/interactive/interactive-session.ts",
     "./interactive-thread-view-feed": "./src/operation/interactive/interactive-thread-view-feed.ts",
+    "./live-thread-projection": "./src/thread/projection/live-thread-projection.ts",
     "./model-registration-identity": "./src/execution/contract/model-registration-identity.ts",
     "./openai-auth-contract": "./src/authentication/openai-auth-contract.ts",
     "./openai-auth-service": "./src/authentication/openai-auth-service.ts",

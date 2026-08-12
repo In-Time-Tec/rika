@@ -20,12 +20,10 @@ const appendRecordedShellOutput = (output: { readonly text: string; readonly tru
 export interface InteractiveRecordedShellInput {
   readonly options: InteractiveSessionInput["options"]
   readonly dispatch: (event: InteractiveEvent) => void
-  readonly emit: (dispatch: (event: InteractiveEvent) => void, event: InteractiveEvent) => void
+  readonly hub: InteractiveSessionInput["hub"]
   readonly ensureTurnSummary: InteractiveSessionInput["ensureTurnSummary"]
   readonly notifyThreadSummaries: InteractiveSessionInput["notifyThreadSummaries"]
   readonly notifyTurnChanged: InteractiveSessionInput["notifyTurnChanged"]
-  readonly publishInteractiveActivity: InteractiveSessionInput["publishInteractiveActivity"]
-  readonly sessionId: number
   readonly executionDependencies: InteractiveExecutionContext
   readonly executeShellCommand: InteractiveSessionInput["executeShellCommand"]
   readonly recordedShellStartedEvent: InteractiveSessionInput["recordedShellStartedEvent"]
@@ -45,12 +43,10 @@ const runRecordedShellImpl = (
   const {
     options,
     dispatch,
-    emit,
+    hub,
     ensureTurnSummary,
     notifyThreadSummaries,
     notifyTurnChanged,
-    publishInteractiveActivity,
-    sessionId,
     executeShellCommand,
     recordedShellStartedEvent,
     recordedShellSettledEvents,
@@ -91,7 +87,11 @@ const runRecordedShellImpl = (
           runningTurn,
           recordedShellProjection(runningTurn).units,
         )
-        emit(dispatch, recordedShellStartedEvent(runningTurn, runningProjection))
+        hub.commitChange(
+          runningTurn.threadId,
+          runningTurn,
+          recordedShellStartedEvent(runningTurn, runningProjection).change,
+        )
         const processExit = (yield* Effect.exit(
           restore(
             ensureTurnSummary(runningTurn).pipe(
@@ -137,10 +137,7 @@ const runRecordedShellImpl = (
           settleRecordedShellProjection(recordedShellProjection(runningTurn), settledTurn).units,
         )
         const terminalEvents = recordedShellSettledEvents(settledTurn, settledProjection)
-        if (interrupted) {
-          for (const event of terminalEvents) publishInteractiveActivity(sessionId, event)
-        } else {
-          for (const event of terminalEvents) emit(dispatch, event)
+        if (!interrupted) {
           dispatch({
             _tag: "ShellCompleted",
             threadId: thread.id,
@@ -150,6 +147,7 @@ const runRecordedShellImpl = (
             status: terminalTurn.status,
           })
         }
+        for (const event of terminalEvents) hub.commitChange(settledTurn.threadId, settledTurn, event.change)
         yield* Effect.gen(function* () {
           const summaries = yield* ThreadSummaryRepository.Service
           yield* summaries.replaceTurn({

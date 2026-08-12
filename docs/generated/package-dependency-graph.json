@@ -166,6 +166,7 @@
         "./interactive-operation",
         "./interactive-session",
         "./interactive-thread-view-feed",
+        "./live-thread-projection",
         "./model-registration-identity",
         "./openai-auth-contract",
         "./openai-auth-service",

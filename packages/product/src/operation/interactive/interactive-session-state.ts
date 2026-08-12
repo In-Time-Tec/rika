@@ -1,6 +1,7 @@
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
+import * as LiveThreadProjection from "../../thread/projection/live-thread-projection"
 import { Effect, Fiber, Ref, Scope, Semaphore } from "effect"
 import { OperationUnavailable } from "../contract/product-operation"
 import { OperationError } from "../operation-error"
@@ -68,7 +69,7 @@ export interface InteractiveSessionStateInput {
   readonly publishInteractiveActivity: (origin: number, event: InteractiveEvent) => InteractiveEvent
   readonly activitySequence: number
   readonly initialThreadId: string | undefined
-  readonly serverOwner: boolean
+  readonly hub: LiveThreadProjection.Interface
   readonly options: import("../dispatch/product-operation-options").ProductLayerOptions<
     Error,
     Error,
@@ -111,6 +112,7 @@ export const makeInteractiveSessionState = (
     const operationFeed = yield* makeInteractiveOperationFeed({
       sessionId,
       sessionScope,
+      hub: input.hub,
       publishActivity: publishInteractiveActivity,
       selectionAdmission,
       selectionRequest,
@@ -153,6 +155,8 @@ export const makeInteractiveSessionState = (
     const projection = makeInteractiveSelectionProjection({
       activitySequence,
       interactiveThread,
+      hub: input.hub,
+      sessionScope,
       setActiveSelectionState: (value: SelectionEpochState) => (activeSelectionState = value),
       setCurrentSelectionEpoch: (value: number) => (currentSelectionEpoch = value),
       setSelectedThreadId: (value: string) => (selectedThreadId = value),

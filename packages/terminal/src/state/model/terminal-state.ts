@@ -103,6 +103,7 @@ export const Model = Schema.Struct({
       input: Schema.String,
       attachments: Schema.Array(PastedTextAttachmentSchema),
       cursor: Schema.Finite,
+      threadId: Schema.optionalKey(Schema.String),
       submissionId: Schema.optionalKey(Schema.String),
       turnId: Schema.optionalKey(Schema.String),
     }),

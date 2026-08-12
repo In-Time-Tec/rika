@@ -1,8 +1,9 @@
 import * as ExecutionProjection from "../../execution/contract/execution-projection"
 import { promptUnit } from "./interactive-prompt-unit"
+import * as Thread from "@rika/product/thread-record"
 import * as ThreadView from "@rika/product/thread-view"
 import { compareUnitOrder, encodeUnitOrder } from "@rika/transcript/transcript-unit-order"
-import { Result } from "effect"
+import type * as LiveThreadProjection from "../../thread/projection/live-thread-projection"
 import type { InteractiveEvent as ClientEvent } from "./interactive-event"
 import type { InteractiveEvent as RuntimeEvent, QueueItem } from "./interactive-runtime-event"
 
@@ -63,108 +64,6 @@ const sourceFor = (
   }
 }
 
-const trackedProjectionLimit = 64
-
-const difference = (next: number | undefined, previous: number | undefined): number | undefined => {
-  if (next === undefined) return previous === undefined ? undefined : 0
-  return Math.max(0, next - (previous ?? 0))
-}
-
-const tokenDifference = (
-  next: ExecutionProjection.TokenTotals | undefined,
-  previous: ExecutionProjection.TokenTotals | undefined,
-): ExecutionProjection.TokenTotals | undefined => {
-  if (next === undefined) return undefined
-  return {
-    ...(difference(next.total, previous?.total) === undefined
-      ? {}
-      : { total: difference(next.total, previous?.total)! }),
-    input: {
-      ...(difference(next.input.total, previous?.input.total) === undefined
-        ? {}
-        : { total: difference(next.input.total, previous?.input.total)! }),
-      ...(difference(next.input.uncached, previous?.input.uncached) === undefined
-        ? {}
-        : { uncached: difference(next.input.uncached, previous?.input.uncached)! }),
-      ...(difference(next.input.cacheRead, previous?.input.cacheRead) === undefined
-        ? {}
-        : { cacheRead: difference(next.input.cacheRead, previous?.input.cacheRead)! }),
-      ...(difference(next.input.cacheWrite, previous?.input.cacheWrite) === undefined
-        ? {}
-        : { cacheWrite: difference(next.input.cacheWrite, previous?.input.cacheWrite)! }),
-    },
-    output: {
-      ...(difference(next.output.total, previous?.output.total) === undefined
-        ? {}
-        : { total: difference(next.output.total, previous?.output.total)! }),
-      ...(difference(next.output.text, previous?.output.text) === undefined
-        ? {}
-        : { text: difference(next.output.text, previous?.output.text)! }),
-      ...(difference(next.output.reasoning, previous?.output.reasoning) === undefined
-        ? {}
-        : { reasoning: difference(next.output.reasoning, previous?.output.reasoning)! }),
-    },
-    ...(difference(next.failedProviderTotal, previous?.failedProviderTotal) === undefined
-      ? {}
-      : { failedProviderTotal: difference(next.failedProviderTotal, previous?.failedProviderTotal)! }),
-  }
-}
-
-const nextThreadUsage = (
-  current: ThreadView.ThreadViewUsage,
-  previous: ExecutionProjection.UsageState | undefined,
-  next: ExecutionProjection.UsageState,
-  turn: import("@rika/product/turn-record").Turn | undefined,
-): ThreadView.ThreadViewUsage => {
-  const previousActive = previous?.active._tag === "Available" ? previous.active.accumulatedMillis : 0
-  const nextActive = next.active._tag === "Available" ? next.active.accumulatedMillis : 0
-  const costNanoUsd = difference(next.costNanoUsd, previous?.costNanoUsd)
-  const delta: ExecutionProjection.UsageState = {
-    ...(costNanoUsd === undefined ? {} : { costNanoUsd }),
-    ...(tokenDifference(next.tokens, previous?.tokens) === undefined
-      ? {}
-      : { tokens: tokenDifference(next.tokens, previous?.tokens)! }),
-    pricedAttempts: Math.max(0, next.pricedAttempts - (previous?.pricedAttempts ?? 0)),
-    unpricedAttempts: Math.max(0, next.unpricedAttempts - (previous?.unpricedAttempts ?? 0)),
-    countedAttempts: Math.max(0, next.countedAttempts - (previous?.countedAttempts ?? 0)),
-    uncountedAttempts: Math.max(0, next.uncountedAttempts - (previous?.uncountedAttempts ?? 0)),
-    sourceComplete: next.sourceComplete,
-    contextPending: next.contextPending,
-    active:
-      next.active._tag === "Unavailable"
-        ? { _tag: "Unavailable" }
-        : { _tag: "Available", accumulatedMillis: Math.max(0, nextActive - previousActive) },
-  }
-  const aggregate = ExecutionProjection.aggregateUsage([current.state, delta])
-  const context = next.context ?? current.state.context
-  const active =
-    aggregate.active._tag === "Unavailable"
-      ? aggregate.active
-      : {
-          _tag: "Available" as const,
-          accumulatedMillis: aggregate.active.accumulatedMillis,
-          ...(next.active._tag === "Available" && next.active.activeSince !== undefined
-            ? { activeSince: next.active.activeSince }
-            : {}),
-        }
-  let contextCapacity = current.contextCapacity
-  if (next.context !== undefined && turn?._tag === "AgentExecution")
-    contextCapacity = {
-      contextWindow: turn.executionRoute.main.compaction.contextWindow,
-      reserveTokens: turn.executionRoute.main.compaction.reserveTokens,
-    }
-  return {
-    state: {
-      ...aggregate,
-      sourceComplete: next.sourceComplete,
-      ...(context === undefined ? {} : { context }),
-      contextPending: next.contextPending,
-      active,
-    },
-    ...(contextCapacity === undefined ? {} : { contextCapacity }),
-  }
-}
-
 const snapshotFromSelection = (
   event: Extract<RuntimeEvent, { readonly _tag: "SelectionLoaded" }>,
   revision: number,
@@ -210,7 +109,7 @@ const snapshotFromSelection = (
     source: sourceFor(turns, ExecutionProjection.projectionVersion, {
       ...(event.oldestCursor === undefined ? {} : { oldestCursor: event.oldestCursor }),
       ...(event.newestCursor === undefined ? {} : { newestCursor: event.newestCursor }),
-    }),
+    } as Pick<ThreadView.ThreadViewSource, "oldestCursor" | "newestCursor">),
     turns,
     pending: pending(event.queue),
     hasOlder: event.hasOlder,
@@ -222,289 +121,95 @@ const snapshotFromSelection = (
   }
 }
 
-const resync = (snapshot: ThreadView.ThreadViewSnapshot, receivedBaseRevision = snapshot.revision) =>
+const resyncFor = (threadId: Thread.ThreadId) =>
   ThreadView.ResyncRequired.make({
-    threadId: snapshot.thread.id,
-    expectedRevision: snapshot.revision + 1,
-    receivedBaseRevision,
-    currentRevision: snapshot.revision,
+    threadId,
+    expectedRevision: 0,
+    receivedBaseRevision: 0,
+    currentRevision: 0,
   })
 
 export interface ThreadViewFeed {
   readonly publish: (event: RuntimeEvent) => ReadonlyArray<ClientEvent>
-  readonly current: () => ThreadView.ThreadViewSnapshot | undefined
 }
 
-export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
-  let current: ThreadView.ThreadViewSnapshot | undefined
-  let snapshotRequired = false
-  let knownThreadId: string | undefined
-  const knownProjectionRevisions = new Map<string, number>()
-  const knownUsage = new Map<string, ExecutionProjection.UsageState>()
-
-  const rememberProjection = (turnId: string, revision: number, usage: ExecutionProjection.UsageState) => {
-    knownProjectionRevisions.delete(turnId)
-    knownUsage.delete(turnId)
-    knownProjectionRevisions.set(turnId, revision)
-    knownUsage.set(turnId, usage)
-    while (knownProjectionRevisions.size > trackedProjectionLimit) {
-      const oldest = knownProjectionRevisions.keys().next().value
-      if (oldest === undefined) break
-      knownProjectionRevisions.delete(oldest)
-      knownUsage.delete(oldest)
-    }
-  }
-
-  const remember = (snapshot: ThreadView.ThreadViewSnapshot) => {
-    const threadId = String(snapshot.thread.id)
-    if (knownThreadId !== threadId) {
-      knownThreadId = threadId
-      knownProjectionRevisions.clear()
-      knownUsage.clear()
-    }
-    for (const entry of snapshot.turns) {
-      const turnId = String(entry.turn.id)
-      const tracked =
-        knownProjectionRevisions.has(turnId) ||
-        (entry.turn.status !== "completed" && entry.turn.status !== "failed" && entry.turn.status !== "cancelled")
-      if (!tracked) continue
-      const revision = knownProjectionRevisions.get(turnId)
-      if (revision === undefined || entry.projectionRevision >= revision)
-        rememberProjection(turnId, entry.projectionRevision, entry.usage)
-    }
-  }
-
-  const replace = (snapshot: ThreadView.ThreadViewSnapshot): ReadonlyArray<ClientEvent> => {
-    current = snapshot
-    remember(snapshot)
-    snapshotRequired = false
-    return [{ _tag: "ThreadViewSnapshot", snapshot }]
-  }
-
-  const patch = (value: ThreadView.ThreadViewPatch): ReadonlyArray<ClientEvent> => {
-    if (current === undefined || snapshotRequired) return []
-    const applied = ThreadView.apply(current, value)
-    if (Result.isFailure(applied)) {
-      snapshotRequired = true
-      return [resync(current, value.baseRevision)]
-    }
-    current = applied.success
-    return [{ _tag: "ThreadViewPatch", patch: value }]
-  }
-
-  const nextPatch = (
-    change: Omit<ThreadView.ThreadViewPatch, "threadId" | "baseRevision" | "revision">,
-  ): ReadonlyArray<ClientEvent> => {
-    if (current === undefined || snapshotRequired) return []
-    return patch({
-      threadId: current.thread.id,
-      baseRevision: current.revision,
-      revision: current.revision + 1,
-      ...change,
-    })
-  }
-
+export const makeThreadViewFeed = (hub: LiveThreadProjection.Interface): ThreadViewFeed => {
   const publish = (event: RuntimeEvent): ReadonlyArray<ClientEvent> => {
-    if (event._tag === "SelectionLoaded")
-      return replace(snapshotFromSelection(event, current?.thread.id === event.thread.id ? current.revision + 1 : 0))
-    if (current !== undefined && event._tag === "ThreadTitled" && event.threadId === current.thread.id)
-      return nextPatch({
-        upsert: [],
-        remove: [],
-        turnChanges: [],
-        header: {
-          thread: { ...current.thread, title: event.title },
-          source: current.source,
-          pending: current.pending,
-          hasOlder: current.hasOlder,
-          hasNewer: current.hasNewer,
-          usage: current.usage,
-        },
-      })
-    if (event._tag === "ExecutionProjectionChanged") {
-      if (current === undefined || event.threadId !== current.thread.id) return []
-      const change = event.change
-      const changedUnits = change._tag === "ProjectionSnapshot" ? change.units : change.upsert
-      const turnId = event.turn?.id ?? changedUnits[0]?.turnId
-      if (turnId === undefined) {
-        snapshotRequired = true
-        return [resync(current)]
-      }
-      const turnKey = String(turnId)
-      const existing = current.turns.find((entry) => String(entry.turn.id) === turnKey)
-      const knownRevision = knownProjectionRevisions.get(turnKey) ?? existing?.projectionRevision
-      const isTrackedOffWindow = existing === undefined && current.hasNewer && knownRevision !== undefined
-      const canInsertUnknown =
-        existing === undefined && !current.hasNewer && event.turn !== undefined && change._tag === "ProjectionSnapshot"
-      if (existing === undefined && !isTrackedOffWindow && !canInsertUnknown) {
-        snapshotRequired = true
-        return [resync(current)]
-      }
-      if (change._tag === "ProjectionPatch" && knownRevision !== change.baseRevision) {
-        snapshotRequired = true
-        return [resync(current)]
-      }
-      const previousUsage = knownUsage.get(turnKey) ?? existing?.usage
-      const header = {
-        thread: current.thread,
-        source: current.source,
-        pending: current.pending,
-        hasOlder: current.hasOlder,
-        hasNewer: current.hasNewer,
-        usage: nextThreadUsage(current.usage, previousUsage, change.state.usage, event.turn),
-      }
-      rememberProjection(turnKey, change.revision, change.state.usage)
-      if (existing === undefined) {
-        if (isTrackedOffWindow)
-          return nextPatch({
-            upsert: [],
-            remove: [],
-            turnChanges: [],
-            header,
-          })
-        return nextPatch({
-          upsert: changedUnits,
-          remove: [],
-          turnChanges: [
-            {
-              _tag: "UpsertTurn",
-              turn: { ...ThreadView.turnRecord(event.turn!), status: change.state.status },
-              projectionRevision: change.revision,
-              usage: change.state.usage,
-            },
-          ],
-          header,
-        })
-      }
-      const record =
-        event.turn === undefined
-          ? { ...existing.turn, status: change.state.status, updatedAt: now() }
-          : { ...ThreadView.turnRecord(event.turn), status: change.state.status, updatedAt: event.turn.updatedAt }
-      const nextKeys =
-        change._tag === "ProjectionSnapshot" && !change.hasOlder
-          ? new Set(change.units.map((unit) => unit.key))
-          : undefined
-      const removedKeys = (): ReadonlyArray<string> => {
-        if (nextKeys !== undefined)
-          return existing.units.filter((unit) => !nextKeys.has(unit.key)).map((unit) => unit.key)
-        return change._tag === "ProjectionSnapshot" ? [] : change.remove
-      }
-      return nextPatch({
-        upsert: changedUnits,
-        remove: removedKeys(),
-        turnChanges: [
-          {
-            _tag: "UpsertTurn",
-            turn: record,
-            projectionRevision: change.revision,
-            usage: change.state.usage,
-          },
-        ],
-        header,
-      })
-    }
-    if (event._tag === "TurnStarted") {
-      if (current === undefined || event.threadId !== current.thread.id) return []
-      if (current.hasNewer) {
-        rememberProjection(String(event.turn.id), 0, ExecutionProjection.emptyUsageState())
-        return []
-      }
-      const seed = promptUnit(event.turn)
-      return nextPatch({
-        upsert: [seed],
-        remove: [],
-        turnChanges: [
-          {
-            _tag: "UpsertTurn",
-            turn: ThreadView.turnRecord(event.turn),
-            projectionRevision: 0,
-            usage: ExecutionProjection.emptyUsageState(),
-          },
-        ],
-      })
-    }
-    if (event._tag === "TurnSettled") {
-      if (current === undefined || event.threadId !== current.thread.id) return []
-      knownProjectionRevisions.delete(String(event.turnId))
-      knownUsage.delete(String(event.turnId))
-      const existing = current.turns.find((entry) => entry.turn.id === event.turnId)
-      if (existing === undefined) return []
-      return nextPatch({
-        upsert: [],
-        remove: [],
-        turnChanges: [
-          {
-            _tag: "UpsertTurn",
-            turn: { ...existing.turn, status: event.status, updatedAt: now() },
-            projectionRevision: existing.projectionRevision,
-            usage: existing.usage,
-          },
-        ],
-      })
-    }
-    if (event._tag === "QueueUpdated") {
-      if (current === undefined || event.threadId !== current.thread.id) return []
-      let items = current.pending
-      const change = event.change
-      switch (change._tag) {
-        case "Reset":
-          items = pending(change.items)
-          break
-        case "Added":
-          items = pending([...items, change.item])
-          break
-        case "Updated":
-          items = pending(items.map((item) => (item.id === change.item.id ? change.item : item)))
-          break
-        case "Removed":
-          items = items.filter((item) => item.id !== change.turnId)
-          break
-      }
-      return nextPatch({
-        upsert: [],
-        remove: [],
-        turnChanges: [],
-        header: {
-          thread: current.thread,
-          source: current.source,
-          pending: items,
-          hasOlder: current.hasOlder,
-          hasNewer: current.hasNewer,
-          usage: current.usage,
-        },
-      })
-    }
-    if (event._tag === "ExecutionProjectionResyncRequired" || event._tag === "ThreadViewResyncRequired") {
-      if (current === undefined || event.threadId !== current.thread.id) return []
-      snapshotRequired = true
-      return [resync(current)]
+    if (event._tag === "SelectionLoaded") {
+      // The hub owns the authoritative base; every selection rebuilds it from the durable
+      // transcript page and bumps the generation so every subscriber replaces its namespace.
+      hub.setBase(event.thread.id, snapshotFromSelection(event, 0))
+      return []
     }
     switch (event._tag) {
-      case "ExecutionModelPreviewed":
-        return current !== undefined && event.threadId === current.thread.id ? [event] : []
-      case "ExecutionModelPreviewCleared":
-        return event.threadId === current?.thread.id ? [event] : []
-      case "ContextDiagnostics":
-      case "TurnRetryScheduled":
-      case "ExecutionFailed":
-      case "ExecutionControlFailed":
-      case "QueueFull":
-      case "SubmissionAdmitted":
-      case "ExecutionControlled":
-      case "ThreadRefolding": {
-        const { selectionEpoch: _, ...value } = event
-        return [value]
-      }
-      case "ThreadsListed":
-      case "AssistantCompleted":
-      case "ShellCompleted":
+      case "ThreadViewHubBase":
+        // A subscriber can attach between selection and the durable base landing; the live Base
+        // frame arrives right behind it. Dropping keeps the atomic base the single admission.
+        if (event.base === undefined) return []
+        return [
+          { _tag: "ThreadViewSnapshot", generation: event.generation, snapshot: event.base },
+          ...(event.live === undefined
+            ? []
+            : ([
+                {
+                  _tag: "ExecutionModelPreviewed",
+                  threadId: event.threadId,
+                  turnId: event.live.turnId,
+                  preview: event.live.preview,
+                },
+              ] satisfies ReadonlyArray<ClientEvent>)),
+        ]
+      case "ThreadViewHubPatch":
+        return [{ _tag: "ThreadViewPatch", generation: event.generation, patch: event.patch }]
+      case "ThreadViewHubLive":
+        return [
+          {
+            _tag: "ExecutionModelPreviewed",
+            threadId: event.threadId,
+            turnId: event.preview.turnId,
+            preview: event.preview.preview,
+          },
+        ]
+      case "ThreadViewHubLiveCleared":
+        return [
+          {
+            _tag: "ExecutionModelPreviewCleared",
+            threadId: event.threadId,
+            turnId: event.turnId,
+            runId: event.runId,
+            attemptFence: event.attemptFence,
+            generation: event.previewGeneration,
+          },
+        ]
+      case "ThreadViewHubGeneration":
+        return [resyncFor(event.threadId)]
       case "ThreadTitled":
-      case "GoalChanged":
-      case "ThreadActivated":
-      case "ThreadPreviewLoaded":
-      case "ThreadPreviewFailed":
+        hub.threadTitled(Thread.ThreadId.make(String(event.threadId)), event.title)
         return [event]
+      case "QueueUpdated":
+        hub.queueUpdated(event.threadId, event.change)
+        return []
+      case "TurnStarted":
+        return [
+          {
+            _tag: "TurnStarted",
+            threadId: event.threadId,
+            turnId: event.turn.id,
+            prompt: event.turn.prompt,
+            ...(event.submissionId === undefined ? {} : { submissionId: event.submissionId }),
+          },
+        ]
+      case "ExecutionProjectionChanged":
+      case "TurnSettled":
+        return []
+      case "ExecutionProjectionResyncRequired":
+      case "ThreadViewResyncRequired":
+        return [resyncFor(event.threadId)]
+      default: {
+        const { selectionEpoch: _, ...value } = event as RuntimeEvent & { readonly selectionEpoch?: number }
+        return [value as ClientEvent]
+      }
     }
   }
-  return { publish, current: () => current }
+  return { publish }
 }

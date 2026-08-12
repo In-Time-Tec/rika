@@ -1,5 +1,6 @@
-import { Clock, Effect, Queue, Ref, Semaphore } from "effect"
+import { Effect, Queue, Ref, Semaphore } from "effect"
 import * as InteractiveFeedOverflow from "./interactive-runtime-feed-overflow"
+import type * as LiveThreadProjection from "../../thread/projection/live-thread-projection"
 import type { InteractiveEvent as RuntimeEvent } from "./interactive-runtime-event"
 import type { InteractiveEvent as ClientEvent } from "./interactive-event"
 import { makeThreadViewFeed } from "./interactive-thread-view-feed"
@@ -76,6 +77,7 @@ const eventThreadId = (event: RuntimeEvent): string | undefined => {
 export const makeInteractiveOperationFeed = (input: {
   readonly sessionId: number
   readonly sessionScope: import("effect").Scope.Scope
+  readonly hub: LiveThreadProjection.Interface
   readonly publishActivity: (origin: number, event: RuntimeEvent) => RuntimeEvent
   readonly selectionAdmission: Semaphore.Semaphore
   readonly selectionRequest: import("effect").Ref.Ref<number>
@@ -87,8 +89,7 @@ export const makeInteractiveOperationFeed = (input: {
 }): Effect.Effect<InteractiveOperationFeed> =>
   Effect.gen(function* () {
     const queue = yield* Queue.bounded<SessionEnvelope>(64)
-    const clock = yield* Clock.Clock
-    const threadViews = makeThreadViewFeed(() => clock.currentTimeMillisUnsafe())
+    const threadViews = makeThreadViewFeed(input.hub)
     let overflow: InteractiveFeedOverflow.State | undefined
 
     const deliver = (

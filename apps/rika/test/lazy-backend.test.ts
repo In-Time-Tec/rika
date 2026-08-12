@@ -83,6 +83,7 @@ it.effect("keeps deletion tombstoned when a gateway-only backend lacks session l
         turns: { list: () => Effect.succeed([]) } as unknown as import("@rika/product/turn-repository").Interface,
         sessions,
         rootTurns,
+        ingest: { quiesceThread: () => Effect.void },
         turnMutationAdmission: yield* Semaphore.make(1),
       })
 

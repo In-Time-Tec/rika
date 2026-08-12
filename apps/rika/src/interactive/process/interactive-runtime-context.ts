@@ -15,6 +15,7 @@ import type { InteractiveTuiOptions } from "./interactive-process-loop"
 export interface InteractiveLoop {
   model: Model
   threadView: ThreadView.ThreadViewSnapshot | undefined
+  viewGeneration: number
   modelPreview: ModelPreviewOverlay | undefined
   requestedThreadId: string | undefined
   workingFrame: string | undefined
