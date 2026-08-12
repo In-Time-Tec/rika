@@ -38,3 +38,37 @@ describe("server host preview overflow", () => {
     ])
   })
 })
+
+it("preserves the thread resync when a control event follows a lost patch", () => {
+  const state = Overflow.make()
+  // Fill the view capacity with distinct threads so the next view event degrades the state.
+  for (let index = 0; index < 64; index += 1)
+    Overflow.remember(state, {
+      _tag: "ThreadViewPatch",
+      patch: {
+        threadId: Thread.ThreadId.make(`t${index}`),
+        baseRevision: 0,
+        revision: 1,
+        upsert: [],
+        remove: [],
+        turnChanges: [],
+      },
+    })
+  Overflow.remember(state, {
+    _tag: "ThreadViewPatch",
+    patch: {
+      threadId: Thread.ThreadId.make("overflowed"),
+      baseRevision: 0,
+      revision: 1,
+      upsert: [],
+      remove: [],
+      turnChanges: [],
+    },
+  })
+  expect(state.degraded).toBeDefined()
+  // A control event arriving after the lost patch must not replace the recovery resync.
+  Overflow.remember(state, { _tag: "ExecutionControlled", threadId, turnId, action: "cancelled" })
+  const recovered = Overflow.events(state)
+  expect(recovered).toHaveLength(1)
+  expect(recovered[0]?._tag).toBe("ResyncRequired")
+})
