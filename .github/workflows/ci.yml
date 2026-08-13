@@ -50,6 +50,8 @@ jobs:
           [ -z "$noise" ] || { echo "login shells emit profile noise: $noise"; exit 1; }
       - name: Check
         run: bun run check
+      - name: Unit tests
+        run: bun run test
 
   tui:
     name: tui
