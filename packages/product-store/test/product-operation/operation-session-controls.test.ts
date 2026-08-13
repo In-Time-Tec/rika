@@ -12,12 +12,7 @@ import { TestClock } from "effect/testing"
 import { executionRoute } from "../support/product-test-current-state"
 import { executionSessionLifecycleLayerTest, productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
-import {
-  backend,
-  inspectTurnFromTurns,
-  projectionPatch,
-  projectionSnapshot,
-} from "../support/operation-execution-fixtures"
+import { backend, projectionPatch, projectionSnapshot } from "../support/operation-execution-fixtures"
 import { turnProvenance, threadLineage } from "../support/operation-selection-fixtures"
 
 describe("Operation", () => {
@@ -117,7 +112,7 @@ describe("Operation", () => {
       const cancellationReasons = yield* Ref.make<ReadonlyArray<string>>([])
       const interruptBackend = ExecutionGateway.Service.of({
         ...backend,
-        inspectTurn: inspectTurnFromTurns(turns),
+        inspectTurn: () => Effect.succeed({ status: "running" }),
         watchTurn: () => Stream.never,
         cancelTurn: (_link, reason) => Ref.update(cancellationReasons, (reasons) => [...reasons, reason]),
       })
@@ -285,7 +280,12 @@ describe("Operation", () => {
       const dispatch = (event: InteractiveEvent) => runSync(Ref.update(events, (current) => [...current, event]))
       const controlBackend = ExecutionGateway.Service.of({
         ...backend,
-        inspectTurn: inspectTurnFromTurns(turns),
+        inspectTurn: (link) =>
+          link.turnId === "active-control"
+            ? Deferred.isDone(activeCancelled).pipe(
+                Effect.map((done) => ({ status: done ? ("cancelled" as const) : ("running" as const) })),
+              )
+            : Effect.succeed({ status: "completed" }),
         watchTurn: (link, cursor) =>
           link.turnId === "active-control"
             ? Stream.concat(
@@ -407,11 +407,19 @@ describe("Operation", () => {
       const dispatch = (event: InteractiveEvent) => runSync(Ref.update(events, (all) => [...all, event]))
       const steeringAttempted = yield* Deferred.make<void>()
       const rejectSteering = yield* Deferred.make<void>()
+      const activeCompleted = yield* Deferred.make<void>()
       const promoted = yield* Deferred.make<void>()
       const promotedCancelled = yield* Deferred.make<void>()
       const restoredBackend = ExecutionGateway.Service.of({
         ...backend,
-        inspectTurn: inspectTurnFromTurns(turns),
+        inspectTurn: (link) =>
+          link.turnId === activeId
+            ? Deferred.isDone(activeCompleted).pipe(
+                Effect.map((done) => ({ status: done ? ("completed" as const) : ("running" as const) })),
+              )
+            : Deferred.isDone(promotedCancelled).pipe(
+                Effect.map((done) => ({ status: done ? ("cancelled" as const) : ("running" as const) })),
+              ),
         watchTurn: (link) =>
           Stream.fromEffect(Deferred.await(promotedCancelled)).pipe(
             Stream.map(() => projectionSnapshot(link.turnId, "cancelled", "promoted-cancelled")),
@@ -442,6 +450,7 @@ describe("Operation", () => {
         ])
         yield* settleEvents
         expect(yield* Deferred.isDone(steeringAttempted)).toBe(true)
+        yield* Deferred.succeed(activeCompleted, undefined)
         yield* turns.setStatus(activeId, "completed", 3)
         yield* Deferred.succeed(rejectSteering, undefined)
         yield* settleEvents
@@ -534,7 +543,10 @@ describe("Operation", () => {
       }
       const terminalBackend = ExecutionGateway.Service.of({
         ...backend,
-        inspectTurn: inspectTurnFromTurns(turns),
+        inspectTurn: () =>
+          Deferred.isDone(activeTerminal).pipe(
+            Effect.map((done) => ({ status: done ? ("completed" as const) : ("running" as const) })),
+          ),
         steerTurn: () => Deferred.succeed(steeringAccepted, undefined).pipe(Effect.as(receipt)),
         watchTurn: () => Stream.fromEffect(Deferred.await(activeTerminal)).pipe(Stream.map(() => terminalProjection)),
       })

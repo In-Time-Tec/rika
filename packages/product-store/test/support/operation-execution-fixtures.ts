@@ -1,6 +1,4 @@
-import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import * as TurnContract from "@rika/product/turn-repository"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import { unitOrder } from "@rika/transcript/transcript-unit-order"
 import { Effect, Function, Stream } from "effect"
@@ -63,12 +61,6 @@ export const backend = ExecutionGateway.Service.of({
   watchTurn: (link) => Stream.make(projectionSnapshot(link.turnId, "completed", "cursor-b", "answer")),
   inspectTurn: () => Effect.succeed({ status: "completed" }),
 })
-
-export const inspectTurnFromTurns = (turns: TurnContract.Interface) => (link: ExecutionGateway.ExecutionLink) =>
-  turns.get(Turn.TurnId.make(link.turnId)).pipe(
-    Effect.map((turn) => (turn === undefined ? { status: "unavailable" as const } : { status: turn.status })),
-    Effect.orElseSucceed(() => ({ status: "unavailable" as const })),
-  )
 
 export const projectionSnapshot: {
   (
