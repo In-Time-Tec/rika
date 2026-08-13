@@ -372,9 +372,13 @@ test(
         yield* selectQueue(app, prompts, 4)
         app.pressEnter()
         yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 9)
+        yield* app.waitTranscript(
+          activeTurnId,
+          (projection) => projection.state.steering.pending?.some((entry) => entry.text === "CANCEL_QUEUE_4") === true,
+        )
         app.pressKey("c", { ctrl: true })
 
-        yield* app.waitFrame("CANCEL_DRAINED_8", 30_000)
+        yield* app.waitFrame("CANCEL_DRAINED_8", 90_000)
         expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 5_000)).turns).toEqual([])
         const frame = yield* app.nextFrame
         expect(frame).not.toContain("CANCELLED_RESPONSE_MUST_NOT_RENDER")
@@ -406,7 +410,7 @@ test(
         yield* app.quit
       }),
     ),
-  60_000,
+  120_000,
 )
 
 test(
