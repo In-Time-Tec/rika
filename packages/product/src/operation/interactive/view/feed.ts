@@ -1,9 +1,183 @@
-import { Clock, Effect, Queue, Ref, Semaphore } from "effect"
-import * as InteractiveFeedOverflow from "./interactive-runtime-feed-overflow"
-import type { InteractiveEvent as RuntimeEvent } from "./interactive-runtime-event"
-import type { InteractiveEvent as ClientEvent } from "./interactive-event"
-import { makeThreadViewFeed } from "./interactive-thread-view-feed"
-import { OperationUnavailable } from "../contract/product-operation"
+import * as Thread from "@rika/product/thread-record"
+import { Function, Clock, Effect, Queue, Ref, Semaphore } from "effect"
+import { type InteractiveEvent, type InteractiveEvent as RuntimeEvent } from "../session-event"
+import { type InteractiveEvent as ClientEvent } from "../event"
+import { makeThreadViewFeed } from "./thread-view"
+import { OperationUnavailable } from "../../contract/product-operation"
+
+export const capacity = 64
+
+export interface State {
+  readonly transcriptThreadIds: Set<string>
+  readonly queueThreadIds: Set<string>
+  readonly critical: Array<InteractiveEvent>
+  readonly settlements: Map<string, Extract<InteractiveEvent, { readonly _tag: "TurnSettled" }>>
+  readonly refolds: Map<string, Extract<InteractiveEvent, { readonly _tag: "ThreadRefolding" }>>
+  readonly previewInvalidations: Map<
+    string,
+    Extract<InteractiveEvent, { readonly _tag: "ExecutionModelPreviewChanged" }>
+  >
+  criticalOverflowed: boolean
+  activated?: Extract<InteractiveEvent, { readonly _tag: "ThreadActivated" }>
+  summaries?: Extract<InteractiveEvent, { readonly _tag: "ThreadsListed" }>
+}
+
+export const make = (): State => ({
+  transcriptThreadIds: new Set(),
+  queueThreadIds: new Set(),
+  critical: [],
+  settlements: new Map(),
+  refolds: new Map(),
+  previewInvalidations: new Map(),
+  criticalOverflowed: false,
+})
+
+const overflowEventThreadId = (event: InteractiveEvent): string | undefined => {
+  if (event._tag === "SelectionLoaded") return String(event.thread.id)
+  if ("threadId" in event && event.threadId !== undefined) return String(event.threadId)
+  return undefined
+}
+
+const rememberThread = (state: State, threadIds: Set<string>, id: string) => {
+  if (threadIds.has(id)) return
+  if (threadIds.size >= capacity) {
+    state.criticalOverflowed = true
+    return
+  }
+  threadIds.add(id)
+}
+
+export const isCritical = (event: InteractiveEvent): boolean => {
+  switch (event._tag) {
+    case "AssistantCompleted":
+    case "ContextDiagnostics":
+    case "ExecutionControlFailed":
+    case "ExecutionFailed":
+    case "SubmissionRejected":
+    case "QueueFull":
+    case "ShellCompleted":
+    case "ExecutionControlled":
+    case "ThreadTitled":
+    case "GoalChanged":
+    case "ThreadPreviewLoaded":
+    case "ThreadPreviewFailed":
+    case "TurnSettled":
+      return true
+    case "TurnRetryScheduled":
+    case "ExecutionModelPreviewChanged":
+      return false
+    case "ThreadsListed":
+    case "ThreadRefolding":
+    case "ExecutionProjectionChanged":
+    case "ExecutionProjectionResyncRequired":
+    case "QueueUpdated":
+    case "ThreadViewResyncRequired":
+    case "TurnStarted":
+    case "SubmissionAdmitted":
+    case "SelectionLoaded":
+    case "ThreadActivated":
+      return false
+  }
+}
+
+const rememberImpl = (state: State, event: InteractiveEvent) => {
+  if (event._tag === "TurnSettled") {
+    const key = `${event.threadId}:${event.turnId}`
+    const previous = state.settlements.get(key)
+    if (previous === undefined || previous.activitySequence < event.activitySequence) state.settlements.set(key, event)
+    return
+  }
+  if (state.criticalOverflowed) return
+  const id = overflowEventThreadId(event)
+  switch (event._tag) {
+    case "ExecutionModelPreviewChanged": {
+      const key = `${event.threadId}:${event.turnId}:${event.preview.runId}`
+      if (!state.previewInvalidations.has(key) && state.previewInvalidations.size >= capacity) {
+        state.criticalOverflowed = true
+        return
+      }
+      state.previewInvalidations.set(key, {
+        ...event,
+        preview: {
+          _tag: "ModelPreviewCleared",
+          runId: event.preview.runId,
+          ...(event.preview.parentId === undefined ? {} : { parentId: event.preview.parentId }),
+          attemptFence: event.preview.attemptFence,
+          generation: event.preview._tag === "ModelPreviewCleared" ? event.preview.generation : 0,
+        },
+      })
+      return
+    }
+    case "ExecutionProjectionChanged":
+    case "ExecutionProjectionResyncRequired":
+    case "TurnStarted":
+    case "SelectionLoaded":
+      if (id !== undefined) rememberThread(state, state.transcriptThreadIds, id)
+      return
+    case "QueueUpdated":
+    case "ThreadViewResyncRequired":
+      if (id !== undefined) rememberThread(state, state.queueThreadIds, id)
+      return
+    case "ThreadActivated":
+      state.activated = event
+      return
+    case "ThreadsListed":
+      state.summaries = event
+      return
+    case "ThreadRefolding":
+      if (id !== undefined) state.refolds.set(id, event)
+      return
+    case "AssistantCompleted":
+    case "ContextDiagnostics":
+    case "ExecutionControlFailed":
+    case "ExecutionFailed":
+    case "SubmissionRejected":
+    case "QueueFull":
+    case "ShellCompleted":
+    case "ExecutionControlled":
+    case "ThreadTitled":
+    case "GoalChanged":
+    case "ThreadPreviewLoaded":
+    case "ThreadPreviewFailed":
+      if (state.critical.length >= capacity) state.criticalOverflowed = true
+      else state.critical.push(event)
+  }
+}
+
+export const remember: {
+  (event: InteractiveEvent): (state: State) => void
+  (state: State, event: InteractiveEvent): void
+} = Function.dual(2, rememberImpl)
+
+const eventsImpl = (state: State, selectionEpoch: number, reason: string): ReadonlyArray<InteractiveEvent> => {
+  const recovered: Array<InteractiveEvent> = []
+  if (state.activated !== undefined) recovered.push(state.activated)
+  if (state.summaries !== undefined) recovered.push(state.summaries)
+  recovered.push(...state.critical)
+  recovered.push(
+    ...[...state.settlements.values()].toSorted((left, right) => left.activitySequence - right.activitySequence),
+  )
+  recovered.push(...state.refolds.values())
+  recovered.push(...state.previewInvalidations.values())
+  for (const id of state.transcriptThreadIds)
+    recovered.push({
+      _tag: "ExecutionProjectionResyncRequired",
+      threadId: Thread.ThreadId.make(id),
+    })
+  for (const id of state.queueThreadIds)
+    recovered.push({
+      _tag: "ThreadViewResyncRequired",
+      selectionEpoch,
+      threadId: Thread.ThreadId.make(id),
+      reason,
+    })
+  return recovered
+}
+
+export const events: {
+  (selectionEpoch: number, reason: string): (state: State) => ReadonlyArray<InteractiveEvent>
+  (state: State, selectionEpoch: number, reason: string): ReadonlyArray<InteractiveEvent>
+} = Function.dual(3, eventsImpl)
 
 const withEpoch = (event: RuntimeEvent, epoch: number): RuntimeEvent => {
   switch (event._tag) {
@@ -37,7 +211,7 @@ export interface SelectionLoad {
   readonly previousThreadId: string | undefined
   readonly events: Array<RuntimeEvent>
   committed: boolean
-  overflow?: InteractiveFeedOverflow.State
+  overflow?: State
 }
 
 export interface InteractiveOperationFeed {
@@ -68,7 +242,7 @@ export interface InteractiveOperationFeed {
   ) => boolean
 }
 
-const eventThreadId = (event: RuntimeEvent): string | undefined => {
+const runtimeEventThreadId = (event: RuntimeEvent): string | undefined => {
   if (event._tag === "SelectionLoaded") return String(event.thread.id)
   if ("threadId" in event && event.threadId !== undefined) return String(event.threadId)
   return undefined
@@ -90,7 +264,7 @@ export const makeInteractiveOperationFeed = (input: {
     const queue = yield* Queue.bounded<SessionEnvelope>(64)
     const clock = yield* Clock.Clock
     const threadViews = makeThreadViewFeed(() => clock.currentTimeMillisUnsafe())
-    let overflow: InteractiveFeedOverflow.State | undefined
+    let overflow: State | undefined
 
     const deliver = (
       event: RuntimeEvent,
@@ -103,31 +277,31 @@ export const makeInteractiveOperationFeed = (input: {
         ...(options?.selectedThreadOnly === undefined ? {} : { selectedThreadOnly: options.selectedThreadOnly }),
       }
       if (overflow !== undefined) {
-        InteractiveFeedOverflow.remember(overflow, selected)
+        remember(overflow, selected)
         return false
       }
       if (Queue.offerUnsafe(queue, envelope)) return true
-      overflow = InteractiveFeedOverflow.make()
-      InteractiveFeedOverflow.remember(overflow, selected)
+      overflow = make()
+      remember(overflow, selected)
       return false
     }
 
     const bufferSelectionEvent = (event: RuntimeEvent): boolean => {
       const loading = input.selectionLoad.get()
-      if (loading === undefined || eventThreadId(event) !== loading.threadId) return false
+      if (loading === undefined || runtimeEventThreadId(event) !== loading.threadId) return false
       const selected = withEpoch(event, loading.epoch)
       if (loading.overflow !== undefined) {
-        InteractiveFeedOverflow.remember(loading.overflow, selected)
+        remember(loading.overflow, selected)
         return true
       }
       if (loading.events.length < 64) {
         loading.events.push(selected)
         return true
       }
-      loading.overflow = InteractiveFeedOverflow.make()
-      for (const buffered of loading.events) InteractiveFeedOverflow.remember(loading.overflow, buffered)
+      loading.overflow = make()
+      for (const buffered of loading.events) remember(loading.overflow, buffered)
       loading.events.length = 0
-      InteractiveFeedOverflow.remember(loading.overflow, selected)
+      remember(loading.overflow, selected)
       return true
     }
 
@@ -143,7 +317,7 @@ export const makeInteractiveOperationFeed = (input: {
         for (const event of loading.events) deliver(event, { selectionRequest: epoch, selectedThreadOnly: true })
         return
       }
-      for (const event of InteractiveFeedOverflow.events(loading.overflow, epoch, reason))
+      for (const event of events(loading.overflow, epoch, reason))
         deliver(event, { selectionRequest: epoch, selectedThreadOnly: true })
     }
     const finishSelection = (epoch: number) =>
@@ -186,7 +360,7 @@ export const makeInteractiveOperationFeed = (input: {
       const published = input.publishActivity(input.sessionId, event)
       dispatch(published)
     }
-    const events = (
+    const feedEvents = (
       dispatch: (event: ClientEvent) => void,
       readEpoch: () => number,
       readThread: () => string | undefined,
@@ -198,31 +372,26 @@ export const makeInteractiveOperationFeed = (input: {
         while (true) {
           if (overflow !== undefined) {
             const state = overflow
-            for (const discarded of yield* Queue.takeAll(queue))
-              InteractiveFeedOverflow.remember(state, discarded.event)
+            for (const discarded of yield* Queue.takeAll(queue)) remember(state, discarded.event)
             overflow = undefined
             if (state.criticalOverflowed)
               return yield* OperationUnavailable.make({
                 operation: "InteractiveSession.events",
                 message: "Interactive event feed exceeded its bounded non-recoverable event capacity",
               })
-            for (const event of InteractiveFeedOverflow.events(
-              state,
-              readEpoch(),
-              "Interactive event feed exceeded its bounded live window",
-            ))
+            for (const event of events(state, readEpoch(), "Interactive event feed exceeded its bounded live window"))
               publish(event)
             continue
           }
           const envelope = yield* Queue.take(queue)
           if (overflow !== undefined) {
-            InteractiveFeedOverflow.remember(overflow, envelope.event)
+            remember(overflow, envelope.event)
             continue
           }
           if (envelope.selectionRequest !== undefined && envelope.selectionRequest !== readEpoch()) continue
           if (envelope.selectedThreadOnly === true) {
-            const threadId = eventThreadId(envelope.event)
-            if (threadId !== undefined && threadId !== readThread()) continue
+            const envelopeThreadId = runtimeEventThreadId(envelope.event)
+            if (envelopeThreadId !== undefined && envelopeThreadId !== readThread()) continue
           }
           publish(envelope.event)
         }
@@ -236,10 +405,10 @@ export const makeInteractiveOperationFeed = (input: {
       commitSelection,
       finishSelection,
       releaseSelectionEvents,
-      events,
+      events: feedEvents,
       emit,
       close: Queue.shutdown(queue),
-      eventThreadId,
+      eventThreadId: runtimeEventThreadId,
       bufferSelectionEvent,
       deliver,
     }

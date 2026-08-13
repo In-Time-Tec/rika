@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { executeInteractiveCommand } from "../src/operation/interactive/interactive-command"
-import type { InteractiveSession } from "../src/operation/interactive/interactive-session"
+import { executeInteractiveCommand } from "../src/operation/interactive/command"
+import type { InteractiveSession } from "../src/operation/interactive/session"
 
 describe("Interactive authorization commands", () => {
   it.effect("dispatches only the public turn and authorization identities", () =>

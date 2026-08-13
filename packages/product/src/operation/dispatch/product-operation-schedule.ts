@@ -3,7 +3,7 @@ import type { OperationError } from "../operation-error"
 import type { ProductOperationRuntimeState } from "./product-operation-runtime-state"
 import type { ProductLayerOptions } from "./product-operation-options"
 import type { ProductOperationInteractiveSessionFactory } from "./product-operation-runtime-session"
-import type { InteractiveSessionRuntimeResult } from "../interactive/interactive-session-runtime"
+import type { InteractiveSessionRuntimeResult } from "../interactive/session"
 
 export interface ProductOperationScheduleInput {
   readonly options: ProductLayerOptions<Error, Error, Error, Error, Error>

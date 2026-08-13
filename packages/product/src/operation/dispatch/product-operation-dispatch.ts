@@ -13,7 +13,7 @@ import { makeProductOperationSchedule } from "./product-operation-schedule"
 import { makeProductOperationRuntimeState } from "./product-operation-runtime-state"
 import { makeProductOperationService } from "./product-operation-service"
 import type { ProductLayerOptions } from "./product-operation-options"
-import type { InteractiveEvent } from "../interactive/interactive-runtime-event"
+import type { InteractiveEvent } from "../interactive/session-event"
 
 const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
 const unavailable = (input: Input, message = `${input._tag} is specified but not implemented yet`) =>

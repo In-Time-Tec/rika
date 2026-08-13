@@ -2,10 +2,11 @@ import * as Thread from "@rika/product/thread-record"
 import * as ThreadSummary from "@rika/product/thread-summary"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as Turn from "@rika/product/turn-record"
-import { Schema } from "effect"
-import { Failure } from "../operation-failure"
 import * as ExecutionProjection from "../../execution/contract/execution-projection"
 import * as ExecutionGateway from "../../execution/contract/execution-gateway"
+
+import { Schema } from "effect"
+import { Failure } from "../operation-failure"
 
 export interface QueueItem {
   readonly id: Turn.TurnId

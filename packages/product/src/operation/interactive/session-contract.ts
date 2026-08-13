@@ -1,14 +1,42 @@
-import { Effect, Exit, Scope, Semaphore, Context, PubSub, PlatformError } from "effect"
-import { makeInteractiveSessionState, type InteractiveSessionState } from "./interactive-session-state"
-import { makeInteractiveSessionComposition } from "./interactive-session-composition"
-import { makeInteractiveImplementation } from "./interactive-session-interface"
-import {
-  makeInteractiveExecutionComponents,
-  makeInteractiveFollowingComponents,
-  makeInteractiveTranscriptComponents,
-  makeInteractiveSupervisionComponents,
-} from "./interactive-session-runtime-components"
-import { ignoreInteractiveEvent } from "./interactive-session-following"
+import type * as Thread from "@rika/product/thread-record"
+import type * as ExecutionRequest from "@rika/product/execution-request"
+import type { ModeId } from "@rika/configuration/behavior-mode"
+import type { Context, Effect, PlatformError, PubSub, Semaphore } from "effect"
+import type { OperationUnavailable } from "../contract/product-operation"
+import type { InteractiveEvent as ClientEvent } from "./event"
+import type { InteractiveEvent } from "./session-event"
+import type { InteractiveSessionState, makeInteractiveSessionComposition } from "./session-state"
+import type { InteractiveOperationFeed } from "./view/feed"
+
+export interface InteractiveSession {
+  readonly events: (dispatch: (event: ClientEvent) => void) => Effect.Effect<void, OperationUnavailable>
+  readonly submit: (
+    prompt: string,
+    mode?: ModeId,
+    promptParts?: ReadonlyArray<ExecutionRequest.PromptPart>,
+    modelTuning?: { readonly fastMode?: boolean },
+    submissionId?: string,
+  ) => Effect.Effect<void, OperationUnavailable>
+  readonly shell: (
+    threadId: Thread.ThreadId | undefined,
+    command: string,
+    incognito: boolean,
+  ) => Effect.Effect<void, OperationUnavailable>
+  readonly editQueued: (turnId: string, prompt: string) => Effect.Effect<void, OperationUnavailable>
+  readonly dequeue: (turnId: string) => Effect.Effect<void, OperationUnavailable>
+  readonly steerQueued: (turnId: string, text: string, requestId: string) => Effect.Effect<void, OperationUnavailable>
+  readonly steer: (text: string, requestId: string, targetTurnId?: string) => Effect.Effect<void, OperationUnavailable>
+  readonly approveAuthorization: (turnId: string, authorizationId: string) => Effect.Effect<void, OperationUnavailable>
+  readonly denyAuthorization: (turnId: string, authorizationId: string) => Effect.Effect<void, OperationUnavailable>
+  readonly interruptAndSend: (prompt: string) => Effect.Effect<void, OperationUnavailable>
+  readonly cancel: Effect.Effect<void, OperationUnavailable>
+  readonly quit: Effect.Effect<void, OperationUnavailable>
+  readonly newThread: Effect.Effect<void, OperationUnavailable>
+  readonly selectThread: (threadId: string) => Effect.Effect<void, OperationUnavailable>
+  readonly readQueue: (threadId: string) => Effect.Effect<void, OperationUnavailable>
+  readonly previewThread: (threadId: string, requestId: number) => Effect.Effect<void, OperationUnavailable>
+  readonly reopenThread: Effect.Effect<void, OperationUnavailable>
+}
 
 type ThreadId = import("@rika/product/thread-record").ThreadId
 type TurnId = import("@rika/product/turn-record").TurnId
@@ -24,9 +52,6 @@ type CreateInput = import("../../thread/repository/turn-repository-contract").Cr
 type QueueSubmission = import("../../thread/repository/turn-repository-queue").Submission
 type QueueClaim = import("../../thread/repository/turn-repository-queue").QueueClaim
 type RootTurnOwnerInterface = import("../../thread/queue/root-turn-owner").Interface
-type ModeId = import("@rika/configuration/behavior-mode").ModeId
-type InteractiveSession = import("./interactive-session").InteractiveSession
-type InteractiveEvent = import("./interactive-runtime-event").InteractiveEvent
 type ProductLayerOptions<
   ThreadError extends Error,
   TurnError extends Error,
@@ -40,16 +65,14 @@ type ProductLayerOptions<
   ThreadSummaryError,
   TranscriptError
 >
-type InteractiveOperationFeed = import("./interactive-operation-feed").InteractiveOperationFeed
-type SelectionEpochState = import("./interactive-thread-selection").SelectionEpochState
 type OperationError = import("../operation-error").OperationError
 type operationError = typeof import("../operation-error").operationError
 type queueMutationEvent = typeof import("../dispatch/product-operation-runtime-support").queueMutationEvent
-type executeShellCommand = typeof import("./interactive-operation-leaves").executeShellCommand
-type recordedShellStartedEvent = typeof import("./interactive-operation-leaves").recordedShellStartedEvent
-type recordedShellSettledEvents = typeof import("./interactive-operation-leaves").recordedShellSettledEvents
-type temporaryThreadTitle = typeof import("./interactive-operation-leaves").temporaryThreadTitle
-type dispatchInteractiveFailure = typeof import("./interactive-session-errors").dispatchInteractiveFailure
+type executeShellCommand = typeof import("./shell").executeShellCommand
+type recordedShellStartedEvent = typeof import("./shell").recordedShellStartedEvent
+type recordedShellSettledEvents = typeof import("./shell").recordedShellSettledEvents
+type temporaryThreadTitle = typeof import("./shell").temporaryThreadTitle
+type dispatchInteractiveFailure = typeof import("./session-state").dispatchInteractiveFailure
 
 export type InteractiveExecutionContextServices =
   | import("@rika/product/thread-repository").Service
@@ -211,99 +234,3 @@ export interface InteractiveSessionRuntimeResult {
   >
   readonly close: Effect.Effect<void, never, never>
 }
-
-export const makeInteractiveSession = (
-  input: InteractiveSessionInput,
-): ((
-  workspace: string,
-  settings?: { readonly initialThreadId?: string; readonly serverOwner?: boolean },
-) => Effect.Effect<InteractiveSessionRuntimeResult, OperationError, never>) =>
-  Effect.fn("ProductOperation.makeInteractiveSession")(function* (
-    workspace: string,
-    settings: { readonly initialThreadId?: string; readonly serverOwner?: boolean } = {},
-  ) {
-    const sessionId = input.nextSessionId()
-    const state: InteractiveSessionState = yield* makeInteractiveSessionState({
-      sessionId,
-      publishInteractiveActivity: input.publishInteractiveActivity,
-      activitySequence: input.activitySequence,
-      options: input.options,
-      initialThreadId: settings.initialThreadId,
-      serverOwner: settings.serverOwner ?? false,
-    })
-    const typedLifecycleAdmission: Semaphore.Semaphore = state.lifecycleAdmission
-    const typedGetLifecycle: () => "open" | "closed" = state.getLifecycle
-    const typedSetLifecycle: (value: "open" | "closed") => void = state.setLifecycle
-    const typedInteractiveSinks: Map<number, unknown> = input.interactiveSinks
-    const typedSessionThreadViews: Map<number, unknown> = input.sessionThreadViews
-    const typedOperationFeed: InteractiveOperationFeed = state.operationFeed
-    const typedSessionScope: Scope.Scope = state.sessionScope
-    const runtimeInput = {
-      ...input,
-      ...state,
-      workspace,
-      sessionId,
-      serverOwner: settings.serverOwner ?? false,
-      emit: state.emit,
-      dispatchFailure: state.dispatchFailure,
-      admit: state.composition.admit,
-      admitLocal: state.composition.admitLocal,
-      attachFeed: state.composition.attachFeed,
-    }
-    const execution = makeInteractiveExecutionComponents(runtimeInput, state)
-    const following = makeInteractiveFollowingComponents(runtimeInput, execution)
-    const transcript = makeInteractiveTranscriptComponents(runtimeInput, state)
-    const supervision = makeInteractiveSupervisionComponents(runtimeInput, state, following, execution)
-    const implementation = makeInteractiveImplementation({
-      ...runtimeInput,
-      ...execution,
-      ...following,
-      ...transcript,
-      ...supervision,
-      getCurrentSelectionEpoch: state.getCurrentSelectionEpoch,
-      getSelectedThreadId: state.getSelectedThreadId,
-      getActiveSelectionState: state.getActiveSelectionState,
-      selectionMatches: (candidate: SelectionEpochState | undefined, threadId: string, epoch: number) =>
-        candidate !== undefined && String(candidate.thread.id) === threadId && candidate.epoch === epoch,
-    })
-    const session: InteractiveSession = {
-      events: (dispatch) => state.composition.attachFeed(implementation.events(dispatch)),
-      submit: (prompt, mode, parts, tuning, submissionId) =>
-        state.composition.admit(implementation.submit(prompt, mode, parts, tuning, submissionId)),
-      newThread: state.composition.admitLocal(implementation.newThread),
-      shell: (threadId, command, incognito) =>
-        state.composition.admitLocal(implementation.shell(threadId, command, incognito)),
-      editQueued: (turnId, prompt) => state.composition.admitLocal(implementation.editQueued(turnId, prompt)),
-      dequeue: (turnId) => state.composition.admitLocal(implementation.dequeue(turnId)),
-      steerQueued: (turnId, text, requestId) =>
-        state.composition.admitLocal(implementation.steerQueued(turnId, text, requestId)),
-      steer: (text, requestId, targetTurnId) =>
-        state.composition.admitLocal(implementation.steer(text, requestId, targetTurnId)),
-      approveAuthorization: (turnId, authorizationId) =>
-        state.composition.admitLocal(implementation.approveAuthorization(turnId, authorizationId)),
-      denyAuthorization: (turnId, authorizationId) =>
-        state.composition.admitLocal(implementation.denyAuthorization(turnId, authorizationId)),
-      interruptAndSend: (prompt) => state.composition.admitLocal(implementation.interruptAndSend(prompt)),
-      cancel: state.composition.admitLocal(implementation.cancel),
-      quit: implementation.quit,
-      selectThread: (threadId) => state.composition.admitLocal(implementation.selectThread(threadId)),
-      readQueue: (threadId) => state.composition.admitLocal(implementation.readQueue(threadId)),
-      previewThread: (threadId, requestId) =>
-        state.composition.admitLocal(implementation.previewThread(threadId, requestId)),
-      reopenThread: state.composition.admitLocal(implementation.reopenThread),
-    }
-    return {
-      session,
-      supervise: supervision.supervise,
-      watchClaimed: (turnId: TurnId) => following.watchClaimedTurn(turnId, ignoreInteractiveEvent),
-      close: typedLifecycleAdmission.withPermits(1)(
-        Effect.suspend(() => {
-          if (typedGetLifecycle() === "closed") return Effect.void
-          typedSetLifecycle("closed")
-          typedInteractiveSinks.delete(sessionId)
-          typedSessionThreadViews.delete(sessionId)
-          return typedOperationFeed.close.pipe(Effect.andThen(Scope.close(typedSessionScope, Exit.void)))
-        }),
-      ),
-    }
-  })

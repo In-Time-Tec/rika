@@ -6,8 +6,8 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import type * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { recordedShellProjection } from "@rika/transcript/recorded-shell-presentation"
-import { initialTranscriptWindow } from "../src/operation/interactive/transcript-window"
-import { makeSelectionState } from "../src/operation/interactive/interactive-thread-selection"
+import { initialTranscriptWindow } from "../src/operation/interactive/view/transcript-window"
+import { makeSelectionState } from "../src/operation/interactive/view/selection"
 
 const thread: Thread.Thread = {
   id: Thread.ThreadId.make("thread-shell-window"),

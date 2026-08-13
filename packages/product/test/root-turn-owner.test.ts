@@ -8,11 +8,15 @@ import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import type * as TurnRepositorySteering from "@rika/product/turn-repository-steering"
-import { Deferred, Effect, Fiber, Schema, Stream } from "effect"
+import { Deferred, Effect, Exit, Fiber, Schema, Stream } from "effect"
 import { unitOrder } from "@rika/transcript/transcript-unit-order"
 
 const encodeStartTurn = Schema.encodeSync(Schema.fromJsonString(ExecutionGateway.StartTurn))
 import { make } from "../src/thread/queue/root-turn-owner"
+import {
+  settleInteractiveSubmission,
+  type InteractiveSubmissionContext,
+} from "../src/operation/interactive/turn/admission"
 
 const link = { runId: "root-run", threadId: "thread", turnId: "turn" }
 
@@ -540,6 +544,127 @@ it.effect("finalizes the source queue row when Baton accepts steering", () =>
     expect(attempts).toBe(1)
     expect(completions).toBe(1)
     expect(admission).toBeUndefined()
+  }),
+)
+
+it.effect("does not accept a terminal projection while the durable parent run remains nonterminal", () =>
+  Effect.gen(function* () {
+    const completedProjection = {
+      turn,
+      units: [
+        {
+          key: "child:first",
+          turnId: turn.id,
+          order: unitOrder("child:first", 0),
+          revision: 1,
+          content: { _tag: "Entry" as const, role: "assistant" as const, text: "first child completed" },
+        },
+        {
+          key: "child:second",
+          turnId: turn.id,
+          order: unitOrder("child:second", 1),
+          revision: 1,
+          content: { _tag: "Entry" as const, role: "assistant" as const, text: "second child completed" },
+        },
+      ],
+      checkpointGeneration: 1,
+      revision: 1,
+      state: {
+        status: "completed" as const,
+        usage: ExecutionProjection.emptyUsageState(),
+        steering: { steeringMessages: 0, followUpMessages: 0 },
+      },
+      projectionVersion: 1,
+    }
+    let durableStatus: "waiting" | "completed" = "waiting"
+    let starts = 0
+    let promotions = 0
+    const owner = yield* make(
+      { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
+      {
+        get: () => Effect.succeed(completedProjection),
+        commitProjection: () => Effect.succeed("committed" as const),
+      } as TranscriptRepository.Interface,
+      {
+        startTurn: () => Effect.sync(() => ((starts += 1), link)),
+        watchTurn: () => Stream.empty,
+        inspectTurn: () => Effect.succeed({ status: durableStatus }),
+      } as ExecutionGateway.Interface,
+    )
+
+    const waiting = yield* owner.watchTurn(turn.id)
+    expect(waiting.status).toBe("waiting")
+    expect(waiting.units).toHaveLength(2)
+    yield* settleInteractiveSubmission(
+      {
+        setTurnStatus: () => Effect.succeed(turn),
+        settleThread: () => Effect.sync(() => (promotions += 1)),
+        emit: () => undefined,
+      } as unknown as InteractiveSubmissionContext,
+      {
+        thread: {
+          id: turn.threadId,
+          workspace: "/workspace",
+          title: "thread",
+          labels: [],
+          pinned: false,
+          archived: false,
+          lineage: { _tag: "Original" },
+          createdAt: 0,
+          updatedAt: 0,
+        },
+        turn,
+        outcome: Exit.succeed(waiting),
+        dispatch: () => undefined,
+      },
+    )
+    expect(promotions).toBe(0)
+    expect(starts).toBe(0)
+
+    durableStatus = "completed"
+    const completed = yield* owner.watchTurn(turn.id)
+    yield* settleInteractiveSubmission(
+      {
+        setTurnStatus: () => Effect.succeed(turn),
+        settleThread: () => Effect.sync(() => (promotions += 1)),
+        emit: () => undefined,
+      } as unknown as InteractiveSubmissionContext,
+      {
+        thread: {
+          id: turn.threadId,
+          workspace: "/workspace",
+          title: "thread",
+          labels: [],
+          pinned: false,
+          archived: false,
+          lineage: { _tag: "Original" },
+          createdAt: 0,
+          updatedAt: 0,
+        },
+        turn,
+        outcome: Exit.succeed(completed),
+        dispatch: () => undefined,
+      },
+    )
+    expect(completed.status).toBe("completed")
+    expect(promotions).toBe(1)
+    expect(starts).toBe(0)
+  }),
+)
+
+it.effect("falls back to the persisted running status when the backend run is unavailable", () =>
+  Effect.gen(function* () {
+    const owner = yield* make(
+      { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
+      { get: () => Effect.void } as TranscriptRepository.Interface,
+      {
+        watchTurn: () => Stream.empty,
+        inspectTurn: () => Effect.succeed({ status: "unavailable" as const }),
+      } as ExecutionGateway.Interface,
+    )
+    const result = yield* owner.watchTurn(turn.id)
+    expect(result.status).toBe("running")
+    expect(result.state.status).toBe("running")
   }),
 )
 

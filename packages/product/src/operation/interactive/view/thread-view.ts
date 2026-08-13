@@ -1,18 +1,17 @@
-import * as ExecutionProjection from "../../execution/contract/execution-projection"
-import { promptUnit } from "./interactive-prompt-unit"
+import * as ExecutionProjection from "../../../execution/contract/execution-projection"
 import * as ThreadView from "@rika/product/thread-view"
+import { promptUnit } from "./transcript-window"
 import { compareUnitOrder, encodeUnitOrder } from "@rika/transcript/transcript-unit-order"
 import { Result } from "effect"
-import type { InteractiveEvent as ClientEvent } from "./interactive-event"
-import type { InteractiveEvent as RuntimeEvent, QueueItem } from "./interactive-runtime-event"
-
+import { type InteractiveEvent as ClientEvent } from "../event"
+import { type InteractiveEvent as RuntimeEvent, type QueueItem } from "../session-event"
+import { threadUsage } from "./usage"
 const pending = (items: ReadonlyArray<QueueItem>): ReadonlyArray<ThreadView.ThreadViewPendingTurn> =>
   items.slice(0, ThreadView.limits.pending).map((item) => ({
     id: item.id,
     prompt: item.prompt,
     createdAt: item.createdAt,
   }))
-
 const orderedUnits = <T extends { readonly units: ReadonlyArray<import("@rika/transcript/transcript-unit").Unit> }>(
   entry: T,
 ): T => ({
@@ -22,13 +21,11 @@ const orderedUnits = <T extends { readonly units: ReadonlyArray<import("@rika/tr
     return order === 0 ? left.key.localeCompare(right.key) : order
   }),
 })
-
 const orderedTurns = (turns: ReadonlyArray<ThreadView.ThreadViewTurn>): ReadonlyArray<ThreadView.ThreadViewTurn> =>
   turns.map(orderedUnits).toSorted((left, right) => {
     const createdAt = left.turn.createdAt - right.turn.createdAt
     return createdAt === 0 ? String(left.turn.id).localeCompare(String(right.turn.id)) : createdAt
   })
-
 const sourceFor = (
   turns: ReadonlyArray<ThreadView.ThreadViewTurn>,
   projectionVersion: number,
@@ -62,110 +59,7 @@ const sourceFor = (
     ...(newestCursor === undefined ? {} : { newestCursor }),
   }
 }
-
 const trackedProjectionLimit = 64
-
-const difference = (next: number | undefined, previous: number | undefined): number | undefined => {
-  if (next === undefined) return previous === undefined ? undefined : 0
-  return Math.max(0, next - (previous ?? 0))
-}
-
-const tokenDifference = (
-  next: ExecutionProjection.TokenTotals | undefined,
-  previous: ExecutionProjection.TokenTotals | undefined,
-): ExecutionProjection.TokenTotals | undefined => {
-  if (next === undefined) return undefined
-  return {
-    ...(difference(next.total, previous?.total) === undefined
-      ? {}
-      : { total: difference(next.total, previous?.total)! }),
-    input: {
-      ...(difference(next.input.total, previous?.input.total) === undefined
-        ? {}
-        : { total: difference(next.input.total, previous?.input.total)! }),
-      ...(difference(next.input.uncached, previous?.input.uncached) === undefined
-        ? {}
-        : { uncached: difference(next.input.uncached, previous?.input.uncached)! }),
-      ...(difference(next.input.cacheRead, previous?.input.cacheRead) === undefined
-        ? {}
-        : { cacheRead: difference(next.input.cacheRead, previous?.input.cacheRead)! }),
-      ...(difference(next.input.cacheWrite, previous?.input.cacheWrite) === undefined
-        ? {}
-        : { cacheWrite: difference(next.input.cacheWrite, previous?.input.cacheWrite)! }),
-    },
-    output: {
-      ...(difference(next.output.total, previous?.output.total) === undefined
-        ? {}
-        : { total: difference(next.output.total, previous?.output.total)! }),
-      ...(difference(next.output.text, previous?.output.text) === undefined
-        ? {}
-        : { text: difference(next.output.text, previous?.output.text)! }),
-      ...(difference(next.output.reasoning, previous?.output.reasoning) === undefined
-        ? {}
-        : { reasoning: difference(next.output.reasoning, previous?.output.reasoning)! }),
-    },
-    ...(difference(next.failedProviderTotal, previous?.failedProviderTotal) === undefined
-      ? {}
-      : { failedProviderTotal: difference(next.failedProviderTotal, previous?.failedProviderTotal)! }),
-  }
-}
-
-const nextThreadUsage = (
-  current: ThreadView.ThreadViewUsage,
-  previous: ExecutionProjection.UsageState | undefined,
-  next: ExecutionProjection.UsageState,
-  turn: import("@rika/product/turn-record").Turn | undefined,
-): ThreadView.ThreadViewUsage => {
-  const previousActive = previous?.active._tag === "Available" ? previous.active.accumulatedMillis : 0
-  const nextActive = next.active._tag === "Available" ? next.active.accumulatedMillis : 0
-  const costNanoUsd = difference(next.costNanoUsd, previous?.costNanoUsd)
-  const delta: ExecutionProjection.UsageState = {
-    ...(costNanoUsd === undefined ? {} : { costNanoUsd }),
-    ...(tokenDifference(next.tokens, previous?.tokens) === undefined
-      ? {}
-      : { tokens: tokenDifference(next.tokens, previous?.tokens)! }),
-    pricedAttempts: Math.max(0, next.pricedAttempts - (previous?.pricedAttempts ?? 0)),
-    unpricedAttempts: Math.max(0, next.unpricedAttempts - (previous?.unpricedAttempts ?? 0)),
-    includedAttempts: Math.max(0, (next.includedAttempts ?? 0) - (previous?.includedAttempts ?? 0)),
-    countedAttempts: Math.max(0, next.countedAttempts - (previous?.countedAttempts ?? 0)),
-    uncountedAttempts: Math.max(0, next.uncountedAttempts - (previous?.uncountedAttempts ?? 0)),
-    sourceComplete: next.sourceComplete,
-    contextPending: next.contextPending,
-    active:
-      next.active._tag === "Unavailable"
-        ? { _tag: "Unavailable" }
-        : { _tag: "Available", accumulatedMillis: Math.max(0, nextActive - previousActive) },
-  }
-  const aggregate = ExecutionProjection.aggregateUsage([current.state, delta])
-  const context = next.context ?? current.state.context
-  const active =
-    aggregate.active._tag === "Unavailable"
-      ? aggregate.active
-      : {
-          _tag: "Available" as const,
-          accumulatedMillis: aggregate.active.accumulatedMillis,
-          ...(next.active._tag === "Available" && next.active.activeSince !== undefined
-            ? { activeSince: next.active.activeSince }
-            : {}),
-        }
-  let contextCapacity = current.contextCapacity
-  if (next.context !== undefined && turn?._tag === "AgentExecution")
-    contextCapacity = {
-      contextWindow: turn.executionRoute.main.compaction.contextWindow,
-      reserveTokens: turn.executionRoute.main.compaction.reserveTokens,
-    }
-  return {
-    state: {
-      ...aggregate,
-      sourceComplete: next.sourceComplete,
-      ...(context === undefined ? {} : { context }),
-      contextPending: next.contextPending,
-      active,
-    },
-    ...(contextCapacity === undefined ? {} : { contextCapacity }),
-  }
-}
-
 const snapshotFromSelection = (
   event: Extract<RuntimeEvent, { readonly _tag: "SelectionLoaded" }>,
   revision: number,
@@ -232,7 +126,6 @@ const snapshotFromSelection = (
     },
   }
 }
-
 const resync = (snapshot: ThreadView.ThreadViewSnapshot, receivedBaseRevision = snapshot.revision) =>
   ThreadView.ResyncRequired.make({
     threadId: snapshot.thread.id,
@@ -240,19 +133,16 @@ const resync = (snapshot: ThreadView.ThreadViewSnapshot, receivedBaseRevision = 
     receivedBaseRevision,
     currentRevision: snapshot.revision,
   })
-
 export interface ThreadViewFeed {
   readonly publish: (event: RuntimeEvent) => ReadonlyArray<ClientEvent>
   readonly current: () => ThreadView.ThreadViewSnapshot | undefined
 }
-
 export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
   let current: ThreadView.ThreadViewSnapshot | undefined
   let snapshotRequired = false
   let knownThreadId: string | undefined
   const knownProjectionRevisions = new Map<string, number>()
   const knownUsage = new Map<string, ExecutionProjection.UsageState>()
-
   const rememberProjection = (turnId: string, revision: number, usage: ExecutionProjection.UsageState) => {
     knownProjectionRevisions.delete(turnId)
     knownUsage.delete(turnId)
@@ -265,7 +155,6 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       knownUsage.delete(oldest)
     }
   }
-
   const remember = (snapshot: ThreadView.ThreadViewSnapshot) => {
     const threadId = String(snapshot.thread.id)
     if (knownThreadId !== threadId) {
@@ -284,14 +173,12 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
         rememberProjection(turnId, entry.projectionRevision, entry.usage)
     }
   }
-
   const replace = (snapshot: ThreadView.ThreadViewSnapshot): ReadonlyArray<ClientEvent> => {
     current = snapshot
     remember(snapshot)
     snapshotRequired = false
     return [{ _tag: "ThreadViewSnapshot", snapshot }]
   }
-
   const patch = (value: ThreadView.ThreadViewPatch): ReadonlyArray<ClientEvent> => {
     if (current === undefined || snapshotRequired) return []
     const applied = ThreadView.apply(current, value)
@@ -302,7 +189,6 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
     current = applied.success
     return [{ _tag: "ThreadViewPatch", patch: value }]
   }
-
   const nextPatch = (
     change: Omit<ThreadView.ThreadViewPatch, "threadId" | "baseRevision" | "revision">,
   ): ReadonlyArray<ClientEvent> => {
@@ -314,7 +200,6 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       ...change,
     })
   }
-
   const publish = (event: RuntimeEvent): ReadonlyArray<ClientEvent> => {
     if (event._tag === "SelectionLoaded")
       return replace(snapshotFromSelection(event, current?.thread.id === event.thread.id ? current.revision + 1 : 0))
@@ -362,7 +247,7 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
         pending: current.pending,
         hasOlder: current.hasOlder,
         hasNewer: current.hasNewer,
-        usage: nextThreadUsage(current.usage, previousUsage, change.state.usage, event.turn),
+        usage: threadUsage.next(current.usage, previousUsage, change.state.usage, event.turn),
       }
       rememberProjection(turnKey, change.revision, change.state.usage)
       if (existing === undefined) {

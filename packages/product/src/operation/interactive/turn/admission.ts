@@ -1,30 +1,48 @@
-import { Function } from "effect"
+import * as Turn from "@rika/product/turn-record"
+import * as ExecutionStatus from "@rika/product/execution-status"
+import * as TurnRepository from "@rika/product/turn-repository"
+import * as TurnRepositoryContract from "../../../thread/repository/turn-repository-contract"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
-import * as TurnRepository from "@rika/product/turn-repository"
-import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionRequest from "@rika/product/execution-request"
 import * as ExecutionProjection from "@rika/product/execution-projection"
-import { Cause, Clock, Duration, Effect, Exit, Ref } from "effect"
-import { admitInteractiveTurn } from "./interactive-turn-submission"
-import { turnFailure } from "../failure-message"
-import { makeFailure } from "../operation-failure"
-import { shouldRetryTurn, turnRetryBudget, turnRetryDelay } from "../turn-retry-policy"
-import { failureKind, operationError, operationFailureDetail } from "../operation-error"
-import type { ModeId } from "@rika/configuration/behavior-mode"
-import type { InteractiveEvent } from "./interactive-runtime-event"
-import type { InteractiveRuntimeContext } from "./interactive-session-runtime"
-import type { makeInteractiveQueue } from "./interactive-session-queue"
-
+import { OperationError, failureKind, operationError, operationFailureDetail } from "../../operation-error"
+import { Function, Effect, Cause, Clock, Duration, Exit, Ref } from "effect"
+import { turnFailure } from "../../failure-message"
+import { makeFailure } from "../../operation-failure"
+import { shouldRetryTurn, turnRetryBudget, turnRetryDelay } from "../../turn-retry-policy"
+import { type ModeId } from "@rika/configuration/behavior-mode"
+import { type InteractiveEvent } from "../session-event"
+import { type InteractiveRuntimeContext } from "../session"
+import { type makeInteractiveQueue } from "./queue"
+export const admitInteractiveTurn = (input: {
+  readonly turns: TurnRepository.Interface
+  readonly submission: TurnRepositoryContract.CreateInput
+  readonly claim: (
+    turnId: Turn.TurnId,
+    status?: ExecutionStatus.Status,
+  ) => Effect.Effect<boolean, OperationError, never>
+}) =>
+  Effect.gen(function* () {
+    const turn = yield* input.turns.createForSubmission(input.submission)
+    if (turn.status === "queued") return { turn, claimed: false }
+    return { turn, claimed: yield* input.claim(turn.id, turn.status) }
+  })
+const newThreadTitleImpl = (prompt: string, fallback: string): string => {
+  const title = prompt.split(/\r?\n/, 1)[0]?.trim() ?? ""
+  return title.length === 0 ? fallback : title
+}
+export const newThreadTitle: {
+  (arg1: string): (arg0: string) => ReturnType<typeof newThreadTitleImpl>
+  (arg0: string, arg1: string): ReturnType<typeof newThreadTitleImpl>
+} = Function.dual(2, newThreadTitleImpl)
 export type InteractiveSubmissionContext = InteractiveRuntimeContext & ReturnType<typeof makeInteractiveQueue>
-
 const emitEvent = (
   input: InteractiveRuntimeContext,
   dispatch: (event: InteractiveEvent) => void,
   event: InteractiveEvent,
 ) => input.emit(dispatch, event)
-
 const admitInteractiveSubmissionImpl = (
   input: InteractiveRuntimeContext,
   thread: Thread.Thread,
@@ -76,7 +94,6 @@ const admitInteractiveSubmissionImpl = (
     return observed.turn
   })
 }
-
 export const admitInteractiveSubmission: {
   (
     arg1: Thread.Thread,
@@ -98,7 +115,6 @@ export const admitInteractiveSubmission: {
     arg7?: string,
   ): ReturnType<typeof admitInteractiveSubmissionImpl>
 } = Function.dual(8, admitInteractiveSubmissionImpl)
-
 type SettleInteractiveSubmissionResult =
   | {
       readonly _tag: "retry"
@@ -107,7 +123,6 @@ type SettleInteractiveSubmissionResult =
       readonly message: string
     }
   | { readonly _tag: "settled" }
-
 interface SettleInteractiveSubmissionState {
   readonly thread: Thread.Thread
   readonly turn: Turn.AgentExecutionTurn
@@ -115,7 +130,6 @@ interface SettleInteractiveSubmissionState {
   readonly dispatch: (event: InteractiveEvent) => void
   readonly retry?: { readonly attempt: number; readonly sourceTurnId: string }
 }
-
 const settleInteractiveSubmissionImpl = (
   input: InteractiveSubmissionContext,
   state: SettleInteractiveSubmissionState,
@@ -176,7 +190,6 @@ const settleInteractiveSubmissionImpl = (
     }),
   )
 }
-
 export const settleInteractiveSubmission: {
   (
     arg1: SettleInteractiveSubmissionState,
@@ -186,7 +199,6 @@ export const settleInteractiveSubmission: {
     arg1: SettleInteractiveSubmissionState,
   ): ReturnType<typeof settleInteractiveSubmissionImpl>
 } = Function.dual(2, settleInteractiveSubmissionImpl)
-
 const executeInteractiveSubmissionImpl = (
   input: InteractiveSubmissionContext,
   thread: Thread.Thread,
@@ -321,7 +333,6 @@ const executeInteractiveSubmissionImpl = (
     Effect.ensuring(releaseTurnObserver(turn.id).pipe(Effect.andThen(notifyTurnChanged(turn)), Effect.ignore)),
   )
 }
-
 export const executeInteractiveSubmission: {
   (
     arg1: Thread.Thread,
@@ -339,7 +350,6 @@ export const executeInteractiveSubmission: {
     arg5?: string,
   ): ReturnType<typeof executeInteractiveSubmissionImpl>
 } = Function.dual(6, executeInteractiveSubmissionImpl)
-
 export const submitInteractiveOperation = (input: InteractiveSubmissionContext) => {
   const {
     workspace,
@@ -462,3 +472,4 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
   })
   return submit
 }
+export const makeInteractiveSubmission = (input: InteractiveSubmissionContext) => submitInteractiveOperation(input)

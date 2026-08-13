@@ -1,6 +1,6 @@
 import { Schema } from "effect"
-import { InteractiveCommand } from "../operation/interactive/interactive-command"
-import { InteractiveEventSchema } from "../operation/interactive/interactive-event"
+import { InteractiveCommand } from "../operation/interactive/command"
+import { InteractiveEventSchema } from "../operation/interactive/event"
 import { Input } from "../operation/contract/product-operation"
 import { OperationUnavailable } from "../operation/contract/product-operation"
 

@@ -5,7 +5,7 @@ import * as ThreadDeletion from "../../thread/lifecycle/thread-deletion"
 import { makeProductOperationFoundation } from "./product-operation-foundation"
 import { operationError } from "../operation-error"
 import { makeProductOperationExecution, type ProductOperationExecution } from "./product-operation-execution"
-import { executionStartFailureMessage, temporaryThreadTitle } from "../interactive/interactive-operation-leaves"
+import { executionStartFailureMessage, temporaryThreadTitle } from "../interactive/shell"
 import { queueMutationEvent as queueMutationEventValue } from "./product-operation-runtime-support"
 
 type ThreadId = import("@rika/product/thread-record").ThreadId
@@ -39,10 +39,10 @@ type queueMutationEvent = typeof import("./product-operation-runtime-support").q
 type staleQueuedTurnsError = typeof import("../../thread/queue/pending-turn-policy").staleQueuedTurnsError
 type OperationUnavailable = import("../contract/product-operation").OperationUnavailable
 type Input = import("../contract/product-operation").Input
-type InteractiveEvent = import("../interactive/interactive-runtime-event").InteractiveEvent
+type InteractiveEvent = import("../interactive/session-event").InteractiveEvent
 type OperationError = import("../operation-error").OperationError
-type InteractiveDependencyContext = import("../interactive/interactive-session-runtime").InteractiveDependencyContext
-type InteractiveExecutionContext = import("../interactive/interactive-session-runtime").InteractiveExecutionContext
+type InteractiveDependencyContext = import("../interactive/session").InteractiveDependencyContext
+type InteractiveExecutionContext = import("../interactive/session").InteractiveExecutionContext
 
 const watchedThreadIds = (sessionThreadViews: Map<number, () => string | undefined>) =>
   new Set(

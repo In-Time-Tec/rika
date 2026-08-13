@@ -1,19 +1,97 @@
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
-import { Effect, Fiber, Ref, Scope, Semaphore } from "effect"
+import { Effect, Fiber, Scope, Semaphore, Function, Schema, Ref } from "effect"
 import { OperationUnavailable } from "../contract/product-operation"
+import { type InteractiveEvent } from "./session-event"
+import { makeFailure } from "../operation-failure"
 import { OperationError } from "../operation-error"
-import type { InteractiveEvent } from "./interactive-runtime-event"
-import {
-  makeInteractiveOperationFeed,
-  type InteractiveOperationFeed,
-  type SelectionLoad,
-} from "./interactive-operation-feed"
-import { makeInteractiveSessionComposition } from "./interactive-session-composition"
-import { makeInteractiveSelectionProjection } from "./interactive-selection-projection"
-import { dispatchInteractiveFailure } from "./interactive-session-errors"
-import type { SelectionEpochState } from "./interactive-thread-selection"
+import { makeInteractiveOperationFeed, type InteractiveOperationFeed, type SelectionLoad } from "./view/feed"
+import { makeInteractiveSelectionProjection, type SelectionEpochState } from "./view/selection"
+
+export const selectionInitialTurnWindow = 6
+export const selectionInitialEntryWindow = 120
+
+export const makeInteractiveSessionComposition = (input: {
+  readonly admission: Semaphore.Semaphore
+  readonly scope: Scope.Scope
+  readonly closed: OperationUnavailable
+  readonly isOpen: () => boolean
+  readonly isAttached: () => boolean
+  readonly setAttached: (attached: boolean) => void
+}) => {
+  const admit = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | OperationUnavailable, R> =>
+    input.admission
+      .withPermits(1)(Effect.suspend(() => (input.isOpen() ? Effect.succeed(effect) : Effect.fail(input.closed))))
+      .pipe(Effect.flatten)
+  const runOwned = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.forkIn(effect, input.scope).pipe(
+      Effect.flatMap((fiber) => Fiber.join(fiber).pipe(Effect.ensuring(Fiber.interrupt(fiber)))),
+    )
+  const admitLocal = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | OperationUnavailable, R> =>
+    effect.pipe(runOwned, admit)
+  const attachFeed = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | OperationUnavailable, R> =>
+    input.admission
+      .withPermits(1)(
+        Effect.suspend(() => {
+          if (!input.isOpen()) return Effect.fail(input.closed)
+          if (input.isAttached())
+            return Effect.fail(
+              OperationUnavailable.make({
+                operation: "InteractiveSession.events",
+                message: "Interactive session already has an event consumer",
+              }),
+            )
+          input.setAttached(true)
+          return Effect.succeed(runOwned(effect.pipe(Effect.ensuring(Effect.sync(() => input.setAttached(false))))))
+        }),
+      )
+      .pipe(Effect.flatten)
+  return { admit, admitLocal, attachFeed, runOwned }
+}
+
+const dispatchInteractiveFailureImpl = (
+  dispatch: (event: InteractiveEvent) => void,
+  error: unknown,
+  threadId?: Thread.ThreadId,
+  turnId?: Turn.TurnId,
+) => {
+  if (Schema.is(TurnRepository.QueueFull)(error))
+    return dispatch({
+      _tag: "QueueFull",
+      selectionEpoch: 0,
+      threadId: error.threadId,
+      capacity: error.capacity,
+      count: error.count,
+    })
+  const failure = makeFailure(error)
+  Effect.logError("interactive.failure.dispatched").pipe(
+    Effect.annotateLogs({
+      "rika.failure.tag": failure.tag,
+      "rika.failure.actor": failure.actor,
+      "rika.failure.retry": failure.retry,
+      ...(threadId === undefined ? {} : { "rika.thread.id": String(threadId) }),
+      ...(turnId === undefined ? {} : { "rika.turn.id": String(turnId) }),
+    }),
+    Effect.runSync,
+  )
+  return dispatch({
+    _tag: "ExecutionFailed",
+    selectionEpoch: 0,
+    ...(threadId === undefined ? {} : { threadId }),
+    ...(turnId === undefined ? {} : { turnId }),
+    failure,
+  })
+}
+
+export const dispatchInteractiveFailure: {
+  (
+    error: unknown,
+    threadId?: Thread.ThreadId,
+    turnId?: Turn.TurnId,
+  ): (dispatch: (event: InteractiveEvent) => void) => void
+  (dispatch: (event: InteractiveEvent) => void, error: unknown, threadId?: Thread.ThreadId, turnId?: Turn.TurnId): void
+} = Function.dual((args) => typeof args[0] === "function", dispatchInteractiveFailureImpl)
 
 export interface InteractiveSessionState {
   readonly operationFeed: InteractiveOperationFeed
@@ -85,7 +163,7 @@ export const makeInteractiveSessionState = (
     const { sessionId, publishInteractiveActivity, activitySequence, initialThreadId } = input
     let selectedThreadId = initialThreadId
     let currentSelectionEpoch = 0
-    let selectionLoad: import("./interactive-operation-feed").SelectionLoad | undefined =
+    let selectionLoad: import("./view/feed").SelectionLoad | undefined =
       initialThreadId === undefined
         ? undefined
         : {
