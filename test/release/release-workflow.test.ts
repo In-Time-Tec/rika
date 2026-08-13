@@ -37,7 +37,7 @@ test("packages nothing until CI is green for the commit being published", () => 
 test("retries only the known-flaky lane, a bounded number of times, and logs any override", () => {
   const gate = commands("verify")
   expect(gate).toContain('[ "$blocking" = "$RETRY_JOB" ] && [ "$retries" -lt "$RETRY_LIMIT" ]')
-  expect(gate).toContain("gh run rerun")
+  expect(gate).toContain('gh run rerun "$run_id" --failed --repo "$GITHUB_REPOSITORY"')
   const environment = (steps("verify")[0] as { readonly env?: Readonly<Record<string, string>> }).env ?? {}
   expect(environment.REQUIRED_JOBS).toBe("quality tui proc")
   expect(environment.RETRY_JOB).toBe("tui")

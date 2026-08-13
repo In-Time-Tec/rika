@@ -98,7 +98,7 @@ jobs:
             if [ "$blocking" = "$RETRY_JOB" ] && [ "$retries" -lt "$RETRY_LIMIT" ]; then
               retries=$((retries + 1))
               echo "::warning::Only the known-flaky $RETRY_JOB lane failed; re-running it (attempt $retries of $RETRY_LIMIT)."
-              gh run rerun "$run_id" --failed
+              gh run rerun "$run_id" --failed --repo "$GITHUB_REPOSITORY"
               for _restart in 1 2 3 4 5 6 7 8 9 10; do
                 if [ "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '.status')" != completed ]; then
                   break
