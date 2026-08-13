@@ -125,7 +125,7 @@ describe("ThreadView contract", () => {
       header: {
         thread: { ...thread("thread", "Renamed"), updatedAt: 5 },
         source: { projectionVersion: 2, oldestCursor: pageCursor(5), newestCursor: pageCursor(5) },
-        pending: [{ id: "pending", prompt: "later", delivery: "followUp", createdAt: 5 }],
+        pending: [{ id: "pending", prompt: "later", createdAt: 5 }],
         hasOlder: false,
         hasNewer: false,
         usage: usage(),
@@ -151,7 +151,7 @@ describe("ThreadView contract", () => {
       hasOlder: false,
       hasNewer: false,
       usage: usage(),
-      pending: [{ id: "pending", prompt: "later", delivery: "followUp" }],
+      pending: [{ id: "pending", prompt: "later" }],
     })
     expect(result.success.turns[0]?.projectionRevision).toBe(2)
     expect(result.success.turns[0]?.units.map((item) => [item.key, item.content])).toEqual([

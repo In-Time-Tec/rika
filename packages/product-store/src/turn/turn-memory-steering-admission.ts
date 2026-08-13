@@ -41,6 +41,7 @@ const cloneAdmission = (admission: SteeringAdmission): SteeringAdmission => ({
   target: structuredClone(admission.target),
   input: structuredClone(admission.input),
   ...(admission.source === undefined ? {} : { source: clone(admission.source) }),
+  ...(admission.sourceWithdrawn === undefined ? {} : { sourceWithdrawn: admission.sourceWithdrawn }),
   preparedAt: admission.preparedAt,
   outcome: cloneOutcome(admission.outcome),
 })
@@ -85,10 +86,12 @@ const pendingAdmission = (
   input: SteeringInput,
   source: AgentExecutionTurn | undefined,
   now: number,
+  sourceWithdrawn = false,
 ): SteeringAdmission => ({
   target: structuredClone(target),
   input: structuredClone(input),
   ...(source === undefined ? {} : { source: clone(source) }),
+  ...(sourceWithdrawn ? { sourceWithdrawn: true } : {}),
   preparedAt: now,
   outcome: { _tag: "Pending" },
 })
@@ -174,7 +177,7 @@ export const makeTurnMemorySteeringAdmission = ({
                       revision: queue.revision,
                       queuedCount: queue.queuedCount,
                       becameNonempty: false,
-                      change: { _tag: "Updated" as const, turn: { ...existing.source!, delivery: "steer" as const } },
+                      change: { _tag: "Removed" as const, turnId: existing.source!.id },
                     }
               return [
                 {
@@ -211,11 +214,12 @@ export const makeTurnMemorySteeringAdmission = ({
                 },
                 state,
               ]
-            const admission = pendingAdmission(target, input, sourceTurn, now)
+            const admission = pendingAdmission(target, input, sourceTurn, now, true)
             const previous = queueState(state, sourceTurn.threadId)
-            const next = { revision: previous.revision + 1, queuedCount: previous.queuedCount }
-            const nextTurn: AgentExecutionTurn = { ...sourceTurn, delivery: "steer" as const, updatedAt: now }
-            const turns = new Map(state.turns).set(source, nextTurn)
+            const next = {
+              revision: previous.revision + 1,
+              queuedCount: Math.max(0, previous.queuedCount - 1),
+            }
             const claims = new Map(state.claims)
             claims.delete(source)
             const admissions = new Map(state.steeringAdmissions).set(input.idempotencyKey, admission)
@@ -229,12 +233,12 @@ export const makeTurnMemorySteeringAdmission = ({
                     revision: next.revision,
                     queuedCount: next.queuedCount,
                     becameNonempty: false,
-                    change: { _tag: "Updated", turn: clone(nextTurn) },
+                    change: { _tag: "Removed", turnId: sourceTurn.id },
                   },
                   queueChanged: true,
                 },
               },
-              withQueueState({ ...state, turns, claims, steeringAdmissions: admissions }, sourceTurn.threadId, next),
+              withQueueState({ ...state, claims, steeringAdmissions: admissions }, sourceTurn.threadId, next),
             ]
           },
         )
@@ -300,21 +304,39 @@ export const makeTurnMemorySteeringAdmission = ({
         if (admission.source !== undefined) {
           const existing = state.turns.get(admission.source.id)
           if (existing !== undefined && existing.status === "queued") {
+            const position = [...state.turns.values()]
+              .filter(
+                (candidate): candidate is AgentExecutionTurn =>
+                  candidate._tag === "AgentExecution" &&
+                  candidate.threadId === admission.source!.threadId &&
+                  candidate.status === "queued" &&
+                  (candidate.id === admission.source!.id ||
+                    ![...state.steeringAdmissions.values()].some(
+                      (other) =>
+                        other.input.idempotencyKey !== requestId &&
+                        other.source?.id === candidate.id &&
+                        other.outcome._tag !== "Rejected",
+                    )),
+              )
+              .toSorted((left, right) => left.createdAt - right.createdAt)
+              .findIndex((candidate) => candidate.id === admission.source!.id)
             const previous = queueState(state, admission.source.threadId)
-            const next = { revision: previous.revision + 1, queuedCount: previous.queuedCount }
-            const turn: AgentExecutionTurn = { ...existing, delivery: "followUp" as const }
+            const next = {
+              revision: previous.revision + 1,
+              queuedCount: previous.queuedCount + (admission.sourceWithdrawn === true ? 1 : 0),
+            }
+            const turn: AgentExecutionTurn = existing
             queue = {
               threadId: turn.threadId,
               revision: next.revision,
               queuedCount: next.queuedCount,
-              becameNonempty: false,
-              change: { _tag: "Updated", turn: clone(turn) },
+              becameNonempty: admission.sourceWithdrawn === true && next.queuedCount === 1,
+              change:
+                admission.sourceWithdrawn === true
+                  ? { _tag: "Added", turn: clone(turn), position }
+                  : { _tag: "Updated", turn: clone(turn) },
             }
-            nextState = withQueueState(
-              { ...state, turns: new Map(state.turns).set(turn.id, turn) },
-              turn.threadId,
-              next,
-            )
+            nextState = withQueueState(state, turn.threadId, next)
           }
         }
         const rejected: SteeringAdmission = {
@@ -365,6 +387,11 @@ export const makeTurnMemorySteeringAdmission = ({
                 turns.delete(source.id)
                 const claims = new Map(nextState.claims)
                 claims.delete(source.id)
+                if (steeringAdmission.sourceWithdrawn === true)
+                  return [
+                    { _tag: "Ok", value: undefined },
+                    { ...nextState, turns, claims },
+                  ]
                 const previous = queueState(nextState, source.threadId)
                 const next = {
                   revision: previous.revision + 1,

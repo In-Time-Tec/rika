@@ -411,6 +411,19 @@ test("keeps queue navigation inactive on reset and Added", () => {
   expect(added.resync).toBe(false)
   expect(added.model.queueSelection).toBeUndefined()
 })
+test("restores an Added queue row at its durable position", () => {
+  const model = resetQueue(busyQueueModel(initial("/work")), "t", 1, [
+    { id: "a", prompt: "a" },
+    { id: "c", prompt: "c" },
+  ])
+  const restored = applyQueueDelta(model, "t", 2, {
+    _tag: "Added",
+    item: { id: "b", prompt: "b" },
+    position: 1,
+  })
+  expect(restored.resync).toBe(false)
+  expect(restored.model.queue.map((item) => item.id)).toEqual(["a", "b", "c"])
+})
 test("keeps a still-valid selection across reset and Updated", () => {
   let model = resetQueue(busyQueueModel(initial("/work")), "t", 1, [
     { id: "a", prompt: "a" },

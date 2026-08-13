@@ -159,10 +159,7 @@ export const makeTurnSqliteSteeringAdmission = (
                         revision: queue?.revision ?? 0,
                         queuedCount: queue?.queued_count ?? 0,
                         becameNonempty: false,
-                        change: {
-                          _tag: "Updated" as const,
-                          turn: { ...existing.source!, delivery: "steer" as const },
-                        },
+                        change: { _tag: "Removed" as const, turnId: existing.source!.id },
                       },
               }
             }
@@ -180,12 +177,14 @@ export const makeTurnSqliteSteeringAdmission = (
               target,
               input,
               source: sourceTurn,
+              sourceWithdrawn: true,
               preparedAt: now,
               outcome: { _tag: "Pending" },
             }
             yield* insertAdmission(sql, admission)
+            yield* sql`UPDATE rika_turns SET queue_claim_token = NULL WHERE id = ${sourceTurn.id}`
             const queueRows = yield* sql`UPDATE rika_thread_queue_state
-            SET revision = revision + 1
+            SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0)
             WHERE thread_id = ${sourceTurn.threadId} RETURNING *`
             if (queueRows[0] === undefined)
               return yield* RepositoryError.make({ message: `Queue state ${sourceTurn.threadId} does not exist` })
@@ -197,7 +196,7 @@ export const makeTurnSqliteSteeringAdmission = (
                 revision: queue.revision,
                 queuedCount: queue.queued_count,
                 becameNonempty: false,
-                change: { _tag: "Updated" as const, turn: { ...sourceTurn, delivery: "steer" as const } },
+                change: { _tag: "Removed" as const, turnId: sourceTurn.id },
               },
               queueChanged: true,
             }
@@ -256,8 +255,21 @@ export const makeTurnSqliteSteeringAdmission = (
             if (existingRows[0] !== undefined) {
               const existing = yield* decodeAgent(existingRows[0])
               if (existing.status === "queued") {
+                const visibleRows = yield* sql`SELECT id FROM rika_turns
+                  WHERE thread_id = ${admission.source.threadId} AND turn_kind = 'AgentExecution' AND status = 'queued'
+                    AND (
+                      id = ${admission.source.id} OR NOT EXISTS (
+                        SELECT 1 FROM rika_turn_steering_outbox
+                        WHERE source_turn_id = rika_turns.id AND status != 'rejected'
+                      )
+                    )
+                  ORDER BY created_at ASC, rowid ASC`
+                const position = visibleRows.findIndex(
+                  (row) => String((row as { readonly id: unknown }).id) === admission.source!.id,
+                )
                 const queueRows = yield* sql`UPDATE rika_thread_queue_state
-                  SET revision = revision + 1
+                  SET revision = revision + 1,
+                    queued_count = queued_count + ${admission.sourceWithdrawn === true ? 1 : 0}
                   WHERE thread_id = ${admission.source.threadId} RETURNING *`
                 if (queueRows[0] === undefined)
                   return yield* RepositoryError.make({
@@ -268,8 +280,11 @@ export const makeTurnSqliteSteeringAdmission = (
                   threadId: admission.source.threadId,
                   revision: state.revision,
                   queuedCount: state.queued_count,
-                  becameNonempty: false,
-                  change: { _tag: "Updated", turn: { ...existing, delivery: "followUp" as const } },
+                  becameNonempty: admission.sourceWithdrawn === true && state.queued_count === 1,
+                  change:
+                    admission.sourceWithdrawn === true
+                      ? { _tag: "Added" as const, turn: existing, position }
+                      : { _tag: "Updated" as const, turn: existing },
                 }
               }
             }
@@ -309,6 +324,7 @@ export const makeTurnSqliteSteeringAdmission = (
             if (queued[0] === undefined) return undefined
             yield* sql`DELETE FROM rika_turns
             WHERE id = ${admission.source.id} AND turn_kind = 'AgentExecution' AND status = 'queued'`
+            if (admission.sourceWithdrawn === true) return undefined
             const queueRows = yield* sql`UPDATE rika_thread_queue_state
               SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0)
               WHERE thread_id = ${admission.source.threadId} RETURNING *`

@@ -74,7 +74,7 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot, modelPre
     steeringRequests,
     editingTurnId: editing ? model.editingTurnId : undefined,
     editReturn: editing ? model.editReturn : undefined,
-    queue: snapshot.pending.map((item) => ({ id: item.id, prompt: item.prompt, delivery: item.delivery })),
+    queue: snapshot.pending.map((item) => ({ id: item.id, prompt: item.prompt })),
     queueSelection: snapshot.pending.some((item) => item.id === model.queueSelection)
       ? model.queueSelection
       : snapshot.pending.at(-1)?.id,

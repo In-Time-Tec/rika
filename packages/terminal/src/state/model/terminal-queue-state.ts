@@ -77,7 +77,7 @@ export const applyQueueDelta: {
       const existing = queue.findIndex((item) => item.id === change.item.id)
       if (existing >= 0 && queue[existing]!.provisional !== true) return { model, resync: true }
       if (existing >= 0) queue[existing] = change.item
-      else queue.push(change.item)
+      else queue.splice(Math.min(change.position ?? queue.length, queue.length), 0, change.item)
     } else if (change._tag === "Updated") {
       const index = queue.findIndex((item) => item.id === change.item.id)
       if (index < 0) return { model, resync: true }

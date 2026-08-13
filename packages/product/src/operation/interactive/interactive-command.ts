@@ -14,7 +14,6 @@ export const InteractiveCommand = Schema.Union([
     submissionId: Schema.optionalKey(Schema.String),
     mode: Schema.optionalKey(Mode),
     promptParts: Schema.optionalKey(Schema.Array(ExecutionRequest.PromptPart)),
-    delivery: Schema.optionalKey(Schema.Literals(["steer", "followUp"])),
     modelTuning: Schema.optionalKey(
       Schema.Struct({
         fastMode: Schema.optionalKey(Schema.Boolean),
@@ -66,7 +65,6 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
         command.promptParts,
         command.modelTuning,
         command.submissionId,
-        command.delivery,
       )
     case "Shell":
       return session.shell(command.threadId, command.command, command.incognito)

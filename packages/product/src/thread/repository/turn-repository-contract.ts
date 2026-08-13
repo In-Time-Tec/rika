@@ -12,7 +12,6 @@ export interface CreateInput {
   readonly executionRoute: ExecutionRouteSnapshot
   readonly author?: TurnAuthor
   readonly lineage?: TurnLineage
-  readonly delivery?: "steer" | "followUp"
   readonly queueCapacity: number
   readonly now: number
 }

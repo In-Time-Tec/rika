@@ -24,9 +24,7 @@ const waitQueue = (
     const queue = yield* app.queue(threadId).pipe(Effect.orDie)
     if (predicate(queue)) return queue
     if (remaining <= 0)
-      return yield* Effect.die(
-        `queue condition was not met: ${queue.turns.map((turn) => `${turn.id}:${turn.delivery ?? "followUp"}`).join(", ")}`,
-      )
+      return yield* Effect.die(`queue condition was not met: ${queue.turns.map((turn) => String(turn.id)).join(", ")}`)
     yield* Effect.sleep("10 millis")
     return yield* waitQueue(app, threadId, predicate, remaining - 10)
   })
@@ -71,24 +69,22 @@ test(
 
         for (const prompt of prompts) {
           yield* Effect.promise(() => app.type(prompt))
-          app.pressKey("\u001b[13;3u")
+          app.pressEnter()
         }
 
         const queued = yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 10)
-        expect(queued.turns.map((turn) => [turn.prompt, turn.delivery ?? "followUp"])).toEqual(
-          prompts.map((prompt) => [prompt, "followUp"]),
-        )
+        expect(queued.turns.map((turn) => turn.prompt)).toEqual(prompts)
 
         yield* selectQueue(app, prompts, 4)
         app.pressEnter()
-        const steering = yield* waitQueue(
-          app,
-          threadId,
-          (queue) => queue.turns.find((turn) => turn.prompt === "QUEUE_4")?.delivery === "steer",
+        const remainingPrompts = prompts.filter((prompt) => prompt !== "QUEUE_4")
+        const steered = yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 9)
+        expect(steered.turns.map((turn) => turn.prompt)).toEqual(remainingPrompts)
+        yield* app.waitFrameMatch((frame) =>
+          frame.split("\n").every((line) => !line.includes("QUEUE_4") || !line.includes("Backspace to dequeue")),
         )
-        expect(steering.queuedCount).toBe(10)
 
-        yield* selectQueue(app, prompts, 7)
+        yield* selectQueue(app, remainingPrompts, remainingPrompts.indexOf("QUEUE_7"))
         app.pressKey("e", { ctrl: true })
         yield* app.waitFrame("Editing queued")
         yield* Effect.promise(() => app.type("_EDITED"))
@@ -96,12 +92,11 @@ test(
         const edited = yield* waitQueue(app, threadId, (queue) =>
           queue.turns.some((turn) => turn.prompt === "QUEUE_7_EDITED"),
         )
-        expect(edited.queuedCount).toBe(10)
-        expect(edited.revision).toBe(steering.revision + 1)
+        expect(edited.queuedCount).toBe(9)
+        expect(edited.revision).toBe(steered.revision + 1)
         expect(edited.turns.map((turn) => turn.prompt)).toEqual(
-          prompts.map((prompt, index) => (index === 7 ? "QUEUE_7_EDITED" : prompt)),
+          remainingPrompts.map((prompt) => (prompt === "QUEUE_7" ? "QUEUE_7_EDITED" : prompt)),
         )
-        expect(edited.turns.find((turn) => turn.prompt === "QUEUE_7_EDITED")?.delivery ?? "followUp").toBe("followUp")
 
         yield* app.waitFrame("STEERED_CONTINUATION_COMPLETE", 30_000)
         yield* app.waitFrame("DRAINED_8", 30_000)
@@ -139,7 +134,7 @@ test(
 )
 
 test(
-  "settles steering entered while a direct final response completes",
+  "queues composer input by default and explicitly steers the selected row while a response completes",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -155,15 +150,15 @@ test(
         yield* app.waitModelRequests(1)
         yield* Effect.promise(() => app.type("Hi"))
         app.pressEnter()
-        yield* waitQueue(
-          app,
-          threadId,
-          (queue) => queue.turns.find((turn) => turn.prompt === "Hi")?.delivery === "steer",
-        )
+        yield* waitQueue(app, threadId, (queue) => queue.turns.some((turn) => turn.prompt === "Hi"))
+        app.pressArrow("up")
+        yield* app.waitFrame("Enter to steer")
+        app.pressEnter()
+        app.pressEnter()
+        yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0)
 
         yield* app.waitFrame("HI_COMPLETE", 20_000)
         expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 5_000)).turns).toEqual([])
-        expect(yield* app.waitGone("steering: Hi")).not.toContain("steering: Hi")
         expect((yield* app.modelPrompts).map(promptTexts).map((texts) => texts.at(-1))).toEqual(["Hello", "Hi"])
         const activeTranscript = yield* app.transcript(Turn.TurnId.make("tui-turn-0")).pipe(Effect.orDie)
         expect(
@@ -295,11 +290,8 @@ test(
               yield* turns.setStatus(activeTurnId, "completed", now + 4)
 
               expect(yield* turns.readQueue(threadId)).toMatchObject({
-                queuedCount: 2,
-                turns: [
-                  { id: steeringTurnId, prompt: request.text, delivery: "steer" },
-                  { id: followUpTurnId, prompt: "RECOVERED_FOLLOW_UP" },
-                ],
+                queuedCount: 1,
+                turns: [{ id: followUpTurnId, prompt: "RECOVERED_FOLLOW_UP" }],
               })
               expect(yield* turns.listSteeringAdmissions).toMatchObject([
                 {
@@ -312,7 +304,11 @@ test(
 
         yield* app.waitFrame("RECOVERED_FOLLOW_UP_COMPLETE", 20_000)
         expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 5_000)).turns).toEqual([])
-        expect(yield* app.waitGone("steering: RECOVERED_STEERING")).not.toContain("steering: RECOVERED_STEERING")
+        expect(
+          (yield* app.nextFrame)
+            .split("\n")
+            .some((line) => line.includes("RECOVERED_STEERING") && line.includes("Backspace to dequeue")),
+        ).toBe(false)
         expect((yield* app.modelPrompts).map(promptTexts).map((texts) => texts.at(-1))).toEqual([
           "Run a real agentic step before product recovery.",
           request.text,
@@ -369,22 +365,18 @@ test(
         yield* app.waitModelRequests(1)
         for (const prompt of prompts) {
           yield* Effect.promise(() => app.type(prompt))
-          app.pressKey("\u001b[13;3u")
+          app.pressEnter()
         }
         yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 10)
 
         yield* selectQueue(app, prompts, 4)
         app.pressEnter()
-        yield* waitQueue(
-          app,
-          threadId,
-          (queue) => queue.turns.find((turn) => turn.prompt === "CANCEL_QUEUE_4")?.delivery === "steer",
-        )
+        yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 9)
         app.pressKey("c", { ctrl: true })
 
         yield* app.waitFrame("CANCEL_DRAINED_8", 30_000)
         expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 5_000)).turns).toEqual([])
-        const frame = yield* app.waitGone("steering: CANCEL_QUEUE_4")
+        const frame = yield* app.nextFrame
         expect(frame).not.toContain("CANCELLED_RESPONSE_MUST_NOT_RENDER")
 
         const requestTexts = (yield* app.modelPrompts).map(promptTexts)
@@ -440,29 +432,26 @@ test(
         yield* app.waitModelRequests(1)
         for (const prompt of prompts) {
           yield* Effect.promise(() => app.type(prompt))
-          app.pressKey("\u001b[13;3u")
+          app.pressEnter()
         }
         yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 3)
 
         yield* selectQueue(app, prompts, 2)
         app.pressEnter()
-        yield* waitQueue(
-          app,
-          threadId,
-          (queue) => queue.turns.find((turn) => turn.prompt === "FAIL_QUEUE_2")?.delivery === "steer",
-        )
+        const remainingPrompts = prompts.filter((prompt) => prompt !== "FAIL_QUEUE_2")
+        yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 2)
 
-        yield* selectQueue(app, prompts, 1)
+        yield* selectQueue(app, remainingPrompts, 1)
         app.pressKey("e", { ctrl: true })
         yield* app.waitFrame("Editing queued")
         yield* Effect.promise(() => app.type("_MUST_NOT_SAVE"))
         app.pressKey("escape")
-        const unchanged = yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 3)
-        expect(unchanged.turns.map((turn) => turn.prompt)).toEqual(prompts)
+        const unchanged = yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 2)
+        expect(unchanged.turns.map((turn) => turn.prompt)).toEqual(remainingPrompts)
 
         yield* app.waitFrame("FAIL_DRAINED_1", 30_000)
         expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 5_000)).turns).toEqual([])
-        expect((yield* app.waitGone("steering: FAIL_QUEUE_2")).match(/FAIL_QUEUE_2/g) ?? []).toHaveLength(0)
+        expect((yield* app.nextFrame).match(/FAIL_QUEUE_2/g) ?? []).toHaveLength(0)
 
         const requestTexts = (yield* app.modelPrompts).map(promptTexts)
         expect(requestTexts.map((texts) => texts.at(-1))).toEqual([

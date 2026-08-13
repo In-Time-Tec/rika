@@ -41,9 +41,8 @@ export const makeInteractiveSessionEvents = (
     parts?: ReadonlyArray<ExecutionRequest.PromptPart>,
     tuning?: { readonly fastMode?: boolean },
     submissionId?: string,
-    delivery?: "steer" | "followUp",
   ) =>
-    input.submit(prompt, input.sessionDispatch, mode, parts, tuning, submissionId, delivery) as Effect.Effect<
+    input.submit(prompt, input.sessionDispatch, mode, parts, tuning, submissionId) as Effect.Effect<
       void,
       OperationUnavailable,
       never
@@ -51,8 +50,7 @@ export const makeInteractiveSessionEvents = (
   const shell = makeInteractiveShell(input)
   return {
     events,
-    submit: (prompt, mode, parts, tuning, submissionId, delivery) =>
-      submit(prompt, mode, parts, tuning, submissionId, delivery),
+    submit: (prompt, mode, parts, tuning, submissionId) => submit(prompt, mode, parts, tuning, submissionId),
     newThread: input.safe(
       input.sessionDispatch,
       submissionAdmission.withPermits(1)(Effect.uninterruptible(input.createAndSelectThread())),

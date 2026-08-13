@@ -358,10 +358,7 @@ describe("Operation", () => {
       expect(yield* turns.get(Turn.TurnId.make("active-control"))).toMatchObject({
         status: "cancelled",
       })
-      expect(yield* turns.get(Turn.TurnId.make("queued-control-2"))).toMatchObject({
-        status: "queued",
-        delivery: "steer",
-      })
+      expect(yield* turns.get(Turn.TurnId.make("queued-control-2"))).toBeUndefined()
       expect(yield* turns.get(Turn.TurnId.make("submitted-control"))).toMatchObject({ status: "completed" })
     }),
   )
@@ -552,7 +549,7 @@ describe("Operation", () => {
         yield* session.selectThread(thread.id)
         yield* session.steerQueued(steeringId, "steering source", "terminal-steering-request")
         yield* Deferred.await(steeringAccepted)
-        while ((yield* turns.listSteeringAdmissions)[0]?.outcome._tag !== "Accepted") yield* Effect.yieldNow
+        while ((yield* turns.listSteeringAdmissions).length > 0) yield* Effect.yieldNow
 
         yield* Deferred.succeed(activeTerminal, undefined)
         while ((yield* turns.get(activeId))?.status !== "completed") yield* Effect.yieldNow

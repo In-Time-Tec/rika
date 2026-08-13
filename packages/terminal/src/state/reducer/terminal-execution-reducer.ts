@@ -73,7 +73,6 @@ const reduceExecutionImpl = (
                   id: message.submissionId!,
                   prompt: submittedPrompt,
                   provisional: true as const,
-                  ...(message.delivery === undefined ? {} : { delivery: message.delivery }),
                 },
               ],
             }

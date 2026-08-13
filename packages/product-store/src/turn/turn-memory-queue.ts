@@ -12,6 +12,19 @@ import type { TurnMemoryContext } from "./turn-memory-state-operations"
 type QueueClaimFinish = Effect.Success<ReturnType<Interface["finishQueuedClaim"]>>
 type QueueItemChange = Effect.Success<ReturnType<Interface["dequeue"]>>
 
+const isWithdrawn = (state: MemoryState, id: string): boolean =>
+  [...state.steeringAdmissions.values()].some(
+    (admission) => admission.source?.id === id && admission.outcome._tag !== "Rejected",
+  )
+
+const withdrawnCount = (state: MemoryState, threadId: string): number =>
+  [...state.steeringAdmissions.values()].filter(
+    (admission) =>
+      admission.source?.threadId === threadId &&
+      admission.sourceWithdrawn === true &&
+      admission.outcome._tag !== "Rejected",
+  ).length
+
 export const makeTurnMemoryQueue = ({
   readState,
   modifyState,
@@ -30,18 +43,16 @@ export const makeTurnMemoryQueue = ({
   readQueue: Effect.fn("TurnRepository.readQueue")(function* (threadId) {
     const current = yield* readState
     const queue = queueState(current, threadId)
-    const steering = new Map(
-      [...current.steeringAdmissions.values()]
-        .filter((admission) => admission.source !== undefined && admission.outcome._tag !== "Rejected")
-        .map((admission) => [String(admission.source!.id), admission] as const),
-    )
     const turns = [...current.turns.values()]
       .filter(
         (turn): turn is AgentExecutionTurn =>
-          TurnResult.isAgentExecution(turn) && turn.threadId === threadId && turn.status === "queued",
+          TurnResult.isAgentExecution(turn) &&
+          turn.threadId === threadId &&
+          turn.status === "queued" &&
+          !isWithdrawn(current, turn.id),
       )
       .toSorted((left, right) => left.createdAt - right.createdAt)
-      .map((turn) => (steering.has(String(turn.id)) ? { ...clone(turn), delivery: "steer" as const } : clone(turn)))
+      .map(clone)
     return { threadId, revision: queue.revision, queuedCount: queue.queuedCount, turns }
   }),
   claimNextQueued: Effect.fn("TurnRepository.claimNextQueued")(function* (threadId, _now) {
@@ -58,7 +69,7 @@ export const makeTurnMemoryQueue = ({
             TurnResult.isAgentExecution(turn) &&
             turn.threadId === threadId &&
             turn.status === "queued" &&
-            turn.delivery !== "steer" &&
+            !isWithdrawn(current, turn.id) &&
             !current.claims.has(turn.id),
         )
         .toSorted((left, right) => left.createdAt - right.createdAt)[0]
@@ -127,7 +138,7 @@ export const makeTurnMemoryQueue = ({
   editQueued: Effect.fn("TurnRepository.editQueued")(function* (id, prompt, now) {
     const result = yield* modifyState((current) => {
       const turn = current.turns.get(id)
-      if (turn === undefined || turn.status !== "queued") return [undefined, current]
+      if (turn === undefined || turn.status !== "queued" || isWithdrawn(current, id)) return [undefined, current]
       const { promptParts: _promptParts, ...withoutParts } = turn
       void _promptParts
       const nextTurn = { ...withoutParts, prompt, updatedAt: now }
@@ -157,7 +168,7 @@ export const makeTurnMemoryQueue = ({
   dequeue: Effect.fn("TurnRepository.dequeue")(function* (id) {
     const result = yield* modifyState((current) => {
       const turn = current.turns.get(id)
-      if (turn === undefined || turn.status !== "queued") return [undefined, current]
+      if (turn === undefined || turn.status !== "queued" || isWithdrawn(current, id)) return [undefined, current]
       const turns = new Map(current.turns)
       turns.delete(id)
       const claims = new Map(current.claims)
@@ -193,14 +204,15 @@ export const makeTurnMemoryQueue = ({
       )
       if (hasOtherActive) return [{ _tag: "Unavailable" as const }, current]
       const previousQueue = queueState(current, turn.threadId)
-      if (previousQueue.queuedCount >= queueCapacity)
+      const occupiedQueueSlots = previousQueue.queuedCount + withdrawnCount(current, turn.threadId)
+      if (occupiedQueueSlots >= queueCapacity)
         return [
           {
             _tag: "Full" as const,
             error: QueueFull.make({
               threadId: turn.threadId,
               capacity: queueCapacity,
-              count: previousQueue.queuedCount,
+              count: occupiedQueueSlots,
             }),
           },
           current,

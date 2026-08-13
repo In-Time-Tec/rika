@@ -20,28 +20,20 @@ export interface SteeringAdmissionRejection {
   readonly notify: boolean
 }
 
-export interface SteeringAdmissionAcceptance {
+export interface SteeringAdmissionCompletion {
   readonly admission: TurnRepositorySteering.SteeringAdmission
   readonly receipt: ExecutionGateway.SteeringReceipt
   readonly notify: boolean
+  readonly queue?: TurnQueuePromotion.QueueItemChange
 }
 
 export interface SteeringAdmissionRecovery {
-  readonly accepted: ReadonlyArray<SteeringAdmissionAcceptance>
   readonly rejected: ReadonlyArray<SteeringAdmissionRejection>
-  readonly completed: ReadonlyArray<
-    Omit<SteeringAdmissionAcceptance, "notify"> & { readonly queue?: TurnQueuePromotion.QueueItemChange }
-  >
+  readonly completed: ReadonlyArray<SteeringAdmissionCompletion>
   readonly pending: boolean
 }
 
 type SteeringAdmissionOutcome =
-  | {
-      readonly _tag: "Accepted"
-      readonly admission: TurnRepositorySteering.SteeringAdmission
-      readonly receipt: ExecutionGateway.SteeringReceipt
-      readonly notify: boolean
-    }
   | {
       readonly _tag: "Rejected"
       readonly admission: TurnRepositorySteering.SteeringAdmission
@@ -50,12 +42,12 @@ type SteeringAdmissionOutcome =
       readonly notify: boolean
     }
   | { readonly _tag: "Pending" }
-  | { readonly _tag: "Observed" }
   | {
       readonly _tag: "Completed"
       readonly admission: TurnRepositorySteering.SteeringAdmission
       readonly receipt: ExecutionGateway.SteeringReceipt
       readonly queue?: TurnQueuePromotion.QueueItemChange
+      readonly notify: boolean
     }
 
 export interface Interface {
@@ -232,55 +224,20 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
     turns
       .rejectSteeringAdmission(admission.input.idempotencyKey, failure)
       .pipe(Effect.map((rejected) => rejection(rejected, true)))
-  const acceptedSteering = (
+  const completeAcceptedSteering = (
     admission: TurnRepositorySteering.SteeringAdmission,
-  ): Effect.Effect<SteeringAdmissionOutcome, TurnRepository.RepositoryError | TranscriptRepository.RepositoryError> =>
+    notify: boolean,
+  ): Effect.Effect<SteeringAdmissionOutcome, TurnRepository.RepositoryError> =>
     Effect.gen(function* () {
       if (admission.outcome._tag !== "Accepted") return { _tag: "Pending" as const }
       const receipt = admission.outcome.receipt
-      const turnId = Turn.TurnId.make(admission.target.turnId)
-      const projection = yield* transcripts.get(turnId)
-      const pending = projection?.state.steering.pending?.find(
-        (entry) => entry.runId === admission.target.runId && entry.requestId === admission.input.idempotencyKey,
-      )
-      if (pending !== undefined) {
-        if (pending.entryId !== receipt.entryId || pending.sequence !== receipt.sequence)
-          return yield* TurnRepository.RepositoryError.make({
-            message: `Steering admission ${admission.input.idempotencyKey} has conflicting Baton identity`,
-          })
-        return { _tag: "Observed" as const }
-      }
-      const disposition = projection?.state.steering.settled?.find(
-        (entry) => entry.runId === admission.target.runId && entry.requestId === admission.input.idempotencyKey,
-      )
-      if (disposition !== undefined) {
-        if (disposition.entryId !== receipt.entryId || disposition.sequence !== receipt.sequence)
-          return yield* TurnRepository.RepositoryError.make({
-            message: `Steering admission ${admission.input.idempotencyKey} has conflicting Baton disposition`,
-          })
-        const queue = yield* turns.completeSteeringAdmission(admission.input.idempotencyKey, admission.target, receipt)
-        return { _tag: "Completed" as const, admission, receipt, ...(queue === undefined ? {} : { queue }) }
-      }
-      const consumed = projection?.units.some(
-        (unit) =>
-          unit.key ===
-          ExecutionProjection.steeringUnitKey(
-            turnId,
-            admission.target.runId,
-            admission.input.idempotencyKey,
-            receipt.entryId,
-            receipt.sequence,
-          ),
-      )
-      if (consumed === true) {
-        const queue = yield* turns.completeSteeringAdmission(admission.input.idempotencyKey, admission.target, receipt)
-        return { _tag: "Completed" as const, admission, receipt, ...(queue === undefined ? {} : { queue }) }
-      }
+      const queue = yield* turns.completeSteeringAdmission(admission.input.idempotencyKey, admission.target, receipt)
       return {
-        _tag: "Accepted" as const,
+        _tag: "Completed" as const,
         admission,
-        receipt: admission.outcome.receipt,
-        notify: false,
+        receipt,
+        notify,
+        ...(queue === undefined ? {} : { queue }),
       }
     })
   const recoverSteeringAdmission = (
@@ -288,7 +245,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
   ): Effect.Effect<SteeringAdmissionOutcome, TurnRepository.RepositoryError | TranscriptRepository.RepositoryError> =>
     Effect.uninterruptibleMask((restore) => {
       if (admission.outcome._tag === "Rejected") return Effect.succeed(rejection(admission, false))
-      if (admission.outcome._tag === "Accepted") return acceptedSteering(admission)
+      if (admission.outcome._tag === "Accepted") return completeAcceptedSteering(admission, true)
       if (admission.input.text.length > ExecutionGateway.SteeringTextMaxCharacters)
         return rejectSteering(
           admission,
@@ -300,14 +257,9 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
       return Effect.exit(restore(backend.steerTurn(admission.target, admission.input))).pipe(
         Effect.flatMap((outcome): Effect.Effect<SteeringAdmissionOutcome, TurnRepository.RepositoryError> => {
           if (outcome._tag === "Success")
-            return turns.acceptSteeringAdmission(admission.input.idempotencyKey, outcome.value).pipe(
-              Effect.as<SteeringAdmissionOutcome>({
-                _tag: "Accepted",
-                admission: { ...admission, outcome: { _tag: "Accepted", receipt: outcome.value } },
-                receipt: outcome.value,
-                notify: true,
-              }),
-            )
+            return turns
+              .acceptSteeringAdmission(admission.input.idempotencyKey, outcome.value)
+              .pipe(Effect.flatMap((accepted) => completeAcceptedSteering(accepted, true)))
           const error = Cause.findErrorOption(outcome.cause)
           const failure = error._tag === "Some" && isSteeringFailure(error.value) ? error.value : undefined
           if (failure === undefined || failure.kind === "unknown")
@@ -384,11 +336,6 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
             restore(recoverSteeringAdmission(steeringAdmission)),
           )
           return {
-            accepted: outcomes.flatMap((outcome) =>
-              outcome._tag === "Accepted"
-                ? [{ admission: outcome.admission, receipt: outcome.receipt, notify: outcome.notify }]
-                : [],
-            ),
             rejected: outcomes.flatMap((outcome) =>
               outcome._tag === "Rejected"
                 ? [
@@ -407,18 +354,13 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
                     {
                       admission: outcome.admission,
                       receipt: outcome.receipt,
+                      notify: outcome.notify,
                       ...(outcome.queue === undefined ? {} : { queue: outcome.queue }),
                     },
                   ]
                 : [],
             ),
-            pending: outcomes.some(
-              (outcome) =>
-                outcome._tag === "Pending" ||
-                outcome._tag === "Accepted" ||
-                outcome._tag === "Observed" ||
-                outcome._tag === "Rejected",
-            ),
+            pending: outcomes.some((outcome) => outcome._tag === "Pending" || outcome._tag === "Rejected"),
           } satisfies SteeringAdmissionRecovery
         }),
       ),

@@ -1581,6 +1581,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/baton-execution/test/baton-steering-sqlite-conformance.test.ts",
+      "path": "packages/baton-execution/test/baton-steering-sqlite-conformance.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/baton-execution/test/baton-subagent-card-projection.test.ts",
       "path": "packages/baton-execution/test/baton-subagent-card-projection.test.ts",
       "workspace": "@rika/baton-execution",
@@ -6909,6 +6919,30 @@
       "from": "packages/baton-execution/test/baton-steering-projection.test.ts",
       "to": "packages/product/src/execution/contract/execution-projection.ts",
       "specifier": "@rika/product/execution-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-steering-sqlite-conformance.test.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-steering-sqlite-conformance.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-steering-sqlite-conformance.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "test",
       "production": false

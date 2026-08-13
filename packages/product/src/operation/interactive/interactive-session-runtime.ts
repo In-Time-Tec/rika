@@ -268,8 +268,8 @@ export const makeInteractiveSession = (
     })
     const session: InteractiveSession = {
       events: (dispatch) => state.composition.attachFeed(implementation.events(dispatch)),
-      submit: (prompt, mode, parts, tuning, submissionId, delivery) =>
-        state.composition.admit(implementation.submit(prompt, mode, parts, tuning, submissionId, delivery)),
+      submit: (prompt, mode, parts, tuning, submissionId) =>
+        state.composition.admit(implementation.submit(prompt, mode, parts, tuning, submissionId)),
       newThread: state.composition.admitLocal(implementation.newThread),
       shell: (threadId, command, incognito) =>
         state.composition.admitLocal(implementation.shell(threadId, command, incognito)),

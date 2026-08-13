@@ -11,13 +11,12 @@ export interface QueueItem {
   readonly id: Turn.TurnId
   readonly prompt: string
   readonly createdAt: number
-  readonly delivery: "steer" | "followUp"
   readonly attachments?: ReadonlyArray<string>
 }
 
 export type QueueChange =
   | { readonly _tag: "Reset"; readonly items: ReadonlyArray<QueueItem> }
-  | { readonly _tag: "Added"; readonly item: QueueItem }
+  | { readonly _tag: "Added"; readonly item: QueueItem; readonly position?: number }
   | { readonly _tag: "Updated"; readonly item: QueueItem }
   | { readonly _tag: "Removed"; readonly turnId: Turn.TurnId }
 
@@ -241,18 +240,17 @@ export const InteractiveEventSchema = Schema.Union([
             id: Turn.TurnId,
             prompt: Schema.String,
             createdAt: Schema.Finite,
-            delivery: Schema.Literals(["steer", "followUp"]),
             attachments: Schema.optionalKey(Schema.Array(Schema.String)),
           }),
         ),
       }),
       Schema.Struct({
         _tag: Schema.tag("Added"),
+        position: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
         item: Schema.Struct({
           id: Turn.TurnId,
           prompt: Schema.String,
           createdAt: Schema.Finite,
-          delivery: Schema.Literals(["steer", "followUp"]),
           attachments: Schema.optionalKey(Schema.Array(Schema.String)),
         }),
       }),
@@ -262,7 +260,6 @@ export const InteractiveEventSchema = Schema.Union([
           id: Turn.TurnId,
           prompt: Schema.String,
           createdAt: Schema.Finite,
-          delivery: Schema.Literals(["steer", "followUp"]),
           attachments: Schema.optionalKey(Schema.Array(Schema.String)),
         }),
       }),
@@ -331,7 +328,6 @@ export const InteractiveEventSchema = Schema.Union([
         id: Turn.TurnId,
         prompt: Schema.String,
         createdAt: Schema.Finite,
-        delivery: Schema.Literals(["steer", "followUp"]),
         attachments: Schema.optionalKey(Schema.Array(Schema.String)),
       }),
     ),

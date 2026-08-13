@@ -77,7 +77,7 @@ export const makeInteractiveSession = (options: SessionOptions): InteractiveSess
           Deferred.await(closed).pipe(Effect.andThen(Effect.fail(unavailable("Server connection closed")))),
         )
       }),
-    submit: (prompt, mode, promptParts, modelTuning, submissionId, delivery) =>
+    submit: (prompt, mode, promptParts, modelTuning, submissionId) =>
       invoke({
         _tag: "Submit",
         prompt,
@@ -85,7 +85,6 @@ export const makeInteractiveSession = (options: SessionOptions): InteractiveSess
         ...(promptParts === undefined ? {} : { promptParts }),
         ...(modelTuning === undefined ? {} : { modelTuning }),
         ...(submissionId === undefined ? {} : { submissionId }),
-        ...(delivery === undefined ? {} : { delivery }),
       }),
     shell: (threadId, command, incognito) =>
       invoke({

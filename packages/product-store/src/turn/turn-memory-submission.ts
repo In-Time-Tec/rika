@@ -24,7 +24,14 @@ export const makeTurnMemorySubmission = ({
           ExecutionStatus.occupiesQueue(turn.status),
       )
       const previousQueue = queueState(current, input.threadId)
-      const occupiedQueueSlots = previousQueue.queuedCount
+      const occupiedQueueSlots =
+        previousQueue.queuedCount +
+        [...current.steeringAdmissions.values()].filter(
+          (admission) =>
+            admission.source?.threadId === input.threadId &&
+            admission.sourceWithdrawn === true &&
+            admission.outcome._tag !== "Rejected",
+        ).length
       if (active && occupiedQueueSlots >= input.queueCapacity)
         return [
           {
@@ -75,7 +82,14 @@ export const makeTurnMemorySubmission = ({
     const result = yield* modifyState((current): readonly [MemorySubmissionResult, MemoryState] => {
       if (current.turns.has(turn.id)) return [{ _tag: "Duplicate" as const }, current]
       const previousQueue = queueState(current, turn.threadId)
-      const occupiedQueueSlots = previousQueue.queuedCount
+      const occupiedQueueSlots =
+        previousQueue.queuedCount +
+        [...current.steeringAdmissions.values()].filter(
+          (admission) =>
+            admission.source?.threadId === turn.threadId &&
+            admission.sourceWithdrawn === true &&
+            admission.outcome._tag !== "Rejected",
+        ).length
       if (turn.status === "queued" && occupiedQueueSlots >= queueCapacity)
         return [
           {

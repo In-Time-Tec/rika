@@ -124,7 +124,7 @@ test(
 )
 
 test(
-  "steers an entered prompt on the same queued row and delivers it into the turn",
+  "queues an entered prompt and steers it only after selecting its row",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -136,7 +136,6 @@ test(
               { delayMillis: 12_000 },
             ),
             model.text("ACTIVE_STEER_COMPLETE"),
-            model.text("STEER_RESPONSE"),
           ],
         })
         yield* Effect.promise(() => app.type("Read the fixture slowly."))
@@ -145,12 +144,20 @@ test(
         yield* app.waitFrame("Waiting")
         yield* Effect.promise(() => app.type("Focus on the exact fixture text."))
         app.pressEnter()
-        yield* app.waitFrame("steering: Focus")
+        yield* app.waitFrame("Focus on the exact fixture text.")
+        app.pressArrow("up")
+        yield* app.waitFrame("Enter to steer")
+        app.pressEnter()
         yield* app.waitFrame("ACTIVE_STEER_COMPLETE", 25_000)
         yield* app.settled
-        const consumed = yield* app.waitGone("steering: Focus")
+        const consumed = yield* app.nextFrame
         expect(consumed).not.toContain("Execution failed")
         expect(consumed.match(/Focus on the exact fixture text\./g) ?? []).toHaveLength(1)
+        expect(
+          consumed
+            .split("\n")
+            .some((line) => line.includes("Focus on the exact fixture text.") && line.includes("Backspace to dequeue")),
+        ).toBe(false)
         yield* app.quit
       }),
     ),

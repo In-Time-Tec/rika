@@ -13,7 +13,6 @@ export interface InteractiveSession {
     promptParts?: ReadonlyArray<ExecutionRequest.PromptPart>,
     modelTuning?: { readonly fastMode?: boolean },
     submissionId?: string,
-    delivery?: "steer" | "followUp",
   ) => Effect.Effect<void, OperationUnavailable>
   readonly shell: (
     threadId: Thread.ThreadId | undefined,

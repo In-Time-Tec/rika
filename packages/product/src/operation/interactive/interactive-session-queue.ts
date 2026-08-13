@@ -22,7 +22,6 @@ export const queueItem = (turn: Turn.AgentExecutionTurn): QueueItem => {
     id: turn.id,
     prompt: turn.prompt,
     createdAt: turn.createdAt,
-    delivery: turn.delivery ?? "followUp",
   }
   return attachments === undefined || attachments.length === 0 ? base : { ...base, attachments }
 }

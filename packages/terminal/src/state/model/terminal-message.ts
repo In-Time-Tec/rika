@@ -40,7 +40,7 @@ type Message =
   | { readonly _tag: "PastedTextExpanded"; readonly token: string }
   | { readonly _tag: "Resized"; readonly width: number; readonly height: number }
   | { readonly _tag: "ComposerHeightChanged"; readonly height: number }
-  | { readonly _tag: "Submitted"; readonly submissionId?: string; readonly delivery?: "steer" | "followUp" }
+  | { readonly _tag: "Submitted"; readonly submissionId?: string }
   | {
       readonly _tag: "SubmissionAdmitted"
       readonly turnId: string

@@ -34,7 +34,6 @@ const admitInteractiveSubmissionImpl = (
   promptParts: ReadonlyArray<ExecutionRequest.PromptPart> | undefined,
   dispatch: (event: InteractiveEvent) => void,
   submissionId?: string,
-  delivery?: "steer" | "followUp",
 ) => {
   const {
     options,
@@ -56,7 +55,6 @@ const admitInteractiveSubmissionImpl = (
           prompt,
           ...(promptParts === undefined ? {} : { promptParts }),
           executionRoute,
-          ...(delivery === undefined ? {} : { delivery }),
           queueCapacity: pendingTurnCapacity,
           now: yield* Clock.currentTimeMillis,
         },
@@ -88,7 +86,6 @@ export const admitInteractiveSubmission: {
     arg5: ReadonlyArray<ExecutionRequest.PromptPart> | undefined,
     arg6: (event: InteractiveEvent) => void,
     arg7?: string,
-    arg8?: "steer" | "followUp",
   ): (arg0: InteractiveRuntimeContext) => ReturnType<typeof admitInteractiveSubmissionImpl>
   (
     arg0: InteractiveRuntimeContext,
@@ -99,9 +96,8 @@ export const admitInteractiveSubmission: {
     arg5: ReadonlyArray<ExecutionRequest.PromptPart> | undefined,
     arg6: (event: InteractiveEvent) => void,
     arg7?: string,
-    arg8?: "steer" | "followUp",
   ): ReturnType<typeof admitInteractiveSubmissionImpl>
-} = Function.dual(9, admitInteractiveSubmissionImpl)
+} = Function.dual(8, admitInteractiveSubmissionImpl)
 
 type SettleInteractiveSubmissionResult =
   | {
@@ -368,7 +364,6 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
     promptParts?: ReadonlyArray<ExecutionRequest.PromptPart>,
     modelTuning?: { readonly fastMode?: boolean },
     submissionId?: string,
-    delivery?: "steer" | "followUp",
   ) {
     let observerTurn: Turn.Turn | undefined
     let executionLaunched = false
@@ -408,7 +403,6 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
         promptParts,
         dispatch,
         submissionId,
-        delivery,
       )
       const turn = admitted as Turn.Turn
       observerTurn = turn.status === "queued" ? undefined : turn
@@ -416,17 +410,6 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
       if (turn.status === "queued") {
         if ("queue" in admitted && admitted.queue !== undefined)
           emitEvent(input, dispatch, queueMutationEvent(admitted.queue))
-        if (delivery === "steer" && turn._tag === "AgentExecution") {
-          const activeTurn = yield* turns.findActive(thread.id)
-          if (activeTurn?._tag === "AgentExecution" && activeTurn.executionLink !== undefined) {
-            const prepared = yield* input.rootTurnOwner.prepareQueuedSteering(turn.id, activeTurn.executionLink, {
-              text: turn.prompt,
-              idempotencyKey: `rika:steer:${turn.id}`,
-            })
-            if (prepared.queueChanged) emitEvent(input, dispatch, queueMutationEvent(prepared.queue))
-            yield* notifyTurnChanged(activeTurn)
-          }
-        }
         return
       }
       yield* Effect.uninterruptible(

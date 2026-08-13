@@ -106,3 +106,47 @@ it.effect("does not replay a persisted queued-steering mutation", () =>
     }
   }),
 )
+
+it.effect("rejects queued images before preparing a steering admission", () =>
+  Effect.gen(function* () {
+    const image = {
+      ...queued,
+      promptParts: [
+        { type: "text" as const, text: "queued steering" },
+        { type: "image" as const, mediaType: "image/png", data: "cG5n", filename: "queued.png" },
+      ],
+    }
+    const events: Array<import("@rika/product/interactive-runtime-event").InteractiveEvent> = []
+    let prepared = false
+    const control = makeInteractiveControl({
+      turns: {
+        get: (id) => Effect.succeed(id === image.id ? image : active),
+      } as TurnRepository.Interface,
+      transcripts: {} as TranscriptRepository.Interface,
+      backend: {} as ExecutionGateway.Interface,
+      rootTurnOwner: {
+        prepareQueuedSteering: () =>
+          Effect.sync(() => {
+            prepared = true
+            return Effect.die("unreachable")
+          }).pipe(Effect.flatten),
+      } as RootTurnOwner.Interface,
+      active: Effect.succeed(active),
+      dispatch: (event) => events.push(event),
+      queueMutation: () => Effect.die("unreachable") as never,
+      notifyTurnChanged: () => Effect.void,
+      fail: operationError,
+    })
+
+    yield* control.steerQueued(image.id, image.prompt, "image-request")
+    expect(prepared).toBe(false)
+    expect(events).toMatchObject([
+      {
+        _tag: "ExecutionControlFailed",
+        action: "steer",
+        steeringRequestId: "image-request",
+        failure: { message: "Queued turns with images cannot be steered" },
+      },
+    ])
+  }),
+)

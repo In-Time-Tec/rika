@@ -388,7 +388,7 @@ it.effect("sql edits and dequeues only queued turns", () =>
       expect((yield* Effect.result(repository.dequeue(Turn.TurnId.make("active"))))._tag).toBe("Failure")
       expect(sql.statements).toEqual([
         {
-          sql: "UPDATE rika_turns SET prompt = ?, prompt_parts_json = NULL, updated_at = ?, queue_claim_token = NULL WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' RETURNING *",
+          sql: "UPDATE rika_turns SET prompt = ?, prompt_parts_json = NULL, updated_at = ?, queue_claim_token = NULL WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' AND NOT EXISTS ( SELECT 1 FROM rika_turn_steering_outbox WHERE source_turn_id = rika_turns.id AND status != 'rejected' ) RETURNING *",
           parameters: ["after", 3, "turn-a"],
         },
         {
@@ -396,11 +396,11 @@ it.effect("sql edits and dequeues only queued turns", () =>
           parameters: ["thread-a"],
         },
         {
-          sql: "UPDATE rika_turns SET prompt = ?, prompt_parts_json = NULL, updated_at = ?, queue_claim_token = NULL WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' RETURNING *",
+          sql: "UPDATE rika_turns SET prompt = ?, prompt_parts_json = NULL, updated_at = ?, queue_claim_token = NULL WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' AND NOT EXISTS ( SELECT 1 FROM rika_turn_steering_outbox WHERE source_turn_id = rika_turns.id AND status != 'rejected' ) RETURNING *",
           parameters: ["invalid", 4, "active"],
         },
         {
-          sql: "DELETE FROM rika_turns WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' RETURNING *",
+          sql: "DELETE FROM rika_turns WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' AND NOT EXISTS ( SELECT 1 FROM rika_turn_steering_outbox WHERE source_turn_id = rika_turns.id AND status != 'rejected' ) RETURNING *",
           parameters: ["turn-a"],
         },
         {
@@ -408,7 +408,7 @@ it.effect("sql edits and dequeues only queued turns", () =>
           parameters: ["thread-a"],
         },
         {
-          sql: "DELETE FROM rika_turns WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' RETURNING *",
+          sql: "DELETE FROM rika_turns WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' AND NOT EXISTS ( SELECT 1 FROM rika_turn_steering_outbox WHERE source_turn_id = rika_turns.id AND status != 'rejected' ) RETURNING *",
           parameters: ["active"],
         },
       ])

@@ -44,6 +44,39 @@ const state = (status: "running" | "completed" = "running") => ({
 })
 
 describe("interactive ThreadView feed", () => {
+  it("keeps pending turns in canonical FIFO order across snapshots and middle restoration", () => {
+    const feed = makeThreadViewFeed(() => 1)
+    feed.publish({
+      _tag: "SelectionLoaded",
+      selectionEpoch: 1,
+      activitySequence: 0,
+      thread,
+      entries: [],
+      hasOlder: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 1,
+      queue: [
+        { id: Turn.TurnId.make("head"), prompt: "head", createdAt: 1 },
+        { id: Turn.TurnId.make("tail"), prompt: "tail", createdAt: 3 },
+      ],
+    })
+    expect(feed.current()?.pending.map((item) => item.id)).toEqual(["head", "tail"])
+
+    feed.publish({
+      _tag: "QueueUpdated",
+      selectionEpoch: 1,
+      threadId,
+      revision: 2,
+      queuedCount: 3,
+      change: {
+        _tag: "Added",
+        position: 1,
+        item: { id: Turn.TurnId.make("middle"), prompt: "middle", createdAt: 2 },
+      },
+    })
+    expect(feed.current()?.pending.map((item) => item.id)).toEqual(["head", "middle", "tail"])
+  })
+
   it("maps direct Projection Changes without exposing gateway checkpoints", () => {
     const feed = makeThreadViewFeed(() => 1)
     const selected = feed.publish({

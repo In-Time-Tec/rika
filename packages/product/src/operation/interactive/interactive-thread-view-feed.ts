@@ -10,7 +10,6 @@ const pending = (items: ReadonlyArray<QueueItem>): ReadonlyArray<ThreadView.Thre
   items.slice(0, ThreadView.limits.pending).map((item) => ({
     id: item.id,
     prompt: item.prompt,
-    delivery: item.delivery,
     createdAt: item.createdAt,
   }))
 
@@ -470,9 +469,12 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
         case "Reset":
           items = pending(change.items)
           break
-        case "Added":
-          items = pending([...items, change.item])
+        case "Added": {
+          const inserted = [...items]
+          inserted.splice(Math.min(change.position ?? inserted.length, inserted.length), 0, change.item)
+          items = pending(inserted)
           break
+        }
         case "Updated":
           items = pending(items.map((item) => (item.id === change.item.id ? change.item : item)))
           break

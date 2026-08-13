@@ -15,7 +15,7 @@ export interface QueueItemChange {
   readonly queuedCount: number
   readonly becameNonempty: boolean
   readonly change:
-    | { readonly _tag: "Added"; readonly turn: AgentExecutionTurn }
+    | { readonly _tag: "Added"; readonly turn: AgentExecutionTurn; readonly position?: number }
     | { readonly _tag: "Updated"; readonly turn: AgentExecutionTurn }
     | { readonly _tag: "Removed"; readonly turnId: TurnId }
 }

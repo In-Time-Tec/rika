@@ -14,7 +14,11 @@ const QueueItemChange = Schema.Struct({
   queuedCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   becameNonempty: Schema.Boolean,
   change: Schema.Union([
-    Schema.Struct({ _tag: Schema.tag("Added"), turn: AgentExecutionTurn }),
+    Schema.Struct({
+      _tag: Schema.tag("Added"),
+      turn: AgentExecutionTurn,
+      position: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+    }),
     Schema.Struct({ _tag: Schema.tag("Updated"), turn: AgentExecutionTurn }),
     Schema.Struct({ _tag: Schema.tag("Removed"), turnId: TurnId }),
   ]),
@@ -33,6 +37,7 @@ export const SteeringAdmission = Schema.Struct({
   target: ExecutionLink,
   input: SteeringInput,
   source: Schema.optionalKey(AgentExecutionTurn),
+  sourceWithdrawn: Schema.optionalKey(Schema.Boolean),
   preparedAt: Schema.Finite,
   outcome: SteeringAdmissionOutcome,
 })

@@ -155,9 +155,6 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       const submission = submitting ? nextSubmissionId(loop.submissionSequence) : undefined
       if (submission !== undefined) loop.submissionSequence = submission.sequence
       const submissionId = submission?.id
-      const steeringDelivery = key.alt ? ("followUp" as const) : ("steer" as const)
-      const delivery =
-        submitting && loop.model.busy && loop.model.activeTurnId !== undefined ? steeringDelivery : undefined
       const prompt = submitting ? loop.model.input : undefined
       const parts = prompt === undefined ? undefined : promptParts(prompt, loop.model.pastedText)
       const submittedPrompt = prompt === undefined ? undefined : expandPastedText(prompt, loop.model.pastedText)
@@ -178,7 +175,6 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
         loop.model = update(loop.model, {
           _tag: "Submitted",
           ...(submissionId === undefined ? {} : { submissionId }),
-          ...(delivery === undefined ? {} : { delivery }),
         })
       if (!wasChangedFilesOpen && loop.model.changedFilesOpen)
         loop.model = update(loop.model, { _tag: "ChangedFilesRequested" })
@@ -211,7 +207,6 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
           mode: loop.model.mode,
           tuning: { fastMode: loop.model.fastMode },
           ...(submissionId === undefined ? {} : { submissionId }),
-          ...(delivery === undefined ? {} : { delivery }),
         })
       }
       if (!loop.model.busy && loop.model.activeTurnId === undefined && loop.model.activity === undefined)

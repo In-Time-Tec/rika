@@ -127,15 +127,13 @@ export const makeInteractiveSupervision = (
             retryDelay = Math.min(retryDelay * 2, 5_000)
             return
           }
-          for (const acceptance of recovered.value.accepted) {
-            if (acceptance.notify)
-              yield* notifyTurnChanged({
-                id: Turn.TurnId.make(acceptance.admission.target.turnId),
-                threadId: Thread.ThreadId.make(acceptance.admission.target.threadId),
-              })
-          }
           for (const completed of recovered.value.completed) {
             if (completed.queue !== undefined) publishObserved(queueMutationEvent(completed.queue))
+            if (completed.notify)
+              yield* notifyTurnChanged({
+                id: Turn.TurnId.make(completed.admission.target.turnId),
+                threadId: Thread.ThreadId.make(completed.admission.target.threadId),
+              })
           }
           for (const rejection of recovered.value.rejected) {
             const handled = yield* Effect.exit(

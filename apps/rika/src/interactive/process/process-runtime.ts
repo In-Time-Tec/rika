@@ -168,7 +168,6 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     mode: Mode,
     tuning?: ModelTuning,
     submissionId?: string,
-    delivery?: "steer" | "followUp",
   ) => {
     const classified = classifyPrompt(prompt)
     const effect =
@@ -180,7 +179,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
           )
         : materializePromptParts(parts, loop.model.workspace).pipe(
             Effect.flatMap((materialized) =>
-              session.submit(classified.prompt, mode, materialized, tuning, submissionId, delivery),
+              session.submit(classified.prompt, mode, materialized, tuning, submissionId),
             ),
             Effect.catchIf(
               (failure): failure is ProcessPrompt.PromptAttachmentError =>

@@ -11,5 +11,11 @@ export const queueMutationEvent = (queue: TurnQueuePromotion.QueueItemChange): I
   change:
     queue.change._tag === "Removed"
       ? { _tag: "Removed", turnId: queue.change.turnId }
-      : { _tag: queue.change._tag, item: queueItem(queue.change.turn) },
+      : {
+          _tag: queue.change._tag,
+          item: queueItem(queue.change.turn),
+          ...(queue.change._tag === "Added" && queue.change.position !== undefined
+            ? { position: queue.change.position }
+            : {}),
+        },
 })

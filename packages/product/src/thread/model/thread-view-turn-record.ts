@@ -6,7 +6,6 @@ import * as ThreadRelationship from "./thread-relationship"
 export const ThreadViewPendingTurn = Schema.Struct({
   id: Turn.TurnId,
   prompt: Schema.String,
-  delivery: Schema.Literals(["steer", "followUp"]),
   createdAt: Schema.Finite,
 })
 export type ThreadViewPendingTurn = typeof ThreadViewPendingTurn.Type
