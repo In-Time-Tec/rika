@@ -139,10 +139,11 @@ test(
     TuiApp.run(
       Effect.gen(function* () {
         const threadId = Thread.ThreadId.make("tui-thread-0")
+        const activeTurnId = Turn.TurnId.make("tui-turn-0")
         const app = yield* TuiApp.tuiApp({
           height: 36,
           inspectTranscript: true,
-          script: [model.text("HELLO_COMPLETE", 5_000), model.text("HI_COMPLETE")],
+          script: [model.text("HELLO_COMPLETE", 10_000), model.text("HI_COMPLETE")],
         })
 
         yield* Effect.promise(() => app.type("Hello"))
@@ -154,13 +155,18 @@ test(
         app.pressArrow("up")
         yield* app.waitFrame("Enter to steer")
         app.pressEnter()
+        yield* app.waitTranscript(
+          activeTurnId,
+          (projection) => projection.state.steering.pending?.some((entry) => entry.text === "Hi") === true,
+          20_000,
+        )
         app.pressEnter()
         yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0)
 
         yield* app.waitFrame("HI_COMPLETE", 20_000)
         expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 5_000)).turns).toEqual([])
         expect((yield* app.modelPrompts).map(promptTexts).map((texts) => texts.at(-1))).toEqual(["Hello", "Hi"])
-        const activeTranscript = yield* app.transcript(Turn.TurnId.make("tui-turn-0")).pipe(Effect.orDie)
+        const activeTranscript = yield* app.transcript(activeTurnId).pipe(Effect.orDie)
         expect(
           activeTranscript?.units.filter(
             (unit) => unit.content._tag === "Entry" && unit.content.role === "user" && unit.content.text === "Hi",
@@ -169,7 +175,7 @@ test(
         yield* app.quit
       }),
     ),
-  30_000,
+  60_000,
 )
 
 test(
