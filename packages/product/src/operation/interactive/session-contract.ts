@@ -1,7 +1,7 @@
 import type * as Thread from "@rika/product/thread-record"
 import type * as ExecutionRequest from "@rika/product/execution-request"
 import type { ModeId } from "@rika/configuration/behavior-mode"
-import type { Context, Effect, PlatformError, PubSub, Semaphore } from "effect"
+import type { Context, Deferred, Effect, PlatformError, PubSub, Semaphore } from "effect"
 import type { OperationUnavailable } from "../contract/product-operation"
 import type { InteractiveEvent as ClientEvent } from "./event"
 import type { InteractiveEvent } from "./session-event"
@@ -201,6 +201,7 @@ export type InteractiveRuntimeContext = InteractiveSessionInput &
     readonly workspace: string
     readonly sessionId: number
     readonly serverOwner: boolean
+    readonly supervisionInitialized: Deferred.Deferred<void, InteractiveSupervisionError>
     readonly emit: InteractiveOperationFeed["emit"]
     readonly dispatchFailure: dispatchInteractiveFailure
     readonly admit: ReturnType<typeof makeInteractiveSessionComposition>["admit"]
@@ -208,18 +209,18 @@ export type InteractiveRuntimeContext = InteractiveSessionInput &
     readonly attachFeed: ReturnType<typeof makeInteractiveSessionComposition>["attachFeed"]
   }
 
+export type InteractiveSupervisionError =
+  | OperationError
+  | import("@rika/product/execution-gateway").StartTurnFailure
+  | import("@rika/product/execution-gateway").WatchTurnFailure
+  | import("@rika/product/execution-gateway").InspectTurnFailure
+  | TurnRepositoryError
+  | import("@rika/product/transcript-repository").RepositoryError
+
 export interface InteractiveSessionRuntimeResult {
   readonly session: InteractiveSession
-  readonly supervise: Effect.Effect<
-    void,
-    | OperationError
-    | import("@rika/product/execution-gateway").StartTurnFailure
-    | import("@rika/product/execution-gateway").WatchTurnFailure
-    | import("@rika/product/execution-gateway").InspectTurnFailure
-    | TurnRepositoryError
-    | import("@rika/product/transcript-repository").RepositoryError,
-    never
-  >
+  readonly supervise: Effect.Effect<void, InteractiveSupervisionError, never>
+  readonly initialized: Effect.Effect<void, InteractiveSupervisionError, never>
   readonly watchClaimed: (
     turnId: TurnId,
   ) => Effect.Effect<

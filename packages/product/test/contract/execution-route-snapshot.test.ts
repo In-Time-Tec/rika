@@ -1,5 +1,6 @@
 import { expect, test } from "vitest"
-import { toExecutionRouteSnapshot } from "../../src/execution/contract/execution-route-snapshot"
+import { Schema } from "effect"
+import { ExecutionRouteSnapshot, toExecutionRouteSnapshot } from "../../src/execution/contract/execution-route-snapshot"
 
 const model = (role: string) => ({
   role,
@@ -43,6 +44,19 @@ test("canonical route conversion preserves every branch and field", () => {
   expect(snapshot).toEqual(route)
   expect(snapshot.main.registrationIdentity).toBe("stable-route-id")
   expect(snapshot.agents.task.candidates[0]?.providerConnection).toEqual(route.main.candidates[0]?.providerConnection)
+})
+
+test("decodes the previous persisted route and always re-encodes the current version", () => {
+  const current = routeWithModels()
+  const { subagents: _subagents, ...withoutSubagents } = current
+  const previous = { ...withoutSubagents, version: 1 as const }
+  const decoded = Schema.decodeUnknownSync(ExecutionRouteSnapshot)(previous)
+  expect(decoded).toEqual({
+    ...withoutSubagents,
+    version: 2,
+    subagents: { maxDepth: 1, maxSubagents: 4 },
+  })
+  expect(Schema.encodeSync(ExecutionRouteSnapshot)(decoded)).toEqual(decoded)
 })
 
 test("preserves the pinned OpenAI account identity and rejects incomplete account routes", () => {

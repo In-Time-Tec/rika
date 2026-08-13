@@ -12,7 +12,7 @@ import * as ResolvedContext from "../../../context/context-resolution-service"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
 import type * as RootTurnOwner from "../../../thread/queue/root-turn-owner"
 import * as ExecutionAuthorityReconciliation from "../../../execution/lifecycle/execution-authority-reconciliation"
-import { Clock, Effect, Cause, Fiber, PubSub } from "effect"
+import { Clock, Effect, Cause, Deferred, Duration, Fiber, PubSub, Schedule } from "effect"
 import { isTerminalStatus } from "../../../execution/contract/execution-status"
 import { OperationError, operationError } from "../../operation-error"
 import { type InteractiveEvent } from "../session-event"
@@ -25,6 +25,7 @@ import {
   type InteractiveSessionInput,
   type makeInteractiveExecution,
 } from "../session"
+import type { InteractiveSupervisionError } from "../session-contract"
 
 export const watchRootTurn = (input: {
   readonly turnId: Turn.TurnId
@@ -219,20 +220,12 @@ export interface InteractiveSupervisionInput {
   readonly interactiveSinks: Map<number, (origin: number, event: InteractiveEvent) => void>
   readonly operationFeed: InteractiveOperationFeed
   readonly queueMutationEvent: InteractiveSessionInput["queueMutationEvent"]
+  readonly initialized: Deferred.Deferred<void, InteractiveSupervisionError>
 }
 
 export const makeInteractiveSupervision = (
   input: InteractiveSupervisionInput,
-): Effect.Effect<
-  void,
-  | OperationError
-  | ExecutionGateway.StartTurnFailure
-  | ExecutionGateway.WatchTurnFailure
-  | ExecutionGateway.InspectTurnFailure
-  | TurnRepository.RepositoryError
-  | TranscriptRepository.RepositoryError,
-  never
-> => {
+): Effect.Effect<void, InteractiveSupervisionError, never> => {
   const {
     acquiredBackend,
     rootTurnOwner,
@@ -251,6 +244,7 @@ export const makeInteractiveSupervision = (
     interactiveSinks,
     operationFeed,
     queueMutationEvent,
+    initialized,
   } = input
   const observedDispatch = serverOwner ? (_event: InteractiveEvent) => {} : operationFeed.sessionDispatch
   const publishObserved = (event: InteractiveEvent) => operationFeed.emit(observedDispatch, event)
@@ -411,13 +405,29 @@ export const makeInteractiveSupervision = (
             yield* launch(turn)
         }
       })
-      yield* recover
+      const initial = yield* Effect.exit(recover)
+      yield* Deferred.done(initialized, initial)
+      if (initial._tag === "Failure") return yield* Effect.failCause(initial.cause)
       while (true) {
         yield* PubSub.take(changes)
         yield* scanDirty
       }
     }),
-  ).pipe(Effect.provide(executionDependencies))
+  ).pipe(
+    Effect.provide(executionDependencies),
+    Effect.tapCause((cause) =>
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.void
+        : Effect.logError("interactive.supervision.failed").pipe(
+            Effect.annotateLogs({ "rika.failure.message": Cause.pretty(cause) }),
+          ),
+    ),
+    Effect.retry(
+      Schedule.exponential("100 millis").pipe(
+        Schedule.modifyDelay(({ duration }) => Effect.succeed(Duration.min(duration, Duration.seconds(5)))),
+      ),
+    ),
+  )
   if (serverOwner !== true) sessionThreadViews.set(sessionId, () => getSelectedThreadId())
   if (serverOwner !== true)
     interactiveSinks.set(sessionId, (_origin: number, event: InteractiveEvent) => {
