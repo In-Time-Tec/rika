@@ -11975,6 +11975,22 @@
       "production": true
     },
     {
+      "from": "apps/rika/test/tui-app-backend.ts",
+      "to": "packages/product/src/thread/repository/thread-repository.ts",
+      "specifier": "@rika/product/thread-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-backend.ts",
+      "to": "packages/product/src/thread/repository/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "apps/rika/test/tui-app-model.ts",
       "to": "packages/baton-execution/src/baton-test-harness.ts",
       "specifier": "@rika/baton-execution/baton-test-harness",

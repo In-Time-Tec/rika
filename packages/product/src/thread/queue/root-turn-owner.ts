@@ -137,9 +137,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           current === undefined ||
           quiesced.has(String(current.threadId)) ||
           current.status === "queued" ||
-          current.status === "completed" ||
-          current.status === "failed" ||
-          current.status === "cancelled" ||
+          (ExecutionStatus.isTerminalStatus(current.status) && expectedStatus === undefined) ||
           (expectedStatus !== undefined && current.status !== expectedStatus)
         )
           return false
@@ -477,27 +475,36 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           turn.status === "cancelling"
             ? turn.status
             : "running"
-        const state = latestChange?.state ??
-          stored?.state ??
-          (yield* Effect.option(backend.inspectTurn(executionLink)).pipe(
-            Effect.map((inspection) =>
-              inspection._tag === "Some" &&
-              inspection.value.status !== "unavailable" &&
-              inspection.value.status !== "accepted" &&
-              inspection.value.status !== "queued"
-                ? {
-                    status: inspection.value.status,
-                    usage: ExecutionProjection.emptyUsageState(),
-                    steering: { steeringMessages: 0, followUpMessages: 0 },
-                  }
-                : undefined,
-            ),
-            Effect.orElseSucceed(() => undefined),
-          )) ?? {
-            status: fallbackStatus,
-            usage: ExecutionProjection.emptyUsageState(),
-            steering: { steeringMessages: 0, followUpMessages: 0 },
-          }
+        const inspectedStatus = yield* Effect.option(backend.inspectTurn(executionLink)).pipe(
+          Effect.map((inspection) =>
+            inspection._tag === "Some" && inspection.value.status !== "unavailable"
+              ? inspection.value.status
+              : undefined,
+          ),
+          Effect.orElseSucceed(() => undefined),
+        )
+        const projectedState = latestChange?.state ?? stored?.state
+        let state = projectedState
+        if (
+          state !== undefined &&
+          inspectedStatus !== undefined &&
+          ExecutionStatus.isTerminalStatus(inspectedStatus) &&
+          !ExecutionStatus.isTerminalStatus(state.status)
+        )
+          state = { ...state, status: inspectedStatus }
+        if (state === undefined)
+          state =
+            inspectedStatus !== undefined && inspectedStatus !== "accepted" && inspectedStatus !== "queued"
+              ? {
+                  status: inspectedStatus,
+                  usage: ExecutionProjection.emptyUsageState(),
+                  steering: { steeringMessages: 0, followUpMessages: 0 },
+                }
+              : {
+                  status: fallbackStatus,
+                  usage: ExecutionProjection.emptyUsageState(),
+                  steering: { steeringMessages: 0, followUpMessages: 0 },
+                }
         return {
           turnId: String(turnId),
           status: state.status,

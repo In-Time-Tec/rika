@@ -7728,6 +7728,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/product/test/root-turn-owner-terminal-recovery.test.ts",
+      "path": "packages/product/test/root-turn-owner-terminal-recovery.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/product/test/root-turn-owner.test.ts",
       "path": "packages/product/test/root-turn-owner.test.ts",
       "workspace": "@rika/product",
@@ -20211,6 +20221,14 @@
     },
     {
       "from": "apps/rika/test/tui-app-backend.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-backend.ts",
       "to": "packages/product/src/thread/query/thread-query-service.ts",
       "specifier": "@rika/product/thread-query-service",
       "kind": "import",
@@ -20221,6 +20239,22 @@
       "from": "apps/rika/test/tui-app-backend.ts",
       "to": "packages/product/src/thread/repository/goal-repository.ts",
       "specifier": "@rika/product/goal-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-backend.ts",
+      "to": "packages/product/src/thread/repository/thread-repository.ts",
+      "specifier": "@rika/product/thread-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-backend.ts",
+      "to": "packages/product/src/thread/repository/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -43842,6 +43876,86 @@
       "from": "packages/product/test/review-policy.test.ts",
       "to": "packages/product/src/operation/review/review-policy.ts",
       "specifier": "../src/operation/review/review-policy",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/root-turn-owner-terminal-recovery.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/root-turn-owner-terminal-recovery.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/root-turn-owner-terminal-recovery.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/root-turn-owner-terminal-recovery.test.ts",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "@rika/product/execution-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/root-turn-owner-terminal-recovery.test.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/root-turn-owner-terminal-recovery.test.ts",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/root-turn-owner-terminal-recovery.test.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/root-turn-owner-terminal-recovery.test.ts",
+      "to": "packages/product/src/thread/queue/root-turn-owner.ts",
+      "specifier": "../src/thread/queue/root-turn-owner",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/root-turn-owner-terminal-recovery.test.ts",
+      "to": "packages/product/src/thread/repository/transcript-repository.ts",
+      "specifier": "@rika/product/transcript-repository",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/root-turn-owner-terminal-recovery.test.ts",
+      "to": "packages/product/src/thread/repository/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
       "kind": "import",
       "relationship": "test",
       "production": false

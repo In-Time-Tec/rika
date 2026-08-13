@@ -579,4 +579,111 @@ describe("Operation", () => {
       yield* scenario
     }),
   )
+
+  it.effect("replays terminal execution history before settling a recovered steering target", () =>
+    Effect.gen(function* () {
+      const thread: Thread.Thread = {
+        id: Thread.ThreadId.make("recovered-terminal-steering"),
+        lineage: threadLineage,
+        workspace: "/work",
+        title: "Recovered terminal steering",
+        labels: [],
+        pinned: false,
+        archived: false,
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      const activeId = Turn.TurnId.make("recovered-terminal-active")
+      const steeringId = Turn.TurnId.make("recovered-terminal-source")
+      const target = { runId: "recovered-terminal-run", turnId: activeId, threadId: thread.id }
+      const request = { text: "recovered steering", idempotencyKey: "recovered-terminal-request" }
+      const receipt = { entryId: "recovered-terminal-entry", sequence: 0 }
+      const turns = yield* TurnRepository.makeMemory([
+        {
+          id: activeId,
+          ...turnProvenance,
+          threadId: thread.id,
+          prompt: "active",
+          executionRoute: executionRoute(),
+          executionLink: target,
+          status: "running",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: steeringId,
+          ...turnProvenance,
+          threadId: thread.id,
+          prompt: request.text,
+          executionRoute: executionRoute(),
+          status: "queued",
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ])
+      yield* turns.prepareQueuedSteeringAdmission(steeringId, target, request, [], 3)
+      yield* turns.acceptSteeringAdmission(request.idempotencyKey, receipt)
+      yield* turns.setStatus(activeId, "completed", 4)
+      const terminal = projectionSnapshot(activeId, "completed", "recovered-terminal-completed")
+      const terminalProjection = {
+        ...terminal,
+        state: {
+          ...terminal.state,
+          steering: {
+            steeringMessages: 0,
+            followUpMessages: 0,
+            settled: [
+              {
+                runId: target.runId,
+                entryId: receipt.entryId,
+                requestId: request.idempotencyKey,
+                sequence: receipt.sequence,
+                outcome: "discarded" as const,
+              },
+            ],
+          },
+        },
+      }
+      const watched = yield* Deferred.make<void>()
+      const recoveredBackend = ExecutionGateway.Service.of({
+        ...backend,
+        inspectTurn: () => Effect.succeed({ status: "completed" }),
+        watchTurn: () =>
+          Stream.fromEffect(Deferred.succeed(watched, undefined)).pipe(
+            Stream.flatMap(() => Stream.succeed(terminalProjection)),
+          ),
+      })
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const scenario = Effect.gen(function* () {
+        const session = yield* openInteractiveSession(sessions, {
+          _tag: "Interactive",
+          prompt: [],
+          ephemeral: false,
+        })
+        yield* Effect.forkChild(session.events(() => {}))
+        yield* settleEvents
+
+        expect(yield* Deferred.isDone(watched)).toBe(true)
+        while ((yield* turns.listSteeringAdmissions).length > 0) yield* Effect.yieldNow
+        expect(yield* turns.get(activeId)).toMatchObject({ status: "completed" })
+        expect(yield* turns.get(steeringId)).toBeUndefined()
+        expect(yield* turns.readQueue(thread.id)).toMatchObject({ queuedCount: 0, turns: [] })
+        yield* session.quit
+      }).pipe(
+        provideLayer(
+          productLayer({
+            executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
+            repositoryLayer: ThreadRepository.memoryLayer([thread]),
+            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+            backendLayer: Layer.succeed(ExecutionGateway.Service, recoveredBackend),
+            defaultWorkspace: "/work",
+            makeThreadId: Effect.die("unused"),
+            makeTurnId: Effect.die("unused"),
+            interactive: holdSession(sessions),
+          }),
+        ),
+      )
+      yield* scenario
+    }),
+  )
 })

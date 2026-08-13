@@ -76,7 +76,10 @@ it.effect("returns stored terminal state and units when checkpoint resume yields
         get: () => Effect.succeed(projection),
         commitProjection: () => Effect.succeed("committed" as const),
       } as TranscriptRepository.Interface,
-      { watchTurn: () => Stream.empty } as ExecutionGateway.Interface,
+      {
+        watchTurn: () => Stream.empty,
+        inspectTurn: () => Effect.succeed({ status: "completed" as const }),
+      } as ExecutionGateway.Interface,
     )
     const result = yield* owner.watchTurn(turn.id)
     expect(result).toMatchObject({
@@ -202,6 +205,7 @@ it.effect("commits and delivers each live change once without retaining or redel
           watches += 1
           return watches === 1 ? Stream.fromIterable([running, completed]) : Stream.empty
         },
+        inspectTurn: () => Effect.succeed({ status: "completed" as const }),
       } as ExecutionGateway.Interface,
     )
     const delivered: Array<ExecutionProjection.Change> = []
@@ -671,38 +675,6 @@ it.effect("persists the Baton receipt until exact accepted, consumed, or discard
   }),
 )
 
-it.effect("settles a turn whose backend run is terminal when the watch stream yields no changes", () =>
-  Effect.gen(function* () {
-    const owner = yield* make(
-      { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
-      { get: () => Effect.void } as TranscriptRepository.Interface,
-      {
-        watchTurn: () => Stream.empty,
-        inspectTurn: () => Effect.succeed({ status: "completed" as const }),
-      } as ExecutionGateway.Interface,
-    )
-    const result = yield* owner.watchTurn(turn.id)
-    expect(result.status).toBe("completed")
-    expect(result.state.status).toBe("completed")
-  }),
-)
-
-it.effect("falls back to the persisted running status when the backend run is unavailable", () =>
-  Effect.gen(function* () {
-    const owner = yield* make(
-      { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
-      { get: () => Effect.void } as TranscriptRepository.Interface,
-      {
-        watchTurn: () => Stream.empty,
-        inspectTurn: () => Effect.succeed({ status: "unavailable" as const }),
-      } as ExecutionGateway.Interface,
-    )
-    const result = yield* owner.watchTurn(turn.id)
-    expect(result.status).toBe("running")
-    expect(result.state.status).toBe("running")
-  }),
-)
-
 it.effect("keeps preview traffic out of the transcript repository and final result", () =>
   Effect.gen(function* () {
     const completed: ExecutionProjection.Change = {
@@ -752,6 +724,7 @@ it.effect("keeps preview traffic out of the transcript repository and final resu
         } as TranscriptRepository.Interface,
         {
           watchTurn: () => Stream.fromIterable(enabled ? [...previews, completed] : [completed]),
+          inspectTurn: () => Effect.succeed({ status: "completed" as const }),
         } as ExecutionGateway.Interface,
       )
       const result = yield* owner.watchTurn(

@@ -78,7 +78,10 @@ export const watchRootTurn = (input: {
 
 export const observeRootTurn = (input: {
   readonly turn: Turn.AgentExecutionTurn
-  readonly claim: (turnId: Turn.TurnId) => Effect.Effect<boolean, TurnRepository.RepositoryError, never>
+  readonly claim: (
+    turnId: Turn.TurnId,
+    expectedStatus?: ExecutionStatus.Status,
+  ) => Effect.Effect<boolean, TurnRepository.RepositoryError, never>
   readonly release: (turnId: Turn.TurnId, notify?: boolean) => Effect.Effect<void, OperationError, never>
   readonly watch: Effect.Effect<
     void,
@@ -100,7 +103,7 @@ export const observeRootTurn = (input: {
     ? Effect.succeed(false)
     : Effect.uninterruptibleMask((restore) =>
         input
-          .claim(input.turn.id)
+          .claim(input.turn.id, isTerminalStatus(input.turn.status) ? input.turn.status : undefined)
           .pipe(
             Effect.flatMap((claimed) =>
               !claimed

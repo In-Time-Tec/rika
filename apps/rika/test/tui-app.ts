@@ -21,7 +21,7 @@ import {
 } from "./tui-app-repositories"
 import type { Lane, LaneModels, Profile } from "./tui-app-model"
 import { tuiToolRuntimeLayer } from "./tui-app-tool-runtime"
-import { backendLayer, kernelPoolFor } from "./tui-app-backend"
+import { backendLayer, kernelPoolFor, prepareTuiRuntimeState, type RuntimeStatePreparation } from "./tui-app-backend"
 import { laneExecutionRoute, makeLaneModels } from "./tui-app-model"
 
 type InteractiveConnection = Parameters<ReturnType<typeof interactiveTui>>[2]
@@ -52,6 +52,7 @@ export interface TuiAppOptions {
   readonly holdSubmissionAdmission?: Deferred.Deferred<void>
   readonly mapInteractiveEvent?: (event: SessionEvent) => SessionEvent
   readonly historicalTranscriptFixture?: HistoricalTranscriptFixture
+  readonly prepareRuntimeState?: RuntimeStatePreparation
 }
 
 export type CapturedSpans = ReturnType<Awaited<ReturnType<typeof createTestRenderer>>["captureSpans"]>
@@ -166,12 +167,23 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     queryFactoryLayer,
     toolRuntimeLayer,
   })
-  const executionBackendLayer = backendLayer({
-    filename: path.join(root, "baton.db"),
-    kernelPool,
-    registryLayer: laneModels.registryLayer,
-    toolRuntimeLayer,
-    queryFactoryLayer,
+  const executionBackendContext = yield* Layer.buildWithScope(
+    backendLayer({
+      filename: path.join(root, "baton.db"),
+      kernelPool,
+      registryLayer: laneModels.registryLayer,
+      toolRuntimeLayer,
+      queryFactoryLayer,
+    }),
+    resourceScope,
+  )
+  const executionBackendLayer = Layer.succeedContext(executionBackendContext)
+  yield* prepareTuiRuntimeState({
+    preparation: options.prepareRuntimeState,
+    workspace,
+    executionBackendContext,
+    repositoryContext,
+    waitModelRequests: awaitModelRequests,
   })
   const setup = yield* Effect.acquireRelease(
     Effect.promise(() =>

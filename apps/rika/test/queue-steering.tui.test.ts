@@ -1,10 +1,10 @@
-import { Effect } from "effect"
+import { Clock, Effect } from "effect"
 import type { Prompt } from "effect/unstable/ai"
 import { expect, test } from "vitest"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as TuiApp from "./tui-app"
-import { model } from "./tui-app-model"
+import { laneExecutionRoute, model } from "./tui-app-model"
 
 const promptTexts = (prompt: Prompt.Prompt): ReadonlyArray<string> =>
   prompt.content.flatMap((message) => {
@@ -136,6 +136,216 @@ test(
       }),
     ),
   60_000,
+)
+
+test(
+  "settles steering entered while a direct final response completes",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const threadId = Thread.ThreadId.make("tui-thread-0")
+        const app = yield* TuiApp.tuiApp({
+          height: 36,
+          inspectTranscript: true,
+          script: [model.text("HELLO_COMPLETE", 5_000), model.text("HI_COMPLETE")],
+        })
+
+        yield* Effect.promise(() => app.type("Hello"))
+        app.pressEnter()
+        yield* app.waitModelRequests(1)
+        yield* Effect.promise(() => app.type("Hi"))
+        app.pressEnter()
+        yield* waitQueue(
+          app,
+          threadId,
+          (queue) => queue.turns.find((turn) => turn.prompt === "Hi")?.delivery === "steer",
+        )
+
+        yield* app.waitFrame("HI_COMPLETE", 20_000)
+        expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 5_000)).turns).toEqual([])
+        expect(yield* app.waitGone("steering: Hi")).not.toContain("steering: Hi")
+        expect((yield* app.modelPrompts).map(promptTexts).map((texts) => texts.at(-1))).toEqual(["Hello", "Hi"])
+        const activeTranscript = yield* app.transcript(Turn.TurnId.make("tui-turn-0")).pipe(Effect.orDie)
+        expect(
+          activeTranscript?.units.filter(
+            (unit) => unit.content._tag === "Entry" && unit.content.role === "user" && unit.content.text === "Hi",
+          ),
+        ).toHaveLength(1)
+        yield* app.quit
+      }),
+    ),
+  30_000,
+)
+
+test(
+  "replays a terminal Baton run to settle steering accepted before product recovery",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const threadId = Thread.ThreadId.make("recovered-steering-thread")
+        const activeTurnId = Turn.TurnId.make("recovered-steering-active")
+        const steeringTurnId = Turn.TurnId.make("recovered-steering-source")
+        const followUpTurnId = Turn.TurnId.make("recovered-steering-follow-up")
+        const request = {
+          text: "RECOVERED_STEERING",
+          idempotencyKey: "rika:steer:recovered-steering-source",
+        }
+        let acceptedRunId = ""
+        let acceptedEntryId = ""
+        let acceptedSequence = -1
+        const app = yield* TuiApp.tuiApp({
+          initialThreadId: threadId,
+          idStart: 10,
+          height: 36,
+          inspectTranscript: true,
+          workspaceFiles: { "recovery.txt": "durable recovery fixture" },
+          script: [
+            model.turn(
+              [
+                model.binding(
+                  { module: "workspace", operation: "read", input: { path: "recovery.txt" } },
+                  "recovery-read",
+                ),
+              ],
+              { delayMillis: 2_000 },
+            ),
+            model.text("RECOVERED_STEERING_COMPLETE"),
+            model.text("RECOVERED_FOLLOW_UP_COMPLETE"),
+          ],
+          prepareRuntimeState: ({ workspace, backend, threads, turns, waitModelRequests }) =>
+            Effect.gen(function* () {
+              const now = yield* Clock.currentTimeMillis
+              yield* threads.create({
+                id: threadId,
+                workspace,
+                title: "Recovered steering",
+                now,
+              })
+              const link = yield* backend.startTurn({
+                threadId,
+                turnId: activeTurnId,
+                workspace,
+                prompt: "Run a real agentic step before product recovery.",
+                executionRoute: laneExecutionRoute(),
+              })
+              acceptedRunId = link.runId
+              const provenance = {
+                _tag: "AgentExecution" as const,
+                author: { _tag: "Human" as const },
+                lineage: { _tag: "Original" as const },
+              }
+              yield* turns.copy(
+                {
+                  ...provenance,
+                  id: activeTurnId,
+                  threadId,
+                  prompt: "Run a real agentic step before product recovery.",
+                  executionRoute: laneExecutionRoute(),
+                  executionLink: link,
+                  status: "running",
+                  createdAt: now,
+                  updatedAt: now,
+                },
+                32,
+              )
+              yield* turns.copy(
+                {
+                  ...provenance,
+                  id: steeringTurnId,
+                  threadId,
+                  prompt: request.text,
+                  executionRoute: laneExecutionRoute(),
+                  status: "queued",
+                  createdAt: now + 1,
+                  updatedAt: now + 1,
+                },
+                32,
+              )
+              yield* turns.copy(
+                {
+                  ...provenance,
+                  id: followUpTurnId,
+                  threadId,
+                  prompt: "RECOVERED_FOLLOW_UP",
+                  executionRoute: laneExecutionRoute(),
+                  status: "queued",
+                  createdAt: now + 2,
+                  updatedAt: now + 2,
+                },
+                32,
+              )
+              yield* turns.prepareQueuedSteeringAdmission(steeringTurnId, link, request, [], now + 3)
+              yield* waitModelRequests(1)
+              const receipt = yield* backend.steerTurn(link, request)
+              acceptedEntryId = receipt.entryId
+              acceptedSequence = receipt.sequence
+              yield* turns.acceptSteeringAdmission(request.idempotencyKey, receipt)
+              yield* waitModelRequests(2)
+              const waitForCompletion = (remaining: number): Effect.Effect<void> =>
+                backend.inspectTurn(link).pipe(
+                  Effect.flatMap(({ status }) => {
+                    if (status === "completed") return Effect.void
+                    if (status === "failed" || status === "cancelled" || status === "unavailable" || remaining <= 0)
+                      return Effect.die(`seeded Baton run settled as ${status}`)
+                    return Effect.sleep("10 millis").pipe(Effect.andThen(waitForCompletion(remaining - 10)))
+                  }),
+                  Effect.orDie,
+                )
+              yield* waitForCompletion(10_000)
+              yield* turns.setStatus(activeTurnId, "completed", now + 4)
+
+              expect(yield* turns.readQueue(threadId)).toMatchObject({
+                queuedCount: 2,
+                turns: [
+                  { id: steeringTurnId, prompt: request.text, delivery: "steer" },
+                  { id: followUpTurnId, prompt: "RECOVERED_FOLLOW_UP" },
+                ],
+              })
+              expect(yield* turns.listSteeringAdmissions).toMatchObject([
+                {
+                  input: request,
+                  outcome: { _tag: "Accepted", receipt },
+                },
+              ])
+            }),
+        })
+
+        yield* app.waitFrame("RECOVERED_FOLLOW_UP_COMPLETE", 20_000)
+        expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 5_000)).turns).toEqual([])
+        expect(yield* app.waitGone("steering: RECOVERED_STEERING")).not.toContain("steering: RECOVERED_STEERING")
+        expect((yield* app.modelPrompts).map(promptTexts).map((texts) => texts.at(-1))).toEqual([
+          "Run a real agentic step before product recovery.",
+          request.text,
+          "RECOVERED_FOLLOW_UP",
+        ])
+        const recoveredTranscript = yield* app.transcript(activeTurnId).pipe(Effect.orDie)
+        expect(recoveredTranscript?.state.steering.settled).toContainEqual({
+          runId: acceptedRunId,
+          entryId: acceptedEntryId,
+          requestId: request.idempotencyKey,
+          sequence: acceptedSequence,
+          outcome: "consumed",
+        })
+        expect(
+          recoveredTranscript?.units.filter(
+            (unit) =>
+              unit.content._tag === "Entry" && unit.content.role === "user" && unit.content.text === request.text,
+          ),
+        ).toHaveLength(1)
+        const followUpTranscript = yield* app.transcript(followUpTurnId).pipe(Effect.orDie)
+        expect(followUpTranscript?.state.status).toBe("completed")
+        expect(
+          followUpTranscript?.units.filter(
+            (unit) =>
+              unit.content._tag === "Entry" &&
+              unit.content.role === "assistant" &&
+              unit.content.text === "RECOVERED_FOLLOW_UP_COMPLETE",
+          ),
+        ).toHaveLength(1)
+        yield* app.quit
+      }),
+    ),
+  30_000,
 )
 
 test(

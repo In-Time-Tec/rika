@@ -178,19 +178,18 @@ export const makeInteractiveSupervision = (
           observeTurn(turn, publishObserved).pipe(
             Effect.flatMap((observed) => {
               if (observed !== true) return Effect.void
-              return turns
-                .get(turn.id)
-                .pipe(
-                  Effect.flatMap((current) =>
-                    current !== undefined &&
-                    current._tag === "AgentExecution" &&
-                    isTerminalStatus(current.status) !== true &&
-                    current.status !== "queued" &&
-                    current.status !== "waiting"
-                      ? Effect.sleep("50 millis").pipe(Effect.andThen(notifyTurnChanged(current)))
-                      : Effect.void,
-                  ),
-                )
+              return launchSteeringRecovery.pipe(
+                Effect.andThen(turns.get(turn.id)),
+                Effect.flatMap((current) =>
+                  current !== undefined &&
+                  current._tag === "AgentExecution" &&
+                  isTerminalStatus(current.status) !== true &&
+                  current.status !== "queued" &&
+                  current.status !== "waiting"
+                    ? Effect.sleep("50 millis").pipe(Effect.andThen(notifyTurnChanged(current)))
+                    : Effect.void,
+                ),
+              )
             }),
             Effect.catch((error) => {
               const logged = Effect.logError("turn.observer.failed").pipe(

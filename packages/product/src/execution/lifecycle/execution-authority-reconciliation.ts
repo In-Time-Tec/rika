@@ -82,8 +82,16 @@ export const make = Effect.fn("ExecutionAuthorityReconciliation.make")(function*
   })
   const reconcile = Effect.gen(function* () {
     const active = new Array<Turn.AgentExecutionTurn>()
+    const candidates = new Map<string, Turn.AgentExecutionTurn>()
     for (const turn of yield* input.turns.listNonterminal) {
-      if (turn.status === "queued") continue
+      if (turn._tag === "AgentExecution" && turn.status !== "queued") candidates.set(String(turn.id), turn)
+    }
+    for (const steeringAdmission of yield* input.turns.listSteeringAdmissions) {
+      if (steeringAdmission.outcome._tag !== "Accepted") continue
+      const turn = yield* input.turns.get(Turn.TurnId.make(steeringAdmission.target.turnId))
+      if (turn?._tag === "AgentExecution") candidates.set(String(turn.id), turn)
+    }
+    for (const turn of candidates.values()) {
       // A Turn without an execution link (for example a forked copy of an active thread) has no
       // Baton authority to reconcile against; leave it untouched so fork semantics stay intact.
       if (turn.executionLink === undefined) continue
@@ -98,11 +106,7 @@ export const make = Effect.fn("ExecutionAuthorityReconciliation.make")(function*
         continue
       }
       if (inspected.success.status === "unavailable") {
-        yield* settleMissing(turn, "execution-run-missing")
-        continue
-      }
-      if (ExecutionStatus.isTerminalStatus(inspected.success.status)) {
-        yield* input.setTurnStatus(turn.id, inspected.success.status, yield* Clock.currentTimeMillis)
+        if (!ExecutionStatus.isTerminalStatus(turn.status)) yield* settleMissing(turn, "execution-run-missing")
         continue
       }
       active.push(turn)
