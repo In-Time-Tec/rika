@@ -23,13 +23,14 @@ export interface SteeringAdmissionRejection {
 export interface SteeringAdmissionAcceptance {
   readonly admission: TurnRepositorySteering.SteeringAdmission
   readonly receipt: ExecutionGateway.SteeringReceipt
+  readonly notify: boolean
 }
 
 export interface SteeringAdmissionRecovery {
   readonly accepted: ReadonlyArray<SteeringAdmissionAcceptance>
   readonly rejected: ReadonlyArray<SteeringAdmissionRejection>
   readonly completed: ReadonlyArray<
-    SteeringAdmissionAcceptance & { readonly queue?: TurnQueuePromotion.QueueItemChange }
+    Omit<SteeringAdmissionAcceptance, "notify"> & { readonly queue?: TurnQueuePromotion.QueueItemChange }
   >
   readonly pending: boolean
 }
@@ -39,6 +40,7 @@ type SteeringAdmissionOutcome =
       readonly _tag: "Accepted"
       readonly admission: TurnRepositorySteering.SteeringAdmission
       readonly receipt: ExecutionGateway.SteeringReceipt
+      readonly notify: boolean
     }
   | {
       readonly _tag: "Rejected"
@@ -280,6 +282,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
         _tag: "Accepted" as const,
         admission,
         receipt: admission.outcome.receipt,
+        notify: false,
       }
     })
   const recoverSteeringAdmission = (
@@ -304,6 +307,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
                 _tag: "Accepted",
                 admission: { ...admission, outcome: { _tag: "Accepted", receipt: outcome.value } },
                 receipt: outcome.value,
+                notify: true,
               }),
             )
           const error = Cause.findErrorOption(outcome.cause)
@@ -383,7 +387,9 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           )
           return {
             accepted: outcomes.flatMap((outcome) =>
-              outcome._tag === "Accepted" ? [{ admission: outcome.admission, receipt: outcome.receipt }] : [],
+              outcome._tag === "Accepted"
+                ? [{ admission: outcome.admission, receipt: outcome.receipt, notify: outcome.notify }]
+                : [],
             ),
             rejected: outcomes.flatMap((outcome) =>
               outcome._tag === "Rejected"

@@ -13,9 +13,11 @@ import { Config, Context, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path
 import { performance } from "node:perf_hooks"
 import { interactiveTui } from "../src/interactive/process/interactive-process-loop"
 import {
+  makeTuiAppQueue,
   makeTuiAppRepositoryLayers,
   seedHistoricalTranscript,
   type HistoricalTranscriptFixture,
+  type TuiAppQueue,
 } from "./tui-app-repositories"
 import type { Lane, LaneModels, Profile } from "./tui-app-model"
 import { tuiToolRuntimeLayer } from "./tui-app-tool-runtime"
@@ -71,6 +73,7 @@ export interface TuiApp {
   readonly transcript: (
     turnId: Turn.TurnId,
   ) => Effect.Effect<TranscriptPage.Projection | undefined, TranscriptRepository.RepositoryError>
+  readonly queue: TuiAppQueue
   readonly waitTranscript: (
     turnId: Turn.TurnId,
     predicate: (projection: TranscriptPage.Projection) => boolean,
@@ -238,6 +241,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   const operation = Context.get(yield* Layer.buildWithScope(operationLayer, resourceScope), Service)
   const transcripts =
     options.inspectTranscript === true ? Context.get(repositoryContext, TranscriptRepository.Service) : undefined
+  const queue = makeTuiAppQueue(repositoryContext)
   const operationFiber = yield* Effect.forkChild(
     operation
       .run({
@@ -313,6 +317,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     nextFrame: Effect.promise(() => setup.flush()).pipe(Effect.andThen(Effect.sync(frame))),
     spans: () => setup.captureSpans(),
     transcript: (turnId) => transcripts?.get(turnId) ?? Effect.die("TUI transcript inspection was not requested"),
+    queue,
     waitTranscript: (turnId, predicate, timeoutMillis = 10_000) =>
       Effect.gen(function* () {
         const started = currentWallTime()

@@ -9,7 +9,7 @@ import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import * as ExecutionAuthorityReconciliation from "../../execution/lifecycle/execution-authority-reconciliation"
-import { Cause, Effect, PubSub } from "effect"
+import { Cause, Effect, Fiber, PubSub } from "effect"
 import { makeFailure } from "../operation-failure"
 import type { SteeringAdmissionRejection } from "../../thread/queue/root-turn-owner"
 import type { InteractiveEvent } from "./interactive-runtime-event"
@@ -99,49 +99,66 @@ export const makeInteractiveSupervision = (
       const turns = yield* TurnRepository.Service
       const steeringChanges = yield* PubSub.sliding<void>(1)
       const steeringSignals = yield* PubSub.subscribe(steeringChanges)
+      let retryDelay = 100
+      let retryFiber: Fiber.Fiber<void> | undefined
+      const scheduleSteeringRetry = Effect.suspend(() => {
+        if (retryFiber !== undefined) return Effect.void
+        return Effect.forkChild(
+          Effect.sleep(retryDelay).pipe(Effect.andThen(PubSub.publish(steeringChanges, undefined)), Effect.asVoid),
+        ).pipe(
+          Effect.tap((fiber) => Effect.sync(() => (retryFiber = fiber))),
+          Effect.asVoid,
+        )
+      })
       const steeringRecovery = Effect.forever(
         Effect.gen(function* () {
           yield* PubSub.take(steeringSignals)
-          let retryDelay = 100
-          while (true) {
-            const recovered = yield* Effect.exit(rootTurnOwner.recoverSteeringAdmissions)
-            if (recovered._tag === "Failure") {
-              yield* Effect.logError("steering.recovery.failed").pipe(
-                Effect.annotateLogs({ "rika.failure.message": String(recovered.cause) }),
-              )
-              yield* Effect.sleep(retryDelay)
-              retryDelay = Math.min(retryDelay * 2, 5_000)
-              continue
-            }
-            for (const acceptance of recovered.value.accepted) {
+          if (retryFiber !== undefined) {
+            const fiber = retryFiber
+            retryFiber = undefined
+            yield* Fiber.interrupt(fiber)
+          }
+          const recovered = yield* Effect.exit(rootTurnOwner.recoverSteeringAdmissions)
+          if (recovered._tag === "Failure") {
+            yield* Effect.logError("steering.recovery.failed").pipe(
+              Effect.annotateLogs({ "rika.failure.message": String(recovered.cause) }),
+            )
+            yield* scheduleSteeringRetry
+            retryDelay = Math.min(retryDelay * 2, 5_000)
+            return
+          }
+          for (const acceptance of recovered.value.accepted) {
+            if (acceptance.notify)
               yield* notifyTurnChanged({
                 id: Turn.TurnId.make(acceptance.admission.target.turnId),
                 threadId: Thread.ThreadId.make(acceptance.admission.target.threadId),
               })
-            }
-            for (const completed of recovered.value.completed) {
-              if (completed.queue !== undefined) publishObserved(queueMutationEvent(completed.queue))
-            }
-            for (const rejection of recovered.value.rejected) {
-              const handled = yield* Effect.exit(
-                Effect.gen(function* () {
-                  if (rejection.notify) publishSteeringRejection(rejection)
-                  if (rejection.queue !== undefined && rejection.admission.source !== undefined) {
-                    const threads = yield* ThreadRepository.Service
-                    const thread = yield* threads.get(rejection.queue.threadId)
-                    if (thread !== undefined) yield* Effect.forkChild(settleThread(thread, publishObserved))
-                  }
-                  yield* rootTurnOwner.acknowledgeSteeringRejection(rejection.admission.input.idempotencyKey)
-                }),
+          }
+          for (const completed of recovered.value.completed) {
+            if (completed.queue !== undefined) publishObserved(queueMutationEvent(completed.queue))
+          }
+          for (const rejection of recovered.value.rejected) {
+            const handled = yield* Effect.exit(
+              Effect.gen(function* () {
+                if (rejection.notify) publishSteeringRejection(rejection)
+                if (rejection.queue !== undefined && rejection.admission.source !== undefined) {
+                  const threads = yield* ThreadRepository.Service
+                  const thread = yield* threads.get(rejection.queue.threadId)
+                  if (thread !== undefined) yield* Effect.forkChild(settleThread(thread, publishObserved))
+                }
+                yield* rootTurnOwner.acknowledgeSteeringRejection(rejection.admission.input.idempotencyKey)
+              }),
+            )
+            if (handled._tag === "Failure")
+              yield* Effect.logError("steering.rejection.failed").pipe(
+                Effect.annotateLogs({ "rika.failure.message": String(handled.cause) }),
               )
-              if (handled._tag === "Failure")
-                yield* Effect.logError("steering.rejection.failed").pipe(
-                  Effect.annotateLogs({ "rika.failure.message": String(handled.cause) }),
-                )
-            }
-            if (!recovered.value.pending) break
-            yield* Effect.sleep(retryDelay)
+          }
+          if (recovered.value.pending) {
+            yield* scheduleSteeringRetry
             retryDelay = Math.min(retryDelay * 2, 5_000)
+          } else {
+            retryDelay = 100
           }
         }),
       )

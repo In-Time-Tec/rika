@@ -472,4 +472,111 @@ describe("Operation", () => {
       expect(yield* turns.listSteeringAdmissions).toEqual([])
     }),
   )
+
+  it.effect("reconciles terminal steering disposition without waiting for the retry timer", () =>
+    Effect.gen(function* () {
+      const thread: Thread.Thread = {
+        id: Thread.ThreadId.make("terminal-steering"),
+        lineage: threadLineage,
+        workspace: "/work",
+        title: "Terminal steering",
+        labels: [],
+        pinned: false,
+        archived: false,
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      const activeId = Turn.TurnId.make("terminal-steering-active")
+      const steeringId = Turn.TurnId.make("terminal-steering-source")
+      const turns = yield* TurnRepository.makeMemory([
+        {
+          id: activeId,
+          ...turnProvenance,
+          threadId: thread.id,
+          prompt: "active",
+          executionRoute: executionRoute(),
+          executionLink: { runId: "terminal-steering-run", turnId: activeId, threadId: thread.id },
+          status: "running",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: steeringId,
+          ...turnProvenance,
+          threadId: thread.id,
+          prompt: "steering source",
+          executionRoute: executionRoute(),
+          status: "queued",
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const activeTerminal = yield* Deferred.make<void>()
+      const steeringAccepted = yield* Deferred.make<void>()
+      const receipt = { entryId: "terminal-steering-entry", sequence: 0 }
+      const terminal = projectionSnapshot(activeId, "completed", "terminal-steering-completed")
+      const terminalProjection = {
+        ...terminal,
+        state: {
+          ...terminal.state,
+          steering: {
+            steeringMessages: 0,
+            followUpMessages: 0,
+            settled: [
+              {
+                runId: "terminal-steering-run",
+                entryId: receipt.entryId,
+                requestId: "terminal-steering-request",
+                sequence: receipt.sequence,
+                outcome: "discarded" as const,
+              },
+            ],
+          },
+        },
+      }
+      const terminalBackend = ExecutionGateway.Service.of({
+        ...backend,
+        inspectTurn: inspectTurnFromTurns(turns),
+        steerTurn: () => Deferred.succeed(steeringAccepted, undefined).pipe(Effect.as(receipt)),
+        watchTurn: () => Stream.fromEffect(Deferred.await(activeTerminal)).pipe(Stream.map(() => terminalProjection)),
+      })
+      const scenario = Effect.gen(function* () {
+        const session = yield* openInteractiveSession(sessions, {
+          _tag: "Interactive",
+          prompt: [],
+          ephemeral: false,
+        })
+        yield* Effect.forkChild(session.events(() => {}))
+        yield* settleEvents
+        yield* session.selectThread(thread.id)
+        yield* session.steerQueued(steeringId, "steering source", "terminal-steering-request")
+        yield* Deferred.await(steeringAccepted)
+        while ((yield* turns.listSteeringAdmissions)[0]?.outcome._tag !== "Accepted") yield* Effect.yieldNow
+
+        yield* Deferred.succeed(activeTerminal, undefined)
+        while ((yield* turns.get(activeId))?.status !== "completed") yield* Effect.yieldNow
+        yield* settleEvents
+
+        expect(yield* turns.get(steeringId)).toBeUndefined()
+        expect(yield* turns.readQueue(thread.id)).toMatchObject({ queuedCount: 0, turns: [] })
+        expect(yield* turns.listSteeringAdmissions).toEqual([])
+        yield* session.quit
+      }).pipe(
+        provideLayer(
+          productLayer({
+            executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
+            repositoryLayer: ThreadRepository.memoryLayer([thread]),
+            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+            backendLayer: Layer.succeed(ExecutionGateway.Service, terminalBackend),
+            defaultWorkspace: "/work",
+            makeThreadId: Effect.die("unused"),
+            makeTurnId: Effect.die("unused"),
+            interactive: holdSession(sessions),
+          }),
+        ),
+      )
+      yield* scenario
+    }),
+  )
 })

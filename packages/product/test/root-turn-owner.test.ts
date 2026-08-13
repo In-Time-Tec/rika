@@ -415,9 +415,14 @@ it.effect("retries unknown steering admissions with one identity and journals de
         {
           admission: { input: { idempotencyKey: "request-unknown" } },
           receipt: { entryId: "entry-unknown", sequence: 1 },
+          notify: true,
         },
       ],
       rejected: [],
+      pending: true,
+    })
+    expect(yield* retryingOwner.recoverSteeringAdmissions).toMatchObject({
+      accepted: [{ receipt: { entryId: "entry-unknown", sequence: 1 }, notify: false }],
       pending: true,
     })
     expect(attempts).toEqual([
@@ -520,11 +525,11 @@ it.effect("persists the Baton receipt until exact accepted, consumed, or discard
     } as ExecutionGateway.Interface)
 
     expect(yield* owner.recoverSteeringAdmissions).toMatchObject({
-      accepted: [{ receipt: { entryId: "opaque-entry", sequence: 9 } }],
+      accepted: [{ receipt: { entryId: "opaque-entry", sequence: 9 }, notify: true }],
       pending: true,
     })
     expect(yield* owner.recoverSteeringAdmissions).toMatchObject({
-      accepted: [{ receipt: { entryId: "opaque-entry", sequence: 9 } }],
+      accepted: [{ receipt: { entryId: "opaque-entry", sequence: 9 }, notify: false }],
       pending: true,
     })
     expect(attempts).toBe(1)

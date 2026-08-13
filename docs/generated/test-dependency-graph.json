@@ -503,6 +503,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "apps/rika/test/queue-steering.tui.test.ts",
+      "path": "apps/rika/test/queue-steering.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
       "id": "apps/rika/test/release-update.proc.test.ts",
       "path": "apps/rika/test/release-update.proc.test.ts",
       "workspace": "@rika/cli",
@@ -5783,6 +5793,30 @@
     },
     {
       "from": "apps/rika/test/prompt-parts.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/queue-steering.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/queue-steering.tui.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/queue-steering.tui.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

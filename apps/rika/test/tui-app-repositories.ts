@@ -7,11 +7,12 @@ import * as ThreadSearchRepository from "@rika/product-store/sqlite-thread-searc
 import * as ThreadSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import type * as TurnContract from "@rika/product/turn-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { Effect, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 
 export interface HistoricalTranscriptFixture {
   readonly threadId: string
@@ -37,6 +38,15 @@ export const makeTuiAppRepositoryLayers = (filename: string) => {
       Layer.provide(BunServices.layer),
     ),
   }
+}
+
+export type TuiAppQueue = (
+  threadId: Thread.ThreadId,
+) => Effect.Effect<Effect.Success<ReturnType<TurnContract.Interface["readQueue"]>>, TurnContract.RepositoryError>
+
+export const makeTuiAppQueue = (context: Context.Context<TurnContract.Service>): TuiAppQueue => {
+  const turns = Context.get(context, TurnRepository.Service)
+  return (threadId) => turns.readQueue(threadId)
 }
 
 export const seedHistoricalTranscript = Effect.fn("TuiApp.seedHistoricalTranscript")(function* (
