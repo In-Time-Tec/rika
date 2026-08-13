@@ -124,6 +124,54 @@ test(
 )
 
 test(
+  "does not deliver a cancelled subagent settlement to the next turn",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          lanes: [
+            {
+              steps: [
+                model.turn([model.spawn([{ profile: "Task", prompt: "CANCELLED_CHILD_PROMPT" }], "cancelled-child")]),
+                model.text("FOLLOW_UP_AFTER_CHILD_CANCELLATION"),
+              ],
+            },
+            { profile: "Task", steps: [model.text("CANCELLED_CHILD_RESPONSE", 20_000)] },
+          ],
+        })
+
+        yield* Effect.promise(() => app.type("Start child work that will be cancelled."))
+        app.pressEnter()
+        yield* app.waitFrame("Subagent working")
+        app.pressKey("c", { ctrl: true })
+        yield* app.waitFrame("Subagent cancelled")
+        yield* app.settled
+        yield* Effect.promise(() => app.type(" Run only this follow-up."))
+        app.pressEnter()
+
+        const followUp = yield* app.waitFrame("FOLLOW_UP_AFTER_CHILD_CANCELLATION", 30_000)
+        yield* app.settled
+        expect(followUp).not.toContain("Child run")
+        expect(followUp).not.toContain("settled with status cancelled")
+        expect(
+          (yield* app.modelPrompts).some((prompt) =>
+            prompt.content.some(
+              (message) =>
+                message.role === "user" &&
+                message.content.some(
+                  (part) => part.type === "text" && part.text.includes("settled with status cancelled"),
+                ),
+            ),
+          ),
+        ).toBe(false)
+        expect(yield* app.modelRequestCount).toBe(2)
+        yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)
+
+test(
   "queues an entered prompt and steers it only after selecting its row",
   () =>
     TuiApp.run(
