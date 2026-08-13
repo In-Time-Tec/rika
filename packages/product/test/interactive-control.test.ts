@@ -7,7 +7,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import type * as RootTurnOwner from "@rika/product/root-turn-owner"
 import { Effect } from "effect"
-import { makeInteractiveControl } from "../src/operation/interactive/interactive-control"
+import { makeInteractiveControl } from "../src/operation/interactive/turn/control"
 import { operationError } from "../src/operation/operation-error"
 import type * as TurnQueue from "../src/thread/repository/turn-repository-queue"
 

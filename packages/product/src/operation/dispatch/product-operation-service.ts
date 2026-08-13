@@ -9,7 +9,7 @@ import type { ProductOperationSchedule } from "./product-operation-schedule"
 import type { ProductLayerOptions } from "./product-operation-options"
 import type { ProductOperationRunFactory } from "./product-operation-run-branches"
 import type { Input } from "../contract/product-operation"
-import type { InteractiveEvent } from "../interactive/interactive-runtime-event"
+import type { InteractiveEvent } from "../interactive/session-event"
 
 export interface ProductOperationServiceInput {
   readonly options: ProductLayerOptions<Error, Error, Error, Error, Error>

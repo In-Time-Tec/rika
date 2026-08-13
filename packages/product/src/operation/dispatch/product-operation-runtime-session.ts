@@ -3,7 +3,7 @@ import {
   makeInteractiveSession as makeInteractiveSessionRuntime,
   type InteractiveSessionInput,
   type InteractiveSessionRuntimeResult,
-} from "../interactive/interactive-session-runtime"
+} from "../interactive/session"
 import { isTerminalStatus } from "../../execution/contract/execution-status"
 import {
   executionStartFailureMessage,
@@ -11,7 +11,7 @@ import {
   recordedShellSettledEvents,
   temporaryThreadTitle,
   executeShellCommand,
-} from "../interactive/interactive-operation-leaves"
+} from "../interactive/shell"
 import { queueMutationEvent } from "./product-operation-runtime-support"
 import { OperationError } from "../operation-error"
 

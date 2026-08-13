@@ -22,7 +22,7 @@ import * as Handshake from "./server-service-handshake"
 import type * as InteractiveConnection from "./server-interactive-connection"
 import { OperationUnavailable } from "../operation/contract/product-operation"
 import { Input } from "../operation/contract/product-operation"
-import type { InteractiveSession } from "../operation/interactive/interactive-session"
+import type { InteractiveSession } from "../operation/interactive/session"
 
 const ClientMessage = Schema.Union([
   Handshake.HandshakeProtocol.Handshake,

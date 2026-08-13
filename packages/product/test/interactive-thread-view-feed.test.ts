@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import { makeThreadViewFeed } from "../src/operation/interactive/interactive-thread-view-feed"
+import { makeThreadViewFeed } from "../src/operation/interactive/view/thread-view"
 
 const threadId = Thread.ThreadId.make("thread")
 const turnId = Turn.TurnId.make("turn")

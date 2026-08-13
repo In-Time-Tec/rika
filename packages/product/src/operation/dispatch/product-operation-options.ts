@@ -64,6 +64,6 @@ export interface ProductLayerOptions<
   readonly authOperations?: import("./authentication-operation-dispatch").AuthOperationOptions
   readonly interactive?: (
     input: Extract<import("../contract/product-operation").Input, { readonly _tag: "Interactive" }>,
-    session: import("../interactive/interactive-session").InteractiveSession,
+    session: import("../interactive/session").InteractiveSession,
   ) => import("effect").Effect.Effect<void, OperationUnavailable, never>
 }

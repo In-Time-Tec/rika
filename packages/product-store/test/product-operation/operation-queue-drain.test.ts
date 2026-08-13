@@ -128,6 +128,8 @@ describe("Operation queue drain", () => {
       const completeFirst = yield* Deferred.make<void>()
       const failingBackend = ExecutionGateway.Service.of({
         ...backend,
+        inspectTurn: (link) =>
+          Effect.succeed({ status: link.turnId === "turn-2" ? ("failed" as const) : ("completed" as const) }),
         watchTurn: (link) => {
           if (link.turnId === "turn-1")
             return Stream.concat(

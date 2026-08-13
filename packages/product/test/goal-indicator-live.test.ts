@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Schema } from "effect"
 import { provideLayer } from "./product-test-layer"
-import { InteractiveEventSchema } from "../src/operation/interactive/interactive-event"
-import * as RuntimeFeedOverflow from "../src/operation/interactive/interactive-runtime-feed-overflow"
+import { InteractiveEventSchema } from "../src/operation/interactive/event"
+import * as RuntimeFeedOverflow from "../src/operation/interactive/view/feed"
 import { GoalService, layer as goalServiceLayer } from "../src/thread/goal/goal-service"
 import * as GoalRepository from "../src/thread/repository/goal-repository"
 

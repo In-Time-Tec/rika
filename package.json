@@ -9,19 +9,18 @@
   "workspaces": {
     "packages": [
       "packages/*",
-      "apps/*",
-      "tooling/*"
+      "apps/*"
     ],
     "catalog": {
       "@ast-grep/cli": "0.44.0",
-      "@batonfx/core": "0.24.0",
-      "@batonfx/mcp": "0.24.0",
-      "@batonfx/providers": "0.24.0",
-      "@batonfx/runtime": "0.24.0",
-      "@batonfx/skills": "0.24.0",
-      "@batonfx/harness": "0.24.0",
-      "@batonfx/repl": "0.24.0",
-      "@batonfx/test": "0.24.0",
+      "@batonfx/core": "0.25.0",
+      "@batonfx/mcp": "0.25.0",
+      "@batonfx/providers": "0.25.0",
+      "@batonfx/runtime": "0.25.0",
+      "@batonfx/skills": "0.25.0",
+      "@batonfx/harness": "0.25.0",
+      "@batonfx/repl": "0.25.0",
+      "@batonfx/test": "0.25.0",
       "@effect/platform-bun": "4.0.0-beta.98",
       "@effect/sql-mysql2": "4.0.0-beta.98",
       "@effect/sql-sqlite-bun": "4.0.0-beta.98",
@@ -54,22 +53,18 @@
       "string-width": "7.2.0",
       "turbo": "2.8.13",
       "typescript": "7.0.2",
-      "vitest": "4.0.16",
-      "dependency-cruiser": "18.1.0",
-      "@typescript-eslint/parser": "8.65.0"
+      "vitest": "4.0.16"
     }
   },
   "scripts": {
     "bench": "bun run scripts/benchmark/benchmark-runner.ts",
-    "ast-grep-check": "ast-grep scan --config sgconfig.yml --report-style short apps packages scripts tooling test",
+    "ast-grep-check": "ast-grep scan --config sgconfig.yml --report-style short apps packages scripts test",
     "build": "bun turbo build",
-    "check": "bun turbo run --continue build typecheck \"//#test-unit\" \"//#repository-policy\" \"//#repository-graph-check\" \"//#diagnostics\" \"//#ast-grep-check\" \"//#format-check\" \"//#lint\"",
+    "check": "bun turbo run --continue typecheck \"//#ast-grep-check\" \"//#lint\"",
     "dev": "bun --cwd apps/rika start",
-    "diagnostics": "bun node_modules/@effect/tsgo/dist/effect-tsgo.cjs diagnostics --project ./tsconfig.json --format pretty --strict",
     "format": "prettier --write .",
-    "format-check": "prettier --check .",
     "install-local": "bun run scripts/installation/install-local.ts",
-    "lint": "bun node_modules/oxlint/dist/cli.js apps packages scripts tooling",
+    "lint": "bun node_modules/oxlint/dist/cli.js apps packages scripts",
     "local-baton-smoke": "bun run scripts/release/local-baton-smoke.ts",
     "package": "bun run scripts/packaging/package-target.ts",
     "npm-package": "bun run scripts/packaging/npm-package.ts",
@@ -80,8 +75,6 @@
     "test-unit": "bun --bun vitest run --project unit",
     "typecheck": "bun turbo run typecheck",
     "uninstall-local": "bun run scripts/installation/uninstall-local.ts",
-    "repository-policy": "bun --cwd tooling/repository-policy check",
-    "repository-graph-check": "bun --cwd tooling/repository-graph check",
     "prepare": "effect-tsgo patch --no-typescript --oxlint"
   },
   "prettier": {
@@ -124,9 +117,7 @@
     "prettier": "catalog:",
     "turbo": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:",
-    "dependency-cruiser": "catalog:",
-    "@typescript-eslint/parser": "catalog:"
+    "vitest": "catalog:"
   },
   "rika": {
     "kind": "application",

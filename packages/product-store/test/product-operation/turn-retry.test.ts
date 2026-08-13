@@ -91,6 +91,8 @@ describe("turn retry", () => {
       let calls = 0
       const retryingBackend = ExecutionGateway.Service.of({
         ...backend,
+        inspectTurn: (link) =>
+          Effect.succeed({ status: link.turnId === "turn-1" ? ("failed" as const) : ("completed" as const) }),
         watchTurn: (link) => {
           calls += 1
           if (calls === 1)

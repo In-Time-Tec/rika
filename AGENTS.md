@@ -4,16 +4,8 @@ Rika is a local coding-agent CLI and OpenTUI app written in Effect TypeScript. R
 
 ## Navigation
 
-- Start with `rg -n "<capability-or-symbol>" apps packages tooling` to find the likely owner.
-- Open that owner and the first `rankedTests` result from `check` before expanding to neighboring files.
-- For a source path, query structural relationships with:
-
-  ```bash
-  bun --cwd tooling/repository-graph query -- impact <path>
-  bun --cwd tooling/repository-graph query -- check <path>
-  bun --cwd tooling/repository-graph query -- tests <path>
-  bun --cwd tooling/repository-graph query -- why <path>
-  ```
+- Start with `rg -n "<capability-or-symbol>" apps packages` to find the likely owner.
+- Open that owner and its matching tests before expanding to neighboring files.
 
 ## GREENFIELD PROJECT — BREAKING CHANGES ARE WELCOME!!!
 
@@ -55,4 +47,4 @@ Rika is a local coding-agent CLI and OpenTUI app written in Effect TypeScript. R
 - User-visible interactive behavior is tested in-process with `apps/rika/test/tui-app.ts` (`*.tui.test.ts`, run by `bun run test-tui` in CI): the real Surface on the OpenTUI test renderer, the real interactive loop, and the real product stack with a scripted model. Process-lifecycle and transport tests that spawn servers, PTYs, or kill fixtures use `*.proc.test.ts` and run by `bun run test-proc` in CI. `bun run check` and `bun run test` stay fast and deterministic: no child processes, no packaged binaries, and no wall-clock assertions — waits poll observable conditions with generous ceilings instead of asserting durations.
 - `bun run test` owns all deterministic checks. Use `@effect/vitest` and `TestClock` for Effect behavior and time; use `bun:test` only when a Bun API requires it.
 - Packaged-product verification lives in `bun run release-smoke` (after `bun run package`) and runs in the release workflow, not per push. Manual TUI acceptance uses the pilotty and agent-tty skills.
-- Run focused tests while working, then `bun run check` when the risk and time budget permit. Report what ran and what did not.
+- Run focused tests while working, then `bun run check` and `bun run test` when the risk and time budget permit. Report what ran and what did not.

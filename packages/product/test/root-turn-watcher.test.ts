@@ -9,7 +9,7 @@ import { expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import * as ResolvedContext from "../src/context/context-resolution-service"
 import type * as RootTurnOwner from "../src/thread/queue/root-turn-owner"
-import { watchRootTurn } from "../src/operation/interactive/root-turn-watcher"
+import { watchRootTurn } from "../src/operation/interactive/turn/observation"
 
 const thread: Thread.Thread = {
   id: Thread.ThreadId.make("thread"),

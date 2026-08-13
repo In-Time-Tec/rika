@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
-import * as Overflow from "../src/operation/interactive/interactive-runtime-feed-overflow"
+import * as Overflow from "../src/operation/interactive/view/feed"
 
 const threadId = Thread.ThreadId.make("thread")
 const turnId = Turn.TurnId.make("turn")

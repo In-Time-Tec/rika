@@ -1,6 +1,6 @@
 import * as TurnQueuePromotion from "../../thread/repository/turn-repository-queue"
-import type { InteractiveEvent } from "../interactive/interactive-runtime-event"
-import { queueItem } from "../interactive/interactive-session-queue"
+import type { InteractiveEvent } from "../interactive/session-event"
+import { queueItem } from "../interactive/turn/queue"
 
 export const queueMutationEvent = (queue: TurnQueuePromotion.QueueItemChange): InteractiveEvent => ({
   _tag: "QueueUpdated",
