@@ -1,7 +1,7 @@
 import * as ExecutionRequest from "@rika/product/execution-request"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import { Effect, Function, Context, Schema, Semaphore, Exit, Scope } from "effect"
+import { Effect, Function, Context, Schema, Semaphore, Exit, Scope, Deferred } from "effect"
 import { ModeId } from "@rika/configuration/behavior-mode"
 import { OperationUnavailable } from "../contract/product-operation"
 import { type InteractiveEvent } from "./session-event"
@@ -19,6 +19,7 @@ import type {
   InteractiveSession,
   InteractiveSessionInput,
   InteractiveSessionRuntimeResult,
+  InteractiveSupervisionError,
 } from "./session-contract"
 
 export type {
@@ -155,6 +156,7 @@ const makeInteractiveSupervisionComponentsImpl = (
     interactiveSinks: input.interactiveSinks,
     operationFeed: state.operationFeed,
     queueMutationEvent: input.queueMutationEvent,
+    initialized: input.supervisionInitialized,
   })
   const control = makeInteractiveControl({
     turns: Context.get(input.dependencyContext, TurnRepository.Service),
@@ -272,6 +274,7 @@ export const makeInteractiveSession = (
     settings: { readonly initialThreadId?: string; readonly serverOwner?: boolean } = {},
   ) {
     const sessionId = input.nextSessionId()
+    const supervisionInitialized = yield* Deferred.make<void, InteractiveSupervisionError>()
     const state: InteractiveSessionState = yield* makeInteractiveSessionState({
       sessionId,
       publishInteractiveActivity: input.publishInteractiveActivity,
@@ -293,6 +296,7 @@ export const makeInteractiveSession = (
       workspace,
       sessionId,
       serverOwner: settings.serverOwner ?? false,
+      supervisionInitialized,
       emit: state.emit,
       dispatchFailure: state.dispatchFailure,
       admit: state.composition.admit,
@@ -344,6 +348,7 @@ export const makeInteractiveSession = (
     return {
       session,
       supervise: supervision.supervise,
+      initialized: Deferred.await(supervisionInitialized),
       watchClaimed: (turnId: TurnId) => following.watchClaimedTurn(turnId, ignoreInteractiveEvent),
       close: typedLifecycleAdmission.withPermits(1)(
         Effect.suspend(() => {

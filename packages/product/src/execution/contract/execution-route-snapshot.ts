@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Schema, SchemaGetter } from "effect"
 import { ModelRegistrationIdentity } from "./model-registration-identity"
 import { ProviderConnectionSnapshot } from "./provider-connection-snapshot"
 import { defaultCompactionSummaryPrompt } from "./execution-compaction-prompt"
@@ -40,7 +40,28 @@ export const ExecutionRouteModelSnapshot = Schema.Struct({
 })
 export type ExecutionRouteModelSnapshot = typeof ExecutionRouteModelSnapshot.Type
 
-export const ExecutionRouteSnapshot = Schema.Struct({
+const ExecutionRouteSnapshotV1 = Schema.Struct({
+  version: Schema.Literal(1),
+  mode: Schema.String,
+  tokenBudget: Schema.optionalKey(Schema.Finite),
+  compaction: Schema.Struct({
+    strategy: Schema.Literal("default"),
+    summaryPrompt: Schema.String,
+  }),
+  title: ExecutionRouteModelSnapshot,
+  compactionSummary: ExecutionRouteModelSnapshot,
+  main: ExecutionRouteModelSnapshot,
+  oracle: ExecutionRouteModelSnapshot,
+  agents: Schema.Struct({
+    librarian: ExecutionRouteModelSnapshot,
+    painter: ExecutionRouteModelSnapshot,
+    readThread: ExecutionRouteModelSnapshot,
+    review: ExecutionRouteModelSnapshot,
+    surgeon: ExecutionRouteModelSnapshot,
+    task: ExecutionRouteModelSnapshot,
+  }),
+})
+const ExecutionRouteSnapshotV2 = Schema.Struct({
   version: Schema.Literal(2),
   mode: Schema.String,
   tokenBudget: Schema.optionalKey(Schema.Finite),
@@ -65,6 +86,19 @@ export const ExecutionRouteSnapshot = Schema.Struct({
     task: ExecutionRouteModelSnapshot,
   }),
 })
+export const ExecutionRouteSnapshot = Schema.Union([
+  ExecutionRouteSnapshotV2,
+  ExecutionRouteSnapshotV1,
+]).pipe(
+  Schema.decodeTo(Schema.toType(ExecutionRouteSnapshotV2), {
+    decode: SchemaGetter.transform((snapshot) =>
+      snapshot.version === 1
+        ? { ...snapshot, version: 2 as const, subagents: { maxDepth: 1, maxSubagents: 4 } }
+        : snapshot,
+    ),
+    encode: SchemaGetter.transform((snapshot) => snapshot),
+  }),
+)
 export type ExecutionRouteSnapshot = typeof ExecutionRouteSnapshot.Type
 
 export const testExecutionRoute = (mode = "test"): ExecutionRouteSnapshot => {
@@ -199,5 +233,5 @@ export const toExecutionRouteSnapshot = (routeValue: unknown): ExecutionRouteSna
   )
   for (const role of ["librarian", "painter", "readThread", "review", "surgeon", "task"] as const)
     validateModel(agents[role], role)
-  return Schema.decodeUnknownSync(ExecutionRouteSnapshot, { onExcessProperty: "error" })(route)
+  return Schema.decodeUnknownSync(ExecutionRouteSnapshotV2, { onExcessProperty: "error" })(route)
 }
