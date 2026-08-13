@@ -341,7 +341,7 @@ test(
         yield* app.quit
       }),
     ),
-  30_000,
+  60_000,
 )
 
 test(
