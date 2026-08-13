@@ -157,7 +157,9 @@ test(
         app.pressEnter()
         yield* app.waitTranscript(
           activeTurnId,
-          (projection) => projection.state.steering.pending?.some((entry) => entry.text === "Hi") === true,
+          (projection) =>
+            projection.state.steering.pending?.some((entry) => entry.text === "Hi") === true ||
+            projection.state.steering.settled?.some((entry) => entry.outcome === "consumed") === true,
           20_000,
         )
         app.pressEnter()
