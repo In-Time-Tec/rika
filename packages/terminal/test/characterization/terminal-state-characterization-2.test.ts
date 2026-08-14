@@ -332,7 +332,16 @@ test("steers a queued row into the active turn while idle with a queue", () => {
     requestId: "request-idle",
   })
   expect(model.pendingSteering).toEqual([])
-  expect(model.steeringRequests).toEqual([])
+  expect(model.steeringRequests).toEqual([
+    {
+      requestId: "request-idle",
+      turnId: "active",
+      text: "two",
+      origin: "queue",
+      queuedTurnId: "two",
+    },
+  ])
+  expect(model.queueSelection).toBeUndefined()
 })
 test("recalls composer history only when the queue is empty", () => {
   let model: Model = {
@@ -369,7 +378,7 @@ test("moves up into queued turns and down or Escape back to the composer", () =>
   expect(model.queueSelection).toBeUndefined()
   expect(model.pendingAction).toBeUndefined()
 })
-test("steers and dequeues only while a queued turn is selected", () => {
+test("steers a selected row and removes it from queue controls during handoff", () => {
   let model = replaceQueue({ ...initial("/work"), busy: true, activeTurnId: "active" }, [
     { id: "one", prompt: "one" },
     { id: "two", prompt: "two" },
@@ -386,9 +395,14 @@ test("steers and dequeues only while a queued turn is selected", () => {
     prompt: "two",
     requestId: "request-selected",
   })
+  expect(model.queueSelection).toBeUndefined()
   model = { ...model, pendingAction: undefined }
   model = update(model, { _tag: "KeyPressed", key: key({ name: "backspace" }) })
-  expect(model.pendingAction).toEqual({ _tag: "Dequeue", id: "two" })
+  expect(model.pendingAction).toBeUndefined()
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
+  expect(model.queueSelection).toBe("one")
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "backspace" }) })
+  expect(model.pendingAction).toEqual({ _tag: "Dequeue", id: "one" })
 })
 test("leaves the queue unchanged when Backspace is pressed from the composer", () => {
   const model = update(

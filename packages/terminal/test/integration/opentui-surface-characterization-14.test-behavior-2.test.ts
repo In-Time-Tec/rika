@@ -75,6 +75,74 @@ test("shows the editing hint inline on the queued row being edited", () =>
       }
     }),
   ))
+test("keeps a steering row visible from local request through Baton acceptance", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const base = resetQueue(
+        {
+          ...initial("/work", "medium"),
+          busy: true,
+          activeTurnId: "active",
+          currentThreadId: "thread",
+          width: 80,
+          height: 24,
+        },
+        "thread",
+        1,
+        [{ id: "queued", prompt: "keep this visible" }],
+      )
+      const requested = {
+        ...base,
+        queueSelection: undefined,
+        steeringRequests: [
+          {
+            requestId: "request",
+            turnId: "active",
+            text: "keep this visible",
+            origin: "queue" as const,
+            queuedTurnId: "queued",
+          },
+        ],
+      }
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      try {
+        surface.update(requested)
+        yield* openTui(() => setup.renderOnce())
+        expect(setup.captureCharFrame()).toContain("steering: keep this visible")
+
+        const withdrawn = applyQueueDelta(requested, "thread", 2, { _tag: "Removed", turnId: "queued" }, 0).model
+        surface.update(withdrawn)
+        yield* openTui(() => setup.renderOnce())
+        expect(setup.captureCharFrame()).toContain("steering: keep this visible")
+
+        const accepted = {
+          ...withdrawn,
+          steeringRequests: [],
+          pendingSteering: [
+            {
+              runId: "run",
+              entryId: "entry",
+              requestId: "request",
+              turnId: "active",
+              sequence: 1,
+              text: "keep this visible",
+            },
+          ],
+        }
+        surface.update(accepted)
+        yield* openTui(() => setup.renderOnce())
+        expect(setup.captureCharFrame()).toContain("steering: keep this visible")
+
+        surface.update({ ...accepted, pendingSteering: [] })
+        yield* openTui(() => setup.renderOnce())
+        expect(setup.captureCharFrame()).not.toContain("steering: keep this visible")
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
 test("removes a promoted prompt from the queue when it starts", () =>
   Effect.runPromise(
     Effect.gen(function* () {

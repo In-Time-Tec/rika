@@ -114,7 +114,10 @@ const reduceKeyboardImpl = (
         model.detailSelection !== undefined
       )
         return update(model, { _tag: "DetailToggled" })
-      const queued = model.queue as ReadonlyArray<QueueItem>
+      const steeringQueueIds = new Set(
+        model.steeringRequests.flatMap((request) => (request.origin === "queue" ? [request.queuedTurnId] : [])),
+      )
+      const queued = (model.queue as ReadonlyArray<QueueItem>).filter((item) => !steeringQueueIds.has(item.id))
       if (model.input.length === 0 && queued.length > 0 && model.editingTurnId === undefined) {
         const current = queued.findIndex((item) => item.id === model.queueSelection)
         if (current < 0) {
@@ -156,6 +159,17 @@ const reduceKeyboardImpl = (
           if (key.name === "return" && model.activeTurnId !== undefined && message.steeringRequestId !== undefined)
             return {
               ...model,
+              queueSelection: undefined,
+              steeringRequests: [
+                ...model.steeringRequests,
+                {
+                  requestId: message.steeringRequestId,
+                  turnId: model.activeTurnId,
+                  text: selected.prompt,
+                  origin: "queue",
+                  queuedTurnId: selected.id,
+                },
+              ],
               pendingAction: {
                 _tag: "SteerQueued",
                 id: selected.id,

@@ -123,12 +123,21 @@ export const Model = Schema.Struct({
     }),
   ),
   steeringRequests: Schema.Array(
-    Schema.Struct({
-      requestId: Schema.String,
-      turnId: Schema.String,
-      text: Schema.String,
-      origin: Schema.Literals(["composer", "queue"]),
-    }),
+    Schema.Union([
+      Schema.Struct({
+        requestId: Schema.String,
+        turnId: Schema.String,
+        text: Schema.String,
+        origin: Schema.Literal("composer"),
+      }),
+      Schema.Struct({
+        requestId: Schema.String,
+        turnId: Schema.String,
+        text: Schema.String,
+        origin: Schema.Literal("queue"),
+        queuedTurnId: Schema.String,
+      }),
+    ]),
   ),
   cancelPending: Schema.Boolean,
   busy: Schema.Boolean,
