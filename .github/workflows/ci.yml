@@ -87,6 +87,8 @@ jobs:
           noise="$(sh -lc true 2>&1)"
           [ -z "$noise" ] || { echo "login shells emit profile noise: $noise"; exit 1; }
       - name: TUI app tests
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: bun run test-tui
 
   proc:
