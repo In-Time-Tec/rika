@@ -97,7 +97,7 @@ const backendFor = (snapshot: (id: Turn.TurnId) => ExecutionProjection.Snapshot)
     approveTurn: () => Effect.void,
     denyTurn: () => Effect.void,
     watchTurn: (link) => Stream.make(snapshot(Turn.TurnId.make(link.turnId))),
-    inspectTurn: () => Effect.succeed({ status: "completed" }),
+    inspectTurn: () => Effect.succeed({ status: "completed", cursor: "cursor-a" }),
   })
 
 const runPrompt = {

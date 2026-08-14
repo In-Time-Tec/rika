@@ -28,7 +28,8 @@ it.effect("delegates the five execution operations through the deferred backend"
           approveTurn: () => Effect.sync(() => calls.push("approve")),
           denyTurn: () => Effect.sync(() => calls.push("deny")),
           watchTurn: () => Stream.fromEffect(Effect.sync(() => calls.push("watch"))).pipe(Stream.drain),
-          inspectTurn: () => Effect.sync(() => (calls.push("inspect"), { status: "running" as const })),
+          inspectTurn: () =>
+            Effect.sync(() => (calls.push("inspect"), { status: "running" as const, cursor: "opaque-cursor" })),
         }),
       )
       const context = yield* Layer.build(lazyBackendLayer(service))
@@ -52,7 +53,7 @@ it.effect("delegates the five execution operations through the deferred backend"
       yield* backend.approveTurn(link, authorization)
       yield* backend.denyTurn(link, authorization)
       yield* Stream.runDrain(backend.watchTurn(link))
-      expect(yield* backend.inspectTurn(link)).toEqual({ status: "running" })
+      expect(yield* backend.inspectTurn(link)).toEqual({ status: "running", cursor: "opaque-cursor" })
       expect(calls).toEqual(["start", "cancel", "steer", "approve", "deny", "watch", "inspect"])
     }),
   ),

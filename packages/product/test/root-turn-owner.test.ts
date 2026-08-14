@@ -8,7 +8,8 @@ import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import type * as TurnRepositorySteering from "@rika/product/turn-repository-steering"
-import { Deferred, Effect, Exit, Fiber, Schema, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Schema, Stream } from "effect"
+import { TestClock } from "effect/testing"
 import { unitOrder } from "@rika/transcript/transcript-unit-order"
 
 const encodeStartTurn = Schema.encodeSync(Schema.fromJsonString(ExecutionGateway.StartTurn))
@@ -82,7 +83,7 @@ it.effect("returns stored terminal state and units when checkpoint resume yields
       } as TranscriptRepository.Interface,
       {
         watchTurn: () => Stream.empty,
-        inspectTurn: () => Effect.succeed({ status: "completed" as const }),
+        inspectTurn: () => Effect.succeed({ status: "completed" as const, cursor: "stored-cursor" }),
       } as ExecutionGateway.Interface,
     )
     const result = yield* owner.watchTurn(turn.id)
@@ -131,6 +132,7 @@ it.effect("passes the included pricing class to the backend for an OpenAI accoun
         usage: ExecutionProjection.emptyUsageState(),
         steering: { steeringMessages: 0, followUpMessages: 0 },
       },
+      projectorCheckpoint: { version: ExecutionProjection.projectionVersion, cursor: "account", state: "{}" },
       projectionVersion: ExecutionProjection.projectionVersion,
     }
     let receivedPricing: string | undefined
@@ -145,7 +147,7 @@ it.effect("passes the included pricing class to the backend for an OpenAI accoun
           receivedPricing = input?.pricing
           return Stream.empty
         },
-        inspectTurn: () => Effect.succeed({ status: "completed" as const }),
+        inspectTurn: () => Effect.succeed({ status: "completed" as const, cursor: "account" }),
       } as ExecutionGateway.Interface,
     )
     yield* owner.watchTurn(accountTurn.id)
@@ -209,7 +211,7 @@ it.effect("commits and delivers each live change once without retaining or redel
           watches += 1
           return watches === 1 ? Stream.fromIterable([running, completed]) : Stream.empty
         },
-        inspectTurn: () => Effect.succeed({ status: "completed" as const }),
+        inspectTurn: () => Effect.succeed({ status: "completed" as const, cursor: "completed" }),
       } as ExecutionGateway.Interface,
     )
     const delivered: Array<ExecutionProjection.Change> = []
@@ -233,6 +235,151 @@ it.effect("commits and delivers each live change once without retaining or redel
     expect(commits).toHaveLength(2)
     expect(resumed.status).toBe("completed")
     expect(Object.hasOwn(resumed, "changes")).toBe(false)
+  }),
+)
+
+it.effect("propagates a consumer callback defect instead of treating it as a reconnect", () =>
+  Effect.gen(function* () {
+    const running: ExecutionProjection.Change = {
+      _tag: "ProjectionSnapshot",
+      revision: 1,
+      checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "running", state: "{}" },
+      units: [],
+      hasOlder: false,
+      state: {
+        status: "running",
+        usage: ExecutionProjection.emptyUsageState(),
+        steering: { steeringMessages: 0, followUpMessages: 0 },
+      },
+    }
+    let watches = 0
+    let commits = 0
+    let inspections = 0
+    const owner = yield* make(
+      { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
+      {
+        get: () => Effect.void,
+        commitProjection: () => Effect.sync(() => ((commits += 1), "committed" as const)),
+      } as TranscriptRepository.Interface,
+      {
+        watchTurn: () => {
+          watches += 1
+          return Stream.succeed(running)
+        },
+        inspectTurn: () =>
+          Effect.sync(() => {
+            inspections += 1
+            return { status: "running" as const, cursor: "running" }
+          }),
+      } as ExecutionGateway.Interface,
+    )
+
+    const result = yield* owner
+      .watchTurn(turn.id, () => {
+        throw new Error("consumer callback defect")
+      })
+      .pipe(Effect.exit)
+
+    expect(result._tag).toBe("Failure")
+    if (result._tag === "Failure") expect(Cause.pretty(result.cause)).toContain("consumer callback defect")
+    expect(watches).toBe(1)
+    expect(commits).toBe(1)
+    expect(inspections).toBe(0)
+  }),
+)
+
+it.effect("reloads the committed checkpoint when another projector makes a change stale", () =>
+  Effect.gen(function* () {
+    const running: ExecutionProjection.Change = {
+      _tag: "ProjectionSnapshot",
+      revision: 1,
+      checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "running", state: "{}" },
+      units: [],
+      hasOlder: false,
+      state: {
+        status: "running",
+        usage: ExecutionProjection.emptyUsageState(),
+        steering: { steeringMessages: 0, followUpMessages: 0 },
+      },
+    }
+    const completed: ExecutionProjection.Change = {
+      _tag: "ProjectionPatch",
+      baseRevision: 1,
+      revision: 2,
+      checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "completed", state: "{}" },
+      upsert: [],
+      remove: [],
+      state: {
+        status: "completed",
+        usage: ExecutionProjection.emptyUsageState(),
+        steering: { steeringMessages: 0, followUpMessages: 0 },
+      },
+    }
+    const stale = yield* Deferred.make<void>()
+    let stored: Projection | undefined
+    const commits = new Array<ExecutionProjection.Change>()
+    const delivered = new Array<ExecutionProjection.Change>()
+    const cursors = new Array<string | undefined>()
+    const owner = yield* make(
+      { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
+      {
+        get: () => Effect.succeed(stored),
+        commitProjection: (_turn, change) =>
+          Effect.gen(function* () {
+            commits.push(change)
+            if (commits.length === 1) {
+              stored = {
+                turn,
+                units: [],
+                checkpointGeneration: 1,
+                revision: 1,
+                state: running.state,
+                projectorCheckpoint: {
+                  version: ExecutionProjection.projectionVersion,
+                  cursor: "winner",
+                  state: "{}",
+                },
+                projectionVersion: ExecutionProjection.projectionVersion,
+              }
+              yield* Deferred.succeed(stale, undefined)
+              return "stale" as const
+            }
+            stored = {
+              turn,
+              units: change._tag === "ProjectionSnapshot" ? change.units : (stored?.units ?? []),
+              checkpointGeneration: (stored?.checkpointGeneration ?? 0) + 1,
+              revision: change.revision,
+              state: change.state,
+              ...(change.checkpoint === undefined ? {} : { projectorCheckpoint: change.checkpoint }),
+              projectionVersion: ExecutionProjection.projectionVersion,
+            }
+            return "committed" as const
+          }),
+      } as TranscriptRepository.Interface,
+      {
+        watchTurn: (_link, input) => {
+          cursors.push(input?.checkpoint?.cursor)
+          return Stream.succeed(input?.checkpoint?.cursor === "winner" ? completed : running)
+        },
+        inspectTurn: () => Effect.succeed({ status: "completed" as const, cursor: "completed" }),
+      } as ExecutionGateway.Interface,
+    )
+    const fiber = yield* Effect.forkChild(owner.watchTurn(turn.id, (change) => delivered.push(change)))
+    yield* Deferred.await(stale)
+
+    yield* TestClock.adjust("99 millis")
+    expect(cursors).toEqual([undefined])
+    yield* TestClock.adjust("1 millis")
+    const result = yield* Fiber.join(fiber)
+
+    expect(cursors).toEqual([undefined, "winner"])
+    expect(commits).toEqual([running, completed])
+    expect(delivered).toEqual([completed])
+    expect(result).toMatchObject({
+      status: "completed",
+      state: { status: "completed" },
+      checkpoint: { cursor: "completed" },
+    })
   }),
 )
 
@@ -574,6 +721,7 @@ it.effect("does not accept a terminal projection while the durable parent run re
         usage: ExecutionProjection.emptyUsageState(),
         steering: { steeringMessages: 0, followUpMessages: 0 },
       },
+      projectorCheckpoint: { version: ExecutionProjection.projectionVersion, cursor: "durable", state: "{}" },
       projectionVersion: 1,
     }
     let durableStatus: "waiting" | "completed" = "waiting"
@@ -588,7 +736,7 @@ it.effect("does not accept a terminal projection while the durable parent run re
       {
         startTurn: () => Effect.sync(() => ((starts += 1), link)),
         watchTurn: () => Stream.empty,
-        inspectTurn: () => Effect.succeed({ status: durableStatus }),
+        inspectTurn: () => Effect.succeed({ status: durableStatus, cursor: "durable" }),
       } as ExecutionGateway.Interface,
     )
 
@@ -673,6 +821,7 @@ it.effect("keeps preview traffic out of the transcript repository and final resu
     const completed: ExecutionProjection.Change = {
       _tag: "ProjectionSnapshot",
       revision: 1,
+      checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "preview-completed", state: "{}" },
       units: [],
       hasOlder: false,
       state: {
@@ -717,7 +866,7 @@ it.effect("keeps preview traffic out of the transcript repository and final resu
         } as TranscriptRepository.Interface,
         {
           watchTurn: () => Stream.fromIterable(enabled ? [...previews, completed] : [completed]),
-          inspectTurn: () => Effect.succeed({ status: "completed" as const }),
+          inspectTurn: () => Effect.succeed({ status: "completed" as const, cursor: "preview-completed" }),
         } as ExecutionGateway.Interface,
       )
       const result = yield* owner.watchTurn(

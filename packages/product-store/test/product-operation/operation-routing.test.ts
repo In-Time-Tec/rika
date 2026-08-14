@@ -177,7 +177,7 @@ describe("Operation", () => {
           ExecutionGateway.Service,
           ExecutionGateway.Service.of({
             ...backend,
-            inspectTurn: () => Effect.succeed({ status: "running" }),
+            inspectTurn: () => Effect.succeed({ status: "running", cursor: "synthetic-running-cursor" }),
             startTurn: (input) =>
               Ref.update(starts, (count) => count + 1).pipe(Effect.andThen(backend.startTurn(input))),
           }),

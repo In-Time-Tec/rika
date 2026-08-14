@@ -59,7 +59,7 @@ export const backend = ExecutionGateway.Service.of({
   approveTurn: () => Effect.void,
   denyTurn: () => Effect.void,
   watchTurn: (link) => Stream.make(projectionSnapshot(link.turnId, "completed", "cursor-b", "answer")),
-  inspectTurn: () => Effect.succeed({ status: "completed" }),
+  inspectTurn: () => Effect.succeed({ status: "completed", cursor: "cursor-b" }),
 })
 
 export const projectionSnapshot: {

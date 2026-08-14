@@ -280,7 +280,7 @@ describe("Operation", () => {
       })
       const forkBackend = ExecutionGateway.Service.of({
         ...backend,
-        inspectTurn: () => Effect.succeed({ status: "running" }),
+        inspectTurn: () => Effect.succeed({ status: "running", cursor: "synthetic-running-cursor" }),
         startTurn: (input) =>
           Effect.succeed({ runId: "atomic-fork-run", turnId: input.turnId, threadId: input.threadId }),
       })

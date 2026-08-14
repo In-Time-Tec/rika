@@ -178,9 +178,12 @@ it.layer(BunServices.layer)("SQLite turn admission outbox", (test) => {
             Deferred.succeed(steeringDelivered, undefined).pipe(
               Effect.as({ entryId: "legacy-route-recovery-entry", sequence: 0 }),
             ),
-          inspectTurn: () =>
+          inspectTurn: (target) =>
             Deferred.isDone(steeringDelivered).pipe(
-              Effect.map((delivered) => ({ status: delivered ? ("completed" as const) : ("running" as const) })),
+              Effect.map((delivered) => ({
+                status: delivered ? ("completed" as const) : ("running" as const),
+                cursor: `${target.turnId}-${delivered ? "completed" : "running"}`,
+              })),
             ),
           watchTurn: (target) =>
             target.turnId === activeId

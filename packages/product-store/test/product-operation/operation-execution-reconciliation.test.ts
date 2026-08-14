@@ -40,7 +40,9 @@ const makeBackend = (status: { readonly _tag: "unavailable" } | { readonly _tag:
       inspectTurn: () =>
         Ref.updateAndGet(inspectCount, (count) => count + 1).pipe(
           Effect.as(
-            status._tag === "unavailable" ? ({ status: "unavailable" } as const) : ({ status: "running" } as const),
+            status._tag === "unavailable"
+              ? ({ status: "unavailable" } as const)
+              : ({ status: "running", cursor: "synthetic-running-cursor" } as const),
           ),
         ),
     })

@@ -95,6 +95,9 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
       }).pipe(
         Effect.catch((error) =>
           Effect.gen(function* () {
+            const current = yield* turns.get(turn.id)
+            if (current?._tag === "AgentExecution" && current.executionLink !== undefined)
+              return yield* Effect.failCause(Cause.fail(error))
             const failedAt = yield* Clock.currentTimeMillis
             yield* Effect.logError("turn.failed").pipe(
               Effect.annotateLogs({

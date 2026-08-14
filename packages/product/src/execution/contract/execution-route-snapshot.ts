@@ -86,10 +86,7 @@ const ExecutionRouteSnapshotV2 = Schema.Struct({
     task: ExecutionRouteModelSnapshot,
   }),
 })
-export const ExecutionRouteSnapshot = Schema.Union([
-  ExecutionRouteSnapshotV2,
-  ExecutionRouteSnapshotV1,
-]).pipe(
+export const ExecutionRouteSnapshot = Schema.Union([ExecutionRouteSnapshotV2, ExecutionRouteSnapshotV1]).pipe(
   Schema.decodeTo(Schema.toType(ExecutionRouteSnapshotV2), {
     decode: SchemaGetter.transform((snapshot) =>
       snapshot.version === 1

@@ -92,7 +92,10 @@ describe("turn retry", () => {
       const retryingBackend = ExecutionGateway.Service.of({
         ...backend,
         inspectTurn: (link) =>
-          Effect.succeed({ status: link.turnId === "turn-1" ? ("failed" as const) : ("completed" as const) }),
+          Effect.succeed({
+            status: link.turnId === "turn-1" ? ("failed" as const) : ("completed" as const),
+            cursor: link.turnId === "turn-1" ? "cursor-fail" : "cursor-ok",
+          }),
         watchTurn: (link) => {
           calls += 1
           if (calls === 1)

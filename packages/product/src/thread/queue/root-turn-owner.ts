@@ -375,78 +375,147 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
             message: `Turn ${turnId} has no persisted execution link`,
           })
         const executionLink = turn.executionLink
-        const projection = yield* transcripts.get(turnId)
         const pricing = turn.executionRoute.main.candidates.some(
           (candidate) => candidate.providerConnection.authentication === "account",
         )
           ? "included"
           : "metered"
         let latestChange: ExecutionProjection.Change | undefined
-        yield* backend
-          .watchTurn(executionLink, {
-            prompt: turn.prompt,
-            pricing,
-            ...(projection === undefined ? {} : { units: projection.units }),
-            ...(projection?.projectorCheckpoint === undefined ? {} : { checkpoint: projection.projectorCheckpoint }),
-          })
-          .pipe(
-            Stream.runForEach((event) =>
-              event._tag === "ModelPreview" || event._tag === "ModelPreviewCleared"
-                ? Effect.sync(() => onPreview?.(event))
-                : Effect.gen(function* () {
-                    const committed = yield* transcripts.commitProjection(turn, event)
-                    if (committed === "stale")
-                      return yield* TranscriptRepository.RepositoryError.make({
-                        message: `Turn ${turnId} projection revision is stale`,
+        let retryDelay = 100
+        while (true) {
+          let progressed = false
+          let callbackCause: Cause.Cause<never> | undefined
+          const attempt = yield* Effect.exit(
+            Effect.gen(function* () {
+              const projection = yield* transcripts.get(turnId)
+              const pendingTerminal = new Array<ExecutionProjection.Change>()
+              const notify = (callback: () => void) =>
+                Effect.sync(callback).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.sync(() => {
+                      callbackCause = cause
+                    }).pipe(Effect.andThen(Effect.failCause(cause))),
+                  ),
+                )
+              const commit = (change: ExecutionProjection.Change) =>
+                Effect.gen(function* () {
+                  const committed = yield* transcripts.commitProjection(turn, change)
+                  if (committed === "stale")
+                    return yield* TranscriptRepository.RepositoryError.make({
+                      message: `Turn ${turnId} projection revision is stale`,
+                    })
+                  latestChange = change
+                  progressed = true
+                  yield* notify(() => onChange?.(change))
+                })
+              yield* backend
+                .watchTurn(executionLink, {
+                  prompt: turn.prompt,
+                  pricing,
+                  ...(projection === undefined ? {} : { units: projection.units }),
+                  ...(projection?.projectorCheckpoint === undefined
+                    ? {}
+                    : { checkpoint: projection.projectorCheckpoint }),
+                })
+                .pipe(
+                  Stream.runForEach((event) => {
+                    if (event._tag === "ModelPreview" || event._tag === "ModelPreviewCleared")
+                      return notify(() => onPreview?.(event))
+                    if (pendingTerminal.length > 0 && !ExecutionStatus.isTerminalStatus(event.state.status))
+                      return TranscriptRepository.RepositoryError.make({
+                        message: `Turn ${turnId} projected a nonterminal change after terminal revision ${pendingTerminal.at(-1)!.revision}`,
                       })
-                    latestChange = event
-                    onChange?.(event)
+                    if (ExecutionStatus.isTerminalStatus(event.state.status)) {
+                      pendingTerminal.push(event)
+                      return Effect.void
+                    }
+                    return commit(event)
                   }),
-            ),
+                )
+              const inspection = yield* backend.inspectTurn(executionLink)
+              if (
+                pendingTerminal.length > 0 &&
+                inspection.status !== "unavailable" &&
+                ExecutionStatus.isTerminalStatus(inspection.status)
+              ) {
+                const last = pendingTerminal.at(-1)!
+                if (
+                  pendingTerminal.some((change) => change.state.status !== inspection.status) ||
+                  last.checkpoint?.cursor !== inspection.cursor
+                )
+                  return yield* TranscriptRepository.RepositoryError.make({
+                    message: `Turn ${turnId} terminal projection does not match Baton inspection at ${inspection.cursor}`,
+                  })
+                yield* Effect.forEach(pendingTerminal, commit, { discard: true })
+                pendingTerminal.length = 0
+              }
+              const stored = yield* transcripts.get(turnId)
+              if (
+                inspection.status !== "unavailable" &&
+                ExecutionStatus.isTerminalStatus(inspection.status) &&
+                stored?.projectorCheckpoint?.cursor !== inspection.cursor
+              )
+                return yield* TranscriptRepository.RepositoryError.make({
+                  message: `Turn ${turnId} projection cursor does not match terminal Baton inspection at ${inspection.cursor}`,
+                })
+              return { stored, inspection, hasUncommittedTerminal: pendingTerminal.length > 0 }
+            }),
           )
-        const stored = yield* transcripts.get(turnId)
-        const checkpoint =
-          latestChange?._tag === "ProjectionPatch"
-            ? latestChange.checkpoint
-            : (latestChange?.checkpoint ?? stored?.projectorCheckpoint)
-        const fallbackStatus =
-          turn.status === "completed" ||
-          turn.status === "failed" ||
-          turn.status === "cancelled" ||
-          turn.status === "waiting" ||
-          turn.status === "cancelling"
-            ? turn.status
-            : "running"
-        const projectedState = latestChange?.state ?? stored?.state
-        const inspection = yield* Effect.option(backend.inspectTurn(executionLink))
-        const durableStatus =
-          inspection._tag === "Some" &&
-          inspection.value.status !== "unavailable" &&
-          inspection.value.status !== "accepted" &&
-          inspection.value.status !== "queued"
-            ? inspection.value.status
-            : undefined
-        const projectedStatus =
-          projectedState !== undefined && !ExecutionStatus.isTerminalStatus(projectedState.status)
-            ? projectedState.status
-            : fallbackStatus
-        const state =
-          projectedState === undefined
-            ? {
-                status: durableStatus ?? projectedStatus,
-                usage: ExecutionProjection.emptyUsageState(),
-                steering: { steeringMessages: 0, followUpMessages: 0 },
-              }
-            : {
-                ...projectedState,
-                status: durableStatus ?? projectedStatus,
-              }
-        return {
-          turnId: String(turnId),
-          status: state.status,
-          state,
-          units: stored?.units ?? [],
-          ...(checkpoint === undefined ? {} : { checkpoint }),
+          if (attempt._tag === "Failure") {
+            if (callbackCause !== undefined) return yield* Effect.failCause(callbackCause)
+            if (Cause.hasInterrupts(attempt.cause)) return yield* Effect.interrupt
+            const delay = progressed ? 100 : retryDelay
+            retryDelay = Math.min(delay * 2, 5_000)
+            yield* Effect.logWarning("root-turn-owner.watch.reconnecting").pipe(
+              Effect.annotateLogs({
+                "rika.turn.id": String(turnId),
+                "rika.retry.delay.ms": delay,
+                "rika.failure.message": Cause.pretty(attempt.cause),
+              }),
+            )
+            yield* Effect.sleep(delay)
+            continue
+          }
+          const { hasUncommittedTerminal, inspection, stored } = attempt.value
+          if (hasUncommittedTerminal || inspection.status === "running") {
+            const delay = progressed ? 100 : retryDelay
+            retryDelay = Math.min(delay * 2, 5_000)
+            yield* Effect.sleep(delay)
+            continue
+          }
+          const storedIsNewest =
+            stored !== undefined && (latestChange === undefined || stored.revision >= latestChange.revision)
+          const checkpoint = storedIsNewest ? stored.projectorCheckpoint : latestChange?.checkpoint
+          const projectedState = storedIsNewest ? stored.state : latestChange?.state
+          const fallbackStatus = turn.status === "waiting" || turn.status === "cancelling" ? turn.status : "running"
+          const projectedStatus =
+            projectedState !== undefined && !ExecutionStatus.isTerminalStatus(projectedState.status)
+              ? projectedState.status
+              : fallbackStatus
+          const inspectedTerminalStatus =
+            inspection.status !== "unavailable" && ExecutionStatus.isTerminalStatus(inspection.status)
+              ? inspection.status
+              : undefined
+          const inspectedActiveStatus =
+            inspection.status === "waiting" || inspection.status === "cancelling" ? inspection.status : undefined
+          const state =
+            projectedState === undefined
+              ? {
+                  status: inspectedTerminalStatus ?? inspectedActiveStatus ?? projectedStatus,
+                  usage: ExecutionProjection.emptyUsageState(),
+                  steering: { steeringMessages: 0, followUpMessages: 0 },
+                }
+              : {
+                  ...projectedState,
+                  status: inspectedTerminalStatus ?? inspectedActiveStatus ?? projectedStatus,
+                }
+          return {
+            turnId: String(turnId),
+            status: state.status,
+            state,
+            units: stored?.units ?? [],
+            ...(checkpoint === undefined ? {} : { checkpoint }),
+          }
         }
       }),
     install: (installed) =>
