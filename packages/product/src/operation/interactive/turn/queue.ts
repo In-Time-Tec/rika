@@ -404,6 +404,7 @@ export const promotePendingTurns = (input: {
         )
         if (outcome._tag === "Failure") {
           const current = yield* input.turns.get(promoted.id)
+          if (current?._tag === "AgentExecution" && current.executionLink !== undefined) return false
           if (current?.status === "running")
             yield* input.setTurnStatus(promoted.id, "failed", yield* Clock.currentTimeMillis)
           else {

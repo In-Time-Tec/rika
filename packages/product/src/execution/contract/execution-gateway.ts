@@ -41,7 +41,10 @@ export interface Interface {
   ) => Stream.Stream<WatchEvent, WatchTurnFailure>
   readonly inspectTurn: (
     link: ExecutionLink,
-  ) => Effect.Effect<{ readonly status: Status | "unavailable"; readonly cursor?: string }, InspectTurnFailure>
+  ) => Effect.Effect<
+    { readonly status: "unavailable" } | { readonly status: Status; readonly cursor: string },
+    InspectTurnFailure
+  >
 }
 
 export class Service extends Context.Service<Service, Interface>()(

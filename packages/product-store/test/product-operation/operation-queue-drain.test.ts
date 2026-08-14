@@ -55,7 +55,7 @@ const openSession = (
   })
 
 describe("Operation queue drain", () => {
-  it.effect("promotes queued turns after a directly submitted turn fails", () =>
+  it.effect("promotes queued turns after Baton terminalizes a directly submitted turn", () =>
     Effect.gen(function* () {
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
@@ -68,18 +68,16 @@ describe("Operation queue drain", () => {
       const failFirst = yield* Deferred.make<void>()
       const failingBackend = ExecutionGateway.Service.of({
         ...backend,
+        inspectTurn: (link) =>
+          link.turnId === "turn-1"
+            ? Effect.succeed({ status: "failed" as const, cursor: "turn-1-failed" })
+            : backend.inspectTurn(link),
         watchTurn: (link) =>
           link.turnId === "turn-1"
             ? Stream.concat(
                 Stream.make(projectionSnapshot(link.turnId, "running", "turn-1-running")),
                 Stream.fromEffect(Deferred.await(failFirst)).pipe(
-                  Stream.flatMap(() =>
-                    Stream.fail(
-                      ExecutionGateway.WatchTurnFailure.make({
-                        message: "The model provider rate-limited the request. Wait a moment, then try again.",
-                      }),
-                    ),
-                  ),
+                  Stream.map(() => projectionSnapshot(link.turnId, "failed", "turn-1-failed")),
                 ),
               )
             : backend.watchTurn(link),
@@ -129,7 +127,11 @@ describe("Operation queue drain", () => {
       const failingBackend = ExecutionGateway.Service.of({
         ...backend,
         inspectTurn: (link) =>
-          Effect.succeed({ status: link.turnId === "turn-2" ? ("failed" as const) : ("completed" as const) }),
+          Effect.sync(() => {
+            if (link.turnId === "turn-1") return { status: "completed" as const, cursor: "turn-1-completed" }
+            if (link.turnId === "turn-2") return { status: "failed" as const, cursor: "turn-2-failed" }
+            return { status: "completed" as const, cursor: "cursor-b" }
+          }),
         watchTurn: (link) => {
           if (link.turnId === "turn-1")
             return Stream.concat(

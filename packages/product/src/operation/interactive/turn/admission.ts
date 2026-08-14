@@ -139,6 +139,8 @@ const settleInteractiveSubmissionImpl = (
   return Effect.uninterruptible(
     Effect.gen(function* () {
       if (outcome._tag === "Failure") {
+        const current = yield* (yield* TurnRepository.Service).get(turn.id)
+        if (current?._tag === "AgentExecution" && current.executionLink !== undefined) return { _tag: "settled" }
         if (Cause.hasInterruptsOnly(outcome.cause)) {
           yield* setTurnStatus(turn.id, "cancelled", yield* Clock.currentTimeMillis)
           return { _tag: "settled" }

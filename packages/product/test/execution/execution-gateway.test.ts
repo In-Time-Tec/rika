@@ -37,7 +37,8 @@ it.effect("passes one opaque execution link through all gateway operations", () 
         }),
       approveTurn: (received, input) => Effect.sync(() => void observed.push(["approve", received, input])),
       denyTurn: (received, input) => Effect.sync(() => void observed.push(["deny", received, input])),
-      inspectTurn: (received) => Effect.sync(() => (observed.push(["inspect", received]), { status: "running" })),
+      inspectTurn: (received) =>
+        Effect.sync(() => (observed.push(["inspect", received]), { status: "running", cursor: "opaque-cursor" })),
     })
     const started = yield* gateway.startTurn({
       threadId: "thread-1",

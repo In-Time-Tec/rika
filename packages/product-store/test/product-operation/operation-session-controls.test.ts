@@ -112,7 +112,7 @@ describe("Operation", () => {
       const cancellationReasons = yield* Ref.make<ReadonlyArray<string>>([])
       const interruptBackend = ExecutionGateway.Service.of({
         ...backend,
-        inspectTurn: () => Effect.succeed({ status: "running" }),
+        inspectTurn: () => Effect.succeed({ status: "running", cursor: "synthetic-running-cursor" }),
         watchTurn: () => Stream.never,
         cancelTurn: (_link, reason) => Ref.update(cancellationReasons, (reasons) => [...reasons, reason]),
       })
@@ -169,7 +169,12 @@ describe("Operation", () => {
             Effect.as({ runId: "hosted-queue-run", turnId: input.turnId, threadId: input.threadId }),
           ),
         watchTurn: () => Stream.never,
-        inspectTurn: (link) => Effect.succeed({ status: link.turnId === "busy" ? "running" : "unavailable" }),
+        inspectTurn: (link) =>
+          Effect.succeed(
+            link.turnId === "busy"
+              ? ({ status: "running", cursor: "busy-running-cursor" } as const)
+              : ({ status: "unavailable" } as const),
+          ),
       })
       const turns = yield* TurnRepository.makeMemory([
         {
@@ -283,9 +288,12 @@ describe("Operation", () => {
         inspectTurn: (link) =>
           link.turnId === "active-control"
             ? Deferred.isDone(activeCancelled).pipe(
-                Effect.map((done) => ({ status: done ? ("cancelled" as const) : ("running" as const) })),
+                Effect.map((done) => ({
+                  status: done ? ("cancelled" as const) : ("running" as const),
+                  cursor: done ? "active-control-cancelled" : "active-control-started",
+                })),
               )
-            : Effect.succeed({ status: "completed" }),
+            : Effect.succeed({ status: "completed", cursor: "cursor-b" }),
         watchTurn: (link, cursor) =>
           link.turnId === "active-control"
             ? Stream.concat(
@@ -415,10 +423,16 @@ describe("Operation", () => {
         inspectTurn: (link) =>
           link.turnId === activeId
             ? Deferred.isDone(activeCompleted).pipe(
-                Effect.map((done) => ({ status: done ? ("completed" as const) : ("running" as const) })),
+                Effect.map((done) => ({
+                  status: done ? ("completed" as const) : ("running" as const),
+                  cursor: done ? "active-completed" : "active-running",
+                })),
               )
             : Deferred.isDone(promotedCancelled).pipe(
-                Effect.map((done) => ({ status: done ? ("cancelled" as const) : ("running" as const) })),
+                Effect.map((done) => ({
+                  status: done ? ("cancelled" as const) : ("running" as const),
+                  cursor: done ? "promoted-cancelled" : "promoted-running",
+                })),
               ),
         watchTurn: (link) =>
           Stream.fromEffect(Deferred.await(promotedCancelled)).pipe(
@@ -545,7 +559,10 @@ describe("Operation", () => {
         ...backend,
         inspectTurn: () =>
           Deferred.isDone(activeTerminal).pipe(
-            Effect.map((done) => ({ status: done ? ("completed" as const) : ("running" as const) })),
+            Effect.map((done) => ({
+              status: done ? ("completed" as const) : ("running" as const),
+              cursor: done ? "terminal-steering-completed" : "terminal-steering-running",
+            })),
           ),
         steerTurn: () => Deferred.succeed(steeringAccepted, undefined).pipe(Effect.as(receipt)),
         watchTurn: () => Stream.fromEffect(Deferred.await(activeTerminal)).pipe(Stream.map(() => terminalProjection)),
@@ -656,7 +673,7 @@ describe("Operation", () => {
       const watched = yield* Deferred.make<void>()
       const recoveredBackend = ExecutionGateway.Service.of({
         ...backend,
-        inspectTurn: () => Effect.succeed({ status: "completed" }),
+        inspectTurn: () => Effect.succeed({ status: "completed", cursor: "recovered-terminal-completed" }),
         watchTurn: () =>
           Stream.fromEffect(Deferred.succeed(watched, undefined)).pipe(
             Stream.flatMap(() => Stream.succeed(terminalProjection)),
