@@ -96,7 +96,7 @@ test("provisional queue rows ignore edit, steer, and dequeue keys", () => {
   expect(steered.pendingAction).toBeUndefined()
   expect(edited.editingTurnId).toBeUndefined()
 })
-test("steering a selected queued message keeps the request local until authoritative acceptance", () => {
+test("steering a selected queued message projects the handoff until authoritative acceptance", () => {
   const busy: Model = resetQueue(
     {
       ...initial("/work"),
@@ -115,7 +115,16 @@ test("steering a selected queued message keeps the request local until authorita
     steeringRequestId: "request-1",
   })
   expect(steered.pendingSteering).toEqual([])
-  expect(steered.steeringRequests).toEqual([])
+  expect(steered.steeringRequests).toEqual([
+    {
+      requestId: "request-1",
+      turnId: "turn-a",
+      text: "steer me please",
+      origin: "queue",
+      queuedTurnId: "queued-1",
+    },
+  ])
+  expect(steered.queueSelection).toBeUndefined()
   expect(steered.pendingAction).toEqual({
     _tag: "SteerQueued",
     id: "queued-1",
@@ -176,6 +185,7 @@ test("does not duplicate a restored queued steer in the composer", () => {
         turnId: "turn-a",
         text: "queued text",
         origin: "queue",
+        queuedTurnId: "queued-a",
       },
     ],
   }

@@ -417,7 +417,13 @@ describe("interactive ThreadView controller", () => {
         busy: true,
         steeringRequests: [
           { requestId: "request-a", turnId: "turn", text: "same text", origin: "composer" as const },
-          { requestId: "request-b", turnId: "turn", text: "same text", origin: "queue" as const },
+          {
+            requestId: "request-b",
+            turnId: "turn",
+            text: "same text",
+            origin: "queue" as const,
+            queuedTurnId: "queued-turn",
+          },
         ],
       },
     }

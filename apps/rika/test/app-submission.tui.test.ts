@@ -1,5 +1,6 @@
 import { expect, test } from "vitest"
 import { Deferred, Effect } from "effect"
+import * as Turn from "@rika/product/turn-record"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
@@ -177,6 +178,7 @@ test(
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
           workspaceFiles: { "fixture.txt": "steer fixture body" },
           script: [
             model.turn(
@@ -196,6 +198,14 @@ test(
         app.pressArrow("up")
         yield* app.waitFrame("Enter to steer")
         app.pressEnter()
+        expect(yield* app.nextFrame).toContain("steering: Focus on the exact fixture text.")
+        yield* app.waitTranscript(
+          Turn.TurnId.make("tui-turn-0"),
+          (projection) =>
+            projection.state.steering.pending?.some((entry) => entry.text === "Focus on the exact fixture text.") ===
+            true,
+        )
+        expect(app.frame()).toContain("steering: Focus on the exact fixture text.")
         yield* app.waitFrame("ACTIVE_STEER_COMPLETE", 25_000)
         yield* app.settled
         const consumed = yield* app.nextFrame
