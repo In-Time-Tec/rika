@@ -43,7 +43,6 @@ const program = Effect.gen(function* () {
     Config.withDefault("test/fixtures/server-host.ts"),
   )
   const buildIdentity = yield* Config.string("RIKA_TEST_BUILD_IDENTITY").pipe(Config.withDefault(""))
-  const noSupersede = (yield* Config.string("RIKA_TEST_SERVER_NO_SUPERSEDE").pipe(Config.withDefault("0"))) === "1"
   const service = yield* make()
   const connected = yield* Effect.result(
     service.getOrCreate({
@@ -51,7 +50,6 @@ const program = Effect.gen(function* () {
       dataRoot,
       clientKind: "run",
       graceMilliseconds: Number(grace),
-      ...(noSupersede ? { allowSupersede: false } : {}),
       startHost: () =>
         ServerProcessStartup.spawn({
           executable: "bun",

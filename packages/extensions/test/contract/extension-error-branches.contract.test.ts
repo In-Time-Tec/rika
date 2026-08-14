@@ -20,16 +20,28 @@ const pluginSource = (id: string, load: PluginLoader.Source["load"]): PluginLoad
   load,
 })
 
-const skillLayer = (operation: keyof SkillFileSystem.FileSystemInterface) =>
+const manifestPath = (path: string) => path.endsWith("package.json")
+
+const probe = (
+  path: string,
+  probed: keyof SkillFileSystem.FileSystemInterface,
+  operation: keyof SkillFileSystem.FileSystemInterface,
+  packaged: boolean,
+) => {
+  if (!packaged && manifestPath(path)) return Effect.succeed(false)
+  return operation === probed ? Effect.fail(platformFailure(probed)) : Effect.succeed(true)
+}
+
+const skillLayer = (operation: keyof SkillFileSystem.FileSystemInterface, packaged: boolean) =>
   Layer.succeed(
     SkillFileSystem.SkillFileSystem,
     SkillFileSystem.SkillFileSystem.of({
-      exists: () => (operation === "exists" ? Effect.fail(platformFailure("exists")) : Effect.succeed(true)),
+      exists: (path) => probe(path, "exists", operation, packaged),
       readDirectory: () =>
         operation === "readDirectory"
           ? Effect.fail(platformFailure("readDirectory"))
           : Effect.succeed(["resource.txt"]),
-      isFile: () => (operation === "isFile" ? Effect.fail(platformFailure("isFile")) : Effect.succeed(true)),
+      isFile: (path) => probe(path, "isFile", operation, packaged),
       readFileString: () =>
         operation === "readFileString" ? Effect.fail(platformFailure("readFileString")) : Effect.succeed("resource"),
       realPath: (path) => (operation === "realPath" ? Effect.fail(platformFailure("realPath")) : Effect.succeed(path)),
@@ -37,24 +49,46 @@ const skillLayer = (operation: keyof SkillFileSystem.FileSystemInterface) =>
   )
 
 it.layer(BunServices.layer)((test) => {
+  const roots = Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-skill-errors-" })
+    const globalRoot = `${root}/global`
+    const workspaceRoot = `${root}/workspace`
+    yield* fileSystem.makeDirectory(`${globalRoot}/test`, { recursive: true })
+    yield* fileSystem.writeFileString(`${globalRoot}/test/SKILL.md`, document("test"))
+    return { globalRoot, workspaceRoot }
+  })
+
   test.effect("maps every skill resource filesystem failure", () =>
     Effect.gen(function* () {
       const operations = ["exists", "realPath", "readDirectory", "isFile", "readFileString"] as const
       const results = yield* Effect.forEach(operations, (operation) =>
         Effect.gen(function* () {
-          const context = yield* Layer.build(skillLayer(operation))
-          const fileSystem = yield* FileSystem.FileSystem
-          const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-skill-errors-" })
-          const globalRoot = `${root}/global`
-          const workspaceRoot = `${root}/workspace`
-          yield* fileSystem.makeDirectory(`${globalRoot}/test`, { recursive: true })
-          yield* fileSystem.writeFileString(`${globalRoot}/test/SKILL.md`, document("test"))
+          const context = yield* Layer.build(skillLayer(operation, false))
+          const { globalRoot, workspaceRoot } = yield* roots
           const registry = yield* SkillRegistry.discover({ globalRoot, workspaceRoot }).pipe(Effect.provide(context))
           return yield* Effect.flip(registry.activate("test"))
         }).pipe(Effect.scoped),
       )
       for (const result of results) {
         expect(result.operation).toBe("activate")
+        expect(result.message).toContain("failed")
+      }
+    }),
+  )
+
+  test.effect("maps every executable skill discovery filesystem failure", () =>
+    Effect.gen(function* () {
+      const operations = ["exists", "isFile", "realPath", "readFileString"] as const
+      const results = yield* Effect.forEach(operations, (operation) =>
+        Effect.gen(function* () {
+          const context = yield* Layer.build(skillLayer(operation, true))
+          const { globalRoot, workspaceRoot } = yield* roots
+          return yield* Effect.flip(SkillRegistry.discover({ globalRoot, workspaceRoot }).pipe(Effect.provide(context)))
+        }).pipe(Effect.scoped),
+      )
+      for (const result of results) {
+        expect(result.operation).toBe("discover")
         expect(result.message).toContain("failed")
       }
     }),

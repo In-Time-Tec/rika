@@ -1,0 +1,86 @@
+import { describe, expect, it } from "vitest"
+import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
+import * as Overflow from "../src/transport/host/server-host-feed-overflow"
+
+const threadId = Thread.ThreadId.make("thread")
+const turnId = Turn.TurnId.make("turn")
+const preview = (revision: number, runId = "run") => ({
+  _tag: "ExecutionModelPreviewChanged" as const,
+  threadId,
+  turnId,
+  preview: {
+    _tag: "ModelPreview" as const,
+    runId,
+    attemptFence: 1,
+    turn: 0,
+    modelCallId: "call",
+    modelAttemptId: "attempt",
+    attempt: 0,
+    sequence: revision,
+    changes: [{ channel: "text" as const, offset: revision, delta: String(revision) }] as const,
+  },
+})
+
+describe("server host preview overflow", () => {
+  it("coalesces preview storms to one scoped invalidation while retaining control outcomes", () => {
+    const state = Overflow.make()
+    for (let revision = 1; revision <= 10_000; revision += 1) Overflow.remember(state, preview(revision))
+    const controlled = { _tag: "ExecutionControlled" as const, threadId, turnId, action: "cancelled" as const }
+    Overflow.remember(state, controlled)
+    expect(state.degraded).toBeUndefined()
+    expect(Overflow.events(state)).toEqual([
+      controlled,
+      {
+        ...preview(10_000),
+        preview: { _tag: "ModelPreviewCleared", runId: "run", attemptFence: 1, generation: 0 },
+      },
+    ])
+  })
+
+  it("retains one invalidation for each concurrently streaming run", () => {
+    const state = Overflow.make()
+    Overflow.remember(state, preview(1, "child-a"))
+    Overflow.remember(state, preview(1, "child-b"))
+
+    expect(
+      Overflow.events(state).map((event) =>
+        event._tag === "ExecutionModelPreviewChanged" ? event.preview.runId : event._tag,
+      ),
+    ).toEqual(["child-a", "child-b"])
+  })
+})
+
+it("preserves the thread resync when a control event follows a lost patch", () => {
+  const state = Overflow.make()
+  // Fill the view capacity with distinct threads so the next view event degrades the state.
+  for (let index = 0; index < 64; index += 1)
+    Overflow.remember(state, {
+      _tag: "ThreadViewPatch",
+      patch: {
+        threadId: Thread.ThreadId.make(`t${index}`),
+        baseRevision: 0,
+        revision: 1,
+        upsert: [],
+        remove: [],
+        turnChanges: [],
+      },
+    })
+  Overflow.remember(state, {
+    _tag: "ThreadViewPatch",
+    patch: {
+      threadId: Thread.ThreadId.make("overflowed"),
+      baseRevision: 0,
+      revision: 1,
+      upsert: [],
+      remove: [],
+      turnChanges: [],
+    },
+  })
+  expect(state.degraded).toBeDefined()
+  // A control event arriving after the lost patch must not replace the recovery resync.
+  Overflow.remember(state, { _tag: "ExecutionControlled", threadId, turnId, action: "cancelled" })
+  const recovered = Overflow.events(state)
+  expect(recovered).toHaveLength(1)
+  expect(recovered[0]?._tag).toBe("ResyncRequired")
+})

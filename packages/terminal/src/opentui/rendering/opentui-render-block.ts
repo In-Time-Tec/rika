@@ -1,6 +1,7 @@
 import type { ColorInput, TextChunk } from "@opentui/core"
 import { Function } from "effect"
 import { subagentPhrase } from "@rika/transcript/subagent-presentation"
+import { cellBodyText, cellCollapsedLine } from "@rika/transcript/cell-presentation"
 import stringWidth from "string-width"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
 import type { ChangedFile } from "../../state/model/terminal-changed-file"
@@ -89,11 +90,16 @@ export const renderBlock: {
         return `${completedCompactionIcon} Auto-compacted${block.summary.length === 0 ? "" : `\n${body(block.summary)}`}`
       case "Notification":
         return `${head(`! ${block.title}`)}\n${body(block.detail)}`
-      case "Error":
-        return `${head(`✖ ERROR: ${block.title}${block.turnId === undefined ? "" : ` · Turn ${block.turnId}`}`)}\n${body(block.detail)}${block.recovery === undefined ? "" : `\n${body(`Next: ${block.recovery}`)}`}`
+      case "Error": {
+        const title = wrapTextToWidth(block.title, Math.max(1, width)).join("\n")
+        const detail =
+          block.detail.length === 0 ? "" : `\n${wrapTextToWidth(block.detail, Math.max(1, width)).join("\n")}`
+        return `${title}${detail}`
+      }
       case "SubagentCard": {
         let icon = "✗"
-        if (block.status === "running" || block.status === "waiting" || block.status === "cancelling") icon = "⠿"
+        if (block.status === "queued") icon = "◷"
+        else if (block.status === "running" || block.status === "waiting" || block.status === "cancelling") icon = "⠿"
         else if (block.status === "complete") icon = "✓"
         else if (block.status === "cancelled") icon = "⊘"
         const detail = block.summary.length === 0 ? block.prompt : block.summary
@@ -110,6 +116,18 @@ export const renderBlock: {
           block.width !== undefined && block.height !== undefined ? ` · ${block.width}×${block.height}` : ""
         const size = block.bytes === undefined ? "" : ` · ${formatBytes(block.bytes)}`
         return `▧ ${block.name} · ${block.mediaType}${dimensions}${size}`
+      }
+      case "Cell": {
+        const running = block.status === "running"
+        const icon = iconChar(
+          block.status === "failed" || block.status === "unknown",
+          running,
+          "⠿",
+          block.status === "cancelled",
+        )
+        const detail = cellCollapsedLine(block)
+        const output = cellBodyText(block)
+        return `${icon} ${detail}${output.length === 0 ? "" : `\n${body(output)}`}`
       }
     }
   },

@@ -1,8 +1,8 @@
 import type { RunEvent } from "@batonfx/runtime"
 import * as Projection from "@rika/product/execution-projection"
-import { type Node } from "./baton-projector-model"
-import { type AttemptStart, type ModelCallState } from "./baton-projector-persistence"
-import { add, occurredAt } from "./baton-projector-decoding"
+import { type Node } from "./projection/model"
+import { type AttemptStart, type ModelCallState } from "./projection/persistence"
+import { add, occurredAt } from "./projection/decoding"
 
 export interface UsageAccounting {
   readonly attemptStarts: Map<string, AttemptStart>
@@ -53,7 +53,7 @@ export interface PersistedUsage {
   readonly lastLifecycleAt?: number
 }
 
-export const makeUsageAccounting = (): UsageAccounting => {
+export const makeUsageAccounting = (pricing: "included" | "metered" = "metered"): UsageAccounting => {
   let usageState = Projection.emptyUsageState()
   let requestOrdinal = 0
   let pendingContextOrdinal: number | undefined
@@ -177,14 +177,17 @@ export const makeUsageAccounting = (): UsageAccounting => {
         ? undefined
         : input.inputTotal + input.outputTotal)
     addTokenTotals({ ...input, attemptTotal })
+    let pricingPatch: Record<string, number>
+    if (pricing === "included") pricingPatch = { includedAttempts: (usageState.includedAttempts ?? 0) + 1 }
+    else if (input.costNanoUsd === undefined) pricingPatch = { unpricedAttempts: usageState.unpricedAttempts + 1 }
+    else
+      pricingPatch = {
+        costNanoUsd: add(usageState.costNanoUsd, input.costNanoUsd)!,
+        pricedAttempts: usageState.pricedAttempts + 1,
+      }
     usageState = {
       ...usageState,
-      ...(input.costNanoUsd === undefined
-        ? { unpricedAttempts: usageState.unpricedAttempts + 1 }
-        : {
-            costNanoUsd: add(usageState.costNanoUsd, input.costNanoUsd)!,
-            pricedAttempts: usageState.pricedAttempts + 1,
-          }),
+      ...pricingPatch,
       ...(attemptTotal === undefined
         ? { uncountedAttempts: usageState.uncountedAttempts + 1 }
         : { countedAttempts: usageState.countedAttempts + 1 }),

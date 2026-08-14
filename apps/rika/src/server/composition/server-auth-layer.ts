@@ -4,6 +4,7 @@ import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import * as ConfigurationService from "@rika/configuration/configuration-service"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/product/product-operation-service"
+import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import * as ExtensionOperations from "@rika/product/extension-operation"
 import * as McpOAuthService from "@rika/extensions/mcp-oauth-service"
 import * as SkillRegistry from "@rika/extensions/skill-registry"
@@ -12,6 +13,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { Context, Effect, Function, Layer, Option, Schema } from "effect"
 import { globalPaths, workspacePaths } from "@rika/configuration/configuration-paths"
 import * as OpenAiProviderAuth from "../../provider/openai/openai-provider-auth"
+import * as OpenRouterProviderAuth from "../../provider/openrouter/openrouter-provider-auth"
 import { loadSettingsFile } from "./server-configuration-adapter"
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -40,6 +42,7 @@ export interface ServerProductOptions {
   readonly environment: ServerProductEnvironment
   readonly database: string
   readonly batonDatabase: string
+  readonly profileIdentity: string
   readonly globalConfig: string
   readonly workspaceConfig: string
   readonly editor: string | undefined
@@ -74,10 +77,31 @@ export const createExtensionLayer: {
 const createOpenAiAuthLayerImpl = (database: string, profileIdentity: string) =>
   OpenAiProviderAuth.createLayer(database, profileIdentity)
 
-export const createOpenAiAuthLayer: {
+const createOpenAiAuthLayer: {
   (profileIdentity: string): (database: string) => ReturnType<typeof createOpenAiAuthLayerImpl>
   (database: string, profileIdentity: string): ReturnType<typeof createOpenAiAuthLayerImpl>
 } = Function.dual(2, createOpenAiAuthLayerImpl)
+
+export const resolveOpenAiAccountAuth = (authOperations: Operation.AuthOperationOptions) =>
+  Layer.build(authOperations.layer).pipe(
+    Effect.map((context) => Context.get(context, OpenAiAuth.Service)),
+    Effect.mapError((error) => OperationProductError.make({ message: error.message })),
+  )
+
+const createOpenRouterAuthLayerImpl = (database: string, profileIdentity: string) =>
+  OpenRouterProviderAuth.createLayer(database, profileIdentity)
+
+const createOpenRouterAuthLayer: {
+  (profileIdentity: string): (database: string) => ReturnType<typeof createOpenRouterAuthLayerImpl>
+  (database: string, profileIdentity: string): ReturnType<typeof createOpenRouterAuthLayerImpl>
+} = Function.dual(2, createOpenRouterAuthLayerImpl)
+
+export const createProviderCredentialStoreLayer: {
+  (profileIdentity: string): (database: string) => ReturnType<typeof OpenRouterProviderAuth.credentialStoreLayer>
+  (database: string, profileIdentity: string): ReturnType<typeof OpenRouterProviderAuth.credentialStoreLayer>
+} = Function.dual(2, (database: string, profileIdentity: string) =>
+  OpenRouterProviderAuth.credentialStoreLayer(database, profileIdentity),
+)
 
 export const createAuthOperations = (options: {
   readonly globalConfig: string
@@ -85,6 +109,7 @@ export const createAuthOperations = (options: {
   readonly profileIdentity: string
 }): Operation.AuthOperationOptions => ({
   layer: createOpenAiAuthLayer(options.database, options.profileIdentity),
+  openRouterLayer: createOpenRouterAuthLayer(options.database, options.profileIdentity),
   assertOpenAiDirect: (workspace) =>
     Effect.gen(function* () {
       const globalSettings = yield* loadSettingsFile(options.globalConfig)

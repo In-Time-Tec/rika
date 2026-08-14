@@ -1,4 +1,5 @@
 import * as InteractiveSession from "@rika/product/interactive-session"
+import type * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
@@ -8,20 +9,30 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as Turn from "@rika/product/turn-record"
 import * as ThreadQuery from "@rika/product/thread-query-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
-import { Config, Context, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Scope } from "effect"
+import { Config, Context, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Scope, SubscriptionRef } from "effect"
 import { performance } from "node:perf_hooks"
 import { interactiveTui } from "../src/interactive/process/interactive-process-loop"
 import {
+  makeTuiAppQueue,
   makeTuiAppRepositoryLayers,
   seedHistoricalTranscript,
   type HistoricalTranscriptFixture,
+  type TuiAppQueue,
 } from "./tui-app-repositories"
-import type { Lane } from "./tui-app-model"
+import type { Lane, LaneModels, Profile } from "./tui-app-model"
 import { tuiToolRuntimeLayer } from "./tui-app-tool-runtime"
-import { backendLayer } from "./tui-app-backend"
+import { backendLayer, kernelPoolFor, prepareTuiRuntimeState, type RuntimeStatePreparation } from "./tui-app-backend"
 import { laneExecutionRoute, makeLaneModels } from "./tui-app-model"
 
-const activityMarkers = ["Waiting", "Streaming", "Running 1 tool", "Thinking"] as const
+type InteractiveConnection = Parameters<ReturnType<typeof interactiveTui>>[2]
+type InteractiveConnectionStatus = InteractiveConnection["initialStatus"]
+
+/**
+ * Settling means no work is still in flight, so a running subagent counts. `Running` covers every
+ * running-tools label the activity line produces — a cell, a subagent, or several of either — which
+ * an exact "Running 1 tool" misses the moment a turn delegates.
+ */
+const activityMarkers = ["Waiting", "Streaming", "Running", "Thinking"] as const
 const currentWallTime = () => performance.now()
 
 type SessionEvent = Parameters<Parameters<InteractiveSession.InteractiveSession["events"]>[0]>[0]
@@ -29,6 +40,7 @@ type SessionEvent = Parameters<Parameters<InteractiveSession.InteractiveSession[
 export interface TuiAppOptions {
   readonly script?: Lane["steps"]
   readonly lanes?: ReadonlyArray<Lane>
+  readonly subagents?: ExecutionRouteSnapshot.ExecutionRouteSnapshot["subagents"]
   readonly root?: string
   readonly initialThreadId?: string
   readonly idStart?: number
@@ -36,9 +48,11 @@ export interface TuiAppOptions {
   readonly workspaceFiles?: Readonly<Record<string, string>>
   readonly width?: number
   readonly height?: number
+  readonly initialConnectionStatus?: InteractiveConnectionStatus
   readonly holdSubmissionAdmission?: Deferred.Deferred<void>
   readonly mapInteractiveEvent?: (event: SessionEvent) => SessionEvent
   readonly historicalTranscriptFixture?: HistoricalTranscriptFixture
+  readonly prepareRuntimeState?: RuntimeStatePreparation
 }
 
 export type CapturedSpans = ReturnType<Awaited<ReturnType<typeof createTestRenderer>>["captureSpans"]>
@@ -60,6 +74,7 @@ export interface TuiApp {
   readonly transcript: (
     turnId: Turn.TurnId,
   ) => Effect.Effect<TranscriptPage.Projection | undefined, TranscriptRepository.RepositoryError>
+  readonly queue: TuiAppQueue
   readonly waitTranscript: (
     turnId: Turn.TurnId,
     predicate: (projection: TranscriptPage.Projection) => boolean,
@@ -73,7 +88,10 @@ export interface TuiApp {
   readonly settled: Effect.Effect<string>
   readonly reload: Effect.Effect<void>
   readonly waitModelRequests: (count: number) => Effect.Effect<void>
+  readonly setConnectionStatus: (status: InteractiveConnectionStatus) => Effect.Effect<void>
   readonly modelRequestCount: Effect.Effect<number>
+  readonly modelPrompts: ReturnType<LaneModels["promptsFor"]>
+  readonly modelToolNamesFor: (profile: Profile) => Effect.Effect<ReadonlyArray<ReadonlyArray<string>>>
   readonly close: () => void
   readonly done: Effect.Effect<void>
   readonly quit: Effect.Effect<void>
@@ -87,19 +105,18 @@ export const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | 
 const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const context = yield* Effect.context<never>()
-  const runFork = Effect.runForkWith(context)
   const temporaryDirectory = yield* Config.string("TMPDIR").pipe(Config.withDefault("/tmp"))
   const root =
     options.root ??
     (yield* fileSystem.makeTempDirectoryScoped({ directory: temporaryDirectory, prefix: "rika-tui-app-" }))
   const workspace = path.join(root, "workspace")
   const resourceScope = yield* Scope.make()
-  yield* Effect.addFinalizer(() =>
-    Effect.sync(() => {
-      runFork(Scope.close(resourceScope, Exit.void))
-    }),
-  )
+  /**
+   * Teardown is awaited rather than forked. These resources include a pool of real kernel workers,
+   * and a fire-and-forget close returns before any of them dies, so the next test in the file starts
+   * while the previous one's workers are still running and competing for the machine.
+   */
+  yield* Effect.addFinalizer(() => Scope.close(resourceScope, Exit.void))
   yield* fileSystem.makeDirectory(workspace, { recursive: true })
   for (const [name, content] of Object.entries(options.workspaceFiles ?? {})) {
     const target = path.join(workspace, name)
@@ -144,11 +161,29 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   const queryFactoryLayer = Layer.succeedContext(
     yield* Layer.buildWithScope(ThreadQuery.Runtime.factoryLayer.pipe(Layer.provide(repositories)), resourceScope),
   )
-  const executionBackendLayer = backendLayer({
-    filename: path.join(root, "baton.db"),
-    registryLayer: laneModels.registryLayer,
-    toolRuntimeLayer,
+  const kernelPool = yield* kernelPoolFor({
+    workspace,
+    dataRoot: root,
     queryFactoryLayer,
+    toolRuntimeLayer,
+  })
+  const executionBackendContext = yield* Layer.buildWithScope(
+    backendLayer({
+      filename: path.join(root, "baton.db"),
+      kernelPool,
+      registryLayer: laneModels.registryLayer,
+      toolRuntimeLayer,
+      queryFactoryLayer,
+    }),
+    resourceScope,
+  )
+  const executionBackendLayer = Layer.succeedContext(executionBackendContext)
+  yield* prepareTuiRuntimeState({
+    preparation: options.prepareRuntimeState,
+    workspace,
+    executionBackendContext,
+    repositoryContext,
+    waitModelRequests: awaitModelRequests,
   })
   const setup = yield* Effect.acquireRelease(
     Effect.promise(() =>
@@ -160,6 +195,12 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   let nextThread = options.idStart ?? 0
   let nextTurn = options.idStart ?? 0
   let session: InteractiveSession.InteractiveSession | undefined
+  const initialConnectionStatus = options.initialConnectionStatus ?? "connected"
+  const connectionStatus = yield* SubscriptionRef.make<InteractiveConnectionStatus>(initialConnectionStatus)
+  const interactiveConnection: InteractiveConnection = {
+    initialStatus: initialConnectionStatus,
+    statusChanges: SubscriptionRef.changes(connectionStatus),
+  }
   let selectionsLoaded = 0
   const awaitSelectionLoaded = (count: number): Effect.Effect<void> =>
     Effect.suspend(() =>
@@ -172,6 +213,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     writeTerminalTitle: (sequence) => terminalTitles.push(sequence.slice(4, -1)),
   })
   const operationLayer = productLayer({
+    executionSessionLifecycleLayer: executionBackendLayer,
     repositoryLayer: repositories,
     turnRepositoryLayer: repositories,
     transcriptRepositoryLayer: repositories,
@@ -181,29 +223,37 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     defaultWorkspace: workspace,
     makeThreadId: Effect.sync(() => Thread.ThreadId.make(`tui-thread-${nextThread++}`)),
     makeTurnId: Effect.sync(() => Turn.TurnId.make(`tui-turn-${nextTurn++}`)),
-    resolveExecutionRoute: (mode) => Effect.succeed(laneExecutionRoute(mode)),
+    resolveExecutionRoute: (mode) => {
+      const route = laneExecutionRoute(mode)
+      return Effect.succeed(options.subagents === undefined ? route : { ...route, subagents: options.subagents })
+    },
     interactive: (settings, current) => {
       session = current
-      return runInteractive(settings, {
-        ...current,
-        submit: (prompt, mode, parts, tuning, submissionId) => {
-          const submitted = current.submit(prompt, mode, parts, tuning, submissionId)
-          return options.holdSubmissionAdmission === undefined
-            ? submitted
-            : Deferred.await(options.holdSubmissionAdmission).pipe(Effect.andThen(submitted))
+      return runInteractive(
+        settings,
+        {
+          ...current,
+          submit: (prompt, mode, parts, tuning, submissionId) => {
+            const submitted = current.submit(prompt, mode, parts, tuning, submissionId)
+            return options.holdSubmissionAdmission === undefined
+              ? submitted
+              : Deferred.await(options.holdSubmissionAdmission).pipe(Effect.andThen(submitted))
+          },
+          events: (dispatch) =>
+            current.events((event) => {
+              const delivered = options.mapInteractiveEvent?.(event) ?? event
+              dispatch(delivered)
+              if (delivered._tag === "ThreadViewSnapshot") selectionsLoaded += 1
+            }),
         },
-        events: (dispatch) =>
-          current.events((event) => {
-            const delivered = options.mapInteractiveEvent?.(event) ?? event
-            dispatch(delivered)
-            if (delivered._tag === "ThreadViewSnapshot") selectionsLoaded += 1
-          }),
-      })
+        interactiveConnection,
+      )
     },
   })
   const operation = Context.get(yield* Layer.buildWithScope(operationLayer, resourceScope), Service)
   const transcripts =
     options.inspectTranscript === true ? Context.get(repositoryContext, TranscriptRepository.Service) : undefined
+  const queue = makeTuiAppQueue(repositoryContext)
   const operationFiber = yield* Effect.forkChild(
     operation
       .run({
@@ -215,17 +265,13 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
       })
       .pipe(Effect.orDie),
   )
-  yield* Effect.addFinalizer(() =>
-    Effect.sync(() => {
-      runFork(Fiber.interrupt(operationFiber))
-    }),
-  )
+  yield* Effect.addFinalizer(() => Fiber.interrupt(operationFiber).pipe(Effect.asVoid))
   const frame = () => setup.captureCharFrame()
   const waitFor = (predicate: (frame: string) => boolean, timeoutMillis: number) =>
     Effect.gen(function* () {
       const started = currentWallTime()
       for (;;) {
-        yield* Effect.promise(() => setup.flush())
+        yield* Effect.promise(() => setup.flush().catch(() => setup.renderOnce()))
         const captured = frame()
         if (predicate(captured)) return captured
         if (currentWallTime() - started >= timeoutMillis) {
@@ -283,6 +329,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     nextFrame: Effect.promise(() => setup.flush()).pipe(Effect.andThen(Effect.sync(frame))),
     spans: () => setup.captureSpans(),
     transcript: (turnId) => transcripts?.get(turnId) ?? Effect.die("TUI transcript inspection was not requested"),
+    queue,
     waitTranscript: (turnId, predicate, timeoutMillis = 10_000) =>
       Effect.gen(function* () {
         const started = currentWallTime()
@@ -309,11 +356,19 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
       yield* awaitSelectionLoaded(before + 1)
     }),
     waitModelRequests: awaitModelRequests,
+    setConnectionStatus: (status) => SubscriptionRef.set(connectionStatus, status),
     modelRequestCount: laneModels.requestCountFor("Root"),
+    modelPrompts: laneModels.promptsFor("Root"),
+    modelToolNamesFor: (profile) =>
+      laneModels
+        .requestsFor(profile)
+        .pipe(Effect.map((requests) => requests.map((request) => request.tools.map((tool) => tool.name).toSorted()))),
     close: () => setup.mockInput.pressCtrlC(),
     done: Fiber.join(operationFiber).pipe(Effect.asVoid, Effect.orDie),
     quit: Effect.gen(function* () {
       yield* settled
+      setup.mockInput.pressCtrlC()
+      yield* Effect.promise(() => setup.flush())
       setup.mockInput.pressCtrlC()
       yield* Fiber.join(operationFiber).pipe(Effect.asVoid, Effect.orDie)
     }),

@@ -1,9 +1,9 @@
 import { Pins } from "@batonfx/core"
+import { KernelProfile } from "@batonfx/repl"
 import { Errors, ExecutableRegistration } from "@batonfx/runtime"
 import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import { Effect, Function, Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
-import * as Sandbox from "./baton-sandbox-identity"
 
 export interface Codec<A, I> {
   readonly codec: string
@@ -25,8 +25,6 @@ const ToolPayload = Schema.Struct({
   schema: Schema.Record(Schema.String, Schema.Unknown),
 })
 
-const SchemaPayload = Schema.Struct({ schema: Schema.Json })
-
 const ApplicationContextPayload = Schema.Struct({
   workspace: Schema.String.check(Schema.isNonEmpty()),
   executionRoute: ExecutionRoute.ExecutionRouteSnapshot,
@@ -41,11 +39,8 @@ export const codecs = {
   modelRoute: codec("rika-model-route", "1", ExecutionRoute.ExecutionRouteModelSnapshot),
   modelRegistryRoute: codec("rika-model-registry-route", "1", ModelRegistryRoutePayload),
   compaction: codec("rika-compaction", "1", ExecutableRegistration.CompactionPolicy),
+  kernelProfile: codec("rika-kernel-profile", "1", KernelProfile.KernelProfile),
   tool: codec("rika-tool", "1", ToolPayload),
-  programSandbox: codec("rika-program-sandbox", "1", Sandbox.Registration),
-  programInput: codec("rika-program-input", "1", SchemaPayload),
-  programOutput: codec("rika-program-output", "1", SchemaPayload),
-  programAgentInput: codec("rika-program-agent-input", "1", SchemaPayload),
 }
 
 export const toolPayload = (value: Tool.Any): typeof ToolPayload.Type => ({

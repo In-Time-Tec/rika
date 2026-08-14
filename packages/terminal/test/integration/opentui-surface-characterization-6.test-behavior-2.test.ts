@@ -92,7 +92,7 @@ test("reports prepend anchor geometry without requesting another page", () =>
       try {
         surface.update(base)
         yield* openTui(() => setup.flush())
-        surface.transcriptScrollbar.scrollPosition = Math.max(0, surface.transcriptScroll.scrollTop - 1)
+        surface.transcriptScrollbar.scrollPosition = Math.max(0, surface.transcriptDiagnostics().virtualScrollTop - 1)
         yield* openTui(() => setup.flush())
         yield* Effect.yieldNow
         requested.length = 0

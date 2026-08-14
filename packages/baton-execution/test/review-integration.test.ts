@@ -1,8 +1,9 @@
-import { ModelRegistry, SandboxExecutor } from "@batonfx/core"
+import { ModelRegistry } from "@batonfx/core"
 import { TestModel } from "@batonfx/test"
 import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
+import type { Change } from "@rika/product/execution-projection"
 import { reviewIntent } from "@rika/product/review-policy"
 import { Database } from "bun:sqlite"
 import { randomUUID } from "node:crypto"
@@ -11,13 +12,8 @@ import { layer } from "../src/baton-execution"
 
 const fanOutJoin = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
 
-const sandbox = SandboxExecutor.makeTest(() => Effect.die(new Error("unexpected Program execution")), {
-  language: "javascript",
-  implementation: "rika-review-test-sandbox",
-  version: "1",
-  memoryBytes: 1024,
-  stackBytes: 1024,
-})
+const projectionChanges = (events: ReadonlyArray<ExecutionGateway.ModelPreviewEvent | Change>): ReadonlyArray<Change> =>
+  events.filter((event): event is Change => event._tag !== "ModelPreview" && event._tag !== "ModelPreviewCleared")
 
 const testLayer = (filename: string, fixture: TestModel.Fixture) =>
   layer({
@@ -25,7 +21,7 @@ const testLayer = (filename: string, fixture: TestModel.Fixture) =>
     modelServices: ModelRegistry.layer([
       Effect.succeed({ ...fixture.registration, isAvailabilityFailure: () => false }),
     ]),
-  }).pipe(Layer.provide(Layer.succeed(SandboxExecutor.SandboxExecutor, sandbox)))
+  })
 
 const input = (route: ReturnType<typeof testExecutionRoute>) => ({
   threadId: "review-thread",
@@ -53,7 +49,7 @@ it.live(
           const link = yield* gateway.startTurn(input(route))
           const duplicate = yield* gateway.startTurn(input(route))
           const events = yield* gateway.watchTurn(link).pipe(Stream.runCollect)
-          return { link, duplicate, events: [...events] }
+          return { link, duplicate, events: projectionChanges([...events]) }
         }),
       )
       const database = new Database(filename)

@@ -1,7 +1,6 @@
 import type { TranscriptViewport, ViewportAnchor, WheelDirection } from "./transcript-viewport-state"
 
 export type ViewportEffect =
-  | { readonly _tag: "ProjectState" }
   | { readonly _tag: "RequestFollowPosition" }
   | { readonly _tag: "NotifyDetached" }
   | { readonly _tag: "NotifyFollowed" }
@@ -28,6 +27,7 @@ export type ViewportEvent =
     }
   | { readonly _tag: "WheelCancelled" }
   | { readonly _tag: "DetachCommanded"; readonly anchor: ViewportAnchor | undefined }
+  | { readonly _tag: "AnchorRebased"; readonly anchor: ViewportAnchor }
   | { readonly _tag: "FollowCommanded" }
   | { readonly _tag: "ResetCommanded" }
   | { readonly _tag: "BottomSettled" }

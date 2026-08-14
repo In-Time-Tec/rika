@@ -2,6 +2,7 @@ import * as ProductOperation from "@rika/product/product-operation"
 import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as InteractiveSession from "@rika/product/interactive-session"
 import * as InteractiveFeedOverflow from "@rika/product/server-interactive-feed"
+import * as FeedOverflow from "./server-host-feed-overflow"
 import * as ServerService from "@rika/product/server-service"
 import { Deferred, Effect, Fiber, Function, Queue, Ref, Schema, Semaphore } from "effect"
 import type { Crypto as CryptoShape } from "effect/Crypto"
@@ -79,21 +80,22 @@ export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter
     let acknowledgedThrough = 0
     let highestSent = 0
     let outstandingDetails = 0
-    let overflow: InteractiveFeedOverflow.State | undefined
+    let overflow: FeedOverflow.State | undefined
     let sentDetails = 0
     const dispatch = (event: InteractiveEvent.InteractiveEvent) => {
       if (overflow !== undefined) {
-        InteractiveFeedOverflow.remember(overflow, event)
+        FeedOverflow.remember(overflow, event)
         return
       }
       if (outstandingDetails >= options.outboundCapacity || !Queue.offerUnsafe(feed, { _tag: "Event", event })) {
-        overflow = InteractiveFeedOverflow.make()
-        InteractiveFeedOverflow.remember(overflow, event)
+        overflow = FeedOverflow.make()
+        FeedOverflow.remember(overflow, event)
         Queue.offerUnsafe(feed, { _tag: "Overflow" })
         return
       }
       outstandingDetails += 1
     }
+    let sentBytes = 0
     const sendNew = (event: InteractiveEvent.InteractiveEvent, detail: boolean) =>
       Effect.gen(function* () {
         yield* Queue.take(sendPermits)
@@ -130,6 +132,7 @@ export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter
               "rika.server.feed.fragments": frames.length,
             }),
           )
+        sentBytes += frames.reduce((total, frame) => total + frame.length, 0)
         yield* route.sendFrames(frames)
       })
     const sender = Effect.gen(function* () {
@@ -142,6 +145,7 @@ export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter
             yield* Effect.logInfo("server.feed.detail_sent").pipe(
               Effect.annotateLogs({
                 "rika.server.feed.sent": sentDetails,
+                "rika.server.feed.bytes": sentBytes,
                 "rika.server.feed.queued": yield* Queue.size(feed),
                 "rika.server.feed.overflowed": overflow !== undefined,
               }),
@@ -150,15 +154,7 @@ export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter
         if ((yield* Queue.size(feed)) === 0 && overflow !== undefined) {
           const state = overflow
           overflow = undefined
-          const reason = state.criticalOverflowed
-            ? "Server event feed exceeded its bounded non-recoverable event capacity"
-            : "Server event feed exceeded its bounded current-session window"
-          for (const event of InteractiveFeedOverflow.events(state)) yield* sendNew(event, false)
-          if (state.criticalOverflowed)
-            return yield* ProductOperation.OperationUnavailable.make({
-              operation: "InteractiveSession.events",
-              message: reason,
-            })
+          for (const event of FeedOverflow.events(state)) yield* sendNew(event, false)
         }
       }
     })

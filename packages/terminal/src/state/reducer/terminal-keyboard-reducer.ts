@@ -114,8 +114,11 @@ const reduceKeyboardImpl = (
         model.detailSelection !== undefined
       )
         return update(model, { _tag: "DetailToggled" })
-      const queued = model.queue as ReadonlyArray<QueueItem>
-      if (model.busy && model.input.length === 0 && queued.length > 0 && model.editingTurnId === undefined) {
+      const steeringQueueIds = new Set(
+        model.steeringRequests.flatMap((request) => (request.origin === "queue" ? [request.queuedTurnId] : [])),
+      )
+      const queued = (model.queue as ReadonlyArray<QueueItem>).filter((item) => !steeringQueueIds.has(item.id))
+      if (model.input.length === 0 && queued.length > 0 && model.editingTurnId === undefined) {
         const current = queued.findIndex((item) => item.id === model.queueSelection)
         if (current < 0) {
           if (key.name === "up")
@@ -153,18 +156,25 @@ const reduceKeyboardImpl = (
               },
               selected.prompt,
             )
-          if (key.name === "return")
+          if (key.name === "return" && model.activeTurnId !== undefined && message.steeringRequestId !== undefined)
             return {
               ...model,
-              ...(model.activeTurnId === undefined
-                ? {}
-                : {
-                    pendingSteering: [...model.pendingSteering, { turnId: model.activeTurnId, text: selected.prompt }],
-                  }),
+              queueSelection: undefined,
+              steeringRequests: [
+                ...model.steeringRequests,
+                {
+                  requestId: message.steeringRequestId,
+                  turnId: model.activeTurnId,
+                  text: selected.prompt,
+                  origin: "queue",
+                  queuedTurnId: selected.id,
+                },
+              ],
               pendingAction: {
                 _tag: "SteerQueued",
                 id: selected.id,
                 prompt: selected.prompt,
+                requestId: message.steeringRequestId,
               },
             }
           if (key.name === "backspace") return { ...model, pendingAction: { _tag: "Dequeue", id: selected.id } }

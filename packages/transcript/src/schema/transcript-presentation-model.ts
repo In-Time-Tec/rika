@@ -79,7 +79,8 @@ const ErrorBlock = Schema.TaggedStruct("Error", {
   title: Schema.String,
   detail: Schema.String,
   turnId: Schema.optionalKey(Schema.String),
-  recovery: Schema.optionalKey(Schema.String),
+  category: Schema.optionalKey(Schema.String),
+  retryable: Schema.optionalKey(Schema.Boolean),
 })
 const SubagentCard = Schema.TaggedStruct("SubagentCard", {
   id: Schema.String,
@@ -87,7 +88,7 @@ const SubagentCard = Schema.TaggedStruct("SubagentCard", {
   prompt: Schema.String,
   promptTruncated: Schema.Boolean,
   summary: Schema.String,
-  status: Schema.Literals(["running", "waiting", "cancelling", "complete", "failed", "cancelled"]),
+  status: Schema.Literals(["queued", "running", "waiting", "cancelling", "complete", "failed", "cancelled"]),
   activity: Schema.Array(Schema.String),
 })
 const AuthorizationCard = Schema.TaggedStruct("AuthorizationCard", {
@@ -105,6 +106,43 @@ const ImageAttachment = Schema.TaggedStruct("ImageAttachment", {
   height: Schema.optionalKey(Schema.Finite),
   bytes: Schema.optionalKey(Schema.Finite),
 })
+const CellSource = Schema.Struct({
+  text: Schema.String.check(Schema.isMaxLength(65_536)),
+  lines: Schema.Finite,
+  truncated: Schema.Boolean,
+})
+const CellOutput = Schema.Struct({
+  stdout: Schema.String,
+  stderr: Schema.String,
+  droppedBytes: Schema.Finite,
+  droppedEvents: Schema.Finite,
+})
+const CellNotice = Schema.Struct({
+  kind: Schema.Literals(["restored", "lost", "restarted", "starting", "ready", "activity"]),
+  detail: Schema.String,
+})
+const Cell = Schema.TaggedStruct("Cell", {
+  id: Schema.String,
+  status: Schema.Literals(["running", "complete", "failed", "cancelled", "unknown"]),
+  visual: Schema.Literals(["ts", "shell"]),
+  summary: Schema.String,
+  source: CellSource,
+  output: CellOutput,
+  result: Schema.optionalKey(Schema.String),
+  error: Schema.optionalKey(
+    Schema.Struct({
+      name: Schema.String,
+      message: Schema.String,
+      stack: Schema.optionalKey(Schema.String),
+    }),
+  ),
+  durationMillis: Schema.optionalKey(Schema.Finite),
+  epoch: Schema.Finite,
+  notices: Schema.Array(CellNotice),
+  files: Schema.Array(ToolFile),
+  process: Schema.optionalKey(ToolProcess),
+  parentId: Schema.optionalKey(Schema.String),
+})
 
 export const Block = Schema.Union([
   Reasoning,
@@ -118,6 +156,7 @@ export const Block = Schema.Union([
   SubagentCard,
   AuthorizationCard,
   ImageAttachment,
+  Cell,
 ])
 export type Block = typeof Block.Type
 

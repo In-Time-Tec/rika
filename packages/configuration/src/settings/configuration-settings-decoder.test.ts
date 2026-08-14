@@ -2,11 +2,12 @@ import { describe, expect, it } from "@effect/vitest"
 import * as SettingsDefaults from "./configuration-defaults"
 import * as SettingsDecoder from "./configuration-settings-decoder"
 import * as ModelResolution from "../model-routing/model-route-resolution"
+import * as Merge from "./configuration-merge"
 import { isStreamingOnlyBaseUrl } from "../model-routing/model-route"
 import { catalog } from "../model-routing/model-catalog"
 import type { ConfigurationSettings } from "./configuration-settings"
 
-const ConfigContract = { ...SettingsDefaults, ...SettingsDecoder, ...ModelResolution, isStreamingOnlyBaseUrl }
+const ConfigContract = { ...SettingsDefaults, ...SettingsDecoder, ...ModelResolution, ...Merge, isStreamingOnlyBaseUrl }
 const Models = { catalog }
 
 describe("ConfigContract", () => {
@@ -22,6 +23,7 @@ describe("ConfigContract", () => {
       candidates: ["gpt-5.6-luna"],
       limits: { contextWindow: 272_000, maxInputTokens: 258_400, maxOutputTokens: 128_000, keepRecentTokens: 32_000 },
     })
+    expect(ConfigContract.defaults.subagents).toEqual({ maxDepth: 1, maxSubagents: 4 })
     expect(Models.catalog.gpt56Sol.limits.contextWindow).toBe(272_000)
     expect(ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")).toMatchObject({
       alias: "terra",
@@ -49,6 +51,70 @@ describe("ConfigContract", () => {
         providers: { custom: { baseUrl: "https://models.test" } },
       }),
     ).toThrowError(/unknown key custom/)
+  })
+
+  it("accepts the openrouter provider override with a stored credential identity", () => {
+    const input = {
+      providers: {
+        openrouter: {
+          baseUrl: "https://openrouter.ai/api/v1",
+          apiKeyEnv: "OPENROUTER_API_KEY",
+          credentialIdentity: "openrouter",
+        },
+      },
+    } as const
+    expect(ConfigContract.decodeSettingsInput("settings.json", input)).toBe(input)
+    expect(() =>
+      ConfigContract.decodeSettingsInput("settings.json", {
+        providers: { openrouter: { credentialIdentity: "" } },
+      }),
+    ).toThrowError(/credentialIdentity must be a non-empty string/)
+  })
+
+  it("resolves openrouter aliases through the openai preset into every route role", () => {
+    const settings: ConfigurationSettings = ConfigContract.mergeConfigurationSettings({
+      global: {
+        providers: { openrouter: { apiKeyEnv: "OPENROUTER_API_KEY" } },
+        modelAliases: {
+          "mg-flash": {
+            preset: "openai",
+            provider: "openrouter",
+            candidates: ["~deepseek/deepseek-v4-flash-latest"],
+            displayName: "DeepSeek V4 Flash",
+          },
+        },
+        modelRoutes: {
+          modes: { medium: { main: "mg-flash", oracle: "mg-flash" } },
+          title: "mg-flash",
+          compaction: "mg-flash",
+        },
+      },
+      workspace: {},
+    })
+    expect(settings.providers.openrouter).toMatchObject({
+      protocol: "openrouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      apiKeyEnv: "OPENROUTER_API_KEY",
+      credentialIdentity: "openrouter",
+    })
+    for (const [mode, role] of [
+      ["medium", "main"],
+      ["medium", "oracle"],
+    ] as const) {
+      expect(ConfigContract.resolveModelRoute(settings, mode, role)).toMatchObject({
+        providerId: "openrouter",
+        model: "~deepseek/deepseek-v4-flash-latest",
+        options: { reasoning: { effort: expect.any(String) } },
+      })
+    }
+    expect(ConfigContract.resolveThreadTitleRoute(settings)).toMatchObject({
+      providerId: "openrouter",
+      model: "~deepseek/deepseek-v4-flash-latest",
+    })
+    expect(ConfigContract.resolveCompactionSummaryRoute(settings)).toMatchObject({
+      providerId: "openrouter",
+      model: "~deepseek/deepseek-v4-flash-latest",
+    })
   })
 
   it("accepts Bedrock identity and structured SSO refresh settings", () => {
@@ -282,6 +348,40 @@ describe("ConfigContract", () => {
     expect(() =>
       ConfigContract.decodeSettingsInput("settings.json", { logging: { level: "info", file: "/tmp/rika.log" } }),
     ).toThrowError(/unknown key file/)
+  })
+
+  it("accepts non-negative recursive subagent limits and merges each setting by scope", () => {
+    const global = ConfigContract.decodeSettingsInput("global/settings.json", {
+      subagents: { maxDepth: 2, maxSubagents: 8 },
+    })
+    const workspace = ConfigContract.decodeSettingsInput("workspace/settings.json", {
+      subagents: { maxSubagents: 3 },
+    })
+    expect(ConfigContract.mergeConfigurationSettings({ global, workspace }).subagents).toEqual({
+      maxDepth: 2,
+      maxSubagents: 3,
+    })
+    expect(
+      ConfigContract.decodeSettingsInput("settings.json", { subagents: { maxDepth: 0, maxSubagents: 0 } }),
+    ).toEqual({
+      subagents: { maxDepth: 0, maxSubagents: 0 },
+    })
+    for (const subagents of [
+      { maxDepth: -1 },
+      { maxDepth: 1.5 },
+      { maxDepth: 1_025 },
+      { maxSubagents: 1_025 },
+      { maxSubagents: "4" },
+    ])
+      expect(() => ConfigContract.decodeSettingsInput("settings.json", { subagents })).toThrowError(
+        /integer between 0 and 1024/,
+      )
+    expect(
+      ConfigContract.decodeSettingsInput("settings.json", { subagents: { maxDepth: 1_024, maxSubagents: 1_024 } }),
+    ).toEqual({ subagents: { maxDepth: 1_024, maxSubagents: 1_024 } })
+    expect(() =>
+      ConfigContract.decodeSettingsInput("settings.json", { subagents: { maxDepth: 1, maxPerDepth: 4 } }),
+    ).toThrowError(/unknown key maxPerDepth/)
   })
 
   it.each([

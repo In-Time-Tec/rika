@@ -32,10 +32,14 @@ const makeArchive = async (directory: string, marker: string) => {
   await writeFile(join(payload, "bin", ".rika-performance"), `performance-${marker}`)
   await writeFile(join(payload, "bin", ".rika-interactive"), `interactive-${marker}`)
   await writeFile(join(payload, "bin", ".rika-server"), `server-${marker}`)
+  await writeFile(join(payload, "bin", ".rika-kernel-runtime"), `runtime-${marker}`)
+  await writeFile(join(payload, "bin", ".rika-kernel-worker.js"), `worker-${marker}`)
+  await writeFile(join(payload, "bin", "text-result.js"), `worker-support-${marker}`)
   await chmod(join(payload, "bin", "rika"), 0o755)
   await chmod(join(payload, "bin", ".rika-performance"), 0o755)
   await chmod(join(payload, "bin", ".rika-interactive"), 0o755)
   await chmod(join(payload, "bin", ".rika-server"), 0o755)
+  await chmod(join(payload, "bin", ".rika-kernel-runtime"), 0o755)
   const child = Bun.spawn(["tar", "-czf", archive, `rika-${version}-${target}`], { cwd: directory })
   expect(await child.exited).toBe(0)
 }
@@ -62,10 +66,12 @@ test("installs, upgrades, and uninstalls a versioned split-runtime package witho
     expect(await readFile(join(installRoot, "bin", ".rika-performance"), "utf8")).toBe("performance-first")
     expect(await readFile(join(installRoot, "bin", ".rika-interactive"), "utf8")).toBe("interactive-first")
     expect(await readFile(join(installRoot, "bin", ".rika-server"), "utf8")).toBe("server-first")
+    expect(await readFile(join(installRoot, "bin", "text-result.js"), "utf8")).toBe("worker-support-first")
 
     await makeArchive(home, "second")
     await run("scripts/installation/install-local.ts", environment)
     expect(await readFile(join(installRoot, "bin", "rika"), "utf8")).toBe("second")
+    expect(await readFile(join(installRoot, "bin", "text-result.js"), "utf8")).toBe("worker-support-second")
     expect(await readFile(state, "utf8")).toBe("preserve")
 
     await run("scripts/installation/uninstall-local.ts", environment)

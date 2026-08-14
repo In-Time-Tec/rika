@@ -3,8 +3,8 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Clock, Context, Effect } from "effect"
 import { operationError } from "../operation-error"
-import type { InteractiveEvent } from "../interactive/interactive-runtime-event"
-import type { InteractiveDependencyContext } from "../interactive/interactive-session-runtime"
+import type { InteractiveEvent } from "../interactive/session-event"
+import type { InteractiveDependencyContext } from "../interactive/session"
 
 export const makeExecutionLifecycle = (input: {
   readonly dependencyContext: InteractiveDependencyContext
@@ -34,7 +34,7 @@ export const makeExecutionLifecycle = (input: {
         (turn) => turn.status !== "queued" && turn.executionLink !== undefined,
       )
       for (const turn of running) {
-        const outcome = yield* Effect.result(backend.cancelTurn(turn.executionLink!))
+        const outcome = yield* Effect.result(backend.cancelTurn(turn.executionLink!, "Cancelled: server shutdown"))
         if (outcome._tag === "Failure") {
           yield* Effect.logWarning("execution.cancel.failed").pipe(
             Effect.annotateLogs({

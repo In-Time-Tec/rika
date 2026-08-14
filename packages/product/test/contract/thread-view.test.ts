@@ -84,10 +84,8 @@ describe("ThreadView contract", () => {
     )
   })
 
-  it("rejects unbounded and internally duplicated snapshots at the schema", () => {
-    const units = Array.from({ length: ThreadView.limits.timelineItems + 1 }, (_, index) =>
-      unit("turn", `unit:${index}`, index),
-    )
+  it("rejects internally duplicated snapshots and accepts timelines beyond the old window bound", () => {
+    const units = Array.from({ length: 300 }, (_, index) => unit("turn", `unit:${index}`, index))
     expect(() =>
       decodeSnapshot({
         thread: thread("thread"),
@@ -99,7 +97,7 @@ describe("ThreadView contract", () => {
         hasNewer: false,
         usage: usage(),
       }),
-    ).toThrow()
+    ).not.toThrow()
     expect(() =>
       decodeSnapshot({
         thread: thread("thread"),

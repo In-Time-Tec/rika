@@ -1,8 +1,12 @@
 import { readFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { defineConfig } from "vitest/config"
+import { CompletionReporter } from "./test/support/vitest-run-completeness-reporter"
 
 export default defineConfig({
+  resolve: {
+    dedupe: ["effect"],
+  },
   plugins: [
     {
       name: "prompt-text",
@@ -18,6 +22,7 @@ export default defineConfig({
     },
   ],
   test: {
+    reporters: ["default", new CompletionReporter()],
     projects: [
       {
         extends: true,
@@ -41,6 +46,7 @@ export default defineConfig({
           name: "tui",
           include: ["apps/*/test/**/*.tui.test.ts"],
           fileParallelism: false,
+          testTimeout: 60_000,
         },
       },
       {

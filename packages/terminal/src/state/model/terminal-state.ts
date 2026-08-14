@@ -11,6 +11,7 @@ import { QueueItem as QueueItemSchema } from "./terminal-queue-item"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Entry } from "./terminal-message"
 import { ContextUsage } from "./terminal-context-usage"
+import { GoalIndicator } from "./terminal-goal"
 
 export const Mode = ModeId
 export type Mode = typeof Mode.Type
@@ -20,7 +21,12 @@ const WorkspaceFilesSchema = Schema.Union([
   loadableSchemas.loading,
   Schema.TaggedStruct("Ready", { value: Schema.Array(Schema.String) }),
 ])
-const PaletteStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Finite })
+const PaletteStateSchema = Schema.Struct({
+  open: Schema.Boolean,
+  query: Schema.String,
+  selected: Schema.Finite,
+  limit: Schema.optional(Schema.Literals(["maxDepth", "maxSubagents"])),
+})
 const ModePickerStateSchema = Schema.Struct({
   open: Schema.Boolean,
   selected: Schema.Finite,
@@ -50,7 +56,6 @@ const ThreadSwitcherStateSchema = Schema.Struct({
   query: Schema.String,
   selected: Schema.Finite,
   kind: Schema.Literals(["switch", "mention"]),
-  previewScroll: Schema.Finite,
 })
 const ThreadSidebarStateSchema = Schema.Struct({
   open: Schema.Boolean,
@@ -73,13 +78,14 @@ const ChangedFilesSchema = Schema.Union([
 ])
 const ThreadPreviewValueSchema = Schema.Struct({
   threadId: Schema.String,
-  turns: Schema.Array(Schema.Struct({ prompt: Schema.String, units: Schema.Array(TranscriptUnit.Unit) })),
+  requestId: Schema.Int,
+  units: Schema.Array(TranscriptUnit.Unit),
 })
 const ThreadPreviewSchema = Schema.Union([
   loadableSchemas.idle,
-  Schema.TaggedStruct("Loading", { previous: Schema.optionalKey(ThreadPreviewValueSchema) }),
+  Schema.TaggedStruct("Loading", { threadId: Schema.String, requestId: Schema.Int }),
   Schema.TaggedStruct("Ready", { value: ThreadPreviewValueSchema }),
-  Schema.TaggedStruct("Failed", { message: Schema.String }),
+  Schema.TaggedStruct("Failed", { threadId: Schema.String, requestId: Schema.Int, message: Schema.String }),
 ])
 export const Model = Schema.Struct({
   workspace: Schema.String,
@@ -108,18 +114,40 @@ export const Model = Schema.Struct({
   ),
   pendingSteering: Schema.Array(
     Schema.Struct({
+      runId: Schema.String,
+      requestId: Schema.String,
       turnId: Schema.String,
       text: Schema.String,
-      sequence: Schema.optionalKey(Schema.Finite),
+      entryId: Schema.String,
+      sequence: Schema.Finite,
     }),
+  ),
+  steeringRequests: Schema.Array(
+    Schema.Union([
+      Schema.Struct({
+        requestId: Schema.String,
+        turnId: Schema.String,
+        text: Schema.String,
+        origin: Schema.Literal("composer"),
+      }),
+      Schema.Struct({
+        requestId: Schema.String,
+        turnId: Schema.String,
+        text: Schema.String,
+        origin: Schema.Literal("queue"),
+        queuedTurnId: Schema.String,
+      }),
+    ]),
   ),
   cancelPending: Schema.Boolean,
   busy: Schema.Boolean,
   activity: Schema.optional(Activity),
-  costUsd: Schema.optional(Schema.Finite),
+  connectionStatus: Schema.optional(Schema.Literals(["Connecting", "Reconnecting"])),
   contextUsage: Schema.optional(ContextUsage),
+  goal: Schema.optional(GoalIndicator),
   contextAnimation: ContextAnimationSchema,
   animationTick: Schema.Finite,
+  retryCountdown: Schema.Finite,
   compactionShimmer: Schema.optional(CompactionShimmerSchema),
   contextDetailsOpen: Schema.Boolean,
   usageDisplay: Schema.optional(UsageDisplay),
@@ -135,7 +163,13 @@ export const Model = Schema.Struct({
     Schema.Union([
       Schema.Struct({ _tag: Schema.tag("Loading") }),
       Schema.Struct({ _tag: Schema.tag("Unavailable") }),
-      Schema.Struct({ _tag: Schema.tag("Available"), usd: Schema.Finite, unpricedAttempts: Schema.Int }),
+      Schema.Struct({ _tag: Schema.tag("Included"), includedAttempts: Schema.Int }),
+      Schema.Struct({
+        _tag: Schema.tag("Available"),
+        usd: Schema.Finite,
+        unpricedAttempts: Schema.Int,
+        includedAttempts: Schema.Int,
+      }),
     ]),
   ),
   paletteOpen: Schema.Boolean,
@@ -198,11 +232,15 @@ const initialImpl: {
     historySearch: "",
     submittedDrafts: [],
     pendingSteering: [],
+    steeringRequests: [],
     cancelPending: false,
     busy: false,
+    connectionStatus: undefined,
     contextUsage: { _tag: "Loading" },
+    goal: undefined,
     contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
     animationTick: 0,
+    retryCountdown: 0,
     compactionShimmer: undefined,
     contextDetailsOpen: false,
     usageDisplay: "cost",
@@ -211,7 +249,7 @@ const initialImpl: {
     modePicker: { open: false, selected: 0 },
     modeCommit: undefined,
     filePicker: { open: false, query: "", selected: 0, items: loadableIdle },
-    threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
+    threadSwitcher: { open: false, query: "", selected: 0, kind: "switch" },
     shortcutsOpen: false,
     shortcutsTrigger: undefined,
     composerHeight: 5,
@@ -234,7 +272,7 @@ const initialImpl: {
     sidebarWidth: 52,
     threadLoading: false,
     refoldingThreadIds: [],
-    threadPreview: loadableIdle,
+    threadPreview: { _tag: "Idle" },
   }),
 )
 export const withModeRouteMap: {

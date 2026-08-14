@@ -74,7 +74,8 @@ describe("MediaView", () => {
     Effect.gen(function* () {
       const pdf = bytes([...new TextEncoder().encode("%PDF-")])
       const result = yield* view(pdf, () => Effect.succeed("x".repeat(40_001)))
-      expect(result.text).toHaveLength(40_000)
+      expect(new TextEncoder().encode(result.text).byteLength).toBe(16_384)
+      expect(result.text).toContain("[truncated: kept first")
       expect(result.truncated).toBe(true)
       const error = yield* Effect.flip(view(pdf, () => Effect.fail(MediaAnalysisError.make({ message: "no route" }))))
       expect(error.message).toBe("no route")

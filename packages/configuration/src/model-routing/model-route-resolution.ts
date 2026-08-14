@@ -49,17 +49,18 @@ const resolveRoute = (
       mode: owner,
       message: `${owner} model alias ${route.alias} has no provider candidates`,
     })
-  const variant = alias.variants[route.effort]?.[route.fast === true ? "fast" : "normal"]
+  const variants = alias.variants[route.effort]
+  const variant = route.fast === true ? (variants?.fast ?? variants?.normal) : variants?.normal
   if (variant === undefined)
     throw ModelRouteError.make({
       mode: owner,
-      message: `${owner} requests unavailable ${route.alias}/${route.effort}${route.fast === true ? "/fast" : ""} variant`,
+      message: `${owner} requests unavailable ${route.alias}/${route.effort} variant`,
     })
   return {
     alias: route.alias,
     displayName: alias.displayName,
     effort: route.effort,
-    fast: route.fast === true,
+    fast: route.fast === true && variants?.fast !== undefined,
     providerId: alias.provider,
     providerConnection,
     candidates: alias.candidates,

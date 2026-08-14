@@ -17,7 +17,11 @@ const storeProjectionImpl = (
   repository.commitProjection(turn, {
     _tag: "ProjectionSnapshot",
     revision: projection.revision,
-    checkpoint: { version: 1, cursor: `fixture:${projection.revision}`, state: "{}" },
+    checkpoint: {
+      version: ExecutionProjection.projectionVersion,
+      cursor: `fixture:${projection.revision}`,
+      state: "{}",
+    },
     units: projection.units,
     hasOlder: false,
     state: {

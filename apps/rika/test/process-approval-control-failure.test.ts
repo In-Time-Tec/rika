@@ -31,14 +31,15 @@ describe("approval control failures", () => {
     const { dispatch, showToast } = router()
     dispatch({
       _tag: "ExecutionControlFailed",
-      selectionEpoch: 0,
       threadId: Thread.ThreadId.make("thread"),
       turnId: Turn.TurnId.make("turn"),
       action,
       failure: {
         tag: "ApprovalResponseFailure",
         message: "Authorization is no longer pending",
-        retry: "user",
+        category: "operation",
+        retryable: false,
+        retry: "none",
         actor: "user",
       },
     })
@@ -49,14 +50,15 @@ describe("approval control failures", () => {
     const { dispatch, showToast } = router()
     dispatch({
       _tag: "ExecutionControlFailed",
-      selectionEpoch: 0,
       threadId: Thread.ThreadId.make("other-thread"),
       turnId: Turn.TurnId.make("turn"),
       action: "approve",
       failure: {
         tag: "ApprovalResponseFailure",
         message: "Authorization is no longer pending",
-        retry: "user",
+        category: "operation",
+        retryable: false,
+        retry: "none",
         actor: "user",
       },
     })

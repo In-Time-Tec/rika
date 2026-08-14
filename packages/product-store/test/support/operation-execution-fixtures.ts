@@ -1,6 +1,4 @@
-import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import * as TurnContract from "@rika/product/turn-repository"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import { unitOrder } from "@rika/transcript/transcript-unit-order"
 import { Effect, Function, Stream } from "effect"
@@ -13,7 +11,7 @@ const projectionSnapshotImpl = (
 ): ExecutionProjection.Snapshot => ({
   _tag: "ProjectionSnapshot",
   revision: 0,
-  checkpoint: { version: 1, cursor, state: "{}" },
+  checkpoint: { version: ExecutionProjection.projectionVersion, cursor, state: "{}" },
   units:
     text === undefined
       ? []
@@ -43,7 +41,7 @@ const projectionPatchImpl = (
   _tag: "ProjectionPatch",
   baseRevision,
   revision,
-  checkpoint: { version: 1, cursor, state: "{}" },
+  checkpoint: { version: ExecutionProjection.projectionVersion, cursor, state: "{}" },
   upsert: [],
   remove: [],
   state: {
@@ -57,18 +55,12 @@ export const backend = ExecutionGateway.Service.of({
   startTurn: (input) =>
     Effect.succeed({ runId: `${input.turnId}-run`, turnId: input.turnId, threadId: input.threadId }),
   cancelTurn: () => Effect.void,
-  steerTurn: () => Effect.void,
+  steerTurn: () => Effect.succeed({ entryId: "test-steering", sequence: 0 }),
   approveTurn: () => Effect.void,
   denyTurn: () => Effect.void,
   watchTurn: (link) => Stream.make(projectionSnapshot(link.turnId, "completed", "cursor-b", "answer")),
-  inspectTurn: () => Effect.succeed({ status: "completed" }),
+  inspectTurn: () => Effect.succeed({ status: "completed", cursor: "cursor-b" }),
 })
-
-export const inspectTurnFromTurns = (turns: TurnContract.Interface) => (link: ExecutionGateway.ExecutionLink) =>
-  turns.get(Turn.TurnId.make(link.turnId)).pipe(
-    Effect.map((turn) => (turn === undefined ? { status: "unavailable" as const } : { status: turn.status })),
-    Effect.orElseSucceed(() => ({ status: "unavailable" as const })),
-  )
 
 export const projectionSnapshot: {
   (

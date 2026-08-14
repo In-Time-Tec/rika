@@ -10,12 +10,14 @@ import { pasteClipboardPng, pastedImagePath, persistPastedImage } from "./proces
 type InputContext = Omit<InteractiveInputContext, "options" | "resume">
 
 export const createInputHandlers = (context: InputContext): Partial<Parameters<typeof createTui>[0]> => {
+  let quitConfirmationVisible = false
+  let previewRequestId = 0
   const {
     loop,
     session,
     run,
+    nextSteeringRequestId,
     previewTimer,
-    requestNewerPage,
     close,
     refreshTerminalTitle,
     openPath,
@@ -35,29 +37,12 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
     openPath,
     scroll: (offset) => {
       loop.model = update(loop.model, { _tag: "ScrollMoved", offset })
-      if (offset <= 0 && !loop.loadingOlder) {
-        const threadId = loop.model.currentThreadId
-        const before = loop.transcriptOldestCursor
-        if (!loop.transcriptHasOlder || threadId === undefined || before === undefined) return
-        loop.loadingOlder = true
-        run(
-          session.loadOlder(threadId, before).pipe(
-            Effect.ensuring(
-              Effect.sync(() => {
-                loop.loadingOlder = false
-              }),
-            ),
-          ),
-        )
-      }
-      if (offset > 0 && !loop.loadingOlder) requestNewerPage()
     },
     scrollGeometry: (offset) => {
       loop.model = update(loop.model, { _tag: "ScrollMoved", offset })
     },
     scrollFollow: () => {
       loop.model = update(loop.model, { _tag: "ScrollFollowed" })
-      requestNewerPage()
     },
     paste: (text) => {
       loop.model = update(loop.model, { _tag: "Pasted", text })
@@ -138,7 +123,19 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
     },
     key: (key) => {
       if (key.ctrl && key.name === "c" && !loop.model.busy) {
-        close()
+        if (quitConfirmationVisible) {
+          close()
+          return
+        }
+        quitConfirmationVisible = true
+        loop.renderer?.surface.showQuitConfirmation(true)
+        return
+      }
+      if (quitConfirmationVisible) {
+        if (key.name === "escape") {
+          quitConfirmationVisible = false
+          loop.renderer?.surface.showQuitConfirmation(false)
+        }
         return
       }
       if (key.ctrl && key.name === "g") {
@@ -161,7 +158,19 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       const prompt = submitting ? loop.model.input : undefined
       const parts = prompt === undefined ? undefined : promptParts(prompt, loop.model.pastedText)
       const submittedPrompt = prompt === undefined ? undefined : expandPastedText(prompt, loop.model.pastedText)
-      loop.model = update(loop.model, { _tag: "KeyPressed", key })
+      const steeringRequestId =
+        (key.ctrl && key.name === "s" && loop.model.busy && loop.model.input.length > 0) ||
+        (key.name === "return" &&
+          loop.model.activeTurnId !== undefined &&
+          loop.model.input.length === 0 &&
+          loop.model.queueSelection !== undefined)
+          ? nextSteeringRequestId()
+          : undefined
+      loop.model = update(loop.model, {
+        _tag: "KeyPressed",
+        key,
+        ...(steeringRequestId === undefined ? {} : { steeringRequestId }),
+      })
       if (submitting)
         loop.model = update(loop.model, {
           _tag: "Submitted",
@@ -170,13 +179,23 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       if (!wasChangedFilesOpen && loop.model.changedFilesOpen)
         loop.model = update(loop.model, { _tag: "ChangedFilesRequested" })
       const afterPreviewId = loop.model.threadSwitcher.open ? selectedThreadMetadata(loop.model)?.id : undefined
-      if (afterPreviewId !== undefined && afterPreviewId !== beforePreviewId)
-        loop.model = update(loop.model, { _tag: "ThreadPreviewRequested" })
+      if (afterPreviewId !== undefined && afterPreviewId !== beforePreviewId) {
+        previewRequestId += 1
+        loop.model = update(loop.model, {
+          _tag: "ThreadPreviewRequested",
+          threadId: afterPreviewId,
+          requestId: previewRequestId,
+        })
+      }
       loop.renderer?.surface.update(loop.model)
       if (!wasChangedFilesOpen && loop.model.changedFilesOpen) run(loadChangedFiles)
       if (afterPreviewId !== undefined && afterPreviewId !== beforePreviewId) {
+        const requestId = previewRequestId
         previewTimer(
-          Effect.sleep("120 millis").pipe(Effect.andThen(session.previewThread(afterPreviewId)), recoverSession),
+          Effect.sleep("120 millis").pipe(
+            Effect.andThen(session.previewThread(afterPreviewId, requestId)),
+            recoverSession,
+          ),
         )
       }
       if (submittedPrompt !== undefined && submittedPrompt.length > 0 && parts !== undefined) {
@@ -212,10 +231,6 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       loop.renderer?.surface.update(loop.model)
       const action = loop.model.pendingAction as Action | undefined
       if (action !== undefined) consumePendingAction()
-    },
-    threadPreviewScroll: (offset) => {
-      loop.model = update(loop.model, { _tag: "ThreadPreviewScrolled", offset })
-      loop.renderer?.surface.update(loop.model)
     },
   }
 }

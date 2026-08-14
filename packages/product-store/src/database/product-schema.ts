@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 
 export interface SchemaObject {
   readonly type: string
@@ -34,6 +35,10 @@ export const create = Effect.gen(function* () {
     updated_at INTEGER NOT NULL
   )`
   yield* sql`CREATE INDEX rika_threads_listing ON rika_threads (pinned DESC, updated_at DESC, id ASC)`
+  yield* sql`CREATE TABLE rika_thread_deletion_outbox (
+    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    requested_at INTEGER NOT NULL
+  )`
   yield* sql`CREATE TABLE rika_turns (
     id TEXT PRIMARY KEY NOT NULL,
     thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
@@ -88,9 +93,23 @@ export const create = Effect.gen(function* () {
   yield* sql`CREATE INDEX rika_turns_thread_updated ON rika_turns (thread_id, updated_at DESC)`
   yield* sql`CREATE INDEX rika_turns_thread_nonqueued ON rika_turns (thread_id, created_at DESC, id DESC)
     WHERE status <> 'queued'`
+  yield* sql`CREATE TRIGGER rika_tombstoned_thread_turn_insert
+    BEFORE INSERT ON rika_turns
+    WHEN EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = NEW.thread_id) BEGIN
+      SELECT RAISE(ABORT, 'thread deletion is pending');
+    END`
   yield* sql`CREATE TABLE rika_turn_admission_outbox (
     turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
     start_input_json TEXT NOT NULL,
+    prepared_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE TABLE rika_turn_steering_outbox (
+    request_id TEXT PRIMARY KEY NOT NULL,
+    target_turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    source_turn_id TEXT UNIQUE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    admission_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'rejected')),
     prepared_at INTEGER NOT NULL
   )`
   yield* sql`CREATE TABLE rika_thread_queue_state (
@@ -113,6 +132,21 @@ export const create = Effect.gen(function* () {
   yield* sql`CREATE TABLE rika_thread_read_state (
     thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
     last_read_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE TABLE rika_goals (
+    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    objective TEXT NOT NULL CHECK (length(objective) > 0 AND length(objective) <= 4096),
+    status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'complete', 'errored')),
+    budget_tokens INTEGER CHECK (budget_tokens IS NULL OR budget_tokens > 0),
+    budget_wall_clock_millis INTEGER CHECK (budget_wall_clock_millis IS NULL OR budget_wall_clock_millis > 0),
+    usage_tokens INTEGER NOT NULL DEFAULT 0 CHECK (usage_tokens >= 0),
+    usage_elapsed_millis INTEGER NOT NULL DEFAULT 0 CHECK (usage_elapsed_millis >= 0),
+    usage_turns INTEGER NOT NULL DEFAULT 0 CHECK (usage_turns >= 0),
+    started_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    summary TEXT,
+    CHECK ((status = 'complete') = (completed_at IS NOT NULL))
   )`
   yield* sql`CREATE VIRTUAL TABLE rika_thread_search USING fts5(
     thread_id UNINDEXED,
@@ -326,17 +360,21 @@ export const schemaObjects: ReadonlyArray<string> = [
   "table:rika_workspaces",
   "table:rika_threads",
   "index:rika_threads_listing",
+  "table:rika_thread_deletion_outbox",
   "table:rika_turns",
   "index:rika_turns_thread",
   "index:rika_turns_queue",
   "index:rika_turns_queue_claim",
   "index:rika_turns_thread_updated",
   "index:rika_turns_thread_nonqueued",
+  "trigger:rika_tombstoned_thread_turn_insert",
   "table:rika_turn_admission_outbox",
+  "table:rika_turn_steering_outbox",
   "table:rika_thread_queue_state",
   "table:rika_thread_turn_activity",
   "index:rika_thread_turn_activity_summary",
   "table:rika_thread_read_state",
+  "table:rika_goals",
   "table:rika_thread_search",
   "table:rika_thread_search_data",
   "table:rika_thread_search_idx",
@@ -362,3 +400,82 @@ export const schemaObjects: ReadonlyArray<string> = [
   "trigger:rika_thread_picker_summary_activity_delete",
   "table:rika_schema_identity",
 ]
+
+/**
+ * Objects a database created by an earlier Rika will not have. A data root outlives the version that
+ * made it, so a release that adds a table brings it rather than asking for a fresh one.
+ */
+export const additions: ReadonlyArray<{
+  readonly name: string
+  readonly since: string
+  readonly apply: (sql: SqlClient) => Effect.Effect<unknown, SqlError>
+}> = [
+  {
+    name: "table:rika_turn_steering_outbox",
+    since: "0.5.10",
+    apply: (sql) => sql`CREATE TABLE rika_turn_steering_outbox (
+    request_id TEXT PRIMARY KEY NOT NULL,
+    target_turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    source_turn_id TEXT UNIQUE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    admission_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'rejected')),
+    prepared_at INTEGER NOT NULL
+  )`,
+  },
+  {
+    name: "table:rika_thread_deletion_outbox",
+    since: "0.5.7",
+    apply: (sql) => sql`CREATE TABLE rika_thread_deletion_outbox (
+    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    requested_at INTEGER NOT NULL
+  )`,
+  },
+  {
+    name: "trigger:rika_tombstoned_thread_turn_insert",
+    since: "0.5.7",
+    apply: (sql) => sql`CREATE TRIGGER rika_tombstoned_thread_turn_insert
+    BEFORE INSERT ON rika_turns
+    WHEN EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = NEW.thread_id) BEGIN
+      SELECT RAISE(ABORT, 'thread deletion is pending');
+    END`,
+  },
+  {
+    name: "table:rika_goals",
+    since: "0.5.6",
+    apply: (sql) => sql`CREATE TABLE rika_goals (
+    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    objective TEXT NOT NULL CHECK (length(objective) > 0 AND length(objective) <= 4096),
+    status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'complete', 'errored')),
+    budget_tokens INTEGER CHECK (budget_tokens IS NULL OR budget_tokens > 0),
+    budget_wall_clock_millis INTEGER CHECK (budget_wall_clock_millis IS NULL OR budget_wall_clock_millis > 0),
+    usage_tokens INTEGER NOT NULL DEFAULT 0 CHECK (usage_tokens >= 0),
+    usage_elapsed_millis INTEGER NOT NULL DEFAULT 0 CHECK (usage_elapsed_millis >= 0),
+    usage_turns INTEGER NOT NULL DEFAULT 0 CHECK (usage_turns >= 0),
+    started_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    summary TEXT,
+    CHECK ((status = 'complete') = (completed_at IS NOT NULL))
+  )`,
+  },
+]
+const versionAtLeast = (left: string, right: string): boolean => {
+  const leftParts = left.split(".").map(Number)
+  const rightParts = right.split(".").map(Number)
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0)
+    if (difference !== 0) return difference > 0
+  }
+  return true
+}
+
+export const knownObjectShapes: ReadonlyArray<{
+  readonly version: string
+  readonly objects: ReadonlyArray<string>
+}> = [...new Set(additions.map((addition) => addition.since))].map((version) => ({
+  version,
+  objects: schemaObjects.filter(
+    (key) => !additions.some((addition) => versionAtLeast(addition.since, version) && addition.name === key),
+  ),
+}))

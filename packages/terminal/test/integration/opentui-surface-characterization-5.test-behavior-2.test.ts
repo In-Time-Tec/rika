@@ -97,7 +97,7 @@ test("keeps a detached transcript window stable when live entries arrive", () =>
       try {
         surface.update(base)
         yield* openTui(() => setup.flush())
-        surface.transcriptScrollbar.scrollPosition = Math.max(0, surface.transcriptScroll.scrollTop - 1)
+        surface.transcriptScrollbar.scrollPosition = Math.max(0, surface.transcriptDiagnostics().virtualScrollTop - 1)
         yield* openTui(() => setup.flush())
         const firstBefore = /answer (\d+)/.exec(setup.captureCharFrame())?.[1]
         surface.update({

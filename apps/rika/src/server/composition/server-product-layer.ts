@@ -9,14 +9,13 @@ import { lazyBackendLayer } from "./lazy-execution-backend"
 import { workspacePaths } from "@rika/configuration/configuration-paths"
 import * as ServerConfiguration from "./server-configuration-adapter"
 import * as ServerExecution from "./server-execution-layer"
+import { kernelPoolFor, pinnedCapabilities } from "./server-pinned-capabilities"
 import * as ServerAuth from "./server-auth-layer"
+import { resolvedContextLayer, workspaceExecutionRoute } from "./server-execution-route"
 import type { ServerProductOptions } from "./server-auth-layer"
 import * as ServerRepository from "./server-repository-layer"
-import * as ServerProductContext from "./server-product-context"
-import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
-import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+import * as GoalService from "@rika/product/goal-service"
 import * as ThreadQuery from "@rika/product/thread-query-service"
-import { makeAgentServices } from "./server-agent-services"
 import { defaultWorkspaceToolRuntimeLayer } from "./server-runtime-tools"
 
 const provideLayerScoped =
@@ -51,8 +50,9 @@ const createOperationLayerImpl = (
     threadSummaryRepositoryLayer,
     threadSearchRepositoryLayer,
     transcriptRepositoryLayer,
+    goalRepositoryLayer,
   } = ServerRepository.makeServerRepositoryLayers(database)
-  const resolvedContextLayer = ServerProductContext.layer(workspaceGlob)
+  const contextLayer = resolvedContextLayer(workspaceGlob)
   return Layer.unwrap(
     Effect.gen(function* () {
       const globalSettings = yield* loadSettingsFile(globalConfig)
@@ -62,6 +62,7 @@ const createOperationLayerImpl = (
         global: globalSettings,
         workspace: workspaceSettings,
       })
+      const openAiAccountAuth = yield* ServerAuth.resolveOpenAiAccountAuth(authOperations)
       const effectiveConfigForWorkspace = (workspace: string) =>
         Effect.gen(function* () {
           const settings = yield* loadSettingsFile(workspacePaths(workspace).settings)
@@ -91,24 +92,16 @@ const createOperationLayerImpl = (
               ...(testModelScript === undefined ? {} : { script: testModelScript }),
               ...(testModelResponse === undefined ? {} : { response: testModelResponse }),
             }
+      const resolveRoute = workspaceExecutionRoute({
+        testModel,
+        effectiveConfigForWorkspace,
+        openAiAccountStatus: openAiAccountAuth.status,
+      })
       const resolveWorkspaceExecutionRoute = (
         mode: "low" | "medium" | "high" | "ultra",
         tuning: { readonly fastMode?: boolean } | undefined,
         workspace = workspaceRoot,
-      ) =>
-        testModel === undefined
-          ? effectiveConfigForWorkspace(workspace).pipe(
-              Effect.flatMap((configuration) =>
-                Effect.try({
-                  try: () => ExecutionRouteResolution.resolve(configuration.settings, mode, tuning),
-                  catch: (cause) =>
-                    ServerAuth.OperationProductError.make({
-                      message: `Could not resolve execution route: ${String(cause)}`,
-                    }),
-                }),
-              ),
-            )
-          : Effect.succeed(ExecutionRouteSnapshot.testExecutionRoute(mode))
+      ) => resolveRoute(mode, tuning, workspace)
       const repositories = Layer.succeedContext(
         yield* Layer.build(
           Layer.mergeAll(
@@ -123,24 +116,52 @@ const createOperationLayerImpl = (
       const queryFactory = Layer.succeedContext(
         yield* Layer.build(ThreadQuery.Runtime.factoryLayer.pipe(Layer.provide(repositories))),
       )
-      const agentServices = makeAgentServices({ effectiveConfigForWorkspace, queryFactory })
+      const goalRepositories = Layer.succeedContext(yield* Layer.build(goalRepositoryLayer))
+      const kernelOptions = {
+        workspace: workspaceRoot,
+        home,
+        dataRoot: ServerRepository.dataRootOf(options.batonDatabase),
+        runtimeVersion: Bun.version,
+        goalRepositoryLayer: goalRepositories,
+        queryFactory,
+        toolRuntimeLayer: defaultWorkspaceToolRuntimeLayer(workspaceRoot, effectiveConfigForWorkspace),
+      }
+      /**
+       * One pool for the Server, built here rather than inside an Agent environment or a cell.
+       * Baton builds a resolved Agent's environment once per Run, and a cell's own scope ends with
+       * that cell, so a pool owned by either would be released while later turns still needed it.
+       * This scope is the Server's, which is the lifetime the pool actually has.
+       */
+      const kernelPool = yield* kernelPoolFor(kernelOptions)
+      const { harnessSnapshot, skills } = yield* pinnedCapabilities(kernelOptions)
       const backendLayer = configuredBackendLayer({
         filename: options.batonDatabase,
-        agentServices,
+        kernelPool,
+        skills,
+        harnessSnapshot,
+        credentialStore: ServerAuth.createProviderCredentialStoreLayer(options.database, options.profileIdentity),
+        openAiAccountAuth,
         ...(testModel === undefined ? {} : { testModel }),
       })
       const configAdapter = ServerConfiguration.productConfigAdapter(editor)
+      const goals = Context.get(
+        yield* Layer.build(GoalService.layer.pipe(Layer.provide(goalRepositories))),
+        GoalService.GoalService,
+      )
+      const executionLayer = lazyBackendLayer(backendLayer).pipe(
+        Layer.catchCause((cause) =>
+          Layer.effectContext(Effect.fail(ServerAuth.OperationProductError.make({ message: Cause.pretty(cause) }))),
+        ),
+      )
       const operationLayer = Operation.productLayer({
+        goals,
         repositoryLayer: repositories,
         turnRepositoryLayer: repositories,
         threadSummaryRepositoryLayer: repositories,
         transcriptRepositoryLayer: repositories,
-        resolvedContextLayer,
-        backendLayer: lazyBackendLayer(backendLayer).pipe(
-          Layer.catchCause((cause) =>
-            Layer.effectContext(Effect.fail(ServerAuth.OperationProductError.make({ message: Cause.pretty(cause) }))),
-          ),
-        ),
+        resolvedContextLayer: contextLayer,
+        backendLayer: executionLayer,
+        executionSessionLifecycleLayer: executionLayer,
         resolveExecutionRoute: (...arguments_) =>
           resolveWorkspaceExecutionRoute(...arguments_).pipe(
             Effect.mapError((error) =>

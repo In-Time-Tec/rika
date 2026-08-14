@@ -149,75 +149,57 @@ describe("Rika Server lifecycle", () => {
     }),
   )
 
-  it.effect("keeps work admission closed after an idle replacement decision", () =>
+  it.effect("closes work and attachment admission before preparing replacement", () =>
     Effect.gen(function* () {
       const lifecycle = yield* ServerService.ServiceRuntime.makeLifecycle(() => Effect.void)
-      const inspectionStarted = yield* Deferred.make<void>()
-      const finishInspection = yield* Deferred.make<void>()
+      const preparationStarted = yield* Deferred.make<void>()
+      const finishPreparation = yield* Deferred.make<void>()
       yield* lifecycle.ready
-      const decision = yield* Effect.forkChild(
-        lifecycle.authorizeReplacement(
-          Deferred.succeed(inspectionStarted, undefined).pipe(
-            Effect.andThen(Deferred.await(finishInspection)),
-            Effect.as(false),
-          ),
+      const drain = yield* Effect.forkChild(
+        lifecycle.drainForReplacement(
+          Deferred.succeed(preparationStarted, undefined).pipe(Effect.andThen(Deferred.await(finishPreparation))),
         ),
       )
-      yield* Deferred.await(inspectionStarted)
-      const admissionCompleted = yield* Deferred.make<void>()
-      const admission = yield* Effect.forkChild(
-        lifecycle.reserveReplacementWork.pipe(Effect.tap(() => Deferred.succeed(admissionCompleted, undefined))),
+      yield* Deferred.await(preparationStarted)
+      const workCompleted = yield* Deferred.make<void>()
+      const work = yield* Effect.forkChild(
+        lifecycle.reserveTransientWork.pipe(Effect.tap(() => Deferred.succeed(workCompleted, undefined))),
       )
-      yield* Effect.yieldNow
-      expect(yield* Deferred.isDone(admissionCompleted)).toBe(false)
-      yield* Deferred.succeed(finishInspection, undefined)
-      expect(yield* Fiber.join(decision)).toBe("supersede")
-      expect(yield* Fiber.join(admission)).toBeUndefined()
-      expect(yield* lifecycle.state).toBe("draining")
-    }),
-  )
-
-  it.effect("blocks attachment during replacement inspection and refuses it after authorization", () =>
-    Effect.gen(function* () {
-      const lifecycle = yield* ServerService.ServiceRuntime.makeLifecycle(() => Effect.void)
-      const inspectionStarted = yield* Deferred.make<void>()
-      const finishInspection = yield* Deferred.make<void>()
-      yield* lifecycle.ready
-      const decision = yield* Effect.forkChild(
-        lifecycle.authorizeReplacement(
-          Deferred.succeed(inspectionStarted, undefined).pipe(
-            Effect.andThen(Deferred.await(finishInspection)),
-            Effect.as(false),
-          ),
-        ),
-      )
-      yield* Deferred.await(inspectionStarted)
       const attachCompleted = yield* Deferred.make<void>()
       const attachment = yield* Effect.forkChild(
         lifecycle.tryAttach.pipe(Effect.tap(() => Deferred.succeed(attachCompleted, undefined))),
       )
       yield* Effect.yieldNow
+      expect(yield* Deferred.isDone(workCompleted)).toBe(false)
       expect(yield* Deferred.isDone(attachCompleted)).toBe(false)
-      yield* Deferred.succeed(finishInspection, undefined)
-      expect(yield* Fiber.join(decision)).toBe("supersede")
+      yield* Deferred.succeed(finishPreparation, undefined)
+      yield* Fiber.join(drain)
+      expect(yield* Fiber.join(work)).toBeUndefined()
       expect(yield* Fiber.join(attachment)).toBe(false)
+      expect(yield* lifecycle.state).toBe("draining")
     }),
   )
 
-  it.effect("defers for admitted work, leaves the server usable, and authorizes retry after release", () =>
+  it.effect("waits for each admitted transient operation before completing replacement drain", () =>
     Effect.gen(function* () {
       const lifecycle = yield* ServerService.ServiceRuntime.makeLifecycle(() => Effect.void)
       yield* lifecycle.ready
-      const release = yield* lifecycle.reserveReplacementWork
-      expect(release).toBeDefined()
-      expect(yield* lifecycle.authorizeReplacement(Effect.succeed(false))).toBe("defer")
-      expect(yield* lifecycle.state).not.toBe("draining")
-      yield* release!
-      const next = yield* lifecycle.reserveReplacementWork
-      expect(next).toBeDefined()
-      yield* next!
-      expect(yield* lifecycle.authorizeReplacement(Effect.succeed(false))).toBe("supersede")
-      expect(yield* lifecycle.state).toBe("draining")
+      const releaseFirst = yield* lifecycle.reserveTransientWork
+      const releaseSecond = yield* lifecycle.reserveTransientWork
+      expect(releaseFirst).toBeDefined()
+      expect(releaseSecond).toBeDefined()
+      const drained = yield* Deferred.make<void>()
+      const drain = yield* Effect.forkChild(
+        lifecycle.drainForReplacement(Effect.void).pipe(Effect.andThen(Deferred.succeed(drained, undefined))),
+      )
+      yield* Effect.yieldNow
+      expect(yield* Deferred.isDone(drained)).toBe(false)
+      yield* releaseFirst!
+      yield* releaseFirst!
+      expect(yield* Deferred.isDone(drained)).toBe(false)
+      yield* releaseSecond!
+      yield* Fiber.join(drain)
+      expect(yield* lifecycle.reserveTransientWork).toBeUndefined()
     }),
   )
 })

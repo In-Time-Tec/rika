@@ -15,7 +15,7 @@ const mapServerSocketFailure = (cause: unknown, accepted: boolean): ServerServic
     if (cause.reason.code === 4406)
       return transportError(
         cause.reason.closeReason ||
-          "A listener reported an unsigned server incompatibility; stop it, then run rika again",
+          "A listener reported an unsigned server build mismatch; stop it, then run rika again",
         "foreign-listener",
       )
     if (cause.reason.code === 4401)
@@ -70,18 +70,14 @@ export const make = Effect.fn("ServerTransport.make")(() =>
             Effect.annotateLogs("rika.server.client.kind", input.clientKind),
           )
           const acquire = Effect.fn("ServerTransport.acquireConnection")(function* (policy: "launch" | "reattach") {
-            const yieldToIncompatible = (failure: ServerService.ServerServiceError) =>
-              ServerService.ServerRestartRequired.make({ message: failure.message })
             const startedAt = yield* Clock.currentTimeMillis
             const deadline = startedAt + 30_000
             const first = yield* Effect.result(attach(policy))
             if (first._tag === "Success") return first.success
-            if (policy === "reattach" && first.failure.reason === "incompatible-server")
-              return yield* yieldToIncompatible(first.failure)
             if (
               first.failure.reason !== "server-absent" &&
               first.failure.reason !== "server-draining" &&
-              first.failure.reason !== "incompatible-server"
+              first.failure.reason !== "replacement-required"
             )
               return yield* first.failure
             if (input.startHost === undefined) return yield* first.failure
@@ -97,15 +93,13 @@ export const make = Effect.fn("ServerTransport.make")(() =>
                   return connected.success
                 }
                 lastFailure = connected.failure
-                if (policy === "reattach" && lastFailure.reason === "incompatible-server")
-                  return yield* yieldToIncompatible(lastFailure)
                 if (
                   lastFailure.reason !== "server-absent" &&
                   lastFailure.reason !== "server-draining" &&
-                  lastFailure.reason !== "incompatible-server"
+                  lastFailure.reason !== "replacement-required"
                 )
                   return yield* lastFailure
-                if (lastFailure.reason === "server-absent" || lastFailure.reason === "incompatible-server") {
+                if (lastFailure.reason === "server-absent" || lastFailure.reason === "replacement-required") {
                   const claim = yield* claimStartup(endpoint.startupPath, endpoint.identity, deadline)
                   if (claim._tag === "Owner") {
                     const existing = yield* Effect.result(attach(policy))
@@ -117,13 +111,9 @@ export const make = Effect.fn("ServerTransport.make")(() =>
                       return existing.success
                     }
                     lastFailure = existing.failure
-                    if (policy === "reattach" && lastFailure.reason === "incompatible-server") {
-                      yield* claim.release
-                      return yield* yieldToIncompatible(lastFailure)
-                    }
-                    if (lastFailure.reason === "server-absent" || lastFailure.reason === "incompatible-server") {
+                    if (lastFailure.reason === "server-absent" || lastFailure.reason === "replacement-required") {
                       if (yield* ServerProcessStartup.listenerIsLive(endpoint.port)) {
-                        if (lastFailure.reason !== "incompatible-server" || lastFailure.serverPid === undefined) {
+                        if (lastFailure.reason !== "replacement-required" || lastFailure.serverPid === undefined) {
                           yield* claim.release
                           return yield* transportError(
                             `A process is listening on Rika server port ${endpoint.port}, but it could not be authenticated. Stop that process, then run rika again`,
@@ -228,24 +218,19 @@ export const make = Effect.fn("ServerTransport.make")(() =>
               Effect.provideService(FileSystem.FileSystem, fileSystem),
               Effect.provideService(Path.Path, path),
               Effect.mapError((error) =>
-                Schema.is(ServerService.ServerServiceError)(error) ||
-                Schema.is(ServerService.ServerRestartRequired)(error)
-                  ? error
-                  : transportError(String(error)),
+                Schema.is(ServerService.ServerServiceError)(error) ? error : transportError(String(error)),
               ),
               Effect.tapError((error) =>
                 Effect.logWarning("server.connection.failed").pipe(
                   Effect.annotateLogs({
                     "rika.failure.kind": error._tag,
-                    "rika.failure.reason": Schema.is(ServerService.ServerServiceError)(error)
-                      ? error.reason
-                      : "restart-required",
+                    "rika.failure.reason": error.reason,
                     "rika.server.client.kind": input.clientKind,
                   }),
                 ),
               ),
             )
-          const initial = yield* acquireReady(input.allowSupersede === false ? "reattach" : "launch")
+          const initial = yield* acquireReady("launch")
           const logicalClosed = yield* Deferred.make<void>()
           const supervise = makeInteractiveSupervisor({ initial, acquireReady, logicalClosed })
           return {
@@ -261,9 +246,7 @@ export const make = Effect.fn("ServerTransport.make")(() =>
           } satisfies ServerService.Connection
         }).pipe(
           Effect.mapError((cause) =>
-            Schema.is(ServerService.ServerServiceError)(cause) || Schema.is(ServerService.ServerRestartRequired)(cause)
-              ? cause
-              : transportError(String(cause)),
+            Schema.is(ServerService.ServerServiceError)(cause) ? cause : transportError(String(cause)),
           ),
         ),
     }),

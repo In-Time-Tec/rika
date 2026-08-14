@@ -13,6 +13,12 @@ export const Activity = Schema.Union([
     tools: Schema.optionalKey(Schema.Finite),
   }),
   Schema.TaggedStruct("Compacting", {}),
+  Schema.TaggedStruct("Retrying", {
+    attempt: Schema.Finite,
+    budget: Schema.Finite,
+    message: Schema.String,
+    nextAt: Schema.Finite,
+  }),
 ])
 export type Activity = typeof Activity.Type
 
@@ -30,8 +36,12 @@ export const utf8ByteLength = (value: string): number => {
 
 export const formatActivityCounter = formatTokens
 
-export const formatActivity = (activity: Activity | undefined): string | undefined => {
+const formatActivityImpl = (activity: Activity | undefined, countdownSeconds?: number): string | undefined => {
   if (activity === undefined) return undefined
+  if (activity._tag === "Retrying") {
+    const seconds = countdownSeconds ?? 0
+    return `${activity.message} — retrying in ${seconds}s (attempt ${activity.attempt} of ${activity.budget})`
+  }
   if (activity._tag === "RunningTools") {
     const labels = [
       ...(activity.subagents === undefined || activity.subagents === 0 ? [] : [plural(activity.subagents, "subagent")]),
@@ -47,19 +57,60 @@ export const formatActivity = (activity: Activity | undefined): string | undefin
   return activity._tag
 }
 
-export const runningToolsActivity = (model: Model): Activity => {
-  const nestedBlocks = new Set(
-    (model.items as ReadonlyArray<TranscriptItem>).flatMap((item) =>
-      item._tag === "Block" && item.parentId !== undefined ? [item.index] : [],
-    ),
+export const formatActivity: {
+  (activity: Activity | undefined, countdownSeconds?: number): string | undefined
+  (activity: Activity | undefined): (countdownSeconds?: number) => string | undefined
+} = Function.dual((args) => typeof args[0] !== "number", formatActivityImpl)
+
+const runningCardStatuses: ReadonlySet<string> = new Set(["running", "waiting", "cancelling"])
+
+export const runningToolsActivity = (model: Model): Extract<Activity, { readonly _tag: "RunningTools" }> => {
+  const items = model.items as ReadonlyArray<TranscriptItem>
+  const blockItems = items.flatMap((item) => (item._tag === "Block" ? [item] : []))
+  const ownsChildren = (index: number): boolean => {
+    const block = model.blocks[index] as TranscriptBlock | undefined
+    if (block === undefined) return false
+    return block._tag === "SubagentCard" || (block._tag === "ToolCall" && block.presentation.family === "agent")
+  }
+  const ownerById = new Map(
+    blockItems.flatMap((item) => {
+      const block = model.blocks[item.index] as TranscriptBlock | undefined
+      if (block?._tag !== "SubagentCard" && block?._tag !== "ToolCall") return []
+      return [[block.id, item] as const]
+    }),
   )
+  const ownedByCard = (item: (typeof blockItems)[number]): boolean => {
+    const seen = new Set<string>()
+    let cursor = item.parentId
+    while (cursor !== undefined && !seen.has(cursor)) {
+      seen.add(cursor)
+      const owner = ownerById.get(cursor)
+      if (owner === undefined) return false
+      if (ownsChildren(owner.index)) return true
+      cursor = owner.parentId
+    }
+    return false
+  }
+  const itemByIndex = new Map(blockItems.map((item) => [item.index, item]))
   let subagents = 0
   let tools = 0
   for (const [index, candidate] of model.blocks.entries()) {
     const block = candidate as TranscriptBlock
+    if (block._tag === "SubagentCard") {
+      const item = itemByIndex.get(index)
+      if (runningCardStatuses.has(block.status) && (item === undefined || !ownedByCard(item))) subagents += 1
+      continue
+    }
+    if (block._tag === "Cell") {
+      const item = itemByIndex.get(index)
+      if (block.status === "running" && (item === undefined || !ownedByCard(item))) tools += 1
+      continue
+    }
     if (block._tag !== "ToolCall" || block.status !== "running") continue
+    const item = itemByIndex.get(index) ?? { _tag: "Block" as const, index }
+    if (ownedByCard(item)) continue
     if (block.presentation.family === "agent") {
-      if (!nestedBlocks.has(index)) subagents += 1
+      subagents += 1
     } else tools += 1
   }
   return { _tag: "RunningTools", subagents, tools }

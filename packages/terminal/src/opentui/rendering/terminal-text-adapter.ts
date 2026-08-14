@@ -8,6 +8,8 @@ import { highlightShellCommand as highlightCommand } from "../../presentation/ma
 import { wrapStyledLine as wrapLine } from "../../presentation/markdown/styled-text-wrapping"
 import type { TerminalColor, TerminalStyledText, TerminalTextChunk } from "../../presentation/markdown/styled-text"
 
+export { terminalSafeText } from "../../presentation/terminal/terminal-safe-text"
+
 type TerminalColorWithInts = {
   readonly intent?: string
   readonly slot?: number

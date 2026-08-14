@@ -8,7 +8,7 @@ import * as Turn from "@rika/product/turn-record"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Ref } from "effect"
 import { backend } from "../support/operation-execution-fixtures"
-import { productLayer, provideLayer } from "../support/operation-layer-harness"
+import { executionSessionLifecycleLayerTest, productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
 
 describe("Operation mention routing", () => {
@@ -19,6 +19,7 @@ describe("Operation mention routing", () => {
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const inputs = yield* Ref.make<ReadonlyArray<ResolvedContext.Input>>([])
       const layer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionGateway.Service, backend),

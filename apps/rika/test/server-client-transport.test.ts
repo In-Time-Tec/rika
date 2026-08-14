@@ -23,10 +23,10 @@ describe("serverSocketFailure close-code mapping", () => {
     expect(serverSocketFailure(closeFailure(4401), true).reason).toBe("foreign-listener")
   })
 
-  it("does not trust a bare incompatible close", () => {
+  it("does not trust a bare build-mismatch close", () => {
     expect(serverSocketFailure(closeFailure(4406), true)).toMatchObject({
       reason: "foreign-listener",
-      message: "A listener reported an unsigned server incompatibility; stop it, then run rika again",
+      message: "A listener reported an unsigned server build mismatch; stop it, then run rika again",
     })
   })
 

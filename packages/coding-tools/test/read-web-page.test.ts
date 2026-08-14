@@ -227,6 +227,40 @@ describe("ReadWebPage", () => {
     }),
   )
 
+  it.effect("accepts a null extraction error content", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        run({ url: "https://example.com" }, (request) =>
+          response(
+            request,
+            apiResponse({
+              results: [],
+              errors: [{ url: "https://example.com", error_type: "fetch_error", http_status_code: 503, content: null }],
+            }),
+          ),
+        ),
+      )
+      expect(error._tag).toBe("ReadWebPageContentError")
+      expect(error.message).toContain("fetch_error (503): null")
+    }),
+  )
+
+  it.effect("accepts extract results without title or publish date and ignores usage and warnings", () =>
+    Effect.gen(function* () {
+      const content = yield* run({ url: "https://example.com/docs" }, (request) =>
+        response(
+          request,
+          apiResponse({
+            results: [{ url: "https://example.com/docs", excerpts: ["First excerpt"] }],
+            usage: [{ name: "extract", count: 1 }],
+            warnings: [{ type: "warning", message: "note" }],
+          }),
+        ),
+      )
+      expect(content).toBe("First excerpt")
+    }),
+  )
+
   it.effect("rejects empty results and missing requested full content", () =>
     Effect.gen(function* () {
       const empty = yield* Effect.flip(
@@ -242,7 +276,31 @@ describe("ReadWebPage", () => {
     }),
   )
 
-  it.effect.each(["not a url", "ftp://example.com", "file:///etc/passwd", "https://user:pass@example.com"])(
+  it.effect("rejects file URLs with the supported local-read recovery before checking credentials", () => {
+    let requests = 0
+    return Effect.gen(function* () {
+      const reader = yield* ReadWebPage.Service
+      const error = yield* Effect.flip(reader.read({ url: "file:///workspace/src/main.ts" }))
+      expect(error).toMatchObject({ _tag: "ReadWebPageContentError", reason: "invalid_input" })
+      expect(error.message).toContain("file:// URLs")
+      expect(error.message).toContain("rika.workspace.read")
+      expect(error.message).toContain("Task or Oracle")
+      expect(requests).toBe(0)
+    }).pipe(
+      provide(
+        ReadWebPage.layer({}).pipe(
+          Layer.provide(
+            clientLayer((request) => {
+              requests += 1
+              return response(request, apiResponse())
+            }),
+          ),
+        ),
+      ),
+    )
+  })
+
+  it.effect.each(["not a url", "ftp://example.com", "https://user:pass@example.com"])(
     "rejects invalid, non-HTTP, and credential-bearing URL %s before extraction",
     (url) => {
       let requests = 0

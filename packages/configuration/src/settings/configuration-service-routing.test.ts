@@ -45,6 +45,25 @@ describe("ConfigService routing", () => {
     ),
   )
 
+  it.effect("uses the normal variant when fast is unavailable", () =>
+    Effect.sync(() => {
+      const settings = {
+        ...ConfigContract.settingsDefaults,
+        modes: {
+          ...ConfigContract.settingsDefaults.modes,
+          low: {
+            ...ConfigContract.settingsDefaults.modes.low,
+            main: { alias: "fable", effort: "low", fast: true } as const,
+          },
+        },
+      }
+      const route = ConfigContract.resolveModelRoute(settings, "low")
+      expect(route.alias).toBe("fable")
+      expect(route.fast).toBe(false)
+      expect(route.options).toEqual({ output_config: { effort: "low" } })
+    }),
+  )
+
   it.effect("merges every partial Bedrock override while preserving default auth", () =>
     Effect.gen(function* () {
       const overrides = [

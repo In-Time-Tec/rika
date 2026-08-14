@@ -11,7 +11,7 @@ import * as ThreadOperation from "./thread-operation-dispatch"
 import { Console, Context, Effect, Layer } from "effect"
 import { Catalog as ToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
 import type { Input, OperationUnavailable } from "../contract/product-operation"
-import type { InteractiveSession } from "../interactive/interactive-session"
+import type { InteractiveSession } from "../interactive/session"
 import { OperationError } from "../operation-error"
 import type { ProductOperationRuntimeState } from "./product-operation-runtime-state"
 import type { ProductLayerOptions } from "./product-operation-options"
@@ -40,8 +40,8 @@ export interface ProductOperationRunFactory extends ProductOperationRuntimeState
   readonly configOperations: typeof import("../contract/configuration-operation")
   readonly publishInteractiveActivity: (
     origin: number,
-    event: import("../interactive/interactive-runtime-event").InteractiveEvent,
-  ) => import("../interactive/interactive-runtime-event").InteractiveEvent
+    event: import("../interactive/session-event").InteractiveEvent,
+  ) => import("../interactive/session-event").InteractiveEvent
   readonly staleQueuedTurnsError: typeof import("../../thread/queue/pending-turn-policy").staleQueuedTurnsError
   readonly queuedTurnPromoteMaxAgeMs: number
   readonly repairSummariesOnce: Effect.Effect<void, never, never>
@@ -217,6 +217,7 @@ const runSystemOperationImpl = (
       turnMutationAdmission: factory.turnMutationAdmission,
       backend: factory.backend,
       notifyThreadSummaries: typedNotifyThreadSummaries,
+      deleteThread: factory.deleteThread,
       writeThread: factory.writeThread,
       requireThread: factory.requireThread,
       markdownExport: factory.markdownExport,

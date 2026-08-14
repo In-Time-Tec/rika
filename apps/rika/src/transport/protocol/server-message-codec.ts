@@ -41,8 +41,10 @@ const degradedEvent = (event: ServerService.ServerMessage extends infer _ ? obje
   }
   const degraded = {
     tag: "TransportDegraded" as const,
+    category: "transport-degraded" as const,
     message: degradedReason,
-    retry: "user" as const,
+    retryable: true,
+    retry: "automatic" as const,
     actor: "environment" as const,
   }
   if ("threadId" in event && typeof event.threadId === "string")

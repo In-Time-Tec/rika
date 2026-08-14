@@ -50,6 +50,36 @@ test("admission that starts immediately removes the provisional row", () => {
   })
   expect(admitted.queue).toEqual([])
 })
+test("admission corrects stale optimistic lane predictions in both directions", () => {
+  const predictedDirect = update(
+    { ...initial("/work"), input: "actually queued" },
+    { _tag: "Submitted", submissionId: "sub-queued" },
+  )
+  const queued = update(predictedDirect, {
+    _tag: "SubmissionAdmitted",
+    turnId: "turn-queued",
+    status: "queued",
+    submissionId: "sub-queued",
+  })
+  expect(queued.entries).toEqual([])
+  expect(queued.items).toEqual([])
+  expect(queued.queue).toEqual([{ id: "turn-queued", prompt: "actually queued", provisional: true }])
+
+  const predictedQueued = update(
+    { ...initial("/work"), busy: true, activeTurnId: "old", input: "actually active" },
+    { _tag: "Submitted", submissionId: "sub-active" },
+  )
+  const active = update(predictedQueued, {
+    _tag: "SubmissionAdmitted",
+    turnId: "turn-active",
+    status: "active",
+    submissionId: "sub-active",
+  })
+  expect(active.queue).toEqual([])
+  expect(active.entries).toEqual([{ role: "user", text: "actually active", turnId: "turn-active" }])
+  expect(active.items).toHaveLength(1)
+  expect(active.items[0]).toMatchObject({ _tag: "Entry", turnId: "turn-active", provisional: true })
+})
 test("provisional queue rows ignore edit, steer, and dequeue keys", () => {
   const busy: Model = resetQueue(
     { ...initial("/work"), busy: true, activeTurnId: "turn-a", currentThreadId: "thread", input: "prompt" },
@@ -66,7 +96,7 @@ test("provisional queue rows ignore edit, steer, and dequeue keys", () => {
   expect(steered.pendingAction).toBeUndefined()
   expect(edited.editingTurnId).toBeUndefined()
 })
-test("steering a selected queued message opens a pending steering row", () => {
+test("steering a selected queued message projects the handoff until authoritative acceptance", () => {
   const busy: Model = resetQueue(
     {
       ...initial("/work"),
@@ -79,71 +109,94 @@ test("steering a selected queued message opens a pending steering row", () => {
     1,
     [{ id: "queued-1", prompt: "steer me please" }],
   )
-  const steered = update(busy, { _tag: "KeyPressed", key: key({ name: "return" }) })
-  expect(steered.pendingSteering).toEqual([{ turnId: "turn-a", text: "steer me please" }])
-  expect(steered.pendingAction).toEqual({ _tag: "SteerQueued", id: "queued-1", prompt: "steer me please" })
-})
-test("binds an accepted steering sequence and removes it on delivery", () => {
-  const busy: Model = {
-    ...initial("/work"),
-    busy: true,
-    activeTurnId: "turn-a",
-    pendingSteering: [{ turnId: "turn-a", text: "focus on the fixture" }],
-  }
-  const accepted = update(busy, {
-    _tag: "SteeringAccepted",
-    turnId: "turn-a",
-    sequence: 0,
-    text: "focus on the fixture",
+  const steered = update(busy, {
+    _tag: "KeyPressed",
+    key: key({ name: "return" }),
+    steeringRequestId: "request-1",
   })
-  expect(accepted.pendingSteering).toEqual([{ turnId: "turn-a", text: "focus on the fixture", sequence: 0 }])
-  const delivered = update(accepted, { _tag: "SteeringDelivered", turnId: "turn-a", sequences: [0] })
-  expect(delivered.pendingSteering).toEqual([])
-  const foreign = update(accepted, { _tag: "SteeringDelivered", turnId: "turn-b", sequences: [0] })
-  expect(foreign.pendingSteering).toHaveLength(1)
+  expect(steered.pendingSteering).toEqual([])
+  expect(steered.steeringRequests).toEqual([
+    {
+      requestId: "request-1",
+      turnId: "turn-a",
+      text: "steer me please",
+      origin: "queue",
+      queuedTurnId: "queued-1",
+    },
+  ])
+  expect(steered.queueSelection).toBeUndefined()
+  expect(steered.pendingAction).toEqual({
+    _tag: "SteerQueued",
+    id: "queued-1",
+    prompt: "steer me please",
+    requestId: "request-1",
+  })
 })
 test("keeps the active turn running and restores text when steering fails", () => {
   const busy: Model = {
     ...initial("/work"),
     busy: true,
     activeTurnId: "turn-a",
-    pendingSteering: [{ turnId: "turn-a", text: "focus on the fixture" }],
+    steeringRequests: [
+      {
+        requestId: "request-1",
+        turnId: "turn-a",
+        text: "focus on the fixture",
+        origin: "composer",
+      },
+    ],
   }
   const failed = update(busy, {
     _tag: "SteeringFailed",
-    turnId: "turn-a",
-    text: "focus on the fixture",
+    requestId: "request-1",
     message: "Execution did not become available for steering",
   })
   expect(failed.busy).toBe(true)
   expect(failed.activeTurnId).toBe("turn-a")
-  expect(failed.pendingSteering).toEqual([])
+  expect(failed.steeringRequests).toEqual([])
   expect(failed.input).toBe("focus on the fixture")
   expect(failed.blocks).toContainEqual(
     expect.objectContaining({ _tag: "Notification", title: "Steering not delivered" }),
   )
 })
-test("ignores steering receipts that arrive after another turn becomes active", () => {
+test("ignores steering failures for an unknown request identity", () => {
   const active: Model = {
     ...initial("/work"),
     busy: true,
     activeTurnId: "turn-b",
-    pendingSteering: [{ turnId: "turn-b", text: "for b" }],
+    steeringRequests: [{ requestId: "request-b", turnId: "turn-b", text: "for b", origin: "composer" }],
   }
-  const accepted = update(active, {
-    _tag: "SteeringAccepted",
-    turnId: "turn-a",
-    sequence: 1,
-    text: "for a",
-  })
   const failed = update(active, {
     _tag: "SteeringFailed",
-    turnId: "turn-a",
-    text: "for a",
+    requestId: "request-a",
     message: "late failure",
   })
-  expect(accepted).toEqual(active)
   expect(failed).toEqual(active)
+})
+test("does not duplicate a restored queued steer in the composer", () => {
+  const active: Model = {
+    ...initial("/work"),
+    busy: true,
+    activeTurnId: "turn-a",
+    queue: [{ id: "queued-a", prompt: "queued text" }],
+    steeringRequests: [
+      {
+        requestId: "request-a",
+        turnId: "turn-a",
+        text: "queued text",
+        origin: "queue",
+        queuedTurnId: "queued-a",
+      },
+    ],
+  }
+  const failed = update(active, {
+    _tag: "SteeringFailed",
+    requestId: "request-a",
+    message: "turn settled",
+  })
+  expect(failed.steeringRequests).toEqual([])
+  expect(failed.queue).toEqual(active.queue)
+  expect(failed.input).toBe("")
 })
 test("does not issue another cancel while cancellation is pending", () => {
   const pending: Model = {
@@ -154,32 +207,58 @@ test("does not issue another cancel while cancellation is pending", () => {
   }
   expect(update(pending, { _tag: "KeyPressed", key: key({ name: "c", ctrl: true }) })).toEqual(pending)
 })
-test("restores undelivered steering text into an empty composer when the turn settles", () => {
-  const busy: Model = {
-    ...initial("/work"),
-    busy: true,
-    activeTurnId: "turn-a",
-    pendingSteering: [{ turnId: "turn-a", text: "left behind", sequence: 0 }],
-  }
-  const completed = update(busy, { _tag: "ExecutionCompleted", turnId: "turn-a" })
-  expect(completed.pendingSteering).toEqual([])
-  expect(completed.input).toBe("left behind")
-  const occupied = update({ ...busy, input: "typing" }, { _tag: "ExecutionCompleted", turnId: "turn-a" })
-  expect(occupied.pendingSteering).toEqual([])
-  expect(occupied.input).toBe("typing")
-})
-test("keeps steering rows for other turns when one turn settles", () => {
+test("preserves steering rows across terminal events until authoritative disposition arrives", () => {
   const busy: Model = {
     ...initial("/work"),
     busy: true,
     activeTurnId: "turn-a",
     pendingSteering: [
-      { turnId: "turn-a", text: "for a", sequence: 0 },
-      { turnId: "turn-b", text: "for b", sequence: 1 },
+      {
+        runId: "run-a",
+        entryId: "entry-a",
+        requestId: "request-a",
+        turnId: "turn-a",
+        sequence: 0,
+        text: "left behind",
+      },
+    ],
+    steeringRequests: [{ requestId: "local-a", turnId: "turn-a", text: "local", origin: "composer" }],
+  }
+  const completed = update(busy, { _tag: "ExecutionCompleted", turnId: "turn-a" })
+  expect(completed.pendingSteering).toEqual(busy.pendingSteering)
+  expect(completed.steeringRequests).toEqual(busy.steeringRequests)
+  expect(completed.input).toBe("")
+  const occupied = update({ ...busy, input: "typing" }, { _tag: "ExecutionCompleted", turnId: "turn-a" })
+  expect(occupied.pendingSteering).toEqual(busy.pendingSteering)
+  expect(occupied.steeringRequests).toEqual(busy.steeringRequests)
+  expect(occupied.input).toBe("typing")
+})
+test("does not infer steering disposition for any turn when one turn settles", () => {
+  const busy: Model = {
+    ...initial("/work"),
+    busy: true,
+    activeTurnId: "turn-a",
+    pendingSteering: [
+      {
+        runId: "run-a",
+        entryId: "entry-a",
+        requestId: "request-a",
+        turnId: "turn-a",
+        sequence: 0,
+        text: "for a",
+      },
+      {
+        runId: "run-b",
+        entryId: "entry-b",
+        requestId: "request-b",
+        turnId: "turn-b",
+        sequence: 0,
+        text: "for b",
+      },
     ],
   }
   const completed = update(busy, { _tag: "ExecutionCompleted", turnId: "turn-a" })
-  expect(completed.pendingSteering).toEqual([{ turnId: "turn-b", text: "for b", sequence: 1 }])
+  expect(completed.pendingSteering).toEqual(busy.pendingSteering)
 })
 test("binds keyed submission drafts and restores only the cancelled turn's draft", () => {
   let model = update({ ...initial("/work"), input: "first prompt" }, { _tag: "Submitted", submissionId: "sub-a" })

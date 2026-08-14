@@ -18,6 +18,10 @@ export interface ProductLayerOptions<
     TranscriptError
   >
   readonly backendLayer: import("effect").Layer.Layer<import("@rika/product/execution-gateway").Service, BackendError>
+  readonly executionSessionLifecycleLayer: import("effect").Layer.Layer<
+    import("@rika/product/execution-session-lifecycle").Service,
+    BackendError
+  >
   readonly resolveExecutionRoute?: (
     mode: import("@rika/configuration/behavior-mode").ModeId,
     tuning?: { readonly fastMode?: boolean },
@@ -45,6 +49,11 @@ export interface ProductLayerOptions<
     >
     readonly mcpFingerprint: import("effect").Effect.Effect<string, never, never>
   }
+  /**
+   * The durable Goal a Thread pursues across Turns. Absent in hosts that do not persist goals, in
+   * which case no goal is ever published and the indicator stays hidden.
+   */
+  readonly goals?: import("@rika/product/goal-service").Interface
   readonly defaultWorkspace: string
   readonly recoveredWorkGrace?: import("effect").Duration.Input
   readonly pendingTurnCapacity?: number
@@ -55,6 +64,6 @@ export interface ProductLayerOptions<
   readonly authOperations?: import("./authentication-operation-dispatch").AuthOperationOptions
   readonly interactive?: (
     input: Extract<import("../contract/product-operation").Input, { readonly _tag: "Interactive" }>,
-    session: import("../interactive/interactive-session").InteractiveSession,
+    session: import("../interactive/session").InteractiveSession,
   ) => import("effect").Effect.Effect<void, OperationUnavailable, never>
 }

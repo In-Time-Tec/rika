@@ -1,9 +1,9 @@
 import { Effect } from "effect"
-import type { OperationError } from "../operation-error"
+import { operationError, type OperationError } from "../operation-error"
 import type { ProductOperationRuntimeState } from "./product-operation-runtime-state"
 import type { ProductLayerOptions } from "./product-operation-options"
 import type { ProductOperationInteractiveSessionFactory } from "./product-operation-runtime-session"
-import type { InteractiveSessionRuntimeResult } from "../interactive/interactive-session-runtime"
+import type { InteractiveSessionRuntimeResult } from "../interactive/session"
 
 export interface ProductOperationScheduleInput {
   readonly options: ProductLayerOptions<Error, Error, Error, Error, Error>
@@ -25,6 +25,7 @@ export const makeProductOperationSchedule = (
     const makeInteractiveSession: ProductOperationInteractiveSessionFactory = input.makeInteractiveSession
     const owner = yield* makeInteractiveSession(input.options.defaultWorkspace, { serverOwner: true })
     yield* Effect.forkIn(owner.supervise, input.ownerScope)
+    yield* owner.initialized.pipe(Effect.mapError((error) => operationError(String(error), error)))
     const repairSummariesOnce = yield* Effect.cached(
       input.repairThreadSummaries.pipe(
         Effect.provide(input.executionDependencies),

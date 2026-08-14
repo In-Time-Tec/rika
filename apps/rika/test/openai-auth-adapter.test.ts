@@ -83,7 +83,7 @@ describe("OpenAI authentication HTTP adapter", () => {
       yield* http.exchange({
         code: Redacted.make("authorization-secret"),
         verifier: Redacted.make("verifier-secret"),
-        redirectUri: OpenAiAuth.redirectUri,
+        redirectUri: OpenAiAuth.configuration.redirectUri,
       })
       expect(captured?.url).toBe("https://auth.openai.com/oauth/token")
       expect(captured?.headers["content-type"]).toContain("application/x-www-form-urlencoded")

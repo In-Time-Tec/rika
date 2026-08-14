@@ -5,6 +5,7 @@ import type { Key } from "../../presentation/terminal/terminal-keymap"
 import type { TranscriptBlock, TranscriptItem } from "./terminal-transcript-state"
 import type { ChangedFile } from "./terminal-changed-file"
 import type { ContextUsage } from "./terminal-context-usage"
+import type { GoalIndicator } from "./terminal-goal"
 import type { ThreadItem } from "./terminal-thread-state"
 
 export const Entry = Schema.Struct({
@@ -22,13 +23,15 @@ type UiEvent = {
 }
 
 type Message =
-  | { readonly _tag: "KeyPressed"; readonly key: Key }
+  | { readonly _tag: "KeyPressed"; readonly key: Key; readonly steeringRequestId?: string }
   | { readonly _tag: "ContextDetailsToggled" }
   | { readonly _tag: "ModeSelectorOpened" }
   | { readonly _tag: "ModeTurned"; readonly offset: number }
   | { readonly _tag: "ModeCommitted"; readonly selected?: number }
   | { readonly _tag: "ModeHovered"; readonly selected: number }
   | { readonly _tag: "ContextUsageReplaced"; readonly contextUsage: ContextUsage }
+  | { readonly _tag: "ConnectionStatusChanged"; readonly status?: "Connecting" | "Reconnecting" }
+  | { readonly _tag: "GoalChanged"; readonly goal?: GoalIndicator }
   | { readonly _tag: "CompactionChanged"; readonly status: "running" | "complete" | "failed" | "cancelled" }
   | { readonly _tag: "AnimationTicked" }
   | { readonly _tag: "Pasted"; readonly text: string }
@@ -46,26 +49,31 @@ type Message =
     }
   | { readonly _tag: "SubmissionRejected"; readonly message: string; readonly submissionId?: string }
   | { readonly _tag: "TurnStarted"; readonly turnId: string; readonly prompt: string; readonly submissionId?: string }
-  | {
-      readonly _tag: "SteeringAccepted"
-      readonly turnId: string
-      readonly sequence: number
-      readonly text: string
-    }
-  | { readonly _tag: "SteeringDelivered"; readonly turnId: string; readonly sequences: ReadonlyArray<number> }
-  | { readonly _tag: "SteeringFailed"; readonly turnId: string; readonly text: string; readonly message: string }
+  | { readonly _tag: "SteeringFailed"; readonly requestId: string; readonly message: string }
   | { readonly _tag: "CancelFailed"; readonly turnId?: string; readonly message: string }
   | { readonly _tag: "AssistantStreamed"; readonly id?: string; readonly turnId?: string; readonly text: string }
   | { readonly _tag: "AssistantCompleted"; readonly id?: string; readonly turnId?: string; readonly text: string }
   | { readonly _tag: "ExecutionCompleted"; readonly turnId?: string }
   | {
+      readonly _tag: "TurnRetryScheduled"
+      readonly turnId: string
+      readonly attempt: number
+      readonly budget: number
+      readonly message: string
+      readonly nextAt: number
+      readonly retryCountdown: number
+    }
+  | {
       readonly _tag: "ExecutionFailed"
       readonly turnId?: string
       readonly failure: {
         readonly tag: string
+        readonly category: string
         readonly message: string
-        readonly retry: "user" | "automatic" | "never"
+        readonly retryable: boolean
+        readonly retry: "automatic" | "none"
         readonly actor: "user" | "environment" | "rika"
+        readonly correlationId?: string
       }
     }
   | { readonly _tag: "ExecutionCancelled"; readonly turnId?: string; readonly agentResponseArrived?: boolean }
@@ -80,11 +88,9 @@ type Message =
   | { readonly _tag: "ThreadTitleChanged"; readonly threadId: string; readonly title: string }
   | { readonly _tag: "FilesReplaced"; readonly files: ReadonlyArray<string> }
   | { readonly _tag: "BranchDetected"; readonly branch: string }
-  | { readonly _tag: "UsageReported"; readonly costUsd?: number }
   | { readonly _tag: "WorkspaceFilesToggled" }
   | { readonly _tag: "ThreadSidebarSelectionMoved"; readonly offset: number }
   | { readonly _tag: "ThreadSidebarSelectionConfirmed"; readonly index?: number }
-  | { readonly _tag: "ThreadPreviewScrolled"; readonly offset: number }
   | { readonly _tag: "EventReplayed"; readonly event: UiEvent }
   | { readonly _tag: "DetailMoved"; readonly offset: number }
   | { readonly _tag: "DetailToggled"; readonly id?: string }
@@ -97,16 +103,22 @@ type Message =
   | { readonly _tag: "ChangedFilesReplaced"; readonly files: ReadonlyArray<ChangedFile> }
   | { readonly _tag: "FilesRequested" }
   | { readonly _tag: "FilesFailed"; readonly message: string }
-  | { readonly _tag: "ThreadPreviewRequested" }
+  | { readonly _tag: "ThreadPreviewRequested"; readonly threadId: string; readonly requestId: number }
   | { readonly _tag: "ThreadOpenRequested" }
   | { readonly _tag: "ThreadOpenCompleted" }
   | { readonly _tag: "ThreadRefolding"; readonly threadId: string; readonly refolding: boolean }
   | {
       readonly _tag: "ThreadPreviewLoaded"
       readonly threadId: string
-      readonly turns: ReadonlyArray<{ readonly prompt: string; readonly units: ReadonlyArray<Unit> }>
+      readonly requestId: number
+      readonly units: ReadonlyArray<Unit>
     }
-  | { readonly _tag: "ThreadPreviewFailed"; readonly threadId: string; readonly message: string }
+  | {
+      readonly _tag: "ThreadPreviewFailed"
+      readonly threadId: string
+      readonly requestId: number
+      readonly message: string
+    }
 
 export type { Message }
 export const runningToolsActivity = ActivityState.runningToolsActivity

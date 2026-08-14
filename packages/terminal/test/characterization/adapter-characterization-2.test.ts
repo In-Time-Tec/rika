@@ -298,7 +298,8 @@ test("renders every transcript block variant and sidebar state", () => {
       title: "Execution failed",
       detail: "Model unavailable",
       turnId: "turn-4",
-      recovery: "Press Enter to retry.",
+      category: "operation",
+      retryable: false,
     },
     {
       _tag: "SubagentCard",
@@ -313,6 +314,45 @@ test("renders every transcript block variant and sidebar state", () => {
     { _tag: "ImageAttachment", name: "a.png", mediaType: "image/png" },
     { _tag: "ImageAttachment", name: "partial.png", mediaType: "image/png", width: 2 },
     { _tag: "ImageAttachment", name: "b.png", mediaType: "image/png", width: 2, height: 3, bytes: 4 },
+    {
+      _tag: "Cell",
+      id: "cell-running",
+      status: "running",
+      visual: "ts",
+      summary: 'await rika.workspace.read({ path: "a.ts" })',
+      source: { text: 'await rika.workspace.read({ path: "a.ts" })', lines: 1, truncated: false },
+      output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
+      epoch: 0,
+      notices: [],
+      files: [],
+    },
+    {
+      _tag: "Cell",
+      id: "cell-complete",
+      status: "complete",
+      visual: "shell",
+      summary: "await Bun.$`bun test`",
+      source: { text: "await Bun.$`bun test`", lines: 1, truncated: false },
+      output: { stdout: "pass\n", stderr: "", droppedBytes: 12, droppedEvents: 1 },
+      result: "0",
+      durationMillis: 1_240,
+      epoch: 1,
+      notices: [{ kind: "restored", detail: "Restored total." }],
+      files: [],
+    },
+    {
+      _tag: "Cell",
+      id: "cell-failed",
+      status: "failed",
+      visual: "ts",
+      summary: 'throw new Error("boom")',
+      source: { text: 'throw new Error("boom")', lines: 1, truncated: false },
+      output: { stdout: "", stderr: "trace\n", droppedBytes: 0, droppedEvents: 0 },
+      error: { name: "Error", message: "boom" },
+      epoch: 1,
+      notices: [],
+      files: [],
+    },
   ] as const
   const renderedBlocks = blocks.map((block) => renderBlock(block)).join("\n")
   expect(renderedBlocks).toContain("✕ Result")
@@ -320,10 +360,11 @@ test("renders every transcript block variant and sidebar state", () => {
   expect(renderedBlocks).toContain("❋ Auto-compacted\n  Kept recent turns")
   expect(renderedBlocks).toContain("❋ Auto-compacted\n  No checkpoint")
   expect(renderedBlocks).not.toContain(" at 42")
-  expect(renderedBlocks).toContain(
-    "✖ ERROR: Execution failed · Turn turn-4\n  Model unavailable\n  Next: Press Enter to retry.",
-  )
+  expect(renderedBlocks).toContain("Execution failed\nModel unavailable")
   expect(renderedBlocks).toContain("2×3 · 4 B")
+  expect(renderedBlocks).toContain('⠿ ts await rika.workspace.read({ path: "a.ts" })')
+  expect(renderedBlocks).toContain("✓ $ await Bun.$`bun test` 1.2s truncated")
+  expect(renderedBlocks).toContain('✕ ts throw new Error("boom")')
   const state = model({
     blocks: [...blocks],
     currentThreadId: "a",
@@ -362,27 +403,28 @@ test("renders hidden tool output as inline presentation status in plain transcri
   expect(transcript).toContain("Web Search")
   expect(transcript).not.toContain("HIDDEN SEARCH RESULT")
 })
-test("shows error cause and recovery on the first lines", () => {
+test("shows the error cause on the first lines with no instructions", () => {
   const block = {
     _tag: "Error" as const,
     title: "Execution failed",
     detail: "Model unavailable",
     turnId: "turn-4",
-    recovery: "Press Enter to retry.",
+    category: "operation",
+    retryable: false,
   }
   const text = buildTranscript(model({ blocks: [block] }))
     .styled.chunks.map((chunk) => chunk.text)
     .join("")
 
-  expect(text).toContain("✖ ERROR: Execution failed · Turn turn-4")
+  expect(text).toContain("Execution failed")
   expect(text).toContain("Model unavailable")
-  expect(text).toContain("Next: Press Enter to retry.")
+  expect(text).not.toContain("Next:")
   expect(text).not.toContain("▸")
   expect(text).not.toContain("▾")
+  expect(text).not.toContain("✖")
   expect(
-    buildTranscript(model({ blocks: [block] })).styled.chunks.find((chunk) =>
-      chunk.text.includes("ERROR: Execution failed"),
-    )?.fg,
+    buildTranscript(model({ blocks: [block] })).styled.chunks.find((chunk) => chunk.text.includes("Execution failed"))
+      ?.fg,
   ).toBe(colors.red)
 })
 test("keeps tool cards generic without removed activity assumptions", () => {

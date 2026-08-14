@@ -25,6 +25,7 @@ const Shell = Schema.Struct({
 })
 export const Request = Schema.Union([
   Inputs.Inputs.Grep.Request,
+  Inputs.Inputs.List.Request,
   Inputs.Inputs.Read.Request,
   Inputs.Inputs.Write.Request,
   Inputs.Inputs.Edit.Request,
@@ -57,6 +58,7 @@ export class Service extends Context.Service<Service, Interface>()(
 
 const registrations: ReadonlyArray<ToolPolicy.Registration> = [
   Inputs.Inputs.Grep.registration,
+  Inputs.Inputs.List.registration,
   Inputs.Inputs.Read.registration,
   Inputs.Inputs.Write.registration,
   Inputs.Inputs.Edit.registration,
@@ -68,6 +70,7 @@ const registrations: ReadonlyArray<ToolPolicy.Registration> = [
 ]
 export const toolkit = Toolkit.make(
   Inputs.Inputs.Grep.tool,
+  Inputs.Inputs.List.tool,
   Inputs.Inputs.Read.tool,
   Inputs.Inputs.Write.tool,
   Inputs.Inputs.Edit.tool,
@@ -78,20 +81,93 @@ export const toolkit = Toolkit.make(
   Inputs.Inputs.Media.tool,
 )
 
-const maxOutput = 40_000
-const bounded = (text: string, limit = maxOutput): Result => RuntimeFilesystem.boundedText<Result>(text, limit)
+const bounded = (text: string): Result => ({ text, truncated: false })
 const policyForName = (name: string) => registrations.find((registration) => registration.tool.name === name)?.policy
 const toolName = (request: Request) => request._tag.replaceAll(/([a-z])([A-Z])/g, "$1_$2").toLowerCase()
 const contract = (request: Request) => policyForName(request._tag === "Shell" ? "bash" : toolName(request))!
 
+const outputRecovery = (request: Request): string => {
+  switch (request._tag) {
+    case "Grep":
+      return "narrow the pattern or scope with path"
+    case "List":
+      return "list a narrower path or depth"
+    case "Read":
+      return "request a smaller read_range"
+    case "Bash":
+    case "Shell":
+    case "ShellCommandStatus":
+      return "page or narrow the command"
+    case "WebSearch":
+      return "narrow the search"
+    case "ReadWebPage":
+      return "request focused excerpts or disable full_content"
+    case "ViewMedia":
+      return "request a narrower analysis"
+    case "Write":
+    case "Edit":
+      return "read a narrower file range to inspect the remaining diff"
+  }
+}
+
 const boundResult = (request: Request, result: Result): Result => {
+  const values = [
+    result.text,
+    result.stdout,
+    result.stderr,
+    result.diff,
+    result.artifact?.path,
+    result.artifact?.mimeType,
+    ...(result.matches ?? []).flatMap((match) => [match.path, match.text]),
+  ].filter((value): value is string => value !== undefined)
   const limit = contract(request).outputLimit
-  let remaining = limit
+  const totalBytes = values.reduce((total, value) => total + RuntimeFilesystem.byteLength(value), 0)
+  if (totalBytes <= limit) return result
+
+  const recovery = outputRecovery(request)
+  if (result.matches !== undefined) {
+    const boundedText = RuntimeFilesystem.boundedText<Result>(result.text, Math.floor(limit / 2), recovery)
+    const markerBudget = RuntimeFilesystem.byteLength(
+      `[structured matches truncated: kept ${result.matches.length} of ${result.matches.length} — ${recovery}]\n`,
+    )
+    let remaining = Math.max(0, limit - RuntimeFilesystem.byteLength(boundedText.text) - markerBudget)
+    const matches: Array<CodingToolResult.WorkspaceSearchMatch> = []
+    for (const match of result.matches) {
+      const matchBytes = RuntimeFilesystem.byteLength(match.path) + RuntimeFilesystem.byteLength(match.text) + 16
+      if (remaining < matchBytes) break
+      matches.push(match)
+      remaining -= matchBytes
+    }
+    const matchesTruncation =
+      matches.length < result.matches.length ? { kept: matches.length, total: result.matches.length } : undefined
+    const marker =
+      matchesTruncation === undefined
+        ? ""
+        : `\n[structured matches truncated: kept ${matchesTruncation.kept} of ${matchesTruncation.total} — ${recovery}]`
+    return {
+      ...result,
+      text: `${boundedText.text}${marker}`,
+      matches,
+      ...(matchesTruncation === undefined ? {} : { matchesTruncation }),
+      truncated: true,
+    }
+  }
+  const longestMarker = `[truncated: kept first ${totalBytes} of ${totalBytes} bytes — ${recovery}]`
+  let remaining = Math.max(0, limit - RuntimeFilesystem.byteLength(longestMarker) - 1)
+  let keptBytes = 0
+  let marked = false
   const trim = (value: string | undefined) => {
     if (value === undefined) return undefined
-    const trimmed = RuntimeFilesystem.boundedPrefix(value, remaining)
-    remaining -= trimmed.length
-    return trimmed
+    if (marked) return ""
+    const kept = RuntimeFilesystem.boundedPrefix(value, remaining)
+    const acceptedBytes = RuntimeFilesystem.byteLength(kept)
+    remaining -= acceptedBytes
+    keptBytes += acceptedBytes
+    if (kept === value) return kept
+    marked = true
+    const marker = `[truncated: kept first ${keptBytes} of ${totalBytes} bytes — ${recovery}]`
+    const separator = kept.length === 0 || kept.endsWith("\n") ? "" : "\n"
+    return `${kept}${separator}${marker}`
   }
   const text = trim(result.text)!
   const stdout = trim(result.stdout)
@@ -112,19 +188,23 @@ const boundResult = (request: Request, result: Result): Result => {
     ...(stderr === undefined ? {} : { stderr }),
     ...(diff === undefined ? {} : { diff }),
     ...(artifact === undefined ? {} : { artifact }),
-    truncated:
-      result.truncated ||
-      text.length < result.text.length ||
-      (stdout !== undefined && stdout.length < result.stdout!.length) ||
-      (stderr !== undefined && stderr.length < result.stderr!.length) ||
-      (diff !== undefined && diff.length < result.diff!.length) ||
-      (artifact !== undefined &&
-        (artifact.path.length < result.artifact!.path.length ||
-          artifact.mimeType.length < result.artifact!.mimeType.length)),
+    truncated: true,
   }
 }
 
 const runtimeError = (details: FailureDetails) => new RuntimeOperationError(details)
+
+/**
+ * A missing program is reported differently by every layer it passes through, so matching one exact
+ * sentence left a reader told that a search "could not complete" and nothing about what to install.
+ */
+const missingRipgrep = (message: string): boolean =>
+  /ripgrep|(^|\W)rg(\W|$)|ENOENT|No such file|failed to spawn/i.test(message)
+
+const searchMessage = (operation: string, message: string): string => {
+  if (operation === "initialize") return "The workspace search tools are unavailable"
+  return missingRipgrep(message) ? message : `Workspace search could not complete ${operation}`
+}
 
 const tagOf = (cause: unknown) =>
   cause !== null && typeof cause === "object" && "_tag" in cause && typeof cause._tag === "string"
@@ -133,6 +213,14 @@ const tagOf = (cause: unknown) =>
 
 const operationError = (cause: unknown): RuntimeOperationError => {
   if (cause instanceof RuntimeOperationError) return cause
+  if (cause instanceof ProcessRegistry.ProcessNotFound)
+    return runtimeError({
+      category: "not_found",
+      message: cause.message,
+      outcome: "known",
+      recovery: "after_change",
+      nextAction: "Use a process id returned by a running bash call",
+    })
   if (Schema.is(WebSearchErrors.SelectionError)(cause))
     return runtimeError({
       category: "dependency_unavailable",
@@ -154,7 +242,23 @@ const operationError = (cause: unknown): RuntimeOperationError => {
         })
       : runtimeError({
           category: "dependency_unavailable",
-          message: "Every selected web search provider failed before returning results",
+          /**
+           * Each provider already reported why it failed, and summarising them away left a reader
+           * unable to tell an expired key from an outage. The reasons are what decide what to do
+           * next.
+           */
+          message: `Every selected web search provider failed before returning results${
+            cause.outcomes.length === 0
+              ? ""
+              : `: ${cause.outcomes
+                  .map(
+                    (outcome) =>
+                      `${outcome.provider}: ${outcome.error?.kind ?? "unknown"}${
+                        outcome.error?.message === undefined ? "" : ` (${outcome.error.message})`
+                      }`,
+                  )
+                  .join(", ")}`
+          }`,
           outcome: "known",
           recovery: "later",
           nextAction: "Retry later or use a different configured provider",
@@ -171,7 +275,7 @@ const operationError = (cause: unknown): RuntimeOperationError => {
         })
       : runtimeError({
           category: "dependency_unavailable",
-          message: "The web page provider failed before returning usable content",
+          message: `The web page provider failed before returning usable content: ${cause.message}`,
           outcome: "known",
           recovery: "later",
           nextAction: "Retry later or use another source",
@@ -187,7 +291,7 @@ const operationError = (cause: unknown): RuntimeOperationError => {
         })
       : runtimeError({
           category: "dependency_unavailable",
-          message: "The web page provider could not return usable content",
+          message: `The web page provider could not return usable content: ${cause.message}`,
           outcome: "known",
           recovery: "later",
           nextAction: "Use another source or retry later",
@@ -195,14 +299,11 @@ const operationError = (cause: unknown): RuntimeOperationError => {
   if (Schema.is(WorkspaceIndex.WorkspaceIndexError)(cause))
     return runtimeError({
       category: cause.operation === "initialize" ? "dependency_unavailable" : "operation",
-      message:
-        cause.operation === "initialize"
-          ? "The workspace search tools are unavailable"
-          : `Workspace search could not complete ${cause.operation}`,
+      message: searchMessage(cause.operation, cause.message),
       outcome: "known",
       recovery: cause.operation === "initialize" ? "after_change" : "later",
       nextAction:
-        cause.operation === "initialize"
+        cause.operation === "initialize" || missingRipgrep(cause.message)
           ? "Confirm the workspace path is readable and that ripgrep (rg) is installed"
           : "Retry once later or use a narrower direct file operation",
     })
@@ -230,7 +331,7 @@ const operationError = (cause: unknown): RuntimeOperationError => {
 const actionableMessage = (details: FailureDetails) =>
   `${details.message.replace(/[.\s]+$/, "")}. ${
     details.outcome === "known" ? "The call did not change state." : "The call may have changed state."
-  } Next action: ${details.nextAction.replace(/[.\s]+$/, "")}.`
+  }`
 
 const toolError = (request: Request, cause: unknown, kind: "operation" | "timeout") => {
   const unsafe = contract(request).idempotency === "unsafe"
@@ -250,7 +351,10 @@ const toolError = (request: Request, cause: unknown, kind: "operation" | "timeou
       message: `${toolName(request)} timed out after ${contract(request).timeoutMillis}ms without producing a result`,
       outcome: "known",
       recovery: "later",
-      nextAction: "Retry once later with a narrower request or use an alternative tool",
+      nextAction:
+        request._tag === "Grep"
+          ? "Search greps file CONTENTS repo-wide; scope with path or use workspace.list"
+          : "Retry once later with a narrower request or use an alternative tool",
     }
   const finalDetails =
     unsafe && kind === "operation" && !(cause instanceof RuntimeOperationError)

@@ -7,22 +7,25 @@
   "exports": {
     "./baton-execution": "./src/baton-execution.ts",
     "./baton-route": "./src/baton-route.ts",
+    "./baton-cell-call-context": "./src/baton-cell-call-context.ts",
     "./scripted-model": "./src/scripted-model.ts",
     "./baton-test-harness": "./src/baton-test-harness.ts"
   },
   "dependencies": {
+    "@batonfx/repl": "catalog:",
+    "@batonfx/harness": "catalog:",
     "@batonfx/core": "catalog:",
     "@batonfx/providers": "catalog:",
     "@batonfx/runtime": "catalog:",
     "@batonfx/test": "catalog:",
     "@rika/coding-tools": "workspace:*",
+    "@rika/kernel": "workspace:*",
     "@rika/product": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@rika/configuration": "workspace:*",
-    "@rika/javascript-sandbox": "workspace:*",
     "@types/bun": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

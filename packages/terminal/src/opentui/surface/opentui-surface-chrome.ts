@@ -6,10 +6,11 @@ import { contentColumnWidth } from "../../state/model/terminal-layout-state"
 import { spacing, colors } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { formatActivity } from "../../state/model/terminal-activity-state"
-import { loaderFrame, spinnerFrames } from "../rendering/opentui-spinner"
+import { loaderFrame, spinnerFrames, spinnerInterval } from "../rendering/opentui-spinner"
 import { renderSidebar } from "../rendering/opentui-render-block"
-import { panelLoading, welcomeContent } from "./opentui-surface-content"
-import { welcomeAnimationActive } from "./opentui-welcome-state"
+import { goalAnimationActive, goalIndicatorVisible, panelLoading, welcomeContent } from "./opentui-surface-content"
+import { goalLabelContent } from "./opentui-goal-controller"
+import { welcomeAnimationActive, welcomeAnimationSettled } from "./opentui-welcome-state"
 import { ToastController } from "./opentui-toast-controller"
 import { SurfaceOverlay } from "./opentui-surface-overlay"
 
@@ -61,6 +62,10 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
     if (this.destroyed || !this.welcomeController.running) return
     const current = this.model
     if (current === undefined || !welcomeAnimationActive(current) || this.welcomeController.child === undefined) return
+    if (welcomeAnimationSettled(this.welcomeController.phase, this.welcomeController.impulses)) {
+      this.welcomeController.stop()
+      return
+    }
     this.welcomeController.advance()
     const welcomeWidth = this.welcomeWidthFor(current)
     const impulses = this.welcomeController.impulses
@@ -79,7 +84,22 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
     const child = this.welcomeController.child
     if (this.destroyed || current === undefined || child === undefined) return
     this.welcomeController.strike(this.welcomeWidthFor(current), current.height, event.x - child.x, event.y - child.y)
+    if (this.options.animate !== false && welcomeAnimationActive(current))
+      this.welcomeController.start(spinnerInterval, () => this.tickWelcome())
     this.renderer.requestRender()
+  }
+  protected tickGoal(): void {
+    if (this.destroyed || !this.goalController.running) return
+    const current = this.model
+    if (current === undefined || !goalAnimationActive(current)) return
+    this.goalController.advance()
+    this.renderGoalLabel(current)
+    this.renderer.requestRender()
+  }
+  protected renderGoalLabel(model: Model): void {
+    this.goalLabel.content = goalIndicatorVisible(model)
+      ? goalLabelContent(this.goalController.frame, this.currentTimeMillis() - model.goal!.startedAtMillis)
+      : ""
   }
   protected tickLoader(): void {
     if (this.destroyed || !this.loaderController.running) return
@@ -88,7 +108,15 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
     this.toolSpinner.step()
     const current = this.model
     if (current !== undefined) {
-      const label = formatActivity(current.activity) ?? panelLoading(current)
+      const label =
+        current.connectionStatus ??
+        formatActivity(
+          current.activity,
+          current.activity?._tag === "Retrying"
+            ? Math.max(0, Math.ceil((current.activity.nextAt - this.currentTimeMillis()) / 1000))
+            : undefined,
+        ) ??
+        panelLoading(current)
       if (label !== undefined)
         this.statusLabel.content = new StyledText([
           fg(toOpenColor(colors.text))(" "),
@@ -98,15 +126,7 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
       const glyph = this.toolSpinner.toBraille()
       if (current.busy) this.publishWorkingFrame(glyph)
       if (current.usageDisplay === "time" && current.usageTime?._tag === "Available") this.renderModeLabel(current)
-      for (const record of this.transcriptRecords.values()) {
-        if (record.spinnerChunk === undefined) continue
-        const content = record.renderable.content
-        const chunks = [...content.chunks]
-        const chunk = chunks[record.spinnerChunk]
-        if (chunk === undefined) continue
-        chunks[record.spinnerChunk] = { ...chunk, text: glyph }
-        record.renderable.content = new StyledText(chunks)
-      }
+      this.transcriptPane.updateSpinner(glyph)
       if (current.threadSidebar.open)
         this.sidebar.content = renderSidebar(
           current,
@@ -128,5 +148,9 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
   }
   showToast(message: string, color?: ColorInput): void {
     this.toastController.show(message, color)
+  }
+  showQuitConfirmation(visible: boolean): void {
+    this.quitConfirmationBox.visible = visible
+    this.renderer.requestRender()
   }
 }

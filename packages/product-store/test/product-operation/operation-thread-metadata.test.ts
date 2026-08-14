@@ -1,3 +1,4 @@
+import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
@@ -25,9 +26,18 @@ describe("Operation", () => {
       })
       const repository = yield* ThreadRepository.makeMemory()
       const turns = yield* TurnRepository.makeMemory()
+      const lifecycleCalls = yield* Ref.make<ReadonlyArray<string>>([])
+      const recordLifecycle = (operation: string, sessionId: string) =>
+        Ref.update(lifecycleCalls, (calls) => [...calls, `${operation}:${sessionId}`])
       const layer = Layer.mergeAll(
         TestConsole.layer,
         productLayer({
+          executionSessionLifecycleLayer: ExecutionSessionLifecycle.layerTest({
+            requestCancellation: ({ sessionId }) => recordLifecycle("cancel", sessionId),
+            awaitTerminal: ({ sessionId }) => recordLifecycle("terminal", sessionId),
+            closeKernel: ({ sessionId }) => recordLifecycle("close", sessionId),
+            dropKernelState: ({ sessionId }) => recordLifecycle("drop", sessionId),
+          }),
           repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
           turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
           backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
@@ -66,6 +76,13 @@ describe("Operation", () => {
       expect(lines.some((line) => line.includes('"title":"Named thread"'))).toBe(true)
       expect(lines.some((line) => line.includes('"workspace":"/client-work"'))).toBe(true)
       expect(lines.some((line) => line.includes('"name":"read"'))).toBe(true)
+      expect(yield* Ref.get(lifecycleCalls)).toEqual([
+        "cancel:thread-a",
+        "terminal:thread-a",
+        "close:thread-a",
+        "drop:thread-a",
+      ])
+      expect(yield* repository.pendingDeletions).toEqual([])
       const catalogOutput = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.String))(output.catalogOutput)
       expect(catalogOutput).toHaveLength(6)
       expect(new Set(catalogOutput.slice(0, 5))).toEqual(new Set([catalogOutput[0]!]))

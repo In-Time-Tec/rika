@@ -6,8 +6,8 @@ import type * as TurnQueuePromotion from "../../thread/repository/turn-repositor
 import type { staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
 import type { Input, OperationUnavailable } from "../contract/product-operation"
 import type { OperationError } from "../operation-error"
-import type { InteractiveEvent } from "../interactive/interactive-runtime-event"
-import type { PreparedTurn } from "../interactive/interactive-session-runtime"
+import type { InteractiveEvent } from "../interactive/session-event"
+import type { PreparedTurn } from "../interactive/session"
 import type { ModeId } from "@rika/configuration/behavior-mode"
 import type { CreateInput } from "../../thread/repository/turn-repository-contract"
 import type { Effect } from "effect"
@@ -69,7 +69,7 @@ export interface Dependencies {
   ) => Effect.Effect<TurnQueuePromotion.QueueClaim | undefined, TurnRepository.RepositoryError, never>
   readonly releaseTurnObserver: (turnId: Turn.TurnId) => Effect.Effect<void, never, never>
   readonly queueMutationEvent: (queue: TurnQueuePromotion.QueueItemChange) => InteractiveEvent
-  readonly executionDependencies: import("../interactive/interactive-session-runtime").InteractiveExecutionContext
+  readonly executionDependencies: import("../interactive/session").InteractiveExecutionContext
   readonly staleQueuedTurnsError: typeof staleQueuedTurnsError
   readonly queuedTurnPromoteMaxAgeMs: number
   readonly operationError: (message: string) => Effect.Effect<never, OperationError>

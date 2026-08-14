@@ -52,7 +52,12 @@ const parse = (content: string, source: Source, digest: string): Effect.Effect<R
         try: () => {
           if (typeof document !== "object" || document === null || Array.isArray(document))
             throw new Error("Expected object")
-          const servers = "servers" in document ? document.servers : document
+          /**
+           * A bare configuration is its own server map, and `disabled` sits beside those names
+           * rather than among them.
+           */
+          const { disabled: _disabled, ...bare } = document as Record<string, unknown>
+          const servers = "servers" in document ? document.servers : bare
           if (typeof servers !== "object" || servers === null || Array.isArray(servers))
             throw new Error("Expected servers object")
           const parsed: Array<Server> = []

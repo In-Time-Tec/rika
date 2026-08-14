@@ -56,7 +56,9 @@ test("runs filesystem, shell, and git tools across and beyond the workspace", ()
         const literal = yield* runtime.run({ _tag: "Grep", pattern: "beta", regex: false })
         const regex = yield* runtime.run({ _tag: "Grep", pattern: "b.ta", regex: true })
         const read = yield* runtime.run({ _tag: "Read", path: "src/a.ts", readRange: [2, 2] })
-        const fuzzyRead = yield* runtime.run({ _tag: "Read", path: "src/aa.ts", readRange: [1, 1] })
+        const fuzzyRead = yield* Effect.flip(runtime.run({ _tag: "Read", path: "src/aa.ts", readRange: [1, 1] }))
+        const missingSibling = yield* Effect.flip(runtime.run({ _tag: "Read", path: "src/missing.json" }))
+        const directoryRead = yield* Effect.flip(runtime.run({ _tag: "Read", path: "src" }))
         const outsideRead = yield* runtime.run({ _tag: "Read", path: "link/target.txt" })
         const absoluteRead = yield* runtime.run({ _tag: "Read", path: `${outside}/target.txt` })
         const miscasedRead = yield* runtime.run({ _tag: "Read", path: "SRC/A.ts", readRange: [2, 2] })
@@ -96,6 +98,8 @@ test("runs filesystem, shell, and git tools across and beyond the workspace", ()
           regex,
           read,
           fuzzyRead,
+          missingSibling,
+          directoryRead,
           outsideRead,
           absoluteRead,
           miscasedRead,
@@ -140,7 +144,13 @@ test("runs filesystem, shell, and git tools across and beyond the workspace", ()
           expect(result.literal.text).toContain("src/a.ts:2:beta")
           expect(result.regex.text).toContain("src/a.ts:2:beta")
           expect(result.read.text).toBe("2: beta")
-          expect(result.fuzzyRead.text).toBe("1: alpha")
+          expect(result.fuzzyRead).toMatchObject({ _tag: "ToolError", tool: "read", category: "not_found" })
+          expect(result.fuzzyRead.message).toContain("File not found: src/aa.ts")
+          expect(result.fuzzyRead.message).toContain("src/a.ts")
+          expect(result.missingSibling).toMatchObject({ _tag: "ToolError", tool: "read", category: "not_found" })
+          expect(result.missingSibling.message).toContain("File not found: src/missing.json")
+          expect(result.directoryRead).toMatchObject({ _tag: "ToolError", tool: "read", category: "invalid_input" })
+          expect(result.directoryRead.message).toContain("is a directory")
           expect(result.outsideRead.text).toContain("outside")
           expect(result.absoluteRead.text).toContain("outside")
           expect(result.miscasedRead.text).toBe("2: beta")
@@ -223,7 +233,9 @@ test("bounds grep results to one thousand matches", () =>
             ),
           ),
         )
-        expect(result.text.split("\n")).toHaveLength(1_000)
+        expect(result.text.split("\n").length).toBeLessThanOrEqual(1_000)
+        expect(result.text).toContain("[truncated: kept first")
+        expect(result.truncated).toBe(true)
       }).pipe(provide(BunServices.layer)),
     ),
   ))

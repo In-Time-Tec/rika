@@ -147,35 +147,18 @@ describe("WebSearch registry", () => {
 })
 
 describe("WebSearch HTTP providers", () => {
-  it.effect("uses the Parallel SDK request contract and normalizes its response", () => {
-    let capturedUrl = ""
-    let capturedBody: unknown
-    const fetch: typeof globalThis.fetch = Object.assign(
-      (resource: string | URL | Request, init?: RequestInit) => {
-        capturedUrl = String(resource)
-        capturedBody = JSON.parse(String(init?.body))
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              search_id: "search-1",
-              session_id: "session-1",
-              results: [{ url: "https://parallel.test/result", title: "Result", excerpts: ["excerpt"] }],
-            }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          ),
-        )
-      },
-      { preconnect: () => {} },
-    )
+  it.effect("posts the Parallel request and normalizes its response", () => {
+    const captured: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function* () {
       const parallel = yield* WebSearchProviderImpl.parallel({
         apiKey: Redacted.make("parallel"),
         baseUrl: "https://parallel.test",
-        fetch,
       })
       const outcome = yield* parallel.search({ ...input, kind: "web", strategy: "auto" })
-      expect(capturedUrl).toBe("https://parallel.test/v1/search")
-      expect(capturedBody).toMatchObject({
+      expect(captured[0]?.method).toBe("POST")
+      expect(captured[0]?.url).toBe("https://parallel.test/v1/search")
+      expect(captured[0]?.headers["x-api-key"]).toBe("parallel")
+      expect(body(captured[0]!)).toMatchObject({
         objective: input.objective,
         search_queries: input.searchQueries,
         mode: "advanced",
@@ -187,8 +170,73 @@ describe("WebSearch HTTP providers", () => {
         publishedAt: null,
         excerpts: ["excerpt"],
       })
-    }).pipe(provide(clientLayer((request) => response(request, {}))))
+    }).pipe(
+      provide(
+        clientLayer((request) => {
+          captured.push(request)
+          return response(request, {
+            search_id: "search-1",
+            session_id: "session-1",
+            results: [{ url: "https://parallel.test/result", title: "Result", excerpts: ["excerpt"] }],
+          })
+        }),
+      ),
+    )
   })
+
+  it.effect("accepts the official nullable Parallel title and publish date with usage and warnings", () =>
+    Effect.gen(function* () {
+      const parallel = yield* WebSearchProviderImpl.parallel({
+        apiKey: Redacted.make("parallel"),
+        baseUrl: "https://parallel.test",
+      })
+      const outcome = yield* parallel.search({ ...input, kind: "web", strategy: "auto" })
+      expect(outcome.results?.[0]).toMatchObject({
+        url: "https://parallel.test/result",
+        title: null,
+        publishedAt: null,
+        excerpts: ["excerpt"],
+      })
+    }).pipe(
+      provide(
+        clientLayer((request) =>
+          response(request, {
+            search_id: "search-1",
+            session_id: "session-1",
+            results: [{ url: "https://parallel.test/result", title: null, publish_date: null, excerpts: ["excerpt"] }],
+            usage: [{ name: "search", count: 1 }],
+            warnings: [{ type: "warning", message: "note" }],
+          }),
+        ),
+      ),
+    ),
+  )
+
+  it.effect("accepts a Parallel result without title or publish date", () =>
+    Effect.gen(function* () {
+      const parallel = yield* WebSearchProviderImpl.parallel({
+        apiKey: Redacted.make("parallel"),
+        baseUrl: "https://parallel.test",
+      })
+      const outcome = yield* parallel.search({ ...input, kind: "web", strategy: "auto" })
+      expect(outcome.results?.[0]).toMatchObject({
+        url: "https://parallel.test/result",
+        title: null,
+        publishedAt: null,
+        excerpts: ["excerpt"],
+      })
+    }).pipe(
+      provide(
+        clientLayer((request) =>
+          response(request, {
+            search_id: "search-1",
+            session_id: "session-1",
+            results: [{ url: "https://parallel.test/result", excerpts: ["excerpt"] }],
+          }),
+        ),
+      ),
+    ),
+  )
 
   it.effect("builds and normalizes Exa web and code requests", () => {
     const captured: Array<HttpClientRequest.HttpClientRequest> = []

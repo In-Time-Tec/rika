@@ -146,6 +146,9 @@ describe("tool contracts", () => {
       action: "read-web-page",
       outputDisplay: "expandable",
     })
+    expect(Catalog.get("read_web_page")?.description).toContain("file:// URLs are unsupported")
+    expect(Catalog.get("read_web_page")?.description).toContain("rika.workspace.read")
+    expect(Catalog.get("read_web_page")?.description).toContain("local-capable child")
     expect(Catalog.get("search_threads")?.presentation).toMatchObject({
       family: "explore",
       activeLabel: "Exploring",
@@ -248,23 +251,23 @@ describe("tool contracts", () => {
         "capability, not a particular provider",
       )
       expect(
-        yield* Schema.decodeUnknownEffect(contractFixtures.ParallelSearchContract.SearchQueries)(["current docs"]),
+        yield* Schema.decodeUnknownEffect(contractFixtures.WebSearchInputContract.SearchQueries)(["current docs"]),
       ).toEqual(["current docs"])
       yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ParallelSearchContract.SearchInput)({
+        Schema.decodeUnknownEffect(contractFixtures.WebSearchRequestContract.SearchInput)({
           objective: "",
           searchQueries: ["docs"],
         }),
       )
       yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ParallelSearchContract.SearchInput)({
+        Schema.decodeUnknownEffect(contractFixtures.WebSearchRequestContract.SearchInput)({
           objective: "   ",
           searchQueries: ["docs"],
         }),
       )
-      yield* Effect.flip(Schema.decodeUnknownEffect(contractFixtures.ParallelSearchContract.SearchQueries)([]))
+      yield* Effect.flip(Schema.decodeUnknownEffect(contractFixtures.WebSearchInputContract.SearchQueries)([]))
       yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ParallelSearchContract.SearchQueries)({
+        Schema.decodeUnknownEffect(contractFixtures.WebSearchInputContract.SearchQueries)({
           0: "current docs",
           __rest__: ["api"],
         }),

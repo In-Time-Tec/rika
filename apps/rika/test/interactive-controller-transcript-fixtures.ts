@@ -67,11 +67,6 @@ const entriesImpl = (id: string, createdAt: number, events: ReadonlyArray<Semant
 
 export const initialState = (): InteractiveController.State => ({
   model: ViewState.initial("/work", "medium"),
-  replayTurns: new Map(),
-  entries: [],
-  revisions: new Map(),
-  liveProjections: new Map(),
-  selectionEpoch: 0,
 })
 
 export const entries: {

@@ -1,6 +1,8 @@
 import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { Output, type AnalysisInput, type MediaKind } from "./media-view-contract"
 import { MediaMissingError, MediaOversizedError, UnsupportedMediaError } from "./media-view-errors"
+import { maxOutputBytes } from "../runtime/coding-tool-result"
+import { RuntimeFilesystem } from "../runtime/coding-tool-runtime-filesystem"
 
 export class MediaAnalysisError extends Schema.TaggedErrorClass<MediaAnalysisError>()("MediaAnalysisError", {
   message: Schema.String,
@@ -28,7 +30,6 @@ export class Service extends Context.Service<Service, Interface>()(
 ) {}
 
 const maximumSize = 25 * 1024 * 1024
-const outputLimit = 40_000
 const ascii = (bytes: Uint8Array, start: number, length: number) =>
   new TextDecoder().decode(bytes.slice(start, start + length))
 const classify = (bytes: Uint8Array): { readonly mimeType: string; readonly kind: MediaKind } | undefined => {
@@ -98,7 +99,10 @@ export const layer = (workspace: string) =>
             return { text, artifact, truncated: false }
           }
           const analysis = yield* analyzer.analyze({ ...artifact, bytes })
-          return { text: analysis.slice(0, outputLimit), artifact, truncated: analysis.length > outputLimit }
+          return {
+            ...RuntimeFilesystem.boundedText(analysis, maxOutputBytes, "request a narrower analysis"),
+            artifact,
+          }
         }),
       })
     }),

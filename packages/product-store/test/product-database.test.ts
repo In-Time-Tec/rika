@@ -4,6 +4,7 @@ import { expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { layer } from "../src/database/product-database-layer"
+import { schemaFingerprint } from "../src/database/product-schema"
 
 it.layer(BunServices.layer)("product database", (test) => {
   test.effect("builds the one current schema in a fresh database", () =>
@@ -32,6 +33,20 @@ it.layer(BunServices.layer)("product database", (test) => {
               String((row as { readonly name: unknown }).name),
             ),
           ).toEqual(["turn_id", "start_input_json", "prepared_at"])
+          expect(names).toContain("rika_turn_steering_outbox")
+          expect(
+            (yield* sql`PRAGMA table_info(rika_turn_steering_outbox)`).map((row) =>
+              String((row as { readonly name: unknown }).name),
+            ),
+          ).toEqual([
+            "request_id",
+            "target_turn_id",
+            "source_turn_id",
+            "thread_id",
+            "admission_json",
+            "status",
+            "prepared_at",
+          ])
           expect(names).toContain("rika_transcript_units")
           expect(names).toContain("rika_transcript_checkpoints")
           expect(names).not.toContain("rika_transcript_execution_checkpoints")
@@ -144,6 +159,98 @@ it.layer(BunServices.layer)("product database", (test) => {
             return yield* sql`SELECT unexpected FROM rika_workspaces WHERE path = '/preserve'`
           }).pipe(Effect.provide(client)),
         ).toEqual([{ unexpected: "value" }])
+      }),
+    ),
+  )
+
+  test.effect("brings a database made before durable steering admission up to the current schema", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // A data root outlives the version that made it, so a release that adds a table has to bring
+        // it rather than tell a user their history is unreadable.
+        const fileSystem = yield* FileSystem.FileSystem
+        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-product-upgrade-" })
+        const filename = `${directory}/rika.db`
+        const built = yield* Layer.build(layer(filename))
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient
+          yield* sql`DROP TABLE rika_turn_steering_outbox`
+          yield* sql`DROP TRIGGER rika_tombstoned_thread_turn_insert`
+          yield* sql`DROP TABLE rika_thread_deletion_outbox`
+          yield* sql`DROP TABLE rika_goals`
+          const objects = yield* sql`SELECT type, name, tbl_name AS table_name, sql
+            FROM sqlite_schema
+            WHERE type IN ('table', 'index', 'trigger', 'view') AND name NOT LIKE 'sqlite_%'
+            ORDER BY type ASC, name ASC`
+          yield* sql`UPDATE rika_schema_identity SET fingerprint = ${schemaFingerprint(objects as never)} WHERE id = 1`
+        }).pipe(Effect.provide(built))
+        const reopened = yield* Layer.build(layer(filename))
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient
+          const rows =
+            yield* sql`SELECT name FROM sqlite_schema WHERE name IN ('rika_goals', 'rika_thread_deletion_outbox', 'rika_tombstoned_thread_turn_insert', 'rika_turn_steering_outbox')`
+          expect(rows).toHaveLength(4)
+        }).pipe(Effect.provide(reopened))
+      }),
+    ),
+  )
+
+  test.effect("upgrades the exact schema before durable steering admission and refuses drift", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-product-database-predecessor-" })
+        const filename = `${directory}/rika.db`
+
+        yield* Effect.scoped(Layer.build(layer(filename)))
+        const client = yield* Layer.build(SqliteClient.layer({ filename }))
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient
+          yield* sql`DROP TABLE rika_turn_steering_outbox`
+          const objects = yield* sql`SELECT type, name, tbl_name AS table_name, sql
+            FROM sqlite_schema
+            WHERE type IN ('table', 'index', 'trigger', 'view') AND name NOT LIKE 'sqlite_%'
+            ORDER BY type ASC, name ASC`
+          yield* sql`UPDATE rika_schema_identity SET fingerprint = ${schemaFingerprint(objects as never)} WHERE id = 1`
+          yield* sql`INSERT INTO rika_workspaces (path, created_at) VALUES ('/preserved', 1)`
+          yield* sql`INSERT INTO rika_threads (id, workspace, title, labels_json, created_at, updated_at) VALUES ('t1', '/preserved', 'Keep', '[]', 1, 1)`
+          yield* sql`INSERT INTO rika_turns (id, thread_id, turn_kind, status, prompt, created_at, updated_at, execution_route_json)
+            VALUES ('turn-1', 't1', 'AgentExecution', 'completed', 'keep me', 1, 1, '{}')`
+        }).pipe(Effect.provide(client))
+
+        // Reopening must accept the exact predecessor and apply only the missing additions.
+        const reopened = yield* Layer.build(layer(filename))
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient
+          const names = yield* sql`SELECT name FROM sqlite_schema WHERE name = 'rika_turn_steering_outbox'`
+          expect(names).toHaveLength(1)
+          const rows = yield* sql`SELECT workspace FROM rika_threads WHERE id = 't1'`
+          expect(rows).toEqual([{ workspace: "/preserved" }])
+        }).pipe(Effect.provide(reopened))
+
+        // An unrelated drift on top of the predecessor must be refused and left untouched.
+        const drifted = `${directory}/drifted.db`
+        yield* Effect.scoped(Layer.build(layer(drifted)))
+        const driftedClient = yield* Layer.build(SqliteClient.layer({ filename: drifted }))
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient
+          yield* sql`DROP TABLE rika_turn_steering_outbox`
+          const objects = yield* sql`SELECT type, name, tbl_name AS table_name, sql
+            FROM sqlite_schema
+            WHERE type IN ('table', 'index', 'trigger', 'view') AND name NOT LIKE 'sqlite_%'
+            ORDER BY type ASC, name ASC`
+          yield* sql`UPDATE rika_schema_identity SET fingerprint = ${schemaFingerprint(objects as never)} WHERE id = 1`
+          yield* sql`ALTER TABLE rika_workspaces ADD COLUMN unexpected TEXT`
+          yield* sql`INSERT INTO rika_workspaces (path, created_at, unexpected) VALUES ('/drift', 1, 'value')`
+        }).pipe(Effect.provide(driftedClient))
+        expect((yield* Layer.build(layer(drifted)).pipe(Effect.exit))._tag).toBe("Failure")
+        const preserved = yield* Layer.build(SqliteClient.layer({ filename: drifted }))
+        expect(
+          yield* Effect.gen(function* () {
+            const sql = yield* SqlClient
+            return yield* sql`SELECT path FROM rika_workspaces`
+          }).pipe(Effect.provide(preserved)),
+        ).toEqual([{ path: "/drift" }])
       }),
     ),
   )

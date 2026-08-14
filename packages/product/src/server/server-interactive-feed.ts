@@ -1,8 +1,7 @@
 import { Schema } from "effect"
-import { InteractiveCommand } from "../operation/interactive/interactive-command"
-import { InteractiveEventSchema } from "../operation/interactive/interactive-event"
+import { InteractiveCommand } from "../operation/interactive/command"
+import { InteractiveEventSchema } from "../operation/interactive/event"
 import { Input } from "../operation/contract/product-operation"
-import * as Overflow from "../operation/interactive/interactive-feed-overflow"
 import { OperationUnavailable } from "../operation/contract/product-operation"
 
 type InteractiveInput = Extract<Input, { readonly _tag: "Interactive" }>
@@ -86,10 +85,4 @@ export const InteractiveFeedProtocol = {
   InteractiveCommandCompleted,
   InteractiveCommandFailed,
 } as const
-const make = Overflow.make
-const remember = Overflow.remember
-const events = Overflow.events
-type State = Overflow.State
-
-export { make, remember, events }
-export type { InteractiveInput, State }
+export type { InteractiveInput }

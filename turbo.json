@@ -11,104 +11,12 @@
     "typecheck": {
       "dependsOn": ["^build"]
     },
-    "//#repository-policy": {
-      "inputs": [
-        "package.json",
-        "bun.lock",
-        "apps/*/package.json",
-        "packages/*/package.json",
-        "tooling/*/package.json",
-        "tooling/repository-policy/**/*.ts",
-        "tooling/repository-policy/**/*.json",
-        "tooling/repository-policy/**/*.ts",
-        "apps/*/src/**/*.ts",
-        "apps/*/test/**/*.ts",
-        "apps/*/package.json",
-        "apps/*/tsconfig.json",
-        "packages/*/src/**/*.ts",
-        "packages/*/test/**/*.ts",
-        "packages/*/package.json",
-        "packages/*/tsconfig.json",
-        "scripts/**/*.ts",
-        "test/**/*.ts",
-        "!**/dist/**",
-        "!**/.turbo/**",
-        "!**/node_modules/**",
-        "AGENTS.md",
-        "CONTEXT.md",
-        "PRODUCT.md",
-        "plans/**/*.md",
-        "docs/features/**/*.md",
-        "docs/decisions/**/*.md"
-      ]
-    },
-    "//#repository-graph-check": {
-      "inputs": [
-        "package.json",
-        "bun.lock",
-        "tsconfig.json",
-        "apps/*/src/**/*.ts",
-        "apps/*/test/**/*.ts",
-        "apps/*/package.json",
-        "apps/*/tsconfig.json",
-        "packages/*/src/**/*.ts",
-        "packages/*/test/**/*.ts",
-        "packages/*/package.json",
-        "packages/*/tsconfig.json",
-        "scripts/**/*.ts",
-        "test/**/*.ts",
-        "tooling/repository-graph/src/**/*.ts",
-        "tooling/repository-graph/test/**/*.ts",
-        "tooling/repository-graph/package.json",
-        "tooling/repository-graph/tsconfig.json",
-        "tooling/repository-policy/src/**/*.ts",
-        "tooling/repository-policy/test/**/*.ts",
-        "tooling/repository-policy/*.json",
-        "!**/dist/**",
-        "!**/.turbo/**",
-        "!**/node_modules/**",
-        "docs/generated/*.json",
-        "docs/**/*.md",
-        "plans/**/*.md"
-      ]
-    },
-    "//#diagnostics": {
-      "inputs": [
-        "tsconfig.json",
-        "bun.lock",
-        "apps/**/*.ts",
-        "packages/**/*.ts",
-        "scripts/**/*.ts",
-        "tooling/**/*.ts",
-        "test/**/*.ts",
-        "!**/dist/**"
-      ]
-    },
-    "//#format-check": {
-      "inputs": [
-        "package.json",
-        ".prettierignore",
-        "**/*.ts",
-        "**/*.js",
-        "**/*.json",
-        "**/*.md",
-        "**/*.yml",
-        "**/*.yaml",
-        "!repos/**",
-        "!artifacts/**",
-        "!plans/**",
-        "!**/dist/**",
-        "!coverage/**",
-        "!packages/terminal/test/fixtures/visual/*.styles.json"
-      ]
-    },
     "//#lint": {
       "inputs": [
         "package.json",
         "apps/**/*.ts",
         "packages/**/*.ts",
         "scripts/**/*.ts",
-        "tooling/**/*.ts",
         "!**/dist/**"
       ]
     },
@@ -120,7 +28,6 @@
         "apps/**",
         "packages/**",
         "scripts/**",
-        "tooling/**",
         "test/**",
         "!**/dist/**"
       ]
@@ -133,7 +40,6 @@
         "apps/**",
         "packages/**",
         "scripts/**",
-        "tooling/**",
         "test/**",
         "!**/dist/**"
       ]
@@ -146,7 +52,6 @@
         "apps/**",
         "packages/**",
         "scripts/**",
-        "tooling/**",
         "test/**",
         "!**/dist/**"
       ]
@@ -158,7 +63,6 @@
         "apps/**/*.ts",
         "packages/**/*.ts",
         "scripts/**/*.ts",
-        "tooling/**/*.ts",
         "test/**/*.ts",
         "!**/dist/**"
       ]

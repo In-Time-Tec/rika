@@ -10,6 +10,7 @@
     "./recorded-shell-presentation": "./src/presentation/recorded-shell-presentation.ts",
     "./subagent-presentation": "./src/presentation/subagent-presentation.ts",
     "./partial-tool-input": "./src/presentation/partial-tool-input.ts",
+    "./cell-presentation": "./src/presentation/cell-presentation.ts",
     "./transcript-presentation-model": "./src/schema/transcript-presentation-model.ts",
     "./transcript-unit": "./src/schema/transcript-unit.ts"
   },

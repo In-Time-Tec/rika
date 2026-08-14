@@ -31,8 +31,8 @@ export abstract class SurfaceModeLabel extends SurfaceChrome {
             : formatTokens(model.usageTokens.total)
         return model.usageTokens?._tag === "Unavailable" ? "— tok" : "···· tok"
       }
+      if (model.usageCost?._tag === "Included") return "Included"
       if (model.usageCost?._tag === "Available") return formatCost(model.usageCost.usd)
-      if (model.costUsd !== undefined) return formatCost(model.costUsd)
       if (model.usageCost?._tag === "Unavailable") return "$—"
       return model.usageCost?._tag === "Loading" || model.busy ? "$····" : ""
     }

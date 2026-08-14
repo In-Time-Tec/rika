@@ -1,10 +1,12 @@
 # Execution control
 
-Users may steer text into the active Execution and cancel durable work. Pressing Enter while a Turn is active queues the prompt as a durable Pending Turn. Steering happens explicitly: Ctrl+S steers the composer text directly, and pressing Enter on a selected queued message converts that Pending Turn into steering, removing it from the queue. Image input cannot be converted to steering.
+Users may steer queued text into the active Execution and cancel durable work. Enter in the composer always submits normally: while a Turn is active, the prompt becomes a Pending Turn. Enter on a selected queue row withdraws that exact row and steers its text. Queued image input cannot be steered.
 
-Steering a message renders a `steering:` row above the composer from the moment it is sent, keyed by the backend receipt's steering sequence once accepted. The row is removed only when the durable `steering.delivered` event reports the message was consumed into the next model turn; the transcript then projects each delivered steering message as its own user entry at its exact event position, so several steered messages appear as distinct history entries. If the Turn settles before delivery, undelivered steering text is restored into an empty composer instead of being silently dropped.
+Steering text is limited to 4,096 characters, and an Execution accepts at most 64 pending steering requests. A globally unique request identity follows each command through Baton's idempotent admission, while the returned opaque run and entry identity owns reconciliation.
 
-While a cancellation is pending, Ctrl+S is inert and Enter continues to queue durably; queued Turns are promoted after the cancellation completes. Cancellation acknowledged before any agent response restores the submitted composer draft — drafts are captured per submission and bound to their Turn at admission, so only the cancelled Turn's draft is restored and stale terminal events cannot clear newer Turns.
+A queued row is withdrawn when its durable steering admission is prepared. Baton acceptance completes the handoff and deletes the source Pending Turn; later consumption projects exactly one user transcript entry at its event position, while terminal discard creates no transcript entry. Identity, not text, count, assistant completion, or FIFO position, distinguishes requests, so identical steering messages remain independent. An unknown admission outcome retries the same identity. A definitive rejection restores the source at its original FIFO position.
+
+While a cancellation is pending, Enter still queues a follow-up; Pending Turns are promoted after the cancellation completes. Cancellation acknowledged before any agent response restores the submitted composer draft — drafts are captured per submission and bound to their Turn at admission, so only the cancelled Turn's draft is restored and stale terminal events cannot clear newer Turns.
 
 Interrupt-and-send first admits a replacement prompt durably, then cancels the active Turn and promotes the replacement. If admission fails, the active Turn continues.
 

@@ -11,8 +11,10 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Context, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect"
+import { executionSessionLifecycleLayerTest } from "../support/operation-layer-harness"
 
 const backend = ExecutionGateway.Service.of({
   startTurn: () => Effect.die("unused"),
@@ -52,6 +54,7 @@ const makeHarness = Effect.fn("RecordedShellSessionTest.makeHarness")(function* 
     listRepairCandidates: () => Effect.succeed([]),
   })
   const layer = productLayer({
+    executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
     repositoryLayer: Layer.succeed(ThreadRepository.Service, threads),
     turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
     threadSummaryRepositoryLayer: Layer.succeed(ThreadSummaryRepository.Service, summaries),
@@ -392,7 +395,7 @@ describe("recorded shell session", () => {
             },
           },
         ],
-        projectionVersion: 1,
+        projectionVersion: ExecutionProjection.projectionVersion,
       })
       expect(harness.events.find((event) => event._tag === "ShellCompleted")).toMatchObject({
         command: "exit 7",

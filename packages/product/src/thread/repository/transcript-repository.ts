@@ -50,7 +50,7 @@ export const productMemoryLayerWithTurns = Layer.succeed(
           },
           steering: { steeringMessages: 0, followUpMessages: 0 },
         },
-        projectionVersion: 1,
+        projectionVersion: ExecutionProjection.projectionVersion,
       }),
     page: () =>
       Effect.succeed({

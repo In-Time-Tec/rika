@@ -73,7 +73,7 @@ test("reopens a completed nested transcript through the SQLite page", () => {
           yield* transcripts.commitProjection(completed, {
             _tag: "ProjectionSnapshot",
             revision: 0,
-            checkpoint: { version: 1, cursor: "nested-complete", state: "{}" },
+            checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "nested-complete", state: "{}" },
             units,
             hasOlder: false,
             state: {

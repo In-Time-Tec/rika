@@ -13,6 +13,11 @@ export interface CreateInput {
   readonly now: number
 }
 
+export interface PendingDeletion {
+  readonly threadId: ThreadId
+  readonly requestedAt: number
+}
+
 export interface ListInput {
   readonly includeArchived?: boolean
   readonly limit?: number
@@ -34,7 +39,10 @@ export interface Interface {
   readonly label: (id: ThreadId, labels: ReadonlyArray<string>, now: number) => Effect.Effect<Thread, RepositoryError>
   readonly setPinned: (id: ThreadId, pinned: boolean, now: number) => Effect.Effect<Thread, RepositoryError>
   readonly setArchived: (id: ThreadId, archived: boolean, now: number) => Effect.Effect<Thread, RepositoryError>
-  readonly remove: (id: ThreadId) => Effect.Effect<void, RepositoryError>
+  readonly requestDeletion: (id: ThreadId, requestedAt: number) => Effect.Effect<void, RepositoryError>
+  readonly pendingDeletions: Effect.Effect<ReadonlyArray<PendingDeletion>, RepositoryError>
+  readonly completeDeletion: (id: ThreadId) => Effect.Effect<void, RepositoryError>
+  readonly discard: (id: ThreadId) => Effect.Effect<void, RepositoryError>
 }
 
 export class Service extends Context.Service<Service, Interface>()(

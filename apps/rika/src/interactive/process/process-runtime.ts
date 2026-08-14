@@ -5,7 +5,7 @@ import * as ProcessPrompt from "./process-prompt"
 import * as ProcessWorkspace from "./process-workspace"
 import * as ProcessLayer from "./process-layer"
 import * as ProcessSignals from "./process-signals"
-import { paletteCommand } from "../controller/interactive-palette-controller"
+import * as PaletteController from "../controller/interactive-palette-controller"
 import { classifyPrompt, displayInput, promptParts } from "@rika/terminal/terminal-session"
 import { execute, type Action, type Adapter, type ModelTuning } from "@rika/terminal/terminal-session"
 import { update } from "@rika/terminal/terminal-state-reducer"
@@ -211,8 +211,10 @@ export const makeProcessRuntime = (runtime: Runtime) => {
                     _tag: "ExecutionFailed",
                     failure: {
                       tag: "RecoveredTurnFailed",
+                      category: "operation",
                       message: failure.message,
-                      retry: "user",
+                      retryable: false,
+                      retry: "none",
                       actor: "environment",
                     },
                   })
@@ -227,27 +229,6 @@ export const makeProcessRuntime = (runtime: Runtime) => {
       effect.pipe(
         provideLayerScoped(BunServices.layer),
         Effect.catchCause((cause) => Effect.logError(Cause.pretty(cause))),
-      ),
-    )
-  }
-  const requestNewerPage = () => {
-    const threadId = loop.model.currentThreadId
-    if (
-      !loop.transcriptHasNewer ||
-      loop.pendingNewer !== undefined ||
-      loop.transcriptNewestCursor === undefined ||
-      threadId === undefined
-    )
-      return
-    const cursor = loop.transcriptNewestCursor
-    loop.pendingNewer = { threadId, cursor: JSON.stringify(cursor) }
-    run(
-      session.loadNewer(threadId, cursor).pipe(
-        Effect.tapError(() =>
-          Effect.sync(() => {
-            loop.pendingNewer = undefined
-          }),
-        ),
       ),
     )
   }
@@ -403,8 +384,8 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     quit: () => close(),
     editQueued: (id, prompt) => run(session.editQueued(id, prompt)),
     dequeue: (id) => run(session.dequeue(id)),
-    steerQueued: (id, prompt) => run(session.steerQueued(id, prompt)),
-    steer: (prompt, turnId) => run(session.steer(prompt, turnId)),
+    steerQueued: (id, prompt, requestId) => run(session.steerQueued(id, prompt, requestId)),
+    steer: (prompt, requestId, turnId) => run(session.steer(prompt, requestId, turnId)),
     approveAuthorization: (turnId, authorizationId) => run(session.approveAuthorization(turnId, authorizationId)),
     denyAuthorization: (turnId, authorizationId) => run(session.denyAuthorization(turnId, authorizationId)),
     interruptAndSend: (prompt) => run(session.interruptAndSend(prompt)),
@@ -415,11 +396,37 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     },
   }
   const consumePendingAction = () => {
-    const action = loop.model.pendingAction as Action | undefined
-    const command = paletteCommand(action)
+    const action = loop.model.pendingAction as unknown
+    const command = PaletteController.paletteCommand(action)
     if (command?._tag === "NewThread") startSelection(() => session.newThread)
+    else if (
+      action !== null &&
+      typeof action === "object" &&
+      "_tag" in action &&
+      action._tag === "SetSubagentLimit" &&
+      "limit" in action &&
+      "value" in action &&
+      (action.limit === "maxDepth" || action.limit === "maxSubagents") &&
+      typeof action.value === "number"
+    )
+      run(
+        PaletteController.writeSubagentLimit(loop.model.workspace, action.limit, action.value).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              loop.renderer?.surface.showToast(
+                `${action.limit === "maxDepth" ? "Max depth" : "Max subagents"} set to ${action.value}`,
+              )
+            }),
+          ),
+          Effect.catch(() =>
+            Effect.sync(() => {
+              loop.renderer?.surface.showToast("Could not update workspace subagent settings", "#e06c75")
+            }),
+          ),
+        ),
+      )
     else if (action !== undefined) {
-      execute(adapter, action)
+      execute(adapter, action as Action)
     }
     loop.model = update(loop.model, { _tag: "PaletteActionConsumed" })
   }
@@ -431,7 +438,6 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     interrupt,
     suspend,
     run,
-    requestNewerPage,
     loadSelected,
     startSelection,
     loadChangedFiles,

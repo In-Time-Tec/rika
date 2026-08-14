@@ -1,8 +1,9 @@
 import { expect } from "vitest"
 import { fileURLToPath } from "node:url"
-import { Effect, Function, Queue, Ref, Stream } from "effect"
+import { Cause, Effect, Function, Queue, Ref, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { Event, FixtureFailure, decodeEvent, waitUntil } from "./server-transport-runtime"
+import type { Event } from "./server-transport-runtime"
+import { FixtureFailure, decodeEvent, waitUntil } from "./server-transport-runtime"
 import { fileExists } from "./server-transport-files"
 
 export const hostPids = new Set<number>()

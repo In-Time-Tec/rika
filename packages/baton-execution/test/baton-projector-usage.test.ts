@@ -1,7 +1,7 @@
 import { RunTree, type RunEvent } from "@batonfx/runtime"
 import { DateTime } from "effect"
 import { describe, expect, it } from "@effect/vitest"
-import { TreeProjector } from "../src/baton-tree-projector"
+import { TreeProjector } from "../src/projection/tree"
 
 let position = 0
 const treeEvent = (
@@ -78,6 +78,46 @@ describe("Baton tree projector usage accounting", () => {
       }),
     )
     expect(usage.upsert).toEqual([])
+  })
+
+  it("counts account-backed attempts as included instead of unpriced", () => {
+    position = 0
+    const projector = TreeProjector.make("turn-account", "codex", undefined, [], false, "included")
+    projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ModelAttemptCompleted",
+        deliveryId: "delivery",
+        turn: 0,
+        modelCallId: "call",
+        modelAttemptId: "attempt",
+        attempt: 0,
+        completedAt: 2,
+        usageAt: 2,
+        usage: {
+          inputTokens: { total: 5, uncached: 5, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 3, text: 3, reasoning: undefined },
+        },
+        finishReason: "stop",
+        provider: "openai",
+        model: "codex",
+      }),
+    )
+    const usage = projector.snapshot().state.usage
+    expect(usage).toEqual(
+      expect.objectContaining({
+        tokens: expect.objectContaining({
+          total: 8,
+          input: expect.objectContaining({ total: 5 }),
+          output: expect.objectContaining({ total: 3 }),
+        }),
+        pricedAttempts: 0,
+        unpricedAttempts: 0,
+        includedAttempts: 1,
+        countedAttempts: 1,
+        uncountedAttempts: 0,
+      }),
+    )
+    expect(usage).not.toHaveProperty("costNanoUsd")
   })
 
   it("keeps exact cumulative token totals beyond the bounded replay window", () => {

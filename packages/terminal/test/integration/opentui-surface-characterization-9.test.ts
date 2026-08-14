@@ -119,7 +119,14 @@ for (const width of [80, 50] as const) {
         let model: Model = { ...initial("/work", "high"), width, height: 20 }
         model = update(model, {
           _tag: "ExecutionFailed",
-          failure: { tag: "TestFailure", message: "The model is unavailable.", retry: "user", actor: "environment" },
+          failure: {
+            tag: "TestFailure",
+            message: "The model is unavailable.",
+            category: "operation",
+            retryable: false,
+            retry: "none",
+            actor: "environment",
+          },
         })
         const surface = new Surface(setup.renderer, {
           key: (key) => {
@@ -133,13 +140,12 @@ for (const width of [80, 50] as const) {
           surface.update(model)
           yield* openTui(() => setup.renderOnce())
           const failed = setup.captureCharFrame()
-          expect(failed).toContain("ERROR: TestFailure")
-          expect(failed.replaceAll(/\s+/g, " ")).toContain("Next: Press Enter to try again.")
+          expect(failed).toContain("TestFailure")
           expect(
             setup
               .captureSpans()
               .lines.flatMap((line) => line.spans)
-              .some((span) => span.text.includes("ERROR: TestFailure") && span.fg.toInts().join(",") === "128,0,0,255"),
+              .some((span) => span.text.includes("TestFailure") && span.fg.toInts().join(",") === "128,0,0,255"),
           ).toBe(true)
           yield* openTui(() => setup.mockInput.typeText("retry"))
           setup.mockInput.pressEnter()

@@ -69,9 +69,25 @@ const program = Effect.scoped(
     yield* fileSystem
       .writeFileString(path.join(workspace, "smoke.txt"), "release-smoke-needle\n")
       .pipe(mapFailure("seed workspace"))
-    const grepScript = yield* Schema.encodeUnknownEffect(UnknownJson)([
+    /**
+     * A cell is the only tool a model is given, and it runs in a kernel the packaged binary has to
+     * spawn as a file. Reading the seeded workspace through one is what proves the packaged product
+     * can do its own work, rather than only start.
+     */
+    const cellScript = yield* Schema.encodeUnknownEffect(UnknownJson)([
       {
-        parts: [{ type: "toolCall", name: "grep", params: { pattern: "release-smoke-needle", regex: false } }],
+        parts: [
+          {
+            type: "toolCall",
+            name: "typescript",
+            params: {
+              code: [
+                `const seeded = await rika.workspace.read({"path":"smoke.txt"})`,
+                `seeded.text.includes("release-smoke-needle") ? 6 * 7 : 0`,
+              ].join("\n"),
+            },
+          },
+        ],
       },
       { parts: [{ type: "text", text: "SMOKE_COMPLETE" }] },
     ]).pipe(mapFailure("encode model script"))
@@ -79,7 +95,7 @@ const program = Effect.scoped(
       HOME: home,
       RIKA_DATABASE: path.join(state, "rika.db"),
       RIKA_INTERNAL_SERVER_GRACE: "0",
-      RIKA_TEST_MODEL_SCRIPT: grepScript,
+      RIKA_TEST_MODEL_SCRIPT: cellScript,
     }
     const output = (
       command: ReadonlyArray<string>,
@@ -145,11 +161,99 @@ const program = Effect.scoped(
       !("schemaVersion" in decodedPerformance)
     )
       return yield* failure("performance runtime", "Packaged performance report is invalid")
-    const executed = yield* output(["run", "find the needle"])
+    const executed = yield* output(["run", "--stream-json", "find the needle"])
+    /**
+     * The seeded line proves the cell RAN: a model that answers without its kernel still reaches its
+     * own final text, so the answer alone says nothing about whether any work happened.
+     */
+    /**
+     * The value is computed inside the cell from what it read, so it appears nowhere in the source
+     * the stream echoes back. A kernel that never starts cannot produce it.
+     */
+    if (!executed.includes(`"result":"42"`))
+      return yield* failure("packaged cell", `Packaged run did not execute a cell: ${executed.slice(0, 2_000)}`)
     if (!executed.includes("SMOKE_COMPLETE"))
       return yield* failure(
         "packaged run",
-        `Deterministic packaged run did not complete a grep tool turn: ${executed.slice(0, 2_000)}`,
+        `Deterministic packaged run did not complete a cell turn: ${executed.slice(0, 2_000)}`,
+      )
+    /**
+     * A refinement a cell makes is read once per Server, so proving it reached anything needs two
+     * runs: one that writes it and a second whose prompt carries it. The packaged binary is the only
+     * place this shows, because a harness that never reaches a prompt still stores and reads back
+     * exactly like one that does.
+     */
+    const refineScript = yield* Schema.encodeUnknownEffect(UnknownJson)([
+      {
+        parts: [
+          {
+            type: "toolCall",
+            name: "typescript",
+            params: {
+              code: [
+                `const pinned = await rika.harness.snapshot({"scope":"global"})`,
+                `const content = ["RELEASE", "SMOKE", "HARNESS", "MARKER"].join("_")`,
+                `await rika.harness.createMemory({"id":"release-smoke","title":"Release smoke","content":content,"baseSnapshot":pinned.snapshotId,"scope":"global"})`,
+                `"refined"`,
+              ].join("\n"),
+            },
+          },
+        ],
+      },
+      { parts: [{ type: "text", text: "SMOKE_COMPLETE" }] },
+    ]).pipe(mapFailure("encode refinement script"))
+    /**
+     * A Server outlives the `run` that started it and keeps the script it booted with, so these two
+     * runs need a home of their own: sharing the one above would replay that run's script instead of
+     * these, and the second assertion would pass against the wrong cell entirely.
+     */
+    const harnessHome = path.join(temporary, "harness-home")
+    yield* fileSystem.makeDirectory(harnessHome, { recursive: true }).pipe(mapFailure("seed harness home"))
+    /**
+     * The two runs need separate durable journals, which live under the home rather than at
+     * RIKA_DATABASE: sharing one replays the first run's turn and the second assertion passes
+     * against a cell that never ran. Copying the harness store between the two homes is what leaves
+     * the refinement, and only the refinement, carried across.
+     */
+    const recallHome = path.join(temporary, "recall-home")
+    yield* fileSystem.makeDirectory(recallHome, { recursive: true }).pipe(mapFailure("seed recall home"))
+    const refined = yield* output(["run", "--stream-json", "refine"], {
+      HOME: harnessHome,
+      RIKA_DATABASE: path.join(harnessHome, "rika.db"),
+      RIKA_TEST_MODEL_SCRIPT: refineScript,
+    })
+    if (!refined.includes(`"result":"refined"`))
+      return yield* failure("packaged harness", `Packaged run did not refine its harness: ${refined.slice(-2_000)}`)
+    const recallScript = yield* Schema.encodeUnknownEffect(UnknownJson)([
+      {
+        parts: [
+          {
+            type: "toolCall",
+            name: "typescript",
+            params: {
+              code: [
+                `const pinned = await rika.harness.snapshot({"scope":"global"})`,
+                `pinned.entries.memory.some((entry) => entry.content === ["RELEASE", "SMOKE", "HARNESS", "MARKER"].join("_")) ? "carried" : "lost"`,
+              ].join("\n"),
+            },
+          },
+        ],
+      },
+      { parts: [{ type: "text", text: "SMOKE_COMPLETE" }] },
+    ]).pipe(mapFailure("encode recall script"))
+    yield* fileSystem
+      .copy(path.join(harnessHome, ".config"), path.join(recallHome, ".config"))
+      .pipe(mapFailure("carry the harness store"))
+    const carried = yield* output(["run", "--stream-json", "recall"], {
+      HOME: recallHome,
+      RIKA_DATABASE: path.join(recallHome, "rika.db"),
+      RIKA_TEST_MODEL_SCRIPT: recallScript,
+    })
+    const stored = yield* fileSystem.exists(path.join(harnessHome, ".config", "rika", "harness", "global.json"))
+    if (!carried.includes(`"result":"carried"`))
+      return yield* failure(
+        "packaged harness",
+        `A refinement one run stored was not readable by the next: ${carried.slice(-2_000)} stored=${stored} carriedTail=${carried.slice(-600)}`,
       )
     const threads = yield* output(["threads", "list"])
     const decoded = yield* Schema.decodeUnknownEffect(ThreadsJson)(threads).pipe(mapFailure("decode threads list"))

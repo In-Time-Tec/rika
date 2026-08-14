@@ -23,11 +23,11 @@ type OperationError = import("../operation-error").OperationError
 type OperationUnavailable = import("../contract/product-operation").OperationUnavailable
 type Input = import("../contract/product-operation").Input
 type ModeId = import("@rika/configuration/behavior-mode").ModeId
-type InteractiveEvent = import("../interactive/interactive-runtime-event").InteractiveEvent
-type InteractiveDependencyContext = import("../interactive/interactive-session-runtime").InteractiveDependencyContext
-type InteractiveExecutionContext = import("../interactive/interactive-session-runtime").InteractiveExecutionContext
-type PreparedTurn = import("../interactive/interactive-session-runtime").PreparedTurn
-type temporaryThreadTitle = typeof import("../interactive/interactive-operation-leaves").temporaryThreadTitle
+type InteractiveEvent = import("../interactive/session-event").InteractiveEvent
+type InteractiveDependencyContext = import("../interactive/session").InteractiveDependencyContext
+type InteractiveExecutionContext = import("../interactive/session").InteractiveExecutionContext
+type PreparedTurn = import("../interactive/session").PreparedTurn
+type temporaryThreadTitle = typeof import("../interactive/shell").temporaryThreadTitle
 
 export interface ProductOperationExecution {
   readonly stopActiveExecutionWorkWithProjection: Effect.Effect<
@@ -116,7 +116,6 @@ export interface ProductOperationExecutionInput {
   readonly rawBackend: ExecutionGatewayInterface
   readonly dependencyContext: InteractiveDependencyContext
   readonly executionDependencies: InteractiveExecutionContext
-  readonly withExecutionAdmission: <A, E, R>(effect: Effect.Effect<A, E, R>, closed: E) => Effect.Effect<A, E, R>
   readonly extensionService:
     | import("@rika/extensions/execution-extension-service").ExecutionExtensionInterface
     | undefined

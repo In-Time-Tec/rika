@@ -36,13 +36,50 @@ test("uses padded full-size mode and context sections while compact content stay
         contextUsage: { _tag: "Available", inputTokens: 1_000, contextWindow: 10_000, reserveTokens: 1_000 },
       },
       54,
-      13,
+      16,
       0,
     ).chunks,
   )
-  expect(context).toContain("\n" + " ".repeat(54) + "\nUsable")
-  expect(context).toContain("\n" + " ".repeat(54) + "\nCost")
+  expect(context).toContain("\n\n" + " ".repeat(54) + "\n\nUsable")
+  expect(context).toContain("\n\n" + " ".repeat(54) + "\n\nCost")
   expect(text(modePickerContent(model, 32).chunks)).not.toContain("├─ Route ")
+})
+
+test("renders honest empty states instead of Unknown when no usage exists yet", () => {
+  const base = initial("/work", "high")
+
+  const notStarted = text(contextDetails({ ...base, contextUsage: { _tag: "NotStarted" } }, 54, 16, 0).chunks)
+  expect(notStarted).not.toContain("Unknown")
+  expect(notStarted).toContain("Used        —")
+  expect(notStarted).toContain("Available   —")
+  expect(notStarted).toContain("Usable     —")
+  expect(notStarted).toContain("Full       —")
+  expect(notStarted).toContain("No usage yet — send a message to see context usage")
+
+  const notReported = text(contextDetails({ ...base, contextUsage: { _tag: "Unavailable" } }, 54, 16, 0).chunks)
+  expect(notReported).not.toContain("Unknown")
+  expect(notReported).toContain("Used        —")
+  expect(notReported).toContain("Context usage is not reported by this model")
+
+  const loading = text(contextDetails({ ...base, contextUsage: { _tag: "Loading" }, busy: true }, 54, 16, 0).chunks)
+  expect(loading).not.toContain("Unknown")
+  expect(loading).toContain("Used        ····")
+  expect(loading).toContain("Cost       ····")
+
+  const included = text(
+    contextDetails(
+      {
+        ...base,
+        contextUsage: { _tag: "Available", inputTokens: 10, contextWindow: 100, reserveTokens: 10 },
+        usageCost: { _tag: "Included", includedAttempts: 2 },
+      },
+      54,
+      16,
+      0,
+    ).chunks,
+  )
+  expect(included).toContain("Cost       Included in subscription")
+  expect(included).not.toContain("$0.00")
 })
 
 test("uses a wider file sidebar with mode-accented title geometry and neutral content", () => {

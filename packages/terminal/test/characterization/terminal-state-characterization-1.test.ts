@@ -64,7 +64,7 @@ test("formats Amp activity counters with the singular tok unit", () => {
   expect(formatActivityCounter(1_234_567)).toBe("1.2M tok")
   expect(formatActivityCounter(1_234)).toBe(formatTokens(1_234))
 })
-test("summarizes top-level subagents separately from all other running tools", () => {
+test("summarizes direct subagents and tools without inflating them with descendants", () => {
   const rootAgent = {
     ...readCall("root-agent", "Root agent"),
     presentation: {
@@ -87,40 +87,34 @@ test("summarizes top-level subagents separately from all other running tools", (
     ],
   })
 
-  expect(activity).toEqual({ _tag: "RunningTools", subagents: 1, tools: 2 })
-  expect(formatActivity(activity)).toBe("Running 1 subagent, 2 tools")
+  expect(activity).toEqual({ _tag: "RunningTools", subagents: 1, tools: 1 })
+  expect(formatActivity(activity)).toBe("Running 1 subagent, 1 tool")
   expect(formatActivity({ _tag: "RunningTools", subagents: 5, tools: 3 })).toBe("Running 5 subagents, 3 tools")
 })
-test("exposes thread, mode, context, fast mode, and quit commands in the command palette", () => {
-  expect(commands).toEqual([
+test("exposes thread, mode, context, fast mode, subagent limits, and quit commands in the command palette", () => {
+  expect(commands.map((command) => command.id)).toEqual([
+    "threads",
+    "mode",
+    "context",
+    "fast-mode",
+    "max-subagents",
+    "max-depth",
+    "quit",
+  ])
+  expect(filter("set max subagents")).toEqual([
     {
-      id: "threads",
-      category: "thread",
-      label: "switch",
-      keybinding: "Ctrl+T",
-      action: { _tag: "SwitchThread" },
+      id: "max-subagents",
+      category: "subagents",
+      label: "set max subagents",
+      action: { _tag: "EditSubagentLimit", limit: "maxSubagents" },
     },
+  ])
+  expect(filter("set max depth")).toEqual([
     {
-      id: "mode",
-      category: "mode",
-      label: "change mode",
-      keybinding: "Ctrl+S",
-      action: { _tag: "OpenModePicker" },
-    },
-    {
-      id: "context",
-      category: "usage",
-      label: "show context and usage",
-      keybinding: "Ctrl+Y",
-      action: { _tag: "ToggleContextDetails" },
-    },
-    { id: "fast-mode", category: "rika", label: "toggle fast mode", action: { _tag: "ToggleFastMode" } },
-    {
-      id: "quit",
-      category: "rika",
-      label: "quit",
-      keybinding: "Ctrl+C",
-      action: { _tag: "Quit" },
+      id: "max-depth",
+      category: "subagents",
+      label: "set max depth",
+      action: { _tag: "EditSubagentLimit", limit: "maxDepth" },
     },
   ])
   expect(filter("review")).toEqual([])
@@ -363,13 +357,21 @@ test("streams, completes, and reports failures", () => {
   expect(model.entries).toHaveLength(3)
   model = update(model, {
     _tag: "ExecutionFailed",
-    failure: { tag: "TestFailure", message: "failed", retry: "user", actor: "environment" },
+    failure: {
+      tag: "TestFailure",
+      message: "failed",
+      category: "operation",
+      retryable: false,
+      retry: "none",
+      actor: "environment",
+    },
   })
   expect(model.blocks.at(-1)).toEqual({
     _tag: "Error",
     title: "TestFailure",
     detail: "failed",
-    recovery: "Press Enter to try again.",
+    category: "operation",
+    retryable: false,
   })
   expect(model.items.at(-1)).toEqual({ _tag: "Block", index: 0 })
   expect(model.busy).toBe(false)

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import { makeThreadViewFeed } from "../src/operation/interactive/interactive-thread-view-feed"
+import { makeThreadViewFeed } from "../src/operation/interactive/view/thread-view"
 
 const threadId = Thread.ThreadId.make("thread")
 const turnId = Turn.TurnId.make("turn")
@@ -44,6 +44,39 @@ const state = (status: "running" | "completed" = "running") => ({
 })
 
 describe("interactive ThreadView feed", () => {
+  it("keeps pending turns in canonical FIFO order across snapshots and middle restoration", () => {
+    const feed = makeThreadViewFeed(() => 1)
+    feed.publish({
+      _tag: "SelectionLoaded",
+      selectionEpoch: 1,
+      activitySequence: 0,
+      thread,
+      entries: [],
+      hasOlder: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 1,
+      queue: [
+        { id: Turn.TurnId.make("head"), prompt: "head", createdAt: 1 },
+        { id: Turn.TurnId.make("tail"), prompt: "tail", createdAt: 3 },
+      ],
+    })
+    expect(feed.current()?.pending.map((item) => item.id)).toEqual(["head", "tail"])
+
+    feed.publish({
+      _tag: "QueueUpdated",
+      selectionEpoch: 1,
+      threadId,
+      revision: 2,
+      queuedCount: 3,
+      change: {
+        _tag: "Added",
+        position: 1,
+        item: { id: Turn.TurnId.make("middle"), prompt: "middle", createdAt: 2 },
+      },
+    })
+    expect(feed.current()?.pending.map((item) => item.id)).toEqual(["head", "middle", "tail"])
+  })
+
   it("maps direct Projection Changes without exposing gateway checkpoints", () => {
     const feed = makeThreadViewFeed(() => 1)
     const selected = feed.publish({
@@ -67,7 +100,11 @@ describe("interactive ThreadView feed", () => {
       change: {
         _tag: "ProjectionSnapshot",
         revision: 0,
-        checkpoint: { version: 1, cursor: "gateway:snapshot", state: "secret-state" },
+        checkpoint: {
+          version: ExecutionProjection.projectionVersion,
+          cursor: "gateway:snapshot",
+          state: "secret-state",
+        },
         units: [unit("answer", "one")],
         hasOlder: false,
         state: state(),
@@ -75,7 +112,11 @@ describe("interactive ThreadView feed", () => {
     })
     expect(started[0]).toMatchObject({
       _tag: "ThreadViewPatch",
-      patch: { baseRevision: 0, revision: 1, header: { source: { projectionVersion: 1 } } },
+      patch: {
+        baseRevision: 0,
+        revision: 1,
+        header: { source: { projectionVersion: ExecutionProjection.projectionVersion } },
+      },
     })
 
     const patched = feed.publish({
@@ -86,7 +127,7 @@ describe("interactive ThreadView feed", () => {
         _tag: "ProjectionPatch",
         baseRevision: 0,
         revision: 1,
-        checkpoint: { version: 1, cursor: "gateway:patch", state: "secret-state" },
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "gateway:patch", state: "secret-state" },
         upsert: [unit("answer", "done")],
         remove: [],
         state: state("completed"),
@@ -94,9 +135,134 @@ describe("interactive ThreadView feed", () => {
     })
     expect(patched[0]).toMatchObject({
       _tag: "ThreadViewPatch",
-      patch: { baseRevision: 1, revision: 2, header: { source: { projectionVersion: 1 } } },
+      patch: {
+        baseRevision: 1,
+        revision: 2,
+        header: { source: { projectionVersion: ExecutionProjection.projectionVersion } },
+      },
     })
     expect(JSON.stringify([...selected, ...started, ...patched])).not.toMatch(/gateway:|secret-state|checkpoint/)
+  })
+
+  it("carries the first turn's prompt unit in the created-thread base snapshot", () => {
+    const feed = makeThreadViewFeed(() => 1)
+    const selected = feed.publish({
+      _tag: "SelectionLoaded",
+      selectionEpoch: 1,
+      activitySequence: 0,
+      thread,
+      entries: [],
+      hasOlder: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 0,
+      queue: [],
+      activeTurn: { ...turn, status: "accepted" },
+    })
+    expect(selected[0]).toMatchObject({ _tag: "ThreadViewSnapshot" })
+    const snapshot = (
+      selected[0] as {
+        readonly snapshot: { readonly turns: ReadonlyArray<{ readonly units: ReadonlyArray<unknown> }> }
+      }
+    ).snapshot
+    const units = snapshot.turns.flatMap((entry) => entry.units)
+    expect(units).toContainEqual({
+      key: "turn:turn:user",
+      turnId: "turn",
+      order: [{ sequence: -1, part: 0, key: "turn:turn:user" }],
+      revision: 0,
+      content: { _tag: "Entry", role: "user", text: "prompt" },
+    })
+  })
+
+  it("projects accepted steering until its exact consumed unit arrives", () => {
+    const feed = makeThreadViewFeed(() => 1)
+    feed.publish({
+      _tag: "SelectionLoaded",
+      selectionEpoch: 1,
+      activitySequence: 0,
+      thread,
+      entries: [],
+      hasOlder: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 0,
+      queue: [],
+      activeTurn: turn,
+    })
+    const pending = { runId: "run-a", entryId: "entry-a", requestId: "request-a", sequence: 1, text: "same text" }
+    feed.publish({
+      _tag: "ExecutionProjectionChanged",
+      threadId,
+      turn,
+      change: {
+        _tag: "ProjectionSnapshot",
+        revision: 0,
+        units: [],
+        hasOlder: false,
+        state: {
+          status: "running",
+          usage: ExecutionProjection.emptyUsageState(),
+          steering: { steeringMessages: 1, followUpMessages: 0, pending: [pending] },
+        },
+      },
+    })
+    expect(feed.current()?.turns[0]?.pendingSteering).toEqual([pending])
+
+    const key = ExecutionProjection.steeringUnitKey(
+      String(turnId),
+      pending.runId,
+      pending.requestId,
+      pending.entryId,
+      pending.sequence,
+    )
+    feed.publish({
+      _tag: "ExecutionProjectionChanged",
+      threadId,
+      turn,
+      change: {
+        _tag: "ProjectionPatch",
+        baseRevision: 0,
+        revision: 1,
+        upsert: [
+          {
+            key,
+            turnId: String(turnId),
+            order: [{ sequence: 2, part: 0, key }],
+            revision: 1,
+            content: { _tag: "Entry", role: "user", text: pending.text },
+          },
+        ],
+        remove: [],
+        state: {
+          status: "running",
+          usage: ExecutionProjection.emptyUsageState(),
+          steering: {
+            steeringMessages: 1,
+            followUpMessages: 0,
+            pending: [],
+            settled: [
+              {
+                runId: pending.runId,
+                entryId: pending.entryId,
+                requestId: pending.requestId,
+                sequence: pending.sequence,
+                outcome: "consumed",
+              },
+            ],
+          },
+        },
+      },
+    })
+    expect(feed.current()?.turns[0]?.pendingSteering).toEqual([])
+    expect(feed.current()?.turns[0]?.settledSteering).toEqual([
+      {
+        runId: pending.runId,
+        entryId: pending.entryId,
+        requestId: pending.requestId,
+        sequence: pending.sequence,
+        outcome: "consumed",
+      },
+    ])
+    expect(feed.current()?.turns[0]?.units.filter((candidate) => candidate.key === key)).toHaveLength(1)
   })
 
   it("emits typed resync and stops patching after a projection revision gap", () => {
@@ -121,7 +287,7 @@ describe("interactive ThreadView feed", () => {
         _tag: "ProjectionPatch",
         baseRevision: 9,
         revision: 10,
-        checkpoint: { version: 1, cursor: "gap", state: "gap" },
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "gap", state: "gap" },
         upsert: [],
         remove: [],
         state: state(),
@@ -237,7 +403,7 @@ describe("interactive ThreadView feed", () => {
         _tag: "ProjectionPatch",
         baseRevision: 0,
         revision: 1,
-        checkpoint: { version: 1, cursor: "private", state: "private" },
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "private", state: "private" },
         upsert: [],
         remove: [],
         state: { status: "completed", usage: secondUsage, steering: { steeringMessages: 0, followUpMessages: 0 } },
@@ -253,21 +419,8 @@ describe("interactive ThreadView feed", () => {
     expect(JSON.stringify(feed.current())).not.toMatch(/modelCallId|modelAttemptId|raw-root|private/)
   })
 
-  it("keeps off-window live projections out of a historical page without resyncing", () => {
+  it("delivers every unit of a full snapshot without re-bounding the timeline", () => {
     const feed = makeThreadViewFeed(() => 1)
-    feed.publish({
-      _tag: "SelectionLoaded",
-      selectionEpoch: 1,
-      activitySequence: 0,
-      thread,
-      entries: [],
-      hasOlder: true,
-      hasNewer: false,
-      usage: { usage: ExecutionProjection.emptyUsageState() },
-      queueRevision: 0,
-      queue: [],
-      activeTurn: turn,
-    })
     const historyId = Turn.TurnId.make("history")
     const historyTurn: Turn.Turn = { ...turn, id: historyId, prompt: "history", createdAt: 0, updatedAt: 0 }
     const historyEntries = Array.from({ length: 130 }, (_, sequence) => ({
@@ -284,14 +437,21 @@ describe("interactive ThreadView feed", () => {
       projectionState: state("completed"),
     }))
     feed.publish({
-      _tag: "TranscriptPagePrepended",
+      _tag: "SelectionLoaded",
       selectionEpoch: 1,
-      threadId,
+      activitySequence: 0,
+      thread,
       entries: historyEntries,
       hasOlder: false,
+      hasNewer: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 0,
+      queue: [],
+      activeTurn: turn,
     })
-    expect(feed.current()?.hasNewer).toBe(true)
-    expect(feed.current()?.turns.map((entry) => entry.turn.id)).toEqual([historyId])
+    expect(feed.current()?.hasNewer).toBe(false)
+    expect(feed.current()?.turns.map((entry) => entry.turn.id)).toEqual([historyId, turn.id])
+    expect(feed.current()?.turns[0]?.units).toHaveLength(130)
 
     const live = feed.publish({
       _tag: "ExecutionProjectionChanged",
@@ -301,7 +461,7 @@ describe("interactive ThreadView feed", () => {
         _tag: "ProjectionPatch",
         baseRevision: 0,
         revision: 1,
-        checkpoint: { version: 1, cursor: "private", state: "private" },
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "private", state: "private" },
         upsert: [unit("answer", "live")],
         remove: [],
         state: state(),
@@ -310,10 +470,10 @@ describe("interactive ThreadView feed", () => {
     expect(live).toMatchObject([
       {
         _tag: "ThreadViewPatch",
-        patch: { upsert: [], remove: [], turnChanges: [], header: { hasNewer: true } },
+        patch: { upsert: [{ content: { text: "live" } }] },
       },
     ])
-    expect(feed.current()?.turns.map((entry) => entry.turn.id)).toEqual([historyId])
+    expect(feed.current()?.turns.map((entry) => entry.turn.id)).toEqual([historyId, turn.id])
   })
 
   it("resyncs an unknown turn ahead of a historical window instead of dropping its units", () => {
@@ -352,7 +512,7 @@ describe("interactive ThreadView feed", () => {
         change: {
           _tag: "ProjectionSnapshot",
           revision: 1,
-          checkpoint: { version: 1, cursor: "private", state: "private" },
+          checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "private", state: "private" },
           units: [{ ...unit("shell", "ALLOWED"), turnId: String(newTurn.id) }],
           state: state("completed"),
         },
@@ -388,7 +548,7 @@ describe("interactive ThreadView feed", () => {
         change: {
           _tag: "ProjectionSnapshot",
           revision: 1,
-          checkpoint: { version: 1, cursor: "private", state: "private" },
+          checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "private", state: "private" },
           units: [{ ...unit("shell-live", "ALLOWED"), turnId: String(newTurn.id) }],
           state: state("completed"),
         },
@@ -419,7 +579,7 @@ describe("interactive ThreadView feed", () => {
       change: {
         _tag: "ProjectionSnapshot",
         revision: 1,
-        checkpoint: { version: 1, cursor: "private", state: "private" },
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "private", state: "private" },
         units,
         hasOlder: false,
         state: state(),
@@ -451,7 +611,7 @@ describe("interactive ThreadView feed", () => {
       change: {
         _tag: "ProjectionSnapshot",
         revision: 1,
-        checkpoint: { version: 1, cursor: "private", state: "private" },
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "private", state: "private" },
         units: [unit("first", "first"), unit("second", "second")],
         hasOlder: false,
         state: state(),
@@ -464,7 +624,7 @@ describe("interactive ThreadView feed", () => {
       change: {
         _tag: "ProjectionSnapshot",
         revision: 2,
-        checkpoint: { version: 1, cursor: "private", state: "private" },
+        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "private", state: "private" },
         units: [unit("second", "second")],
         hasOlder: true,
         state: state(),
@@ -475,7 +635,7 @@ describe("interactive ThreadView feed", () => {
     expect(feed.current()?.turns[0]?.units.map((value) => value.key)).toContain("first")
   })
 
-  it("preserves both page edges while walking backward and forward through a bounded window", () => {
+  it("keeps every delivered unit and cursor edge of a full snapshot beyond the old window bounds", () => {
     const feed = makeThreadViewFeed(() => 1)
     const pageEntry = (sequence: number) => ({
       turn,
@@ -491,57 +651,30 @@ describe("interactive ThreadView feed", () => {
       projectionState: state(),
     })
     const canonicalOldest = { createdAt: 1, turnId, orderKey: "canonical-oldest" }
+    const canonicalNewest = { createdAt: 1, turnId, orderKey: "canonical-newest" }
     feed.publish({
       _tag: "SelectionLoaded",
       selectionEpoch: 1,
       activitySequence: 0,
       thread,
-      entries: Array.from({ length: 100 }, (_, index) => pageEntry(index + 100)),
+      entries: Array.from({ length: 150 }, (_, index) => pageEntry(index)),
       hasOlder: true,
       hasNewer: false,
       oldestCursor: canonicalOldest,
+      newestCursor: canonicalNewest,
       usage: { usage: ExecutionProjection.emptyUsageState() },
       queueRevision: 0,
       queue: [],
     })
     expect(feed.current()?.source.oldestCursor).toEqual(canonicalOldest)
-    const prepended = feed.publish({
-      _tag: "TranscriptPagePrepended",
-      selectionEpoch: 1,
-      threadId,
-      entries: Array.from({ length: 50 }, (_, index) => pageEntry(index + 50)),
-      hasOlder: true,
-    })
-    expect(prepended[0]).toMatchObject({
-      _tag: "ThreadViewSnapshot",
-      snapshot: { hasOlder: true, hasNewer: true },
-    })
+    expect(feed.current()?.source.newestCursor).toEqual(canonicalNewest)
     expect(feed.current()?.turns[0]?.units.map((value) => value.key)).toEqual(
-      Array.from({ length: 120 }, (_, index) => `unit:${index + 50}`),
+      Array.from({ length: 150 }, (_, index) => `unit:${index}`),
     )
-    expect(feed.current()?.source.oldestCursor?.turnId).toBe(turnId)
-    expect(feed.current()?.source.newestCursor?.turnId).toBe(turnId)
-
-    const requestedAfter = feed.current()?.source.newestCursor
-    expect(requestedAfter).toBeDefined()
-    const appended = feed.publish({
-      _tag: "TranscriptPageAppended",
-      selectionEpoch: 1,
-      threadId,
-      entries: Array.from({ length: 50 }, (_, index) => pageEntry(index + 170)),
-      hasNewer: false,
-      requestedAfter: requestedAfter!,
-    })
-    expect(appended[0]).toMatchObject({
-      _tag: "ThreadViewSnapshot",
-      snapshot: { hasOlder: true, hasNewer: false },
-    })
-    expect(feed.current()?.turns[0]?.units.map((value) => value.key)).toEqual(
-      Array.from({ length: 120 }, (_, index) => `unit:${index + 100}`),
-    )
+    expect(feed.current()?.hasOlder).toBe(true)
   })
 
-  it("never evicts a whole 125-unit Turn when an older page is prepended", () => {
+  it("keeps the full ancestry-closed timeline of a large snapshot without evicting whole Turns", () => {
     const feed = makeThreadViewFeed(() => 1)
     const makeUnit = (key: string, sequence: number, parentId?: string) => ({
       key,
@@ -582,20 +715,8 @@ describe("interactive ThreadView feed", () => {
       cardUnit("review-retry-card", 72, "Review"),
       ...Array.from({ length: 52 }, (_, index) => makeUnit(`retry-child-${73 + index}`, 73 + index, "card-Review")),
     ]
-    const olderUnit = (key: string, sequence: number) => ({
-      ...makeUnit(key, sequence),
-      turnId: "older-turn",
-      order: [{ sequence, part: 0, key }],
-    })
-    const olderTurn: Turn.Turn = {
-      ...turn,
-      id: Turn.TurnId.make("older-turn"),
-      createdAt: 0,
-      updatedAt: 0,
-    }
-    const olderUnits = Array.from({ length: 5 }, (_, index) => olderUnit(`older-${index}`, index))
-    const entryFor = (entry: ReturnType<typeof makeUnit>, unitTurn: Turn.Turn) => ({
-      turn: unitTurn,
+    const entryFor = (entry: ReturnType<typeof makeUnit>) => ({
+      turn,
       unit: entry,
       projectionRevision: 1,
       projectionModelPhase: -1,
@@ -606,65 +727,64 @@ describe("interactive ThreadView feed", () => {
       selectionEpoch: 1,
       activitySequence: 0,
       thread,
-      entries: newestUnits.map((entry) => entryFor(entry, turn)),
-      hasOlder: true,
+      entries: newestUnits.map((entry) => entryFor(entry)),
+      hasOlder: false,
       hasNewer: false,
       usage: { usage: ExecutionProjection.emptyUsageState() },
       queueRevision: 0,
       queue: [],
     })
-    const prepended = feed.publish({
-      _tag: "TranscriptPagePrepended",
-      selectionEpoch: 1,
-      threadId,
-      entries: olderUnits.map((entry) => entryFor(entry, olderTurn)),
-      hasOlder: false,
-      oldestCursor: { createdAt: 0, turnId: "older-turn", orderKey: "older-0" },
-    })
-    expect(prepended[0]).toMatchObject({
-      _tag: "ThreadViewSnapshot",
-      snapshot: { hasOlder: false, hasNewer: true },
-    })
-    const afterPrepend = feed.current()!
-    expect(afterPrepend.turns.map((entry) => entry.turn.id)).toContain(turn.id)
-    const prependKeys = afterPrepend.turns.flatMap((entry) => entry.units.map((value) => value.key))
-    expect(prependKeys).toHaveLength(120)
-    for (const key of ["task-card", "librarian-card", "review-card", "review-retry-card"])
-      expect(prependKeys).toContain(key)
-    const prependParents = new Set(
-      afterPrepend.turns
+    const snapshot = feed.current()!
+    const keys = snapshot.turns.flatMap((entry) => entry.units.map((value) => value.key))
+    expect(keys).toHaveLength(newestUnits.length)
+    for (const key of ["task-card", "librarian-card", "review-card", "review-retry-card", "prompt"])
+      expect(keys).toContain(key)
+    const parents = new Set(
+      snapshot.turns
         .flatMap((entry) => entry.units)
         .filter((value) => value.content._tag === "Block")
         .flatMap((value) => (value.content.block._tag === "SubagentCard" ? [value.content.block.id] : [])),
     )
-    for (const entry of afterPrepend.turns.flatMap((value) => value.units))
-      if (entry.parentId !== undefined) expect(prependParents.has(entry.parentId)).toBe(true)
+    for (const entry of snapshot.turns.flatMap((value) => value.units))
+      if (entry.parentId !== undefined) expect(parents.has(entry.parentId)).toBe(true)
+  })
 
-    const appended = feed.publish({
-      _tag: "TranscriptPageAppended",
+  it("passes selected tentative previews without revising the durable ThreadView", () => {
+    const feed = makeThreadViewFeed(() => 1)
+    feed.publish({
+      _tag: "SelectionLoaded",
       selectionEpoch: 1,
+      activitySequence: 0,
+      thread,
+      entries: [],
+      hasOlder: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 0,
+      queue: [],
+      activeTurn: turn,
+    })
+    const before = feed.current()
+    const event = {
+      _tag: "ExecutionModelPreviewChanged" as const,
       threadId,
-      entries: newestUnits.slice(115).map((entry) => entryFor(entry, turn)),
-      hasNewer: false,
-      requestedAfter: afterPrepend.source.newestCursor!,
-      newestCursor: { createdAt: 1, turnId: String(turnId), orderKey: "newest-124" },
-    })
-    expect(appended[0]).toMatchObject({
-      _tag: "ThreadViewSnapshot",
-      snapshot: { hasOlder: true, hasNewer: false },
-    })
-    const afterAppend = feed.current()!
-    const appendKeys = afterAppend.turns.flatMap((entry) => entry.units.map((value) => value.key))
-    expect(appendKeys).toHaveLength(120)
-    for (const key of ["task-card", "librarian-card", "review-card", "review-retry-card"])
-      expect(appendKeys).toContain(key)
-    const appendParents = new Set(
-      afterAppend.turns
-        .flatMap((entry) => entry.units)
-        .filter((value) => value.content._tag === "Block")
-        .flatMap((value) => (value.content.block._tag === "SubagentCard" ? [value.content.block.id] : [])),
-    )
-    for (const entry of afterAppend.turns.flatMap((value) => value.units))
-      if (entry.parentId !== undefined) expect(appendParents.has(entry.parentId)).toBe(true)
+      turnId,
+      preview: {
+        _tag: "ModelPreview" as const,
+        runId: "run",
+        attemptFence: 2,
+        turn: 3,
+        modelCallId: "call",
+        modelAttemptId: "attempt",
+        attempt: 4,
+        sequence: 5,
+        changes: [
+          { channel: "reasoning" as const, offset: 0, delta: "thinking" },
+          { channel: "text" as const, offset: 0, delta: "tentative" },
+        ],
+      },
+    }
+    expect(feed.publish(event)).toEqual([event])
+    expect(feed.current()).toBe(before)
+    expect(feed.publish({ ...event, threadId: Thread.ThreadId.make("other") })).toEqual([])
   })
 })

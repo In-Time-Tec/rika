@@ -2,6 +2,7 @@ import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as InteractiveSession from "@rika/product/interactive-session"
 import * as ProductOperation from "@rika/product/product-operation"
 import * as ServerFeed from "@rika/product/server-interactive-feed"
+import type * as ServerInteractiveConnection from "@rika/product/server-interactive-connection"
 import * as ServerService from "@rika/product/server-service"
 import { clientMessageFrames } from "../protocol/server-message-codec"
 import { Deferred, Effect, Function, Queue, Schema } from "effect"
@@ -38,6 +39,7 @@ export type ClientRequest = {
   readonly interactive?: (
     input: ServerFeed.InteractiveInput,
     session: InteractiveSession.InteractiveSession,
+    connection: ServerInteractiveConnection.Connection,
   ) => Effect.Effect<void, ProductOperation.OperationUnavailable>
   readonly interactiveStarted?: Deferred.Deferred<{
     readonly sessionId: string

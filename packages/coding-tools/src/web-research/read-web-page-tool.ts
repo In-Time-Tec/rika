@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
 import * as Policy from "../policy/coding-tool-policy"
-import { Result, ToolFailure } from "../runtime/coding-tool-result"
+import { maxOutputBytes, Result, ToolFailure } from "../runtime/coding-tool-result"
 export const Request = Schema.Struct({
   _tag: Schema.tag("ReadWebPage"),
   url: Schema.String,
@@ -10,7 +10,9 @@ export const Request = Schema.Struct({
   forceRefetch: Schema.optionalKey(Schema.Boolean),
 })
 export const tool = Tool.make("read_web_page", {
-  description: "Read a public HTTP(S) page as readable Markdown, optionally selecting objective-relevant excerpts",
+  description:
+    "Read a public HTTP(S) page as readable Markdown, optionally selecting objective-relevant excerpts. " +
+    "Local paths and file:// URLs are unsupported; use rika.workspace.read or a local-capable child.",
   parameters: Schema.Struct({
     url: Schema.String,
     objective: Schema.optionalKey(Schema.String),
@@ -23,7 +25,7 @@ export const tool = Tool.make("read_web_page", {
 })
 export const registration = Policy.register(
   tool,
-  Policy.allow("safe", 30_000, 40_000, {
+  Policy.allow("safe", 30_000, maxOutputBytes, {
     family: "direct",
     action: "read-web-page",
     activeLabel: "Read",

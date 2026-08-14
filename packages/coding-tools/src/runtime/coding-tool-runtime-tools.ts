@@ -1,5 +1,6 @@
 import { Toolkit } from "effect/unstable/ai"
 import * as Grep from "../workspace/grep-files-tool"
+import * as List from "../workspace/list-files-tool"
 import * as Read from "../workspace/read-file-tool"
 import * as Write from "../workspace/write-file-tool"
 import * as Edit from "../workspace/edit-file-tool"
@@ -14,6 +15,7 @@ import * as ServiceTools from "./coding-tool-runtime-services"
 
 export const registrations: ReadonlyArray<ToolPolicy.Registration> = [
   Grep.registration,
+  List.registration,
   Read.registration,
   Write.registration,
   Edit.registration,
@@ -25,6 +27,7 @@ export const registrations: ReadonlyArray<ToolPolicy.Registration> = [
 ]
 export const toolkit = Toolkit.make(
   CoreTools.grepTool,
+  List.tool,
   CoreTools.readTool,
   CoreTools.writeTool,
   CoreTools.editTool,

@@ -114,7 +114,9 @@ export const layer = Layer.effect(
           summary.removed
         FROM rika_thread_picker_summary AS summary
         LEFT JOIN rika_thread_read_state AS read_state ON read_state.thread_id = summary.thread_id
-        WHERE (${input.includeArchived === true ? 1 : 0} = 1 OR summary.archived = 0)
+        WHERE NOT EXISTS (
+          SELECT 1 FROM rika_thread_deletion_outbox AS deletion WHERE deletion.thread_id = summary.thread_id
+        ) AND (${input.includeArchived === true ? 1 : 0} = 1 OR summary.archived = 0)
         ORDER BY summary.pinned DESC, summary.last_activity_at DESC, summary.thread_id ASC
         LIMIT ${listLimit(input.limit)}`.pipe(Effect.mapError(repositoryError))
         return yield* Effect.all(rows.map(decodeSummary))
@@ -157,7 +159,9 @@ export const layer = Layer.effect(
           turn.status
         FROM rika_turns AS turn
         LEFT JOIN rika_thread_turn_activity AS activity ON activity.turn_id = turn.id
-        WHERE turn.turn_kind = 'AgentExecution' AND (
+        WHERE NOT EXISTS (
+          SELECT 1 FROM rika_thread_deletion_outbox AS deletion WHERE deletion.thread_id = turn.thread_id
+        ) AND turn.turn_kind = 'AgentExecution' AND (
           activity.turn_id IS NULL
           OR (turn.status IN ('completed', 'failed', 'cancelled') AND activity.complete = 0)
         )

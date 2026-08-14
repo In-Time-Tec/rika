@@ -137,3 +137,31 @@ export const settleProvisionalUserEntry: {
     arg2: Parameters<typeof settleProvisionalUserEntryImpl>[2],
   ): ReturnType<typeof settleProvisionalUserEntryImpl>
 } = Function.dual(3, settleProvisionalUserEntryImpl)
+
+export const overlayPendingSubmissions: {
+  (arg0: Model, arg1: Model): Model
+  (arg1: Model): (arg0: Model) => Model
+} = Function.dual(2, (model: Model, previous: Model): Model => {
+  const entries = [...model.entries]
+  const items = [...(model.items as ReadonlyArray<SubmissionItem>)]
+  for (const item of previous.items as ReadonlyArray<SubmissionItem>) {
+    if (item._tag !== "Entry" || item.provisional !== true) continue
+    if (items.some((candidate) => itemMatches(candidate, item))) continue
+    const entry = previous.entries[item.index]
+    if (entry === undefined) continue
+    const index = entries.length
+    entries.push(entry)
+    items.push({ ...item, index })
+  }
+  const queue = [...model.queue]
+  for (const item of previous.queue) {
+    if (item.provisional === true && !queue.some((candidate) => candidate.id === item.id)) queue.push(item)
+  }
+  return {
+    ...model,
+    entries,
+    items,
+    queue,
+    queueSelection: queue.some((item) => item.id === model.queueSelection) ? model.queueSelection : queue.at(-1)?.id,
+  }
+})

@@ -33,8 +33,7 @@ const validateCurrent = (snapshot: ThreadViewSnapshot): ThreadViewApplyError | u
   if (duplicateUnit !== undefined) return duplicateError(snapshot, "snapshot-units", duplicateUnit)
   const duplicatePending = duplicateKey(snapshot.pending.map((pending) => String(pending.id)))
   if (duplicatePending !== undefined) return duplicateError(snapshot, "pending", duplicatePending)
-  if (snapshot.turns.length > limits.turns || snapshot.pending.length > limits.pending)
-    return invalidError(snapshot, "bounds-exceeded")
+  if (snapshot.pending.length > limits.pending) return invalidError(snapshot, "bounds-exceeded")
   for (const entry of snapshot.turns) {
     if (String(entry.turn.threadId) !== threadId)
       return invalidError(snapshot, "turn-thread-mismatch", String(entry.turn.id))
@@ -104,6 +103,8 @@ const applyImpl = (
     units: [...entry.units],
     projectionRevision: entry.projectionRevision,
     usage: entry.usage,
+    pendingSteering: entry.pendingSteering ?? [],
+    settledSteering: entry.settledSteering ?? [],
   }))
   const currentUnits = new Map(entries.flatMap((entry) => entry.units.map((unit) => [unit.key, unit] as const)))
   const currentOwners = new Map(
@@ -138,6 +139,8 @@ const applyImpl = (
       units: current?.units ?? [],
       projectionRevision: change.projectionRevision,
       usage: change.usage,
+      pendingSteering: change.pendingSteering ?? [],
+      settledSteering: change.settledSteering ?? [],
     })
   }
   const unitOwners = new Map<string, string>()
@@ -159,6 +162,8 @@ const applyImpl = (
       turn: entry.turn,
       projectionRevision: entry.projectionRevision,
       usage: entry.usage,
+      pendingSteering: entry.pendingSteering ?? [],
+      settledSteering: entry.settledSteering ?? [],
       units: entry.units.toSorted((left, right) => {
         const order = TranscriptUnitOrder.compareUnitOrder(left.order, right.order)
         return order === 0 ? left.key.localeCompare(right.key) : order
@@ -168,8 +173,7 @@ const applyImpl = (
       const createdAt = left.turn.createdAt - right.turn.createdAt
       return createdAt === 0 ? String(left.turn.id).localeCompare(String(right.turn.id)) : createdAt
     })
-  if (nextTurns.length > limits.turns || header.pending.length > limits.pending)
-    return Result.fail(invalidError(snapshot, "bounds-exceeded"))
+  if (header.pending.length > limits.pending) return Result.fail(invalidError(snapshot, "bounds-exceeded"))
   return Result.succeed({
     ...header,
     revision: patch.revision,

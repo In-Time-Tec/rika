@@ -16,12 +16,7 @@ const provideLayerScoped =
       ),
     )
 import { clientProcessExitCode } from "./client/client-process-exit"
-import {
-  installClientSigintHandler,
-  isInteractiveClientLaunch,
-  observeClientSigint,
-  run,
-} from "./client/client-process"
+import { installClientSigintHandler, isInteractiveClientLaunch, run } from "./client/client-process"
 
 if (import.meta.main) {
   let interruptedBySigint = false
@@ -31,7 +26,6 @@ if (import.meta.main) {
     rootFiber: () => rootFiber,
     onSignal: () => {
       interruptedBySigint = true
-      observeClientSigint()
     },
   })
   rootFiber = Effect.runFork(run().pipe(provideLayerScoped(Layer.merge(BunServices.layer, FetchHttpClient.layer))))

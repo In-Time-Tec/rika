@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     "./product-database-layer": "./src/database/product-database-layer.ts",
+    "./sqlite-goal-repository": "./src/goal/sqlite-goal-repository.ts",
     "./sqlite-thread-search-repository": "./src/search/sqlite-thread-search-repository.ts",
     "./sqlite-thread-summary-repository": "./src/summary/sqlite-thread-summary-repository.ts",
     "./sqlite-thread-repository": "./src/thread/sqlite-thread-repository.ts",

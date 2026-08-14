@@ -6,6 +6,7 @@ import { ReviewIntent } from "./review-intent"
 
 export const ExecutionLink = Schema.Struct({
   runId: Schema.String,
+  titleRunId: Schema.optionalKey(Schema.String),
   turnId: Schema.String,
   threadId: Schema.String,
 })

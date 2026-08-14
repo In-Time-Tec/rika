@@ -1,7 +1,7 @@
 import type { ModeId } from "@rika/configuration/behavior-mode"
 import type { ModelRoute } from "@rika/configuration/model-route"
 import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
-import type { ConfigurationSettings } from "@rika/configuration/configuration-settings"
+import { Defaults, type ConfigurationSettings } from "@rika/configuration/configuration-settings"
 import { dual } from "effect/Function"
 import { createHash } from "node:crypto"
 import { defaultCompactionSummaryPrompt } from "../contract/execution-compaction-prompt"
@@ -11,10 +11,15 @@ import type {
   ExecutionRouteSnapshot,
 } from "../contract/execution-route-snapshot"
 import { modelRegistrationIdentity } from "../contract/model-registration-identity"
+import type { ProviderConnectionSnapshot } from "../contract/provider-connection-snapshot"
 
 export interface RouteTuning {
   readonly fastMode?: boolean
   readonly tokenBudget?: number
+}
+
+export interface RouteAuthentication {
+  readonly openAiAccountFingerprint?: string
 }
 
 const canonical = (value: unknown): string => {
@@ -42,7 +47,72 @@ const bedrockUrl = (connection: ModelRoute.AmazonBedrockProviderConnection): str
   return url.toString()
 }
 
-const registrationIdentity = (route: ModelRouteResolution.ResolvedModelRoute, candidateIndex?: number) =>
+const accountFingerprint = (
+  route: ModelRouteResolution.ResolvedModelRoute,
+  authentication: RouteAuthentication | undefined,
+): string | undefined =>
+  route.providerId === "openai" &&
+  route.providerConnection.protocol === "openai" &&
+  normalizedUrl(route.providerConnection.baseUrl) === normalizedUrl(Defaults.providerDefaults.openai.baseUrl)
+    ? authentication?.openAiAccountFingerprint
+    : undefined
+
+const connectionSnapshot = (
+  route: ModelRouteResolution.ResolvedModelRoute,
+  authentication: RouteAuthentication | undefined,
+): ProviderConnectionSnapshot => {
+  const connection = route.providerConnection
+  const fingerprint = accountFingerprint(route, authentication)
+  if (fingerprint !== undefined && connection.protocol === "openai") {
+    return {
+      provider: route.providerId,
+      protocol: connection.protocol,
+      baseUrl: normalizedUrl(connection.baseUrl),
+      authentication: "account",
+      credentialIdentity: fingerprint,
+    }
+  }
+  return {
+    provider: route.providerId,
+    protocol: connection.protocol,
+    baseUrl: connection.protocol === "amazon-bedrock" ? bedrockUrl(connection) : normalizedUrl(connection.baseUrl),
+    authentication: connection.protocol !== "amazon-bedrock" && connection.apiKeyEnv !== undefined ? "api-key" : "none",
+    ...(connection.protocol !== "amazon-bedrock" && connection.apiKeyEnv !== undefined
+      ? { apiKeyEnvironment: connection.apiKeyEnv }
+      : {}),
+    ...(connection.protocol !== "amazon-bedrock" && connection.credentialIdentity !== undefined
+      ? { credentialIdentity: connection.credentialIdentity }
+      : {}),
+  }
+}
+
+const providerOptions = (
+  route: ModelRouteResolution.ResolvedModelRoute,
+  authentication: ProviderConnectionSnapshot["authentication"],
+): Readonly<Record<string, unknown>> => {
+  switch (route.providerConnection.protocol) {
+    case "openai": {
+      if (authentication === "account") {
+        const { max_output_tokens: _, ...options } = route.options
+        return { ...options, store: false }
+      }
+      return { ...route.options, max_output_tokens: route.maxOutputTokens }
+    }
+    case "anthropic":
+      return { ...route.options, max_tokens: route.maxOutputTokens }
+    case "openrouter":
+      return { ...route.options, max_tokens: route.maxOutputTokens }
+    case "amazon-bedrock":
+      return { ...route.options, maxTokens: route.maxOutputTokens }
+  }
+}
+
+const registrationIdentity = (
+  route: ModelRouteResolution.ResolvedModelRoute,
+  providerConnection: ProviderConnectionSnapshot,
+  options: Readonly<Record<string, unknown>>,
+  candidateIndex?: number,
+) =>
   modelRegistrationIdentity(
     `rika:model:v1:${createHash("sha256")
       .update(
@@ -52,56 +122,34 @@ const registrationIdentity = (route: ModelRouteResolution.ResolvedModelRoute, ca
           compaction: route.compaction,
           effort: route.effort,
           fast: route.fast,
-          maxOutputTokens: route.maxOutputTokens,
-          options: route.options,
+          options,
           provider: route.providerId,
-          providerConnection: route.providerConnection,
+          providerConnection,
           ...(candidateIndex === undefined ? {} : { candidateIndex }),
         }),
       )
       .digest("hex")}`,
   )
 
-const providerOptions = (route: ModelRouteResolution.ResolvedModelRoute): Readonly<Record<string, unknown>> => {
-  switch (route.providerConnection.protocol) {
-    case "openai":
-      return { ...route.options, max_output_tokens: route.maxOutputTokens }
-    case "anthropic":
-      return { ...route.options, max_tokens: route.maxOutputTokens }
-    case "amazon-bedrock":
-      return { ...route.options, maxTokens: route.maxOutputTokens }
-  }
-}
-
 const snapshot = (
   route: ModelRouteResolution.ResolvedModelRoute,
   role: ExecutionRouteModelSnapshot["role"],
+  authentication: RouteAuthentication | undefined,
 ): ExecutionRouteModelSnapshot => {
-  const connection = route.providerConnection
-  const providerConnection = {
-    provider: route.providerId,
-    protocol: connection.protocol,
-    baseUrl: connection.protocol === "amazon-bedrock" ? bedrockUrl(connection) : normalizedUrl(connection.baseUrl),
-    authentication:
-      connection.protocol !== "amazon-bedrock" && connection.apiKeyEnv !== undefined
-        ? ("api-key" as const)
-        : ("none" as const),
-    ...(connection.protocol !== "amazon-bedrock" && connection.apiKeyEnv !== undefined
-      ? { apiKeyEnvironment: connection.apiKeyEnv }
-      : {}),
-  }
+  const providerConnection = connectionSnapshot(route, authentication)
+  const options = providerOptions(route, providerConnection.authentication)
   const candidates = route.candidates.map(
     (model, index): ExecutionRouteModelCandidateSnapshot => ({
       model,
       providerConnection,
-      registrationIdentity: registrationIdentity(route, index),
-      providerOptions: providerOptions(route),
+      registrationIdentity: registrationIdentity(route, providerConnection, options, index),
+      providerOptions: options,
     }),
   ) as ExecutionRouteModelSnapshot["candidates"]
   return {
     role,
     alias: route.alias,
-    registrationIdentity: registrationIdentity(route),
+    registrationIdentity: registrationIdentity(route, providerConnection, options),
     effort: route.effort,
     fast: route.fast,
     candidates,
@@ -128,26 +176,45 @@ const tunedModeRoute = (settings: ConfigurationSettings, mode: ModeId, role: Mod
 }
 
 export const resolve: {
-  (mode: ModeId, tuning?: RouteTuning): (settings: ConfigurationSettings) => ExecutionRouteSnapshot
-  (settings: ConfigurationSettings, mode: ModeId, tuning?: RouteTuning): ExecutionRouteSnapshot
+  (
+    mode: ModeId,
+    tuning?: RouteTuning,
+    authentication?: RouteAuthentication,
+  ): (settings: ConfigurationSettings) => ExecutionRouteSnapshot
+  (
+    settings: ConfigurationSettings,
+    mode: ModeId,
+    tuning?: RouteTuning,
+    authentication?: RouteAuthentication,
+  ): ExecutionRouteSnapshot
 } = dual(
   (arguments_) => typeof arguments_[0] === "object",
-  (settings: ConfigurationSettings, mode: ModeId, tuning?: RouteTuning): ExecutionRouteSnapshot => {
-    const main = snapshot(tunedModeRoute(settings, mode, "main", tuning), "main")
-    const oracle = snapshot(tunedModeRoute(settings, mode, "oracle", tuning), "oracle")
+  (
+    settings: ConfigurationSettings,
+    mode: ModeId,
+    tuning?: RouteTuning,
+    authentication?: RouteAuthentication,
+  ): ExecutionRouteSnapshot => {
+    const main = snapshot(tunedModeRoute(settings, mode, "main", tuning), "main", authentication)
+    const oracle = snapshot(tunedModeRoute(settings, mode, "oracle", tuning), "oracle", authentication)
     const agents = Object.fromEntries(
       ModelRouteResolution.agentIds.map((agent) => [
         agent,
-        snapshot(ModelRouteResolution.resolveAgentRoute(settings, mode, agent, tuning), agent),
+        snapshot(ModelRouteResolution.resolveAgentRoute(settings, mode, agent, tuning), agent, authentication),
       ]),
     ) as NonNullable<ExecutionRouteSnapshot["agents"]>
     return {
-      version: 1,
+      version: 2,
       mode,
       ...(tuning?.tokenBudget === undefined ? {} : { tokenBudget: tuning.tokenBudget }),
+      subagents: settings.subagents,
       compaction: { strategy: "default", summaryPrompt: defaultCompactionSummaryPrompt },
-      title: snapshot(ModelRouteResolution.resolveThreadTitleRoute(settings), "title"),
-      compactionSummary: snapshot(ModelRouteResolution.resolveCompactionSummaryRoute(settings), "compaction"),
+      title: snapshot(ModelRouteResolution.resolveThreadTitleRoute(settings), "title", authentication),
+      compactionSummary: snapshot(
+        ModelRouteResolution.resolveCompactionSummaryRoute(settings),
+        "compaction",
+        authentication,
+      ),
       main,
       oracle,
       agents,

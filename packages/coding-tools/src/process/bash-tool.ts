@@ -1,20 +1,27 @@
 import { Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
 import * as Policy from "../policy/coding-tool-policy"
-import { Result, ToolFailure } from "../runtime/coding-tool-result"
-const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+import { maxOutputBytes, Result, ToolFailure } from "../runtime/coding-tool-result"
+export const initialWaitMaximumMillis = 60_000
+const WaitMillis = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(0),
+  Schema.isLessThanOrEqualTo(initialWaitMaximumMillis),
+).annotate({
+  description: `Initial wait from 0 to ${initialWaitMaximumMillis} ms; use 0 to start in the background`,
+})
 export const Request = Schema.Struct({
   _tag: Schema.tag("Bash"),
   command: Schema.String,
   workdir: Schema.optionalKey(Schema.String),
-  timeoutMillis: Schema.optionalKey(NonNegativeInt),
+  timeoutMillis: Schema.optionalKey(WaitMillis),
 })
 export const tool = Tool.make("bash", {
-  description: "Run a shell command in the workspace and return a process id if it outlives the wait",
+  description:
+    "Run a shell command, waiting at most 60000 ms initially; a running result includes partial output and elapsedMillis for follow-up polling",
   parameters: Schema.Struct({
     command: Schema.String,
     workdir: Schema.optionalKey(Schema.String),
-    timeout_ms: Schema.optionalKey(NonNegativeInt),
+    timeout_ms: Schema.optionalKey(WaitMillis),
   }),
   success: Result,
   failure: ToolFailure,
@@ -22,7 +29,7 @@ export const tool = Tool.make("bash", {
 })
 export const registration = Policy.register(
   tool,
-  Policy.allow("unsafe", 120_000, 40_000, {
+  Policy.allow("unsafe", 120_000, maxOutputBytes, {
     family: "shell",
     action: "command",
     activeLabel: "Running",

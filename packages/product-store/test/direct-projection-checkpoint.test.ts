@@ -65,7 +65,7 @@ const state = {
   steering: { steeringMessages: 0, followUpMessages: 0 },
 }
 const checkpoint = (cursor: string, marker: string) => ({
-  version: 1 as const,
+  version: ExecutionProjection.projectionVersion,
   cursor,
   state: JSON.stringify({ marker }),
 })
@@ -175,7 +175,7 @@ it.effect("atomically resumes the opaque root projector checkpoint in SQLite", (
           ).toMatchObject([{ unit: { key: "assistant" } }])
           expect(yield* repository.get(target.id)).toMatchObject({
             revision: 2,
-            projectionVersion: 1,
+            projectionVersion: ExecutionProjection.projectionVersion,
             projectorCheckpoint: checkpoint("cursor-complete", "complete"),
             units: expect.arrayContaining([
               expect.objectContaining({ content: expect.objectContaining({ text: "partial after approval" }) }),
@@ -370,6 +370,7 @@ it.effect("aggregates semantic projection usage from decoded SQLite transcript s
               },
               pricedAttempts: 1,
               unpricedAttempts: 1,
+              includedAttempts: 0,
               countedAttempts: 2,
               uncountedAttempts: 0,
               sourceComplete: true,

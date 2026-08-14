@@ -9,7 +9,6 @@ import * as ServerService from "@rika/product/server-service"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
 import { Effect, Layer, Cause, Clock, References, Schema } from "effect"
 import * as Logging from "../../diagnostics/diagnostic-file-logging"
-import * as ServerProcessStartup from "../../server/process/server-process"
 import { spawn as spawnServer } from "../../server/process/server-process-spawn"
 import { provideLayerScoped } from "./process-layer"
 import { loadSettingsFile, failureKind, withClientWorkspace } from "./process-configuration"
@@ -20,12 +19,9 @@ type DispatcherContext = {
   readonly workspaceConfig: string
   readonly serverRuntime: { readonly executable: string; readonly arguments: ReadonlyArray<string> }
   readonly environment: any
-  readonly restartThreadId: string | undefined
-  readonly runtimeRestarted: boolean
   readonly version: string
   readonly clientOwnedInteractiveFunction: any
   readonly setClientModeRoutes: (routes: any) => void
-  readonly runtimeRestartRequest: { value: { readonly threadId?: string } | undefined }
 }
 
 export const makeDispatcherLayer = (context: DispatcherContext) => {
@@ -35,12 +31,9 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
     workspaceConfig,
     serverRuntime,
     environment,
-    restartThreadId,
-    runtimeRestarted,
     version,
     clientOwnedInteractiveFunction,
     setClientModeRoutes,
-    runtimeRestartRequest,
   } = context
   const observedProgram = <A, E>(role: Logging.ProcessRole, dataRoot: string, program: Effect.Effect<A, E>) =>
     Clock.currentTimeMillis.pipe(
@@ -101,25 +94,7 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                 dataRoot,
                 Effect.scoped(
                   Effect.gen(function* () {
-                    const workspaceInput = withClientWorkspace(input, process.cwd())
-                    const clientInput =
-                      workspaceInput._tag === "Interactive" && restartThreadId !== undefined
-                        ? { ...workspaceInput, threadId: restartThreadId, last: false }
-                        : workspaceInput
-                    const requestRuntimeRestart = (error: ServerService.ServerRestartRequired) =>
-                      Effect.sync(() => {
-                        runtimeRestartRequest.value = error.threadId === undefined ? {} : { threadId: error.threadId }
-                      }).pipe(
-                        Effect.andThen(
-                          ServerProcessStartup.runtimeRestart.signalRuntimeRestart(error.threadId).pipe(Effect.ignore),
-                        ),
-                        Effect.andThen(
-                          ProductOperation.OperationUnavailable.make({
-                            operation: clientInput._tag,
-                            message: "Rika was upgraded; restarting this session",
-                          }),
-                        ),
-                      )
+                    const clientInput = withClientWorkspace(input, process.cwd())
                     let clientKind: ServerHandshake.Handshake["clientKind"]
                     if (clientInput._tag === "Interactive") clientKind = "interactive"
                     else if (clientInput._tag === "Run") clientKind = "run"
@@ -129,7 +104,6 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                         .getOrCreate({
                           profile: "default",
                           dataRoot,
-                          ...(runtimeRestarted ? { allowSupersede: false } : {}),
                           clientKind,
                           startHost: () =>
                             spawnServer({
@@ -174,36 +148,18 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                             : {}),
                         })
                         .pipe(
-                          Effect.tapError((error) =>
-                            Schema.is(ServerService.ServerRestartRequired)(error)
-                              ? Effect.sync(() => {
-                                  runtimeRestartRequest.value =
-                                    error.threadId === undefined ? {} : { threadId: error.threadId }
-                                }).pipe(
-                                  Effect.andThen(
-                                    ServerProcessStartup.runtimeRestart
-                                      .signalRuntimeRestart(error.threadId)
-                                      .pipe(Effect.ignore),
-                                  ),
-                                )
-                              : Effect.void,
-                          ),
                           Effect.mapError((error) =>
                             Schema.is(ProductOperation.OperationUnavailable)(error)
                               ? error
                               : ProductOperation.OperationUnavailable.make({
                                   operation: clientInput._tag,
-                                  message: Schema.is(ServerService.ServerRestartRequired)(error)
-                                    ? "Rika was upgraded; restarting this session"
-                                    : error.message,
+                                  message: error.message,
                                 }),
                           ),
                           Effect.ensuring(connection.close),
                         )
                       return
                     }
-                    if (Schema.is(ServerService.ServerRestartRequired)(connected.failure))
-                      return yield* requestRuntimeRestart(connected.failure)
                     return yield* ProductOperation.OperationUnavailable.make({
                       operation: clientInput._tag,
                       message: connected.failure.message,

@@ -33,16 +33,13 @@ type ConnectionContext = {
   readonly drainingFailure: (requestId: string, operation: string) => string
   readonly scheduleGrace: (generation: number, delay?: number) => Effect.Effect<void>
   readonly abandonFiber: Ref.Ref<Fiber.Fiber<void> | undefined>
-  readonly scheduleAbandonment: (
-    generation: number,
-    requireActiveWork?: boolean,
-    sleepMilliseconds?: number,
-  ) => Effect.Effect<void>
+  readonly scheduleAbandonment: (generation: number, sleepMilliseconds?: number) => Effect.Effect<void>
   readonly requestByInput: WeakMap<object, { readonly requestId: string; readonly routeKey: string }>
   readonly routes: Ref.Ref<Map<string, ServerRoute>>
   readonly interactive: InteractiveRouter
   readonly operationReady: Deferred.Deferred<import("@rika/product/product-operation-service").Interface>
-  readonly hasActiveExecutionWork: Effect.Effect<boolean>
+  readonly prepareServerReplacement: Effect.Effect<void>
+  readonly requestStop: Effect.Effect<void>
 }
 
 export const makeConnectionHandler = (context: ConnectionContext) => {
@@ -64,7 +61,8 @@ export const makeConnectionHandler = (context: ConnectionContext) => {
     requestByInput,
     routes,
     operationReady,
-    hasActiveExecutionWork,
+    prepareServerReplacement,
+    requestStop,
   } = context
   const activeConnectionsRef = activeConnections
   const abandonFiberRef = abandonFiber
@@ -135,9 +133,10 @@ export const makeConnectionHandler = (context: ConnectionContext) => {
                 buildIdentity: ServerHandshake.HandshakeProtocol.buildIdentity,
               })
               if (result._tag !== "Accepted") {
-                const incompatible = result._tag === "ProtocolMismatch" || result._tag === "BuildMismatch"
-                const reason = incompatible
-                  ? `Incompatible Rika server PID ${process.pid}; the newly launched Rika replaces it`
+                const buildMismatch = result._tag === "BuildMismatch"
+                const replacing = buildMismatch && message.connectRole === "launch"
+                const reason = buildMismatch
+                  ? `Rika server PID ${process.pid} belongs to a different build`
                   : `Rika server PID ${process.pid} rejected this credential; close other Rika clients, stop PID ${process.pid}, then run rika again`
                 yield* Effect.logWarning("server.connection.rejected").pipe(
                   Effect.annotateLogs({
@@ -145,41 +144,36 @@ export const makeConnectionHandler = (context: ConnectionContext) => {
                     "rika.server.rejection.reason": result._tag,
                   }),
                 )
-                if (incompatible) {
-                  const disposition =
-                    message.connectRole === "launch"
-                      ? yield* lifecycle.authorizeReplacement(hasActiveExecutionWork)
-                      : ("restart" as const)
-                  const replacementDelayed = disposition === "defer"
+                if (buildMismatch) {
+                  const responseQueued = replacing ? yield* Deferred.make<void>() : undefined
+                  if (responseQueued !== undefined) {
+                    yield* lifecycle.beginDrain
+                    yield* Effect.forkIn(
+                      lifecycle
+                        .drainForReplacement(prepareServerReplacement)
+                        .pipe(Effect.ensuring(Deferred.await(responseQueued).pipe(Effect.andThen(requestStop)))),
+                      hostScope,
+                    )
+                  }
                   const response = {
-                    _tag: "incompatible" as const,
-                    disposition,
-                    replacementGuard: ServerHandshake.HandshakeProtocol.replacementGuard,
+                    _tag: "build-mismatch" as const,
                     family: "rika-server" as const,
                     identity: options.identity,
                     clientNonce: message.clientNonce,
                     serviceNonce,
                     connectionId,
-                    protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
                     buildIdentity: ServerHandshake.HandshakeProtocol.buildIdentity,
                     serverPid: process.pid,
                   }
-                  yield* writer(
+                  const reject = writer(
                     json({
                       ...response,
                       serverProof: ServerHandshake.HandshakeProtocol.serverProof(options.token, message, response),
-                    } satisfies ServerHandshake.HandshakeIncompatible),
-                  )
-                  if (replacementDelayed)
-                    yield* Effect.logWarning("server.replacement.delayed").pipe(
-                      Effect.annotateLogs("rika.server.rejection.reason", "active-execution-work"),
-                    )
-                  return yield* close(
-                    4406,
-                    replacementDelayed
-                      ? `Rika server PID ${process.pid} owns active execution work; replacement is delayed until that work completes`
-                      : reason,
-                  )
+                    } satisfies ServerHandshake.HandshakeBuildMismatch),
+                  ).pipe(Effect.andThen(close(4406, reason)))
+                  return yield* responseQueued === undefined
+                    ? reject
+                    : reject.pipe(Effect.ensuring(Deferred.succeed(responseQueued, undefined)))
                 }
                 return yield* close(4401, reason)
               }
@@ -203,7 +197,6 @@ export const makeConnectionHandler = (context: ConnectionContext) => {
                 clientNonce: message.clientNonce,
                 serviceNonce,
                 connectionId,
-                protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
                 buildIdentity: ServerHandshake.HandshakeProtocol.buildIdentity,
                 serverPid: process.pid,
               }
@@ -289,8 +282,8 @@ export const makeConnectionHandler = (context: ConnectionContext) => {
                   "rika.server.command.tag": message.command._tag,
                 }),
               )
-              const releaseReplacementWork = yield* lifecycle.reserveReplacementWork
-              if (releaseReplacementWork === undefined) {
+              const releaseWork = yield* lifecycle.reserveTransientWork
+              if (releaseWork === undefined) {
                 yield* writer(
                   json({
                     _tag: "interactive-command-failed",
@@ -367,7 +360,7 @@ export const makeConnectionHandler = (context: ConnectionContext) => {
                     ),
                   ),
                 ),
-                Effect.ensuring(releaseReplacementWork),
+                Effect.ensuring(releaseWork),
                 Effect.ensuring(
                   Effect.sync(() => {
                     active.commandReleases.delete(message.commandSequence)
@@ -375,7 +368,7 @@ export const makeConnectionHandler = (context: ConnectionContext) => {
                 ),
               )
               active.commands.set(message.commandSequence, cancelled)
-              active.commandReleases.set(message.commandSequence, releaseReplacementWork)
+              active.commandReleases.set(message.commandSequence, releaseWork)
               if (message.command._tag === "Cancel" || message.command._tag === "Quit")
                 yield* Effect.forkIn(
                   Effect.raceFirst(Deferred.await(cancelled), effect).pipe(
@@ -393,7 +386,7 @@ export const makeConnectionHandler = (context: ConnectionContext) => {
                   sequence: message.commandSequence,
                   cancelled,
                   effect,
-                }).pipe(Effect.onError(() => releaseReplacementWork))
+                }).pipe(Effect.onError(() => releaseWork))
             }
             if (message._tag === "operation")
               yield* handleOperation({

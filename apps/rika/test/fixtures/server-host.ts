@@ -42,7 +42,7 @@ const fixtureThread = (threadId: Thread.ThreadId): Thread.Thread => ({
 })
 
 const makeFixtureView = (
-  dispatch: (event: InteractiveEvent) => void,
+  dispatch: (event: InteractiveEvent.InteractiveEvent) => void,
   threadId: Thread.ThreadId,
   turnId: Turn.TurnId,
   prompt: string,
@@ -176,6 +176,9 @@ const program = Effect.gen(function* () {
     owner: (interactive) =>
       Effect.gen(function* () {
         yield* append("owner-acquisitions.log", `${process.pid}\n`)
+        yield* append("owner-lifecycle.log", `acquire:${process.pid}\n`)
+        if (yield* fs.exists(path.join(dataRoot, "durable-executions.pending")).pipe(Effect.orDie))
+          yield* append("recovered-executions.log", `${process.pid}:root\n${process.pid}:child\n`)
         yield* Effect.sleep(ownerStartupDelay)
         yield* Effect.addFinalizer(() =>
           append("owner-finalizer-starts.log", `${process.pid}:${activeWork}\n`).pipe(
@@ -185,13 +188,13 @@ const program = Effect.gen(function* () {
                 : Effect.sleep(finalizerDelay).pipe(
                     Effect.andThen(append("owner-finalizations.log", `${process.pid}\n`)),
                     Effect.andThen(Scope.close(interactiveExecutionScope, Exit.void)),
+                    Effect.andThen(append("owner-lifecycle.log", `release:${process.pid}\n`)),
                   ),
             ),
           ),
         )
         return Service.of({
-          hasActiveExecutionWork: Effect.sync(() => activeWork > 0),
-          authorizeServerReplacement: Effect.sync(() => (activeWork > 0 ? "defer" : "supersede")),
+          prepareServerReplacement: Effect.void,
           stopActiveExecutionWork: Effect.sync(() => {
             activeWork = 0
           }).pipe(Effect.andThen(append("stop-work.log", `${process.pid}\n`))),
@@ -206,21 +209,39 @@ const program = Effect.gen(function* () {
                     Effect.orDie,
                   )
                 const delegated = input.prompt[0] === "active-root-with-child"
+                if (delegated)
+                  return Effect.sync(() => {
+                    activeWork += 2
+                  }).pipe(
+                    Effect.andThen(append("delayed-work-starts.log", `${process.pid}\n`)),
+                    Effect.andThen(append("active-executions.log", `${process.pid}:root\n${process.pid}:child\n`)),
+                    Effect.andThen(
+                      fs
+                        .writeFileString(path.join(dataRoot, "durable-executions.pending"), "root\nchild\n")
+                        .pipe(Effect.orDie),
+                    ),
+                    Effect.andThen(
+                      Effect.forkIn(
+                        (activeWorkMilliseconds > 0 ? Effect.sleep(activeWorkMilliseconds) : Effect.never).pipe(
+                          Effect.ensuring(
+                            Effect.sync(() => {
+                              activeWork -= 2
+                            }).pipe(Effect.andThen(append("delayed-work-finalizations.log", `${process.pid}\n`))),
+                          ),
+                        ),
+                        interactiveExecutionScope,
+                      ),
+                    ),
+                    Effect.andThen(Effect.never),
+                  )
                 return Effect.sync(() => {
-                  activeWork += delegated ? 2 : 1
+                  activeWork += 1
                 }).pipe(
                   Effect.andThen(append("delayed-work-starts.log", `${process.pid}\n`)),
-                  Effect.andThen(
-                    delegated
-                      ? append("active-executions.log", `${process.pid}:root\n${process.pid}:child\n`)
-                      : Effect.void,
-                  ),
-                  Effect.andThen(
-                    delegated && activeWorkMilliseconds > 0 ? Effect.sleep(activeWorkMilliseconds) : Effect.never,
-                  ),
+                  Effect.andThen(Effect.never),
                   Effect.ensuring(
                     Effect.sync(() => {
-                      activeWork -= delegated ? 2 : 1
+                      activeWork -= 1
                     }).pipe(Effect.andThen(append("delayed-work-finalizations.log", `${process.pid}\n`))),
                   ),
                 )
@@ -235,6 +256,26 @@ const program = Effect.gen(function* () {
             return interactive(input, {
               events: (dispatch) => {
                 const kind = input.prompt[0]
+                if (kind === "preview-fanout")
+                  return Effect.gen(function* () {
+                    dispatch({
+                      _tag: "ExecutionModelPreviewChanged",
+                      threadId: Thread.ThreadId.make("preview-thread"),
+                      turnId: Turn.TurnId.make("preview-turn"),
+                      preview: {
+                        _tag: "ModelPreview",
+                        runId: "preview-run",
+                        attemptFence: 1,
+                        turn: 1,
+                        modelCallId: "preview-call",
+                        modelAttemptId: "preview-attempt",
+                        attempt: 1,
+                        sequence: 7,
+                        changes: [{ channel: "text", offset: 0, delta: "shared preview text" }],
+                      },
+                    })
+                    return yield* Effect.never
+                  })
                 if (kind === "wire-limit-event")
                   return Effect.sync(() =>
                     dispatch({
@@ -242,7 +283,9 @@ const program = Effect.gen(function* () {
                       failure: {
                         tag: "TestFailure",
                         message: "x".repeat(20_000_000),
-                        retry: "user",
+                        category: "operation",
+                        retryable: false,
+                        retry: "none",
                         actor: "environment",
                       },
                     }),
@@ -254,7 +297,9 @@ const program = Effect.gen(function* () {
                       failure: {
                         tag: "TestFailure",
                         message: kind.at(-1)!.repeat(8_000_000),
-                        retry: "user",
+                        category: "operation",
+                        retryable: false,
+                        retry: "none",
                         actor: "environment",
                       },
                     }),
@@ -276,6 +321,14 @@ const program = Effect.gen(function* () {
                     yield* Effect.sleep("250 millis")
                     yield* emitPatch(outboundCapacity)
                     yield* Effect.sync(() => view.emit([view.entry("completed")]))
+                    return yield* Effect.never
+                  })
+                if (kind === "critical-overflow-events")
+                  return Effect.gen(function* () {
+                    for (let index = 0; index < 70; index += 1)
+                      dispatch({ _tag: "AssistantCompleted", text: String(index) })
+                    yield* Effect.sleep("50 millis")
+                    dispatch({ _tag: "ThreadsListed", threads: [] })
                     return yield* Effect.never
                   })
                 if (kind === "timed-tool-events")
@@ -335,7 +388,9 @@ const program = Effect.gen(function* () {
                         failure: {
                           tag: "TestFailure",
                           message: "x".repeat(1_100_000),
-                          retry: "user",
+                          category: "operation",
+                          retryable: false,
+                          retry: "none",
                           actor: "environment",
                         },
                       })
@@ -429,10 +484,10 @@ const program = Effect.gen(function* () {
               newThread: Effect.void,
               selectThread: () => Effect.void,
               readQueue: () => Effect.void,
-              loadOlder: () => Effect.void,
-              loadNewer: () => Effect.void,
               previewThread: () => Effect.void,
-              reopenThread: () => Effect.void,
+              reopenThread: Effect.void,
+              approveAuthorization: () => Effect.void,
+              denyAuthorization: () => Effect.void,
             })
           },
         })

@@ -34,17 +34,26 @@ export const makeTurnSqliteSubmission = (sql: SqlClient): Pick<Interface, "creat
           yield* sql`INSERT INTO rika_thread_queue_state (thread_id) VALUES (${input.threadId}) ON CONFLICT (thread_id) DO NOTHING`
           const queueRows = yield* sql`UPDATE rika_thread_queue_state
             SET revision = revision + 1, queued_count = queued_count + 1
-            WHERE thread_id = ${input.threadId} AND queued_count < ${input.queueCapacity}
+            WHERE thread_id = ${input.threadId}
+              AND queued_count + (
+                SELECT COUNT(*) FROM rika_turn_steering_outbox
+                WHERE thread_id = ${input.threadId} AND source_turn_id IS NOT NULL AND status != 'rejected'
+                  AND json_extract(admission_json, '$.sourceWithdrawn') = 1
+              ) < ${input.queueCapacity}
             RETURNING *`
           if (queueRows[0] === undefined) {
             const stateRows = yield* sql`SELECT * FROM rika_thread_queue_state WHERE thread_id = ${input.threadId}`
             if (stateRows[0] === undefined)
               return yield* repositoryError(`Queue state ${input.threadId} does not exist`)
             const state = yield* decodeQueueState(stateRows[0])
+            const reservedRows = yield* sql`SELECT COUNT(*) AS count FROM rika_turn_steering_outbox
+              WHERE thread_id = ${input.threadId} AND source_turn_id IS NOT NULL AND status != 'rejected'
+                AND json_extract(admission_json, '$.sourceWithdrawn') = 1`
             return yield* QueueFull.make({
               threadId: input.threadId,
               capacity: input.queueCapacity,
-              count: state.queued_count,
+              count:
+                state.queued_count + Number((reservedRows[0] as { readonly count?: unknown } | undefined)?.count ?? 0),
             })
           }
           const state = yield* decodeQueueState(queueRows[0])
@@ -87,16 +96,25 @@ export const makeTurnSqliteSubmission = (sql: SqlClient): Pick<Interface, "creat
           yield* sql`INSERT INTO rika_thread_queue_state (thread_id) VALUES (${turn.threadId}) ON CONFLICT (thread_id) DO NOTHING`
           const queueRows = yield* sql`UPDATE rika_thread_queue_state
             SET revision = revision + 1, queued_count = queued_count + 1
-            WHERE thread_id = ${turn.threadId} AND queued_count < ${queueCapacity}
+            WHERE thread_id = ${turn.threadId}
+              AND queued_count + (
+                SELECT COUNT(*) FROM rika_turn_steering_outbox
+                WHERE thread_id = ${turn.threadId} AND source_turn_id IS NOT NULL AND status != 'rejected'
+                  AND json_extract(admission_json, '$.sourceWithdrawn') = 1
+              ) < ${queueCapacity}
             RETURNING *`
           if (queueRows[0] === undefined) {
             const stateRows = yield* sql`SELECT * FROM rika_thread_queue_state WHERE thread_id = ${turn.threadId}`
             if (stateRows[0] === undefined) return yield* repositoryError(`Queue state ${turn.threadId} does not exist`)
             const state = yield* decodeQueueState(stateRows[0])
+            const reservedRows = yield* sql`SELECT COUNT(*) AS count FROM rika_turn_steering_outbox
+              WHERE thread_id = ${turn.threadId} AND source_turn_id IS NOT NULL AND status != 'rejected'
+                AND json_extract(admission_json, '$.sourceWithdrawn') = 1`
             return yield* QueueFull.make({
               threadId: turn.threadId,
               capacity: queueCapacity,
-              count: state.queued_count,
+              count:
+                state.queued_count + Number((reservedRows[0] as { readonly count?: unknown } | undefined)?.count ?? 0),
             })
           }
           const state = yield* decodeQueueState(queueRows[0])

@@ -95,8 +95,9 @@ export const makeInteractiveSession = (options: SessionOptions): InteractiveSess
       }),
     editQueued: (turnId, prompt) => invoke({ _tag: "EditQueued", turnId, prompt }),
     dequeue: (turnId) => invoke({ _tag: "Dequeue", turnId }),
-    steerQueued: (turnId, text) => invoke({ _tag: "SteerQueued", turnId, text }),
-    steer: (text, turnId) => invoke({ _tag: "Steer", text, ...(turnId === undefined ? {} : { turnId }) }),
+    steerQueued: (turnId, text, requestId) => invoke({ _tag: "SteerQueued", turnId, text, requestId }),
+    steer: (text, requestId, turnId) =>
+      invoke({ _tag: "Steer", text, requestId, ...(turnId === undefined ? {} : { turnId }) }),
     approveAuthorization: (turnId, authorizationId) =>
       invoke({ _tag: "ApproveAuthorization", turnId, authorizationId }),
     denyAuthorization: (turnId, authorizationId) => invoke({ _tag: "DenyAuthorization", turnId, authorizationId }),
@@ -106,9 +107,7 @@ export const makeInteractiveSession = (options: SessionOptions): InteractiveSess
     newThread: invoke({ _tag: "NewThread" }),
     selectThread: (threadId) => invoke({ _tag: "SelectThread", threadId }),
     readQueue: (threadId) => invoke({ _tag: "ReadQueue", threadId }),
-    loadOlder: (threadId, before) => invoke({ _tag: "LoadOlder", threadId, before }),
-    loadNewer: (threadId, after) => invoke({ _tag: "LoadNewer", threadId, after }),
-    previewThread: (threadId) => invoke({ _tag: "PreviewThread", threadId }),
+    previewThread: (threadId, requestId) => invoke({ _tag: "PreviewThread", threadId, requestId }),
     reopenThread: invoke({ _tag: "ReopenThread" }),
   }
 }

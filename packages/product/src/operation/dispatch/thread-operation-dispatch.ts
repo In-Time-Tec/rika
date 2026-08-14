@@ -23,6 +23,7 @@ export interface Dependencies {
   readonly turnMutationAdmission: Semaphore.Semaphore
   readonly backend: ExecutionGateway.Interface
   readonly notifyThreadSummaries: Effect.Effect<void, OperationError, ThreadSummaryRepository.Service>
+  readonly deleteThread: (threadId: Thread.ThreadId) => Effect.Effect<void, Error>
   readonly writeThread: (thread: Thread.Thread) => Effect.Effect<void>
   readonly requireThread: (
     repository: ThreadRepository.Interface,
@@ -141,7 +142,7 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
         yield* dependencies.notifyThreadSummaries
         return
       case "delete":
-        yield* repository.remove(Thread.ThreadId.make(input.threadId))
+        yield* dependencies.deleteThread(Thread.ThreadId.make(input.threadId))
         yield* dependencies.notifyThreadSummaries
         return
       case "export": {
@@ -192,6 +193,7 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
             attempts: {
               priced: usage.pricedAttempts,
               unpriced: usage.unpricedAttempts,
+              included: usage.includedAttempts ?? 0,
               counted: usage.countedAttempts,
               uncounted: usage.uncountedAttempts,
             },
@@ -267,7 +269,7 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
             }).pipe(
               Effect.onError(() =>
                 forkCreated
-                  ? repository.remove(forkId).pipe(
+                  ? repository.discard(forkId).pipe(
                       Effect.catch((error) =>
                         Effect.logError("thread.fork.cleanup.failed").pipe(
                           Effect.annotateLogs({

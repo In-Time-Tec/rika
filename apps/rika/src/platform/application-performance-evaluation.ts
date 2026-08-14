@@ -4,7 +4,8 @@ import {
   type PerformancePhase,
 } from "@rika/terminal/terminal-performance-evaluation"
 import { DateTime, Effect } from "effect"
-import { observeProcesses, type ProcessObservation } from "./performance-platform"
+import { type ProcessObservation } from "./performance-platform"
+import { observeProcesses } from "./performance-process-table"
 
 const targetPasses = (target: NonNullable<PerformanceMetric["target"]>, value: number): boolean => {
   if (target.operator === "lte") return value <= target.value

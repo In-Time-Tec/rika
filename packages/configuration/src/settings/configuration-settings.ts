@@ -14,6 +14,7 @@ export interface ConfigurationSettings {
   readonly threadTitle: ModelRoute.RoleRoute
   readonly agents: Partial<Readonly<Record<ModelRoute.AgentId, RoleRouteInput>>>
   readonly compaction: { readonly summaryModel: ModelRoute.RoleRoute }
+  readonly subagents: { readonly maxDepth: number; readonly maxSubagents: number }
   readonly keymap: Readonly<Record<string, string>>
   readonly extensionRoots: ReadonlyArray<string>
   readonly mcp: Readonly<Record<string, McpDefinition>>

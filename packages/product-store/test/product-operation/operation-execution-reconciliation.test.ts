@@ -33,14 +33,16 @@ const makeBackend = (status: { readonly _tag: "unavailable" } | { readonly _tag:
       startTurn: (input) =>
         Effect.succeed({ runId: `started-${input.turnId}`, turnId: input.turnId, threadId: input.threadId }),
       cancelTurn: () => Ref.update(cancelCount, (count) => count + 1),
-      steerTurn: () => Effect.void,
+      steerTurn: () => Effect.succeed({ entryId: "test-steering", sequence: 0 }),
       approveTurn: () => Effect.void,
       denyTurn: () => Effect.void,
       watchTurn: () => Stream.empty,
       inspectTurn: () =>
         Ref.updateAndGet(inspectCount, (count) => count + 1).pipe(
           Effect.as(
-            status._tag === "unavailable" ? ({ status: "unavailable" } as const) : ({ status: "running" } as const),
+            status._tag === "unavailable"
+              ? ({ status: "unavailable" } as const)
+              : ({ status: "running", cursor: "synthetic-running-cursor" } as const),
           ),
         ),
     })
@@ -79,14 +81,15 @@ it.effect("settles every stale nonterminal Turn whose durable execution is missi
         expect.objectContaining({
           executionOutcome: {
             status: "failed",
-            reason: "The durable execution for this Turn is unavailable. Start a new Turn to retry the request.",
+            reason: "The durable execution for this Turn is unavailable.",
           },
           content: {
             _tag: "Block",
             block: expect.objectContaining({
               _tag: "Error",
               title: "Execution unavailable",
-              recovery: "Start a new Turn to retry the request.",
+              category: "execution-unavailable",
+              retryable: false,
             }),
           },
         }),

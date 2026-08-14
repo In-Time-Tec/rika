@@ -1,20 +1,53 @@
-import { ModelRegistry, SandboxExecutor } from "@batonfx/core"
+import { ModelRegistry } from "@batonfx/core"
+import type { HarnessState } from "@batonfx/harness"
+import { KernelPool, KernelStateStore } from "@batonfx/repl"
+import type * as ExecutionPins from "@rika/kernel/execution-pins"
+import type * as CellCallContext from "./baton-cell-call-context"
 import { Approval, Run, RunTree, Runtime } from "@batonfx/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
+import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import type { Status } from "@rika/product/execution-status"
-import { Cause, Context, Effect, Layer, Schedule, Schema, Stream } from "effect"
-import type { AgentToolHandlers } from "./baton-route"
+import { ProviderCredentialStore, type ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
+import type * as OpenAiAuth from "@rika/product/openai-auth-service"
+export type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
+export type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
+import { Cause, Context, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
+import type { KernelOptions } from "./baton-route-options"
 import { configure, makeResolver } from "./baton-route"
-import { TreeProjector, titleInvocationId } from "./baton-tree-projector"
+import { TreeProjector } from "./projection/tree"
 
-export type AgentToolServices = AgentToolHandlers
+/**
+ * The runtime database always lives directly under the profile data root as `<dataRoot>/baton.db`,
+ * so the root the kernel pins is derived from the one path the composition root already supplies
+ * rather than threaded through the product Turn contract. Deriving it keeps the pinned profile
+ * describing the kernel this host actually runs; a supplied value overrides it verbatim.
+ */
+const derivedKernelOptions = (filename: string): KernelOptions => {
+  const separator = filename.lastIndexOf("/")
+  return { runtimeVersion: Bun.version, dataRoot: separator > 0 ? filename.slice(0, separator) : "." }
+}
 
-export type SandboxService = (typeof SandboxExecutor.SandboxExecutor)["Identifier"]
+const kernelOptions = (options: Options): KernelOptions => options.kernel ?? derivedKernelOptions(options.filename)
+
+/** The kernel a cell runs in, plus the seam that answers its host requests. */
+export type KernelPoolServices = KernelPool.KernelPool | CellCallContext.CellCallContext
 
 export interface Options {
   readonly filename: string
-  readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolServices, never, never>
+  readonly kernel?: KernelOptions
+  /**
+   * The kernel a cell runs in, already built and owned by the caller's scope. It outlives every
+   * cell, so a host builds it once where a Server-lifetime scope exists rather than letting the
+   * first cell that needs one decide how long it lives.
+   */
+  readonly kernelPool?:
+    | Context.Context<KernelPoolServices>
+    | Context.Context<KernelPoolServices | KernelStateStore.KernelStateStore>
+  readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
+  readonly harnessSnapshot?: HarnessState.HarnessState
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry, never, never>
+  readonly credentialStore?: Layer.Layer<ProviderCredentialStore, never, never>
+  readonly openAiAccountAuth?: OpenAiAuth.ServiceInterface
   readonly subscriberQueueCapacity?: number
 }
 
@@ -23,6 +56,7 @@ const message = (cause: unknown) => {
   const encoded = JSON.stringify(cause)
   return encoded === undefined || encoded === "{}" ? String(cause) : encoded
 }
+const titleRunId = (rootRunId: string) => `${rootRunId}:title`
 const isApprovalResponseFailure = Schema.is(ExecutionGateway.ApprovalResponseFailure)
 
 const approvalFailure = (cause: unknown): ExecutionGateway.ApprovalResponseFailure => {
@@ -36,6 +70,16 @@ const approvalFailure = (cause: unknown): ExecutionGateway.ApprovalResponseFailu
   else if (kind === "mismatch") failureMessage = "Authorization response conflicts with its current state"
   return ExecutionGateway.ApprovalResponseFailure.make({ kind, message: failureMessage })
 }
+const steeringFailure = (cause: Runtime.SteerError): ExecutionGateway.SteeringFailure =>
+  ExecutionGateway.SteeringFailure.make({
+    kind:
+      cause._tag === "@batonfx/runtime/RunNotFound" ||
+      cause._tag === "@batonfx/runtime/RunTerminal" ||
+      cause._tag === "@batonfx/runtime/SteeringConflict"
+        ? "rejected"
+        : "unknown",
+    message: message(cause),
+  })
 const prompt = (input: ExecutionGateway.StartTurn) =>
   input.promptParts === undefined
     ? input.prompt
@@ -76,7 +120,7 @@ const status = (value: Run.RunStatus): Status => {
   }
 }
 
-const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
+const make = (options: Options, credentialStore: ProviderCredentialStoreShape | undefined) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime.Runtime
     // A replayPolicy:"never" operation interrupted by cancellation parks the Run in
@@ -84,7 +128,7 @@ const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
     // side-effecting operation on its own, so the product settles it as Failed and lets the Run
     // reach its terminal state. Idempotent and restart-safe: resolving an already-resolved
     // operation is a no-op, and the operation id is recovered from durable history.
-    const resolveParkedOperations = (runId: string) =>
+    const resolveParkedOperations = (runId: string, reason: string) =>
       Effect.gen(function* () {
         const inspection = yield* RunTree.inspect(runId).pipe(Effect.provideService(Runtime.Runtime, runtime))
         const parked = inspection.runs.filter(({ run }) => run.status === "needs-resolution")
@@ -106,7 +150,7 @@ const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
                       idempotencyKey: `${operationId}:cancelled`,
                       resolution: {
                         _tag: "Failed",
-                        error: { _tag: "OperationInterrupted", message: "Cancelled by Rika" },
+                        error: { _tag: "OperationInterrupted", message: reason },
                       },
                     }),
                   { discard: true },
@@ -119,8 +163,8 @@ const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
 
     // Cancellation is only complete once the Run is terminal. A parked Run is resolved and then
     // re-checked, because the park may be recorded after `cancel` returns.
-    const awaitSettledCancellation = (runId: string) =>
-      resolveParkedOperations(runId).pipe(
+    const awaitSettledCancellation = (runId: string, reason: string) =>
+      resolveParkedOperations(runId, reason).pipe(
         Effect.andThen(RunTree.inspect(runId).pipe(Effect.provideService(Runtime.Runtime, runtime))),
         Effect.map((inspection) =>
           inspection.runs.some(({ run }) => run.status === "needs-resolution" || run.status === "cancelling"),
@@ -153,19 +197,24 @@ const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
         )
       }).pipe(Effect.mapError(approvalFailure))
 
-    return ExecutionGateway.Service.of({
+    const gateway = ExecutionGateway.Service.of({
       startTurn: (input) =>
         Effect.gen(function* () {
           const configured = yield* configure({
             executionRoute: input.executionRoute,
             workspace: input.workspace,
-            sandbox,
-            ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices(input.workspace) }),
+            kernel: kernelOptions(options),
+            ...(options.kernelPool === undefined ? {} : { kernelPool: options.kernelPool }),
+            ...(options.skills === undefined ? {} : { skills: options.skills }),
+            ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
+            ...(credentialStore === undefined ? {} : { credentialStore }),
+            ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
             ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
           })
           const receipt = yield* runtime.start({
             executable: configured.executable,
             registrations: configured.registrations,
+            treePolicy: input.executionRoute.subagents,
             sessionId: input.threadId,
             idempotencyKey: input.turnId,
             prompt: prompt(input),
@@ -194,11 +243,13 @@ const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
                   ],
                 }),
           })
+          const derivedTitleRunId = titleRunId(receipt.runId)
           if (input.titleIntent !== undefined)
-            yield* runtime.spawn({
-              parentRunId: receipt.runId,
-              invocationId: titleInvocationId,
-              selection: "Title",
+            yield* runtime.start({
+              runId: derivedTitleRunId,
+              executable: configured.titleExecutable,
+              registrations: configured.titleRegistrations,
+              sessionId: derivedTitleRunId,
               prompt: `Generate a title for this request:\n\n${input.prompt}`,
               idempotencyKey: `${input.turnId}:title`,
               metadata: {
@@ -208,40 +259,150 @@ const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
                 expectedTitle: input.titleIntent.expectedTitle,
               },
             })
-          return { runId: receipt.runId, turnId: input.turnId, threadId: input.threadId }
+          return {
+            runId: receipt.runId,
+            ...(input.titleIntent === undefined ? {} : { titleRunId: derivedTitleRunId }),
+            turnId: input.turnId,
+            threadId: input.threadId,
+          }
         }).pipe(Effect.mapError((cause) => ExecutionGateway.StartTurnFailure.make({ message: message(cause) }))),
       cancelTurn: (link, reason) =>
-        runtime.cancel({ runId: link.runId, reason: reason ?? "Cancelled by Rika" }).pipe(
-          // Interrupting a replayPolicy:"never" operation parks the Run in `needs-resolution`,
-          // where it can make no further progress on its own. Resolve it so the Run reaches its
-          // terminal state instead of stranding the turn. Retried until the Run settles because
-          // the park is recorded asynchronously by the worker that owned the interrupted operation.
-          Effect.andThen(awaitSettledCancellation(link.runId)),
-          Effect.mapError((cause) => ExecutionGateway.CancelTurnFailure.make({ message: message(cause) })),
-        ),
+        Effect.all(
+          [
+            runtime
+              .cancel({ runId: link.runId, reason })
+              .pipe(Effect.andThen(awaitSettledCancellation(link.runId, reason))),
+            link.titleRunId === undefined
+              ? Effect.void
+              : runtime.cancel({ runId: link.titleRunId, reason }).pipe(Effect.ignore),
+          ],
+          { concurrency: 2, discard: true },
+        ).pipe(Effect.mapError((cause) => ExecutionGateway.CancelTurnFailure.make({ message: message(cause) }))),
       steerTurn: (link, input) =>
         runtime
           .steer({ runId: link.runId, idempotencyKey: input.idempotencyKey, prompt: input.text })
-          .pipe(Effect.mapError((cause) => ExecutionGateway.SteeringFailure.make({ message: message(cause) }))),
+          .pipe(Effect.mapError(steeringFailure)),
       approveTurn: (link, input) => respondToApproval("approve", link, input),
       denyTurn: (link, input) => respondToApproval("deny", link, input),
       watchTurn: (link, input) => {
         let projector: ReturnType<typeof TreeProjector.make>
         try {
-          projector = TreeProjector.make(link.turnId, input?.prompt ?? "", input?.checkpoint, input?.units ?? [])
+          projector = TreeProjector.make(
+            link.turnId,
+            input?.prompt ?? "",
+            input?.checkpoint,
+            input?.units ?? [],
+            link.titleRunId !== undefined,
+            input?.pricing,
+          )
         } catch (cause) {
           return Stream.fail(ExecutionGateway.WatchTurnFailure.make({ message: message(cause) }))
         }
-        const events = RunTree.watch({
+        const rootEvents = RunTree.watch({
           rootRunId: link.runId,
           settlement: "root-blocked",
           ...(input?.checkpoint === undefined ? {} : { cursor: RunTree.TreeCursor.make(input.checkpoint.cursor) }),
         }).pipe(
           Stream.provideService(Runtime.Runtime, runtime),
-          Stream.map(projector.apply),
+          Stream.map((event) => ({ _tag: "root" as const, event })),
+        )
+        const titleId = link.titleRunId
+        const titleEvents =
+          titleId === undefined
+            ? Stream.empty
+            : runtime.events({ runId: titleId }).pipe(
+                Stream.filter(
+                  (event) =>
+                    event._tag === "RunCompleted" || event._tag === "RunFailed" || event._tag === "RunCancelled",
+                ),
+                Stream.take(1),
+                Stream.mapEffect(() => runtime.snapshot(titleId)),
+                Stream.map((snapshot) => ({ _tag: "title" as const, snapshot })),
+                Stream.catchTag("@batonfx/runtime/RunNotFound", () =>
+                  Stream.succeed({ _tag: "title" as const, snapshot: undefined }),
+                ),
+              )
+        let pendingTitle: Run.RunSnapshot | null | undefined
+        let rootProjected = input?.checkpoint !== undefined
+        const projected = Stream.merge(rootEvents, titleEvents).pipe(
+          Stream.map((event) => {
+            if (event._tag === "title") {
+              if (!rootProjected && pendingTitle === undefined) {
+                pendingTitle = event.snapshot ?? null
+                return []
+              }
+              if (event.snapshot === undefined) {
+                const change = projector.applyTitle(undefined, [])
+                return change === undefined ? [] : [{ change }]
+              }
+              const outcome = event.snapshot.outcome
+              const text = outcome?._tag === "Succeeded" && "text" in outcome.result ? outcome.result.text : undefined
+              const change = projector.applyTitle(text, event.snapshot.usage)
+              return change === undefined ? [] : [{ change }]
+            }
+            rootProjected = true
+            const change = projector.apply(event.event)
+            const changes: Array<{
+              readonly change: ReturnType<typeof projector.apply>
+              readonly childRunId?: string
+            }> = [
+              {
+                change,
+                ...(event.event.event._tag === "ChildLinked" ? { childRunId: event.event.event.childRunId } : {}),
+              },
+            ]
+            if (pendingTitle !== undefined) {
+              const snapshot = pendingTitle
+              pendingTitle = undefined
+              if (snapshot === null) {
+                const titleChange = projector.applyTitle(undefined, [])
+                if (titleChange !== undefined) changes.push({ change: titleChange })
+              } else {
+                const outcome = snapshot.outcome
+                const text = outcome?._tag === "Succeeded" && "text" in outcome.result ? outcome.result.text : undefined
+                const titleChange = projector.applyTitle(text, snapshot.usage)
+                if (titleChange !== undefined) changes.push({ change: titleChange })
+              }
+            }
+            return changes
+          }),
+          Stream.flatMap(Stream.fromIterable),
           Stream.mapError((cause) => ExecutionGateway.WatchTurnFailure.make({ message: message(cause) })),
         )
-        return input?.checkpoint === undefined ? Stream.concat(Stream.succeed(projector.snapshot()), events) : events
+        return Stream.unwrap(
+          Stream.broadcastN(projected, { n: 2, capacity: 64 }).pipe(
+            Effect.map(([projectionEvents, childEvents]) => {
+              const projections = Stream.map(projectionEvents, ({ change }) => change)
+              const durable =
+                input?.checkpoint === undefined
+                  ? Stream.concat(Stream.succeed(projector.snapshot()), projections)
+                  : projections
+              const previewRunIds = Stream.concat(
+                Stream.fromIterable([link.runId, ...projector.previewRunIds()]),
+                childEvents.pipe(
+                  Stream.flatMap(({ childRunId }) =>
+                    childRunId === undefined ? Stream.empty : Stream.succeed(childRunId),
+                  ),
+                ),
+              )
+              const previews = previewRunIds.pipe(
+                Stream.flatMap(
+                  (runId) => {
+                    const parentId = projector.previewParentId(runId)
+                    return runtime.previews({ runId }).pipe(
+                      Stream.map((event) => ({
+                        ...event,
+                        ...(parentId === undefined ? {} : { parentId }),
+                      })),
+                    )
+                  },
+                  { concurrency: "unbounded" },
+                ),
+              )
+              return Stream.merge(durable, previews, { haltStrategy: "left" })
+            }),
+          ),
+        )
       },
       inspectTurn: (link) =>
         RunTree.inspect(link.runId).pipe(
@@ -256,25 +417,59 @@ const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
           Effect.mapError((cause) => ExecutionGateway.InspectTurnFailure.make({ message: message(cause) })),
         ),
     })
+    const unavailable = (cause: unknown) => ExecutionSessionLifecycle.Unavailable.make({ message: message(cause) })
+    const pool =
+      options.kernelPool === undefined ? Option.none() : Context.getOption(options.kernelPool, KernelPool.KernelPool)
+    const stateStore =
+      options.kernelPool === undefined
+        ? Option.none()
+        : Context.getOption(options.kernelPool, KernelStateStore.KernelStateStore)
+    const lifecycle = ExecutionSessionLifecycle.Service.of({
+      requestCancellation: (input) => runtime.cancelSession(input).pipe(Effect.mapError(unavailable)),
+      awaitTerminal: (input) => runtime.awaitSessionTerminal(input).pipe(Effect.mapError(unavailable)),
+      closeKernel: ({ sessionId }) =>
+        Option.match(pool, {
+          onNone: () => Effect.void,
+          onSome: (service) => service.close(sessionId).pipe(Effect.mapError(unavailable)),
+        }),
+      dropKernelState: ({ sessionId }) =>
+        Option.match(stateStore, {
+          onNone: () => Effect.void,
+          onSome: (service) => service.drop(sessionId).pipe(Effect.mapError(unavailable)),
+        }),
+    })
+    return Context.make(ExecutionGateway.Service, gateway).pipe(
+      Context.add(ExecutionSessionLifecycle.Service, lifecycle),
+    )
   })
 
 export const layer = (
   options: Options,
-): Layer.Layer<ExecutionGateway.Service, ExecutionGateway.StartTurnFailure, SandboxService> =>
+): Layer.Layer<ExecutionGateway.Service | ExecutionSessionLifecycle.Service, ExecutionGateway.StartTurnFailure> =>
   Layer.unwrap(
     Effect.gen(function* () {
-      const context = yield* Effect.context<SandboxService>()
-      const sandbox = Context.get(context, SandboxExecutor.SandboxExecutor)
+      const credentialStore: ProviderCredentialStoreShape | undefined =
+        options.credentialStore === undefined
+          ? undefined
+          : Context.get(yield* Layer.build(options.credentialStore), ProviderCredentialStore)
       const runtimeLayer = Runtime.layerSqlite({
         filename: options.filename,
-        resolver: makeResolver({ ...options, sandbox }),
+        resolver: makeResolver({
+          kernel: kernelOptions(options),
+          ...(options.kernelPool === undefined ? {} : { kernelPool: options.kernelPool }),
+          ...(options.skills === undefined ? {} : { skills: options.skills }),
+          ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
+          ...(credentialStore === undefined ? {} : { credentialStore }),
+          ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
+          ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
+        }),
         addresses: [],
         ...(options.subscriberQueueCapacity === undefined
           ? {}
           : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
       })
-      return Layer.effect(ExecutionGateway.Service, make(options, sandbox)).pipe(
-        Layer.provide(runtimeLayer),
+      const executionLayer = Layer.effectContext(make(options, credentialStore)).pipe(Layer.provide(runtimeLayer))
+      return executionLayer.pipe(
         Layer.catchCause((cause) =>
           Layer.effectContext(
             Effect.fail(ExecutionGateway.StartTurnFailure.make({ message: message(Cause.squash(cause)) })),

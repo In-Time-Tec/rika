@@ -74,18 +74,12 @@ export const host = Effect.fn("ServerTransport.host")(function* (options: {
       yield* Ref.set(graceFiber, fiber)
     })
   const abandonFiber = yield* Ref.make<Fiber.Fiber<void> | undefined>(undefined)
-  const scheduleAbandonment = (
-    generation: number,
-    requireActiveWork = false,
-    sleepMilliseconds = Math.min(options.abandonMilliseconds, options.graceMilliseconds),
-  ) =>
+  const scheduleAbandonment = (generation: number, sleepMilliseconds = options.abandonMilliseconds) =>
     Effect.gen(function* () {
       const fiber = yield* Effect.forkIn(
         Effect.sleep(sleepMilliseconds).pipe(
           Effect.andThen(lifecycle.graceHolds(generation)),
-          Effect.flatMap((abandoned) =>
-            abandoned ? stopAbandonedExecutionWork(generation, requireActiveWork) : Effect.void,
-          ),
+          Effect.flatMap((abandoned) => (abandoned ? stopAbandonedExecutionWork(generation) : Effect.void)),
         ),
         hostScope,
       )
@@ -162,7 +156,7 @@ export const host = Effect.fn("ServerTransport.host")(function* (options: {
   )
   const server = yield* Scope.provide(BunHttpServer.make({ hostname: "127.0.0.1", port: options.port }), serverScope)
   const operationReady = yield* Deferred.make<Operation.Interface>()
-  const { hasActiveExecutionWork, stopAbandonedExecutionWork } = makeExecutionControls(operationReady)
+  const { prepareServerReplacement, stopAbandonedExecutionWork } = makeExecutionControls(operationReady)
   const handle = makeConnectionHandler({
     options,
     crypto,
@@ -182,7 +176,8 @@ export const host = Effect.fn("ServerTransport.host")(function* (options: {
     routes,
     interactive,
     operationReady,
-    hasActiveExecutionWork,
+    prepareServerReplacement,
+    requestStop: Deferred.succeed(options.stopped, undefined).pipe(Effect.asVoid),
   })
   const app = Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
@@ -198,7 +193,7 @@ export const host = Effect.fn("ServerTransport.host")(function* (options: {
   const startupGrace = yield* lifecycle.ready
   if (startupGrace !== undefined) {
     yield* scheduleGrace(startupGrace)
-    yield* scheduleAbandonment(startupGrace, true, options.abandonMilliseconds)
+    yield* scheduleAbandonment(startupGrace)
   }
   yield* options.onReady
   yield* Effect.logInfo("server.listener.ready")

@@ -6,7 +6,7 @@ import * as ExecutionStatus from "@rika/product/execution-status"
 import * as ThreadActivity from "../../thread/query/thread-activity"
 import { Clock, Context, Effect, PubSub } from "effect"
 import { operationError } from "../operation-error"
-import type { InteractiveEvent } from "../interactive/interactive-runtime-event"
+import type { InteractiveEvent } from "../interactive/session-event"
 
 export const makeExecutionProjection = (input: {
   readonly dirtyTurnObservers: Set<Turn.TurnId>

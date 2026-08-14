@@ -49,6 +49,10 @@ Global settings live at `~/.config/rika/settings.json`. A workspace can override
 
 ```json
 {
+  "subagents": {
+    "maxDepth": 4,
+    "maxSubagents": 4
+  },
   "providers": {
     "openai": {
       "baseUrl": "http://127.0.0.1:9000/v1",

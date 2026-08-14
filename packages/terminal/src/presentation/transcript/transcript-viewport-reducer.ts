@@ -14,9 +14,7 @@ const reduceWheelObserved = (
   const wasFollowing = detachRequested
   const mode = detachRequested ? anchored(event.anchor!) : viewport.mode
   const modeEffects: ReadonlyArray<ViewportEffect> =
-    event.direction === "up"
-      ? [{ _tag: "ProjectState" }, ...(wasFollowing ? ([{ _tag: "NotifyDetached" }] as const) : [])]
-      : []
+    event.direction === "up" && wasFollowing ? [{ _tag: "NotifyDetached" }] : []
   if (event.anchorPending)
     return {
       viewport: mode === viewport.mode ? viewport : { ...viewport, mode },
@@ -77,26 +75,28 @@ export const reduceViewport: {
       if (isAnchored(viewport.mode) || event.anchor === undefined) return { viewport, effects: [] }
       return {
         viewport: { ...viewport, mode: anchored(event.anchor) },
-        effects: [{ _tag: "ProjectState" }],
+        effects: [],
       }
+    case "AnchorRebased":
+      return isAnchored(viewport.mode)
+        ? { viewport: { ...viewport, mode: anchored(event.anchor) }, effects: [] }
+        : { viewport, effects: [] }
     case "FollowCommanded":
       return {
         viewport: isFollowing(viewport.mode) ? viewport : { ...viewport, mode: following },
-        effects: isFollowing(viewport.mode)
-          ? []
-          : [{ _tag: "ProjectState" }, { _tag: "RequestFollowPosition" }, { _tag: "NotifyFollowed" }],
+        effects: isFollowing(viewport.mode) ? [] : [{ _tag: "RequestFollowPosition" }, { _tag: "NotifyFollowed" }],
       }
     case "ResetCommanded":
       return {
         viewport: { mode: following, wheel: wheelIdle, nextToken: viewport.nextToken },
-        effects: [{ _tag: "ProjectState" }, { _tag: "RequestFollowPosition" }],
+        effects: [{ _tag: "RequestFollowPosition" }],
       }
     case "BottomSettled":
       return isFollowing(viewport.mode)
         ? { viewport, effects: [] }
         : {
             viewport: { ...viewport, mode: following },
-            effects: [{ _tag: "ProjectState" }, { _tag: "NotifyFollowed" }],
+            effects: [{ _tag: "NotifyFollowed" }],
           }
   }
 })

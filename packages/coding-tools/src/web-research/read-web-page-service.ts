@@ -28,8 +28,8 @@ export interface LayerOptions {
 
 const ApiResult = Schema.Struct({
   url: Schema.String,
-  title: Schema.NullOr(Schema.String),
-  publish_date: Schema.NullOr(Schema.String),
+  title: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  publish_date: Schema.optionalKey(Schema.NullOr(Schema.String)),
   excerpts: Schema.Array(Schema.String),
   full_content: Schema.optionalKey(Schema.NullOr(Schema.String)),
 })
@@ -38,7 +38,7 @@ const ApiExtractionError = Schema.Struct({
   url: Schema.String,
   error_type: Schema.String,
   http_status_code: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
-  content: Schema.String,
+  content: Schema.NullOr(Schema.String),
 })
 
 const ApiResponse = Schema.Struct({
@@ -52,7 +52,12 @@ const validateUrl = (value: string) =>
   Effect.try({
     try: () => {
       const url = new URL(value)
-      if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Only HTTP(S) URLs are allowed")
+      if (url.protocol === "file:")
+        throw new Error(
+          "read_web_page does not support file:// URLs; use rika.workspace.read or a local-capable Task or Oracle child",
+        )
+      if (url.protocol !== "http:" && url.protocol !== "https:")
+        throw new Error("read_web_page supports only public HTTP(S) URLs")
       if (url.username !== "" || url.password !== "") throw new Error("URL credentials are not allowed")
       return url.toString()
     },
@@ -68,10 +73,10 @@ export const layer = (options: LayerOptions) =>
       const client = HttpClient.filterStatusOk(yield* HttpClient.HttpClient)
       return Service.of({
         read: Effect.fn("ReadWebPage.read")(function* (input) {
+          const url = yield* validateUrl(input.url)
           if (options.apiKey === undefined) {
             return yield* HttpError.make({ message: "PARALLEL_API_KEY is not configured" })
           }
-          const url = yield* validateUrl(input.url)
           const advancedSettings = {
             ...(input.fullContent === true ? { full_content: true } : {}),
             ...(input.forceRefetch === true

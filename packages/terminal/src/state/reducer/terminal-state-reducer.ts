@@ -32,7 +32,10 @@ const sameChangedFiles = (left: ReadonlyArray<ChangedFile>, right: ReadonlyArray
 const cancelTranscriptBlocks = (blocks: ReadonlyArray<TranscriptBlock>): ReadonlyArray<TranscriptBlock> =>
   blocks.map((block) => {
     if (
-      (block._tag === "ToolCall" || block._tag === "SubagentCard" || block._tag === "Compaction") &&
+      (block._tag === "ToolCall" ||
+        block._tag === "SubagentCard" ||
+        block._tag === "Compaction" ||
+        block._tag === "Cell") &&
       block.status === "running"
     )
       return { ...block, status: "cancelled" as const }
@@ -167,7 +170,7 @@ const toggleContextDetails = (model: Model): Model => {
     palette: { open: false, query: "", selected: 0 },
     modePicker: { ...model.modePicker, open: false },
     filePicker: { ...model.filePicker, open: false, query: "", selected: 0 },
-    threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
+    threadSwitcher: { open: false, query: "", selected: 0, kind: "switch" },
     shortcutsOpen: false,
     shortcutsTrigger: undefined,
   }

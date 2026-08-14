@@ -56,6 +56,7 @@ export const decodeSettingsInput: {
     "providers",
     "modelAliases",
     "modelRoutes",
+    "subagents",
     "keymap",
     "extensionRoots",
     "mcp",
@@ -142,7 +143,13 @@ export const decodeSettingsInput: {
       }
       continue
     }
-    exactKeys(path, `Provider ${name}`, providerConnection, ["baseUrl", "apiKeyEnv", "streamingOnly", "promptCaching"])
+    exactKeys(path, `Provider ${name}`, providerConnection, [
+      "baseUrl",
+      "apiKeyEnv",
+      "credentialIdentity",
+      "streamingOnly",
+      "promptCaching",
+    ])
     if (providerConnection.streamingOnly !== undefined && typeof providerConnection.streamingOnly !== "boolean")
       throw ConfigurationSettingsFileError.make({ path, message: `Provider ${name} streamingOnly must be a boolean` })
     if (providerConnection.promptCaching !== undefined && typeof providerConnection.promptCaching !== "boolean")
@@ -157,6 +164,14 @@ export const decodeSettingsInput: {
       })
     if (providerConnection.baseUrl !== undefined && typeof providerConnection.baseUrl !== "string")
       throw ConfigurationSettingsFileError.make({ path, message: `Provider ${name} baseUrl must be a string` })
+    if (
+      providerConnection.credentialIdentity !== undefined &&
+      (typeof providerConnection.credentialIdentity !== "string" || providerConnection.credentialIdentity.length === 0)
+    )
+      throw ConfigurationSettingsFileError.make({
+        path,
+        message: `Provider ${name} credentialIdentity must be a non-empty string`,
+      })
     if (providerConnection.baseUrl === undefined) continue
     if (!/^https?:\/\/[^\s\\]+$/i.test(providerConnection.baseUrl))
       throw ConfigurationSettingsFileError.make({
@@ -377,6 +392,19 @@ export const decodeSettingsInput: {
         roleRoute(`Model route agent ${agent}`, route)
     }
     if (value.modelRoutes.compaction !== undefined) roleRoute("Model route compaction", value.modelRoutes.compaction)
+  }
+  if (value.subagents !== undefined) {
+    if (!object(value.subagents))
+      throw ConfigurationSettingsFileError.make({ path, message: "Subagents must be an object" })
+    exactKeys(path, "Subagents", value.subagents, ["maxDepth", "maxSubagents"])
+    for (const key of ["maxDepth", "maxSubagents"] as const) {
+      const limit = value.subagents[key]
+      if (limit !== undefined && (!Number.isSafeInteger(limit) || (limit as number) < 0 || (limit as number) > 1_024))
+        throw ConfigurationSettingsFileError.make({
+          path,
+          message: `Subagents ${key} must be an integer between 0 and 1024`,
+        })
+    }
   }
   if (value.keymap !== undefined) stringMap(path, "Keymap", value.keymap)
   if (

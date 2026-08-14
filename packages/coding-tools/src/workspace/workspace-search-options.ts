@@ -11,6 +11,8 @@ export interface GrepOptions {
   readonly maxMatchesPerFile?: number
   readonly pageSize?: number
   readonly cursor?: string | null
+  readonly include?: string
+  readonly deadlineMillis?: number
 }
 export interface PathItem {
   readonly relativePath: string

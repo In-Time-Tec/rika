@@ -39,7 +39,7 @@ const behavior = (name: string, layer: Layer.Layer<ThreadRepository.Service>) =>
         const all = yield* repository.list({ includeArchived: true })
         const search = yield* repository.list({ includeArchived: true, query: "urgent" })
         const bounded = yield* repository.list({ includeArchived: true, limit: 0 })
-        yield* repository.remove(first.id)
+        yield* repository.discard(first.id)
         const removed = yield* repository.get(first.id)
         expect(renamed.title).toBe("Renamed")
         expect(labeled.labels).toEqual(["bug", "urgent"])
@@ -131,7 +131,7 @@ describe("sql layer", () => {
         expect(sql.statements.map((statement) => statement.sql)).toEqual([
           "INSERT INTO rika_workspaces (path, created_at) VALUES (?, ?) ON CONFLICT(path) DO NOTHING",
           "INSERT INTO rika_threads (id, workspace, title, labels_json, pinned, archived, lineage_json, created_at, updated_at) VALUES (?, ?, ?, '[]', 0, 0, ?, ?, ?)",
-          "SELECT * FROM rika_threads WHERE id = ?",
+          "SELECT * FROM rika_threads WHERE id = ? AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id)",
         ])
         expect(sql.statements[1]?.parameters).toEqual(["thread-a", "/work/a", "First", '{"_tag":"Original"}', 1, 1])
       }),
@@ -172,13 +172,13 @@ describe("sql layer", () => {
         expect(yield* repository.list({ includeArchived: true, query: "/OTHER", limit: 200 })).toHaveLength(1)
         expect(yield* repository.list({ includeArchived: true, limit: 200 })).toHaveLength(100)
         expect(sql.statements[0]).toEqual({
-          sql: "SELECT * FROM rika_threads WHERE (? = 1 OR archived = 0) AND (? = 1 OR INSTR(LOWER(title), LOWER(?)) > 0 OR INSTR(LOWER(workspace), LOWER(?)) > 0 OR EXISTS (SELECT 1 FROM json_each(labels_json) WHERE INSTR(LOWER(CAST(value AS TEXT)), LOWER(?)) > 0)) ORDER BY pinned DESC, updated_at DESC, id ASC LIMIT ?",
+          sql: "SELECT * FROM rika_threads WHERE NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id) AND (? = 1 OR archived = 0) AND (? = 1 OR INSTR(LOWER(title), LOWER(?)) > 0 OR INSTR(LOWER(workspace), LOWER(?)) > 0 OR EXISTS (SELECT 1 FROM json_each(labels_json) WHERE INSTR(LOWER(CAST(value AS TEXT)), LOWER(?)) > 0)) ORDER BY pinned DESC, updated_at DESC, id ASC LIMIT ?",
           parameters: [0, 1, "", "", "", 50],
         })
         expect(sql.statements[1]?.parameters).toEqual([1, 0, "urgent", "urgent", "urgent", 1])
         expect(sql.statements[2]?.parameters).toEqual([1, 0, "/OTHER", "/OTHER", "/OTHER", 100])
         expect(sql.statements[3]).toEqual({
-          sql: "SELECT * FROM rika_threads WHERE (? = 1 OR archived = 0) AND (? = 1 OR INSTR(LOWER(title), LOWER(?)) > 0 OR INSTR(LOWER(workspace), LOWER(?)) > 0 OR EXISTS (SELECT 1 FROM json_each(labels_json) WHERE INSTR(LOWER(CAST(value AS TEXT)), LOWER(?)) > 0)) ORDER BY pinned DESC, updated_at DESC, id ASC LIMIT ?",
+          sql: "SELECT * FROM rika_threads WHERE NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id) AND (? = 1 OR archived = 0) AND (? = 1 OR INSTR(LOWER(title), LOWER(?)) > 0 OR INSTR(LOWER(workspace), LOWER(?)) > 0 OR EXISTS (SELECT 1 FROM json_each(labels_json) WHERE INSTR(LOWER(CAST(value AS TEXT)), LOWER(?)) > 0)) ORDER BY pinned DESC, updated_at DESC, id ASC LIMIT ?",
           parameters: [1, 1, "", "", "", 100],
         })
       }),
@@ -235,8 +235,8 @@ describe("sql layer", () => {
         sql.rows()
         sql.rows()
         const repository = yield* ThreadRepository.Service
-        yield* repository.remove(id("thread-a"))
-        const missing = yield* Effect.result(repository.remove(id("missing")))
+        yield* repository.discard(id("thread-a"))
+        const missing = yield* Effect.result(repository.discard(id("missing")))
         expect(sql.statements[1]).toEqual({ sql: "DELETE FROM rika_threads WHERE id = ?", parameters: ["thread-a"] })
         expect(missing._tag).toBe("Failure")
       }),

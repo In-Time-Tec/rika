@@ -199,10 +199,7 @@ test("SQLite queue copy, take, and accepted rollback stay atomic", () => {
           ),
         ).toMatchObject({ _tag: "Failure", failure: { _tag: "TurnQueueFull", count: 1 } })
         expect(yield* turns.get(overflowId)).toBeUndefined()
-        expect(yield* turns.takeQueued(copied.id)).toMatchObject({
-          turn: { id: copied.id },
-          queue: { revision: 2, queuedCount: 0 },
-        })
+        expect(yield* turns.dequeue(copied.id)).toMatchObject({ revision: 2, queuedCount: 0 })
       }).pipe(provideLayer(layer))
     }),
   )

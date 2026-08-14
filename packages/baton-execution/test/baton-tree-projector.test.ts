@@ -1,11 +1,11 @@
 import type { RunTree } from "@batonfx/runtime"
 import { describe, expect, it } from "@effect/vitest"
-import { TreeProjector } from "../src/baton-tree-projector"
+import { TreeProjector } from "../src/projection/tree"
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
 import {
   assistantOf,
   block,
-  modelPart,
+  modelResponse,
   occurredAt,
   resetEventPosition,
   treeEvent,
@@ -32,15 +32,13 @@ describe("Baton tree projector", () => {
     ).toBe(prompt)
   })
 
-  it("chunks long assistant and reasoning output losslessly without truncation", () => {
+  it("preserves long assistant and reasoning output as complete logical responses", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-long-output", "chunk output")
     const assistantText = "assistant-".repeat(7_000)
     const reasoningText = "reasoning-".repeat(7_000)
-    projector.apply(modelPart("raw-root-run", { type: "text-delta", id: "long-text", delta: assistantText }))
-    projector.apply(
-      modelPart("raw-root-run", { type: "reasoning-delta", id: "long-reasoning", delta: reasoningText } as never),
-    )
+    projector.apply(modelResponse("raw-root-run", { type: "text", text: assistantText, metadata: {} }))
+    projector.apply(modelResponse("raw-root-run", { type: "reasoning", text: reasoningText, metadata: {} } as never))
     const ordered = projector.snapshot().units.toSorted((left, right) => compareUnitOrder(left.order, right.order))
     const assistant = ordered
       .filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant")
@@ -54,12 +52,10 @@ describe("Baton tree projector", () => {
       .join("")
     expect(assistant).toBe(assistantText)
     expect(reasoning).toBe(reasoningText)
-    expect(
-      ordered.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant").length,
-    ).toBeGreaterThan(1)
+    expect(ordered.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant").length).toBe(1)
     expect(
       ordered.filter((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Reasoning").length,
-    ).toBeGreaterThan(1)
+    ).toBe(1)
   })
 
   it("marks bounded subagent prompts and authorization inputs as truncated", () => {
@@ -103,7 +99,7 @@ describe("Baton tree projector", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-tools", "use tools")
     const read = projector.apply(
-      modelPart("raw-root-run", {
+      modelResponse("raw-root-run", {
         type: "tool-call",
         id: "read-call",
         name: "read",
@@ -117,7 +113,7 @@ describe("Baton tree projector", () => {
       block: expect.objectContaining({ detail: "src/a.ts L2-7", status: "running" }),
     })
     const edit = projector.apply(
-      modelPart("raw-root-run", {
+      modelResponse("raw-root-run", {
         type: "tool-call",
         id: "edit-call",
         name: "edit",
@@ -131,7 +127,7 @@ describe("Baton tree projector", () => {
       expect.objectContaining({ path: "src/a.ts", additions: 2, deletions: 1, preview: true }),
     ])
     projector.apply(
-      modelPart("raw-root-run", {
+      modelResponse("raw-root-run", {
         type: "tool-call",
         id: "bash-call",
         name: "bash",
@@ -175,14 +171,144 @@ describe("Baton tree projector", () => {
     })
   })
 
-  it("restores partial model output and topology from one opaque checkpoint", () => {
+  it("produces identical cell units live and after a checkpoint reload", () => {
+    resetEventPosition()
+    const source = "// warm up\nconst answer = 6 * 7\nanswer"
+    const call = {
+      type: "tool-call" as const,
+      id: "cell-resume",
+      name: "typescript",
+      params: { code: source },
+      providerExecuted: false,
+      metadata: {},
+    }
+    const live = TreeProjector.make("turn-cell-resume", "run a cell")
+    live.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
+    live.apply(treeEvent("raw-root-run", { _tag: "ToolExecutionStarted", turn: 0, call } as never))
+    const patch = live.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolProgress",
+        turn: 0,
+        toolCallId: "cell-resume",
+        message: "Stdout",
+        data: { _tag: "Stdout", cellId: "cell-resume", sequence: 0, text: "partial output" },
+      } as never),
+    )
+    const reloaded = TreeProjector.make("turn-cell-resume", "run a cell", patch.checkpoint, live.snapshot().units)
+    expect(reloaded.snapshot().units).toEqual(live.snapshot().units)
+    const completion = (projector: ReturnType<typeof TreeProjector.make>) =>
+      projector.apply(
+        treeEvent("raw-root-run", {
+          _tag: "ToolExecutionCompleted",
+          turn: 0,
+          call,
+          result: {
+            type: "tool-result",
+            id: "cell-resume",
+            name: "typescript",
+            result: {
+              cellId: "cell-resume",
+              epoch: 1,
+              sequence: 2,
+              value: "42",
+              stdout: "partial output",
+              stderr: "",
+              durationMillis: 8,
+              truncation: [],
+            },
+            encodedResult: {},
+            isFailure: false,
+            providerExecuted: false,
+            preliminary: false,
+            metadata: {},
+          },
+        } as never),
+      )
+    resetEventPosition()
+    const livePosition = completion(live)
+    resetEventPosition()
+    const reloadedPosition = completion(reloaded)
+    expect(reloadedPosition.upsert).toEqual(livePosition.upsert)
+    expect(reloaded.snapshot().units).toEqual(live.snapshot().units)
+    expect(
+      reloaded.snapshot().units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Cell")
+        ?.content,
+    ).toEqual({
+      _tag: "Block",
+      block: expect.objectContaining({ status: "complete", result: "42", durationMillis: 8, epoch: 1 }),
+    })
+  })
+
+  it("keeps a running cell across a Server restart and drops a settled one from the checkpoint", () => {
+    resetEventPosition()
+    const cellCall = (id: string, code: string) => ({
+      type: "tool-call" as const,
+      id,
+      name: "typescript",
+      params: { code },
+      providerExecuted: false,
+      metadata: {},
+    })
+    const projector = TreeProjector.make("turn-cell-retention", "retain")
+    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
+    projector.apply(
+      treeEvent("raw-root-run", { _tag: "ToolExecutionStarted", turn: 0, call: cellCall("done", "1") } as never),
+    )
+    projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolExecutionCompleted",
+        turn: 0,
+        call: cellCall("done", "1"),
+        result: {
+          type: "tool-result",
+          id: "done",
+          name: "typescript",
+          result: {
+            cellId: "done",
+            epoch: 0,
+            sequence: 1,
+            value: "1",
+            stdout: "",
+            stderr: "",
+            durationMillis: 1,
+            truncation: [],
+          },
+          encodedResult: {},
+          isFailure: false,
+          providerExecuted: false,
+          preliminary: false,
+          metadata: {},
+        },
+      } as never),
+    )
+    const patch = projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolExecutionStarted",
+        turn: 0,
+        call: cellCall("live", "await forever()"),
+      } as never),
+    )
+    const persisted = JSON.parse(patch.checkpoint.state) as {
+      readonly nodes: ReadonlyArray<{ readonly cells: ReadonlyArray<readonly [string, unknown]> }>
+    }
+    expect(persisted.nodes.flatMap((node) => node.cells.map(([rawId]) => rawId))).toEqual(["live"])
+    const resumed = TreeProjector.make("turn-cell-retention", "retain", patch.checkpoint, projector.snapshot().units)
+    const settled = resumed.apply(treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "restarted" } as never))
+    expect(
+      settled.upsert.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Cell")?.content,
+    ).toEqual({ _tag: "Block", block: expect.objectContaining({ status: "cancelled" }) })
+  })
+
+  it("restores a committed model response and topology from one opaque checkpoint", () => {
     resetEventPosition()
     const first = TreeProjector.make("turn-resume", "continue")
     first.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    const partial = first.apply(modelPart("raw-root-run", { type: "text-delta", id: "text", delta: "hel" }))
-    const resumed = TreeProjector.make("turn-resume", "continue", partial.checkpoint, first.snapshot().units)
-    const completed = resumed.apply(modelPart("raw-root-run", { type: "text-delta", id: "text", delta: "lo" }))
-    expect(completed.baseRevision).toBe(partial.revision)
+    const committed = first.apply(modelResponse("raw-root-run", { type: "text", text: "hello", metadata: {} }))
+    const resumed = TreeProjector.make("turn-resume", "continue", committed.checkpoint, first.snapshot().units)
+    const completed = resumed.apply(
+      treeEvent("raw-root-run", { _tag: "RunCompleted", result: { text: "hello" } } as never),
+    )
+    expect(completed.baseRevision).toBe(committed.revision)
     expect(
       resumed
         .snapshot()
@@ -240,26 +366,21 @@ describe("Baton tree projector", () => {
     const projector = TreeProjector.make("turn-long", "long")
     projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
     for (let index = 0; index < 500; index += 1) {
-      projector.apply(
-        modelPart("raw-root-run", { type: "text-delta", id: `text-${index}`, delta: `response-${index}` }),
-      )
+      projector.apply(modelResponse("raw-root-run", { type: "text", text: `response-${index}`, metadata: {} }))
       projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: index + 1 }))
     }
-    const partial = projector.apply(modelPart("raw-root-run", { type: "text-delta", id: "active", delta: "partial-" }))
+    const partial = projector.apply(modelResponse("raw-root-run", { type: "text", text: "partial-", metadata: {} }))
     expect(partial.checkpoint.state.length).toBeLessThanOrEqual(1_000_000)
     expect(projector.snapshot().hasOlder).toBe(true)
     const resumed = TreeProjector.make("turn-long", "long", partial.checkpoint, projector.snapshot().units)
-    resumed.apply(modelPart("raw-root-run", { type: "text-delta", id: "active", delta: "continued" }))
+    resumed.apply(modelResponse("raw-root-run", { type: "text", text: "continued", metadata: {} }))
     expect(
       resumed
         .snapshot()
-        .units.find(
-          (unit) =>
-            unit.content._tag === "Entry" &&
-            unit.content.role === "assistant" &&
-            unit.content.text === "partial-continued",
-        )?.content,
-    ).toEqual({ _tag: "Entry", role: "assistant", text: "partial-continued" })
+        .units.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant")
+        .slice(-2)
+        .map((unit) => (unit.content._tag === "Entry" ? unit.content.text : "")),
+    ).toEqual(["partial-", "continued"])
   })
 
   it("externalizes near-limit concurrent active unit content across restart", () => {
@@ -286,9 +407,9 @@ describe("Baton tree projector", () => {
         } as never),
       )
       latest = apply(
-        modelPart(
+        modelResponse(
           child,
-          { type: "text-delta", id: "partial", delta: large },
+          { type: "text", text: large, metadata: {} },
           {
             parentRunId: "raw-root-run",
             invocationId: `active-${index}`,
@@ -302,9 +423,9 @@ describe("Baton tree projector", () => {
     expect(latest.checkpoint.state.length).toBeLessThan(1_000_000)
     const resumed = TreeProjector.make("turn-wide-resume", "wide", latest.checkpoint, [...stored.values()])
     const continued = resumed.apply(
-      modelPart(
+      modelResponse(
         "raw-active-0",
-        { type: "text-delta", id: "partial", delta: "done" },
+        { type: "text", text: "done", metadata: {} },
         {
           parentRunId: "raw-root-run",
           invocationId: "active-0",
@@ -479,10 +600,10 @@ describe("Baton tree projector", () => {
     resetEventPosition()
     const first = TreeProjector.make("turn-sequential-one", "prompt one")
     first.apply(treeEvent("raw-run-one", { _tag: "TurnStarted", turn: 0 }))
-    first.apply(modelPart("raw-run-one", { type: "text-delta", id: "text", delta: "FIRST_ANSWER" }))
+    first.apply(modelResponse("raw-run-one", { type: "text", text: "FIRST_ANSWER", metadata: {} }))
     const second = TreeProjector.make("turn-sequential-two", "prompt two")
     second.apply(treeEvent("raw-run-two", { _tag: "TurnStarted", turn: 0 }))
-    second.apply(modelPart("raw-run-two", { type: "text-delta", id: "text", delta: "SECOND_ANSWER" }))
+    second.apply(modelResponse("raw-run-two", { type: "text", text: "SECOND_ANSWER", metadata: {} }))
 
     const firstAssistant = assistantOf(first)
     const secondAssistant = assistantOf(second)
@@ -498,23 +619,42 @@ describe("Baton tree projector", () => {
     expect([...firstKeys].some((key) => secondKeys.has(key))).toBe(false)
   })
 
-  it("restores chunk continuation from a checkpoint captured within the same turn", () => {
+  it("restores committed response boundaries from a checkpoint within the same turn", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-chunked-restore", "chunk me")
     projector.apply(treeEvent("raw-chunk-run", { _tag: "TurnStarted", turn: 0 }))
-    const opening = projector.apply(modelPart("raw-chunk-run", { type: "text-delta", id: "text", delta: "OPENING " }))
+    const opening = projector.apply(modelResponse("raw-chunk-run", { type: "text", text: "OPENING ", metadata: {} }))
     const resumed = TreeProjector.make(
       "turn-chunked-restore",
       "chunk me",
       opening.checkpoint,
       projector.snapshot().units,
     )
-    resumed.apply(modelPart("raw-chunk-run", { type: "text-delta", id: "text", delta: "CONTINUED" }))
+    resumed.apply(modelResponse("raw-chunk-run", { type: "text", text: "CONTINUED", metadata: {} }))
     const assistant = resumed
       .snapshot()
       .units.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant")
-    expect(assistant).toHaveLength(1)
-    expect(assistant[0]?.content._tag === "Entry" ? assistant[0].content.text : "").toBe("OPENING CONTINUED")
+    expect(assistant.map((unit) => (unit.content._tag === "Entry" ? unit.content.text : ""))).toEqual([
+      "OPENING ",
+      "CONTINUED",
+    ])
+  })
+
+  it("projects cancellation state without adding user-visible transcript content", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-silent-cancellation", "cancel me")
+    projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }))
+    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
+    const before = projector.snapshot().units
+
+    const cancellation = projector.apply(
+      treeEvent("raw-root-run", { _tag: "RunCancellationRequested", reason: "Cancelled by user" }),
+    )
+
+    expect(cancellation.state.status).toBe("cancelling")
+    expect(cancellation.upsert).toEqual([])
+    expect(cancellation.remove).toEqual([])
+    expect(projector.snapshot().units).toEqual(before)
   })
 
   it("parks the root as waiting when an interrupted operation needs resolution", () => {
@@ -522,7 +662,7 @@ describe("Baton tree projector", () => {
     const projector = TreeProjector.make("turn-resolution", "cancel me")
     projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }))
     projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    projector.apply(treeEvent("raw-root-run", { _tag: "RunCancellationRequested", reason: "Cancelled by Rika" }))
+    projector.apply(treeEvent("raw-root-run", { _tag: "RunCancellationRequested", reason: "Cancelled by user" }))
     expect(projector.snapshot().state.status).toBe("cancelling")
 
     // A replayPolicy:"never" tool interrupted mid-flight parks the Run in needs-resolution.
@@ -538,12 +678,12 @@ describe("Baton tree projector", () => {
     const projector = TreeProjector.make("turn-resolution-terminal", "cancel me")
     projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }))
     projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    projector.apply(treeEvent("raw-root-run", { _tag: "RunCancellationRequested", reason: "Cancelled by Rika" }))
+    projector.apply(treeEvent("raw-root-run", { _tag: "RunCancellationRequested", reason: "Cancelled by user" }))
     projector.apply(treeEvent("raw-root-run", { _tag: "OperationUnknown", operationId: "op-1" }))
     expect(projector.snapshot().state.status).toBe("waiting")
 
     // Resolving the parked operation lets the run reach its real terminal state.
-    projector.apply(treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "Cancelled by Rika" }))
+    projector.apply(treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "Cancelled by user" }))
     expect(projector.snapshot().state.status).toBe("cancelled")
   })
 
@@ -581,61 +721,5 @@ describe("Baton tree projector", () => {
       status: "failed",
       reason: "OpenAiClient.createResponseStream: InvalidKey: Verify your API key is correct",
     })
-  })
-})
-
-describe("friendly failure presentation in the projector", () => {
-  it("renders a model rate-limit failure with a friendly title, detail, and recovery", () => {
-    resetEventPosition()
-    const projector = TreeProjector.make("turn-rate-limit", "say hello")
-    projector.apply(treeEvent("raw-root-run", { _tag: "RunAccepted" }))
-    projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted" }))
-    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "ModelCallFailed",
-        deliveryId: "d1",
-        turn: 0,
-        modelCallId: "model-call:0:conversation",
-        purpose: "conversation",
-        attempts: 1,
-        failedAt: 1,
-        category: "rate-limit",
-        classification: "terminal",
-      }),
-    )
-    const unit = projector
-      .snapshot()
-      .units.find((candidate) => candidate.content._tag === "Block" && candidate.content.block._tag === "Error")
-    expect(unit).toBeDefined()
-    if (unit?.content._tag !== "Block" || unit.content.block._tag !== "Error") return
-    expect(unit.content.block.title).toBe("Model rate limit reached")
-    expect(unit.content.block.detail).toContain("provider limited")
-    expect(unit.content.block.recovery).toContain("cannot succeed")
-  })
-
-  it("renders a raw provider failure with a cleaned detail", () => {
-    resetEventPosition()
-    const projector = TreeProjector.make("turn-provider-error", "say hello")
-    projector.apply(treeEvent("raw-root-run", { _tag: "RunAccepted" }))
-    projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted" }))
-    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "RunFailed",
-        error: {
-          _tag: "@batonfx/runtime/AgentExecutionFailure",
-          message: "effect/ai/AiError/AiError: OpenAiClient.createResponseStream: Rate Limit exceeded",
-        },
-      } as never),
-    )
-    const unit = projector
-      .snapshot()
-      .units.find((candidate) => candidate.content._tag === "Block" && candidate.content.block._tag === "Error")
-    expect(unit).toBeDefined()
-    if (unit?.content._tag !== "Block" || unit.content.block._tag !== "Error") return
-    expect(unit.content.block.detail).toBe(
-      "The model provider rate-limited the request. Wait a moment, then try again.",
-    )
   })
 })

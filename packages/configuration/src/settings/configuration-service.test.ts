@@ -33,6 +33,7 @@ describe("ConfigService", () => {
       expect(config.settings.models).toBe(ConfigContract.defaults.models)
       expect(config.settings.modes).toBe(ConfigContract.defaults.modes)
       expect(config.settings.compaction).toEqual(ConfigContract.defaults.compaction)
+      expect(config.settings.subagents).toEqual({ maxDepth: 1, maxSubagents: 4 })
       expect(config.environment.providerCredentials).toEqual({})
       expect(config.environment.webSearchCredentials).toEqual({})
     }).pipe(provideLayer(ConfigurationService.memoryConfigurationLayer())),
@@ -93,6 +94,12 @@ describe("ConfigService", () => {
           apiKeyEnv: "GLOBAL_ANTHROPIC_KEY",
         },
         bedrock: { protocol: "amazon-bedrock", authMode: "default" },
+        openrouter: {
+          protocol: "openrouter",
+          baseUrl: ConfigContract.defaults.providers.openrouter.baseUrl,
+          apiKeyEnv: "OPENROUTER_API_KEY",
+          credentialIdentity: "openrouter",
+        },
       })
     }).pipe(
       provideLayer(

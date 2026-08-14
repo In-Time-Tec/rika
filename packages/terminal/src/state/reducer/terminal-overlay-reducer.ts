@@ -4,12 +4,7 @@ import type { Model } from "../model/terminal-state"
 import type { TranscriptBlock, TranscriptItem } from "../model/terminal-transcript-state"
 import { ready, loading } from "../model/terminal-loadable-state"
 import { streamActivity } from "../model/terminal-activity-state"
-import {
-  dropSubmittedDrafts,
-  settleSteering,
-  takeSubmittedDraftFor,
-  validQueueSelection,
-} from "../model/terminal-queue-state"
+import { dropSubmittedDrafts, takeSubmittedDraftFor, validQueueSelection } from "../model/terminal-queue-state"
 import { hasProvisionalUserEntry, settleProvisionalUserEntry } from "../model/terminal-submission-state"
 import { expandableRowIds, transcriptUnits, transcriptUnitId } from "../../presentation/transcript/transcript-row"
 import { context } from "./terminal-state-reducer"
@@ -37,6 +32,8 @@ const reduceOverlayImpl = (
 ): Model | undefined => {
   const { cancelTranscriptBlocks, sameChangedFiles } = context
   switch (message._tag) {
+    case "ConnectionStatusChanged":
+      return { ...model, connectionStatus: message.status }
     case "ReasoningStreamed": {
       const blocks = [...model.blocks] as Array<TranscriptBlock>
       const lastItem = model.items.at(-1) as TranscriptItem | undefined
@@ -147,14 +144,9 @@ const reduceOverlayImpl = (
     }
     case "ExecutionCompleted": {
       if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
-      const settled = settleSteering(model, message.turnId ?? model.activeTurnId)
       return {
         ...model,
         submittedDrafts: dropSubmittedDrafts(model.submittedDrafts, message.turnId),
-        pendingSteering: settled.pendingSteering,
-        ...(settled.restoredInput === undefined
-          ? {}
-          : { input: settled.restoredInput, cursor: settled.restoredInput.length }),
         cancelPending: false,
         busy: false,
         activity: undefined,
@@ -195,6 +187,20 @@ const reduceOverlayImpl = (
         activity: settledActivity(model.activeTurnId, model.activity, taken.rest.length),
       }
     }
+    case "TurnRetryScheduled": {
+      if (model.activeTurnId !== message.turnId && model.activeTurnId !== undefined) return model
+      return {
+        ...model,
+        activity: {
+          _tag: "Retrying",
+          attempt: message.attempt,
+          budget: message.budget,
+          message: message.message,
+          nextAt: message.nextAt,
+        },
+        retryCountdown: message.retryCountdown,
+      }
+    }
     case "ExecutionFailed": {
       const turnId = message.turnId ?? model.activeTurnId
       const taken = takeSubmittedDraftFor(model.submittedDrafts, turnId === undefined ? {} : { turnId })
@@ -230,7 +236,6 @@ const reduceOverlayImpl = (
         blocks: alreadyPresented ? settled.blocks : [...settled.blocks, errorBlock(message.failure)],
         items: alreadyPresented ? settled.items : [...settled.items, { _tag: "Block", index: settled.blocks.length }],
         submittedDrafts: taken.draft === undefined ? dropSubmittedDrafts(model.submittedDrafts, turnId) : taken.rest,
-        pendingSteering: settleSteering(model, turnId).pendingSteering,
         cancelPending: settlesActive ? false : model.cancelPending,
         busy: remainsBusy,
         activity: settledActivity(activeTurnId, model.activity, taken.rest.length),
@@ -259,7 +264,6 @@ const reduceOverlayImpl = (
           ...queue,
           ...(restore ? { input: draft.input, cursor: draft.cursor, pastedText: draft.attachments } : {}),
           submittedDrafts: taken.rest,
-          pendingSteering: settleSteering(model, turnId).pendingSteering,
           blocks: cancelTranscriptBlocks(settled.blocks as ReadonlyArray<TranscriptBlock>),
           cancelPending: cancelsActive ? false : model.cancelPending,
           busy: remainsBusy,
@@ -269,23 +273,16 @@ const reduceOverlayImpl = (
       }
       if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
       if (!model.busy) return model
-      const cancelSettled = settleSteering(model, turnId)
       return {
         ...model,
         submittedDrafts: dropSubmittedDrafts(model.submittedDrafts, turnId),
-        pendingSteering: cancelSettled.pendingSteering,
         cancelPending: false,
-        ...(cancelSettled.restoredInput === undefined
-          ? {}
-          : { input: cancelSettled.restoredInput, cursor: cancelSettled.restoredInput.length }),
         blocks: cancelTranscriptBlocks(model.blocks as ReadonlyArray<TranscriptBlock>),
         busy: false,
         activity: undefined,
         activeTurnId: undefined,
       }
     }
-    case "UsageReported":
-      return message.costUsd === undefined ? model : { ...model, costUsd: (model.costUsd ?? 0) + message.costUsd }
     case "DetailMoved": {
       const ids = expandableRowIds(model)
       const count = ids.length
@@ -326,16 +323,11 @@ const reduceOverlayImpl = (
       if (model.changedFiles._tag === "Ready" && sameChangedFiles(model.changedFiles.value, message.files)) return model
       return { ...model, changedFiles: ready([...message.files]) }
     }
-    case "ThreadPreviewRequested": {
-      let previous: Extract<Model["threadPreview"], { _tag: "Ready" }>["value"] | undefined
-      if (model.threadPreview._tag === "Ready") previous = model.threadPreview.value
-      else if (model.threadPreview._tag === "Loading") previous = model.threadPreview.previous
+    case "ThreadPreviewRequested":
       return {
         ...model,
-        threadPreview: { _tag: "Loading", ...(previous === undefined ? {} : { previous }) },
-        threadSwitcher: { ...model.threadSwitcher, previewScroll: 0 },
+        threadPreview: { _tag: "Loading", threadId: message.threadId, requestId: message.requestId },
       }
-    }
     case "ThreadOpenRequested":
       return { ...model, threadLoading: true }
     case "ThreadOpenCompleted":
@@ -345,15 +337,39 @@ const reduceOverlayImpl = (
       return { ...model, refoldingThreadIds: message.refolding ? [...others, message.threadId] : others }
     }
     case "ThreadPreviewLoaded":
+      if (
+        model.threadPreview._tag !== "Loading" ||
+        model.threadPreview.threadId !== message.threadId ||
+        model.threadPreview.requestId !== message.requestId
+      )
+        return model
       return {
         ...model,
-        threadPreview: ready({
-          threadId: message.threadId,
-          turns: message.turns.map((turn) => ({ prompt: turn.prompt, units: [...turn.units] })),
-        }),
+        threadPreview: {
+          _tag: "Ready",
+          value: {
+            threadId: message.threadId,
+            requestId: message.requestId,
+            units: [...message.units],
+          },
+        },
       }
     case "ThreadPreviewFailed":
-      return { ...model, threadPreview: { _tag: "Failed", message: message.message } }
+      if (
+        model.threadPreview._tag !== "Loading" ||
+        model.threadPreview.threadId !== message.threadId ||
+        model.threadPreview.requestId !== message.requestId
+      )
+        return model
+      return {
+        ...model,
+        threadPreview: {
+          _tag: "Failed",
+          threadId: message.threadId,
+          requestId: message.requestId,
+          message: message.message,
+        },
+      }
     case "ComposerReplaced":
       return {
         ...model,
@@ -383,27 +399,17 @@ const errorTitle = (failure: { readonly tag: string }): string => {
   }
 }
 
-const errorRecovery = (failure: {
-  readonly retry: "user" | "automatic" | "never"
-  readonly actor: "user" | "environment" | "rika"
-}): string | undefined => {
-  if (failure.retry === "automatic") return "Rika will retry automatically."
-  if (failure.retry === "user") return "Press Enter to try again."
-  if (failure.actor === "environment") return "Fix the issue above, then resend."
-  if (failure.actor === "rika") return "This is a Rika defect. Restart Rika if it keeps happening."
-  return undefined
-}
-
 const errorBlock = (failure: {
   readonly tag: string
+  readonly category: string
   readonly message: string
-  readonly retry: "user" | "automatic" | "never"
-  readonly actor: "user" | "environment" | "rika"
+  readonly retryable: boolean
 }) => ({
   _tag: "Error" as const,
   title: errorTitle(failure),
   detail: failure.message,
-  recovery: errorRecovery(failure),
+  category: failure.category,
+  retryable: failure.retryable,
 })
 
 export const reduceOverlay: {

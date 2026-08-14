@@ -3,11 +3,11 @@ import { StyledText, type TextRenderable } from "@opentui/core"
 import type { Model } from "../../state/model/terminal-state"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
 import type {
-  AgentOutcome,
-  AgentResponseState,
+  NestedTranscriptUnit,
   ToolTranscriptUnit,
   TranscriptUnit,
 } from "../../presentation/transcript/transcript-tool-types"
+import type { AgentOutcome, AgentResponseState } from "../../presentation/transcript/transcript-tool-kinds"
 import type { PathTarget } from "../../presentation/transcript/transcript-tool-detail-types"
 
 let transcriptIdentityCounter = 0
@@ -44,7 +44,7 @@ const transcriptUnitRevisionImpl = (
       }
     }
     for (const index of tool.diffs) ids.push(identityRevision(model.blocks[index]))
-    for (const child of tool.children ?? []) walkTool(child)
+    for (const child of tool.children ?? []) walkNested(child)
     const response = tool.agentResponse === undefined ? undefined : agentResponseOutcome(tool.agentResponse)
     if (response?.kind === "answer") ids.push(identityRevision(model.entries[response.entry]))
     else if (response?.kind === "error") bits.push(`${response.tone}:${response.text}`)
@@ -54,6 +54,20 @@ const transcriptUnitRevisionImpl = (
     ids.push(identityRevision(block))
     if (block._tag === "Compaction" && block.status === "complete")
       bits.push(`rainbow:${model.compactionShimmer?.tick ?? 0}`)
+    if (block._tag === "Cell") {
+      pushExpanded(`cell:${block.id}`)
+      for (const file of block.files) pushExpanded(`file:${file.key}`)
+    }
+  }
+  const walkNested = (nested: NestedTranscriptUnit) => {
+    if (nested.kind === "cell") walkBlock(nested.block)
+    else if (nested.kind === "subagent") {
+      walkBlock(nested.block)
+      const block = model.blocks[nested.block] as Extract<TranscriptBlock, { _tag: "SubagentCard" }>
+      pushExpanded(`subagent:${block.id}`)
+      for (const child of nested.children) walkNested(child)
+      walkAgentResponse(nested.agentResponse)
+    } else walkTool(nested)
   }
   const walkAgentResponse = (state: AgentResponseState | undefined) => {
     const response = state === undefined ? undefined : agentResponseOutcome(state)
@@ -69,11 +83,12 @@ const transcriptUnitRevisionImpl = (
       break
     case "subagent":
       walkBlock(unit.block)
-      for (const child of unit.children) walkTool(child)
+      for (const child of unit.children) walkNested(child)
       walkAgentResponse(unit.agentResponse)
       break
     case "reasoning":
     case "diff":
+    case "cell":
     case "block":
       walkBlock(unit.block)
       break
@@ -108,10 +123,23 @@ export interface TranscriptRenderableDescriptor {
 }
 export interface TranscriptRangeBundle {
   readonly key: string
+  readonly rows: number
   readonly descriptors: ReadonlyArray<TranscriptRenderableDescriptor>
+}
+
+export interface TentativeTranscriptLayout {
+  readonly width: number
+  readonly tone: "answer" | "reasoning"
+  markdown: boolean
+  sourceLength: number
+  pending: string
+  pendingSource: string
+  readonly bands: Array<Array<string>>
+  readonly stableContent: Array<StyledText | undefined>
 }
 
 export interface TranscriptUnitCacheEntry {
   readonly revision: string
   readonly bundles: ReadonlyArray<TranscriptRangeBundle>
+  readonly tentative?: TentativeTranscriptLayout
 }

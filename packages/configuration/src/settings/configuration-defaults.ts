@@ -17,6 +17,12 @@ export const providerDefaults = {
     protocol: "amazon-bedrock",
     authMode: "default",
   },
+  openrouter: {
+    protocol: "openrouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    apiKeyEnv: "OPENROUTER_API_KEY",
+    credentialIdentity: "openrouter",
+  },
 } as const
 
 export const defaultCompaction = {
@@ -37,6 +43,7 @@ export const settingsDefaults: ConfigurationSettings = {
   threadTitle: { alias: "luna", effort: "low" },
   agents: {},
   compaction: { summaryModel: { alias: "sol", effort: "xhigh" } },
+  subagents: { maxDepth: 1, maxSubagents: 4 },
   keymap: { mode: "ctrl+s", palette: "ctrl+p", submit: "enter", newline: "shift+enter", interrupt: "escape" },
   extensionRoots: [`~/${globalDirectory}/extensions`, `${workspaceDirectory}/extensions`],
   mcp: {},

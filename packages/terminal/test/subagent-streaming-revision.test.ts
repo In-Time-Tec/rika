@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest"
+import { buildTranscript } from "../src/opentui/rendering/opentui-renderer"
 import { transcriptUnitRevision } from "../src/opentui/rendering/opentui-render-transcript-revision"
 import { shellCommandText } from "../src/opentui/rendering/opentui-render-tool-detail"
 import { transcriptUnitId, transcriptUnits } from "../src/presentation/transcript/transcript-row"
@@ -63,6 +64,29 @@ describe("subagent unit revision", () => {
   test("is stable when nothing changed", () => {
     const current = model('{"command":"ls"}', "working")
     expect(subagentRevision(current)).toBe(subagentRevision(current))
+  })
+
+  test("renders queued subagents without animation and invalidates the row when they start", () => {
+    const running = model('{"command":"ls"}', "")
+    const queued = { ...running, blocks: [{ ...card, status: "queued" as const }, running.blocks[1]!] }
+    const rendered = buildTranscript(queued)
+      .styled.chunks.map((chunk) => chunk.text)
+      .join("")
+
+    expect(rendered).toContain("◷ Review queued")
+    expect(subagentRevision(queued)).not.toBe(subagentRevision(running))
+  })
+
+  test("renders a complete long final response instead of only its suffix", () => {
+    const response = `BEGIN_LONG_RESPONSE\n${"complete paragraph. ".repeat(700)}\nEND_LONG_RESPONSE`
+    const current = model('{"command":"ls"}', response)
+    const settled = { ...current, blocks: [{ ...card, status: "complete" as const }, current.blocks[1]!] }
+    const rendered = buildTranscript(settled)
+      .styled.chunks.map((chunk) => chunk.text)
+      .join("")
+    expect(response.length).toBeGreaterThan(8_192)
+    expect(rendered).toContain("BEGIN_LONG_RESPONSE")
+    expect(rendered).toContain("END_LONG_RESPONSE")
   })
 })
 

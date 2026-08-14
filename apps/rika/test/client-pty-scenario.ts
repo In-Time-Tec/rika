@@ -17,6 +17,11 @@ export const PtyAction = Schema.Struct({
   after: Schema.String,
   write: Schema.String,
   checkRunning: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Match the text a reader sees rather than the bytes a terminal wrote. The fixture strips control
+   * sequences before it looks, which is what a marker the renderer styles or redraws through needs.
+   */
+  visible: Schema.optionalKey(Schema.Boolean),
   signal: Schema.optionalKey(Schema.Literals(["SIGINT", "SIGTERM", "SIGKILL", "SIGHUP"])),
   closePty: Schema.optionalKey(Schema.Boolean),
   turnPrompt: Schema.optionalKey(Schema.String),
@@ -40,6 +45,7 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     readonly after: string
     readonly write: string
     readonly checkRunning?: boolean
+    readonly visible?: boolean
     readonly signal?: "SIGINT" | "SIGTERM" | "SIGKILL" | "SIGHUP"
     readonly closePty?: boolean
     readonly turnPrompt?: string
@@ -63,6 +69,14 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
   yield* Effect.addFinalizer(() => reapServers(activeDataRoot))
   const directory = fileURLToPath(new URL(".", import.meta.url))
   const helper = `${directory}/fixtures/interactive-pty.py`
+  /**
+   * The client reads its workspace from its own working directory, and that has to stay the package
+   * root so a relative entrypoint resolves. So a file a cell writes lands HERE, not in the temp
+   * workspace above, and the only honest reading is what this directory gained while the scenario
+   * ran. Anything it gained is removed afterwards, because a test may not leave debris in the repo.
+   */
+  const clientWorkspace = directory.replace(/\/test\/$/, "")
+  const before = new Set(yield* fs.readDirectory(clientWorkspace))
   const path = yield* Config.string("PATH").pipe(
     Config.withDefault("/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
   )
@@ -84,7 +98,7 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
       [
         helper,
         process.execPath,
-        directory.replace(/\/test\/$/, ""),
+        clientWorkspace,
         environment,
         encodedActions,
         ...(entrypointArguments.length === 0 ? [] : ["src/client-main.ts", ...entrypointArguments]),
@@ -124,7 +138,11 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     names.filter((name) => name.startsWith("client-") && name.endsWith(".jsonl") && !name.endsWith(".open.jsonl")),
     (name) => fs.readFileString(`${activeDataRoot}/diagnostics/${name}`),
   )
-  const workspaceFiles = yield* fs.readDirectory(workspace)
+  const created = (yield* fs.readDirectory(clientWorkspace)).filter((name) => !before.has(name))
+  yield* Effect.forEach(created, (name) =>
+    fs.remove(`${clientWorkspace}/${name}`, { recursive: true }).pipe(Effect.ignore),
+  )
+  const workspaceFiles = [...(yield* fs.readDirectory(workspace)), ...created]
   return {
     ...result,
     output: stripTerminalControl(Buffer.from(result.output, "base64").toString("utf8")),

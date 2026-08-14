@@ -4,12 +4,13 @@ export namespace ModelRoute {
   export type Role = "main" | "oracle"
   export type AgentId = "librarian" | "painter" | "readThread" | "review" | "surgeon" | "task"
   export type Effort = "low" | "medium" | "high" | "xhigh" | "max"
-  export type ProviderId = "openai" | "anthropic" | "bedrock"
+  export type ProviderId = "openai" | "anthropic" | "bedrock" | "openrouter"
 
   export interface HttpProviderConnection {
-    readonly protocol: "openai" | "anthropic"
+    readonly protocol: "openai" | "anthropic" | "openrouter"
     readonly baseUrl: string
     readonly apiKeyEnv?: string | undefined
+    readonly credentialIdentity?: string | undefined
     readonly streamingOnly?: boolean | undefined
     readonly promptCaching?: boolean | undefined
   }
@@ -37,6 +38,7 @@ export namespace ModelRoute {
   export interface HttpProviderOverride {
     readonly baseUrl?: string
     readonly apiKeyEnv?: string
+    readonly credentialIdentity?: string
     readonly streamingOnly?: boolean
     readonly promptCaching?: boolean
   }

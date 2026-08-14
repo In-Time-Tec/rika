@@ -2,7 +2,8 @@ import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as ThreadView from "@rika/product/thread-view"
 import { Effect } from "effect"
 import type { Model } from "@rika/terminal/terminal-state"
-import { updateState } from "./terminal-interactive-feed"
+import { clearPreviewState, updateState } from "./terminal-interactive-feed"
+import type { Overlay as ModelPreviewOverlay } from "./interactive-model-preview"
 
 export type TranscriptEvent = Extract<
   InteractiveEvent.InteractiveEvent,
@@ -10,11 +11,13 @@ export type TranscriptEvent = Extract<
   | { readonly _tag: "ThreadViewPatch" }
   | { readonly _tag: "ResyncRequired" }
   | { readonly _tag: "ThreadRefolding" }
+  | { readonly _tag: "ExecutionModelPreviewChanged" }
 >
 
 export interface State {
   readonly model: Model
   readonly view?: ThreadView.ThreadViewSnapshot
+  readonly modelPreview?: ModelPreviewOverlay | undefined
 }
 
 export interface Update {
@@ -31,3 +34,5 @@ export const update: {
   (event: TranscriptEvent): (state: State) => Update
   (state: State, event: TranscriptEvent): Update
 } = updateState
+
+export const clearPreview = clearPreviewState

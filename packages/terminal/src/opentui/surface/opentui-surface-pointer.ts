@@ -11,7 +11,7 @@ import { SidebarController } from "./opentui-sidebar-controller"
 import { Clock, Effect } from "effect"
 import { classifyMouseJunk, fromOpenTui, type Key } from "../../presentation/terminal/terminal-keymap"
 import { pastedTextTokenAt } from "../../state/model/terminal-composer-paste"
-import { SurfaceTranscriptScroll } from "./opentui-transcript-scroll"
+import { SurfaceState } from "./opentui-surface-state"
 
 const readRendererProperty = (renderer: object, property: string): unknown => Reflect.get(renderer, property)
 
@@ -37,7 +37,7 @@ const readRendererOutput = (renderer: object): RendererOutput | undefined => {
   return { stdout, realStdoutWrite }
 }
 
-export abstract class SurfacePointer extends SurfaceTranscriptScroll {
+export abstract class SurfacePointer extends SurfaceState {
   protected abstract sidebarController: SidebarController
   protected abstract refreshSidebarRows(model: Model): void
   protected abstract showToast(message: string, color?: ColorInput): void
@@ -45,26 +45,17 @@ export abstract class SurfacePointer extends SurfaceTranscriptScroll {
     const mapped = fromOpenTui(key)
     if (this.suppressMouseJunk(mapped)) return
     if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "pageup") {
-      this.cancelWheelReport()
-      this.dispatchTranscriptViewport({ _tag: "DetachCommanded", anchor: this.captureViewportAnchor() })
-      const amount = Math.max(1, this.transcriptScroll.viewport.height - 1)
-      if (this.queuePendingTranscriptScroll(-amount)) return
-      if (this.transcriptScroll.scrollTop <= 1 && this.shiftTranscriptWindow(-100, true, -amount)) return
-      this.applyTranscriptPosition(this.transcriptScroll.scrollTop - amount)
-      if (this.transcriptScroll.scrollTop <= 1) {
-        this.syncTranscriptScrollbar()
-        this.handlers.scroll?.(0)
-      } else this.reportTranscriptScroll()
+      if (this.model?.threadSwitcher.open === true) this.threadBrowser.pageUp()
+      else this.transcriptPane.pageUp()
     } else if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "pagedown") {
-      this.cancelWheelReport()
-      const amount = Math.max(1, this.transcriptScroll.viewport.height - 1)
-      if (this.queuePendingTranscriptScroll(amount, true)) return
-      if (this.atMountedTranscriptBottom() && this.shiftTranscriptWindow(100, true, amount, true)) return
-      this.applyTranscriptPosition(this.transcriptScroll.scrollTop + amount)
-      this.reportTranscriptScroll(true)
+      if (this.model?.threadSwitcher.open === true) this.threadBrowser.pageDown()
+      else this.transcriptPane.pageDown()
+    } else if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "home") {
+      if (this.model?.threadSwitcher.open === true) this.threadBrowser.home()
+      else this.transcriptPane.home()
     } else if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "end") {
-      this.cancelWheelReport()
-      this.dispatchTranscriptViewport({ _tag: "FollowCommanded" })
+      if (this.model?.threadSwitcher.open === true) this.threadBrowser.end()
+      else this.transcriptPane.end()
     } else if (mapped.ctrl && mapped.name === "v" && this.handlers.pasteImage !== undefined) this.handlers.pasteImage()
     else this.handlers.key(mapped)
   }

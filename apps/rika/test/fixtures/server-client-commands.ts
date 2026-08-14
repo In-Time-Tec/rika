@@ -1,5 +1,6 @@
 import * as ViewState from "@rika/terminal/terminal-state"
 import * as TerminalMessage from "@rika/terminal/terminal-message"
+import * as ProductOperation from "@rika/product/product-operation"
 import * as ServerService from "@rika/product/server-service"
 import * as InteractiveController from "../../src/interactive/controller/interactive-controller"
 import { Clock, Deferred, Effect, FileSystem, Fiber, Path, Queue, Ref, Stdio, Stream } from "effect"
@@ -33,6 +34,48 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
             const until = clock.currentTimeMillisUnsafe() + 1_100
             while (clock.currentTimeMillisUnsafe() < until) {}
           }).pipe(Effect.andThen(connection.ping), Effect.andThen(emit({ type: "stall-survived" })))
+        if (command === "preview-fanout")
+          return connection.run(
+            { _tag: "Interactive", prompt: ["preview-fanout"], ephemeral: false, workspace },
+            {
+              interactive: (_input, session) =>
+                Effect.gen(function* () {
+                  yield* emit({ type: "interactive-callback", callbacks: 1 })
+                  const previews = yield* Queue.unbounded<{
+                    readonly text: string
+                    readonly revision: number
+                    readonly runId: string
+                  }>()
+                  const feed = yield* Effect.forkChild(
+                    session.events((event) => {
+                      if (event._tag === "ExecutionModelPreviewChanged" && event.preview._tag === "ModelPreview")
+                        Queue.offerUnsafe(previews, {
+                          text: event.preview.changes.map((change) => change.delta).join(""),
+                          revision: event.preview.sequence,
+                          runId: event.preview.runId,
+                        })
+                      return true
+                    }),
+                  )
+                  const preview = yield* Queue.take(previews).pipe(
+                    Effect.timeout("8 seconds"),
+                    Effect.mapError(() =>
+                      ProductOperation.OperationUnavailable.make({
+                        operation: "preview-fanout",
+                        message: "no preview arrived",
+                      }),
+                    ),
+                  )
+                  yield* emit({
+                    type: "preview-received",
+                    text: preview.text,
+                    revision: preview.revision,
+                    runId: preview.runId,
+                  })
+                  yield* Fiber.interrupt(feed)
+                }),
+            },
+          )
         if (command === "reconnect-interactive")
           return connection
             .run(
@@ -413,6 +456,33 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
             )
             yield* emit({ type: "fragment-burst-completed", text: lengths.join(",") })
           }).pipe(Effect.catch((error) => emit({ type: "fragment-burst-failed", error: error.message })))
+        if (command === "critical-overflow")
+          return Effect.gen(function* () {
+            const completed = yield* Queue.unbounded<void>()
+            const exit = yield* Effect.exit(
+              connection.run(
+                { _tag: "Interactive", prompt: ["critical-overflow-events"], ephemeral: false, workspace },
+                {
+                  interactive: (_, session) =>
+                    Effect.gen(function* () {
+                      const feed = yield* Effect.forkChild(
+                        session.events((event) => {
+                          if (event._tag === "ThreadsListed") Queue.offerUnsafe(completed, undefined)
+                        }),
+                      )
+                      yield* Queue.take(completed)
+                      yield* session.readQueue("critical-overflow-thread")
+                      yield* Fiber.interrupt(feed)
+                    }),
+                },
+              ),
+            )
+            yield* emit({
+              type: "critical-overflow-completed",
+              outcome: exit._tag,
+              ...(exit._tag === "Failure" ? { error: String(exit.cause) } : {}),
+            })
+          })
         if (command === "overflow-interactive")
           return Effect.gen(function* () {
             const tags = new Array<string>()
@@ -426,7 +496,8 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
                           tags.push(event._tag)
-                          if (event._tag === "ResyncRequired") Queue.offerUnsafe(completed, undefined)
+                          if (event._tag === "ThreadViewPatch" && event.patch.revision >= 6)
+                            Queue.offerUnsafe(completed, undefined)
                         }),
                       )
                       yield* Queue.take(completed)
@@ -457,7 +528,8 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
                           tags.push(event._tag)
-                          if (event._tag === "ResyncRequired") Queue.offerUnsafe(completed, undefined)
+                          if (event._tag === "ThreadViewPatch" && event.patch.revision >= 6)
+                            Queue.offerUnsafe(completed, undefined)
                         }),
                       )
                       yield* Queue.take(completed)
@@ -486,7 +558,8 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
                           tags.push(event._tag)
-                          if (event._tag === "ResyncRequired") Queue.offerUnsafe(completed, undefined)
+                          if (event._tag === "ThreadViewPatch" && event.patch.revision >= 6)
+                            Queue.offerUnsafe(completed, undefined)
                         }),
                       )
                       yield* Queue.take(completed)
@@ -516,7 +589,7 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
                           tags.push(event._tag)
-                          if (event._tag === "ThreadsListed" && tags.includes("ResyncRequired"))
+                          if (event._tag === "ThreadsListed" && tags.includes("ThreadViewPatch"))
                             Queue.offerUnsafe(completed, undefined)
                         }),
                       )
@@ -539,27 +612,40 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
               .run(
                 { _tag: "Interactive", prompt: [], ephemeral: false, workspace },
                 {
-                  interactive: (_input, session) =>
+                  interactive: (_input, session, interactiveConnection) =>
                     Effect.gen(function* () {
                       callbacks += 1
                       yield* emit({ type: "interactive-callback", callbacks })
+                      yield* emit({ type: "connection-status", status: interactiveConnection.initialStatus })
+                      const statuses = yield* Queue.unbounded<typeof interactiveConnection.initialStatus>()
+                      yield* Effect.forkChild(
+                        interactiveConnection.statusChanges.pipe(
+                          Stream.runForEach((status) => Queue.offer(statuses, status)),
+                        ),
+                      )
+                      const awaitStatus = (expected: typeof interactiveConnection.initialStatus) =>
+                        Effect.gen(function* () {
+                          while ((yield* Queue.take(statuses)) !== expected) {}
+                          yield* emit({ type: "connection-status", status: expected })
+                        })
+                      yield* awaitStatus("connected")
                       const events = yield* Queue.unbounded<string>()
                       yield* Effect.forkChild(session.events((event) => Queue.offerUnsafe(events, event._tag)))
                       yield* emit({ type: "initial-read", tag: yield* Queue.take(events) })
+                      yield* awaitStatus("reconnecting")
+                      yield* awaitStatus("connected")
                       yield* emit({ type: "upgrade-survived", tag: yield* Queue.take(events), callbacks })
                       return yield* Effect.never
                     }),
                 },
               )
               .pipe(
+                Effect.andThen(emit({ type: "upgrade-closed" })),
                 Effect.catch((error) =>
                   emit({
-                    type: "restart-required",
+                    type: "upgrade-failed",
                     tag: error._tag,
                     error: error.message,
-                    ...(error._tag === "ServerRestartRequired" && error.threadId !== undefined
-                      ? { text: error.threadId }
-                      : {}),
                   }),
                 ),
               )
@@ -648,7 +734,11 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
               streamJsonInput: false,
               streamJsonThinking: false,
             })
-            .pipe(Effect.catch((error) => emit({ type: "active-execution-failed", error: error.message })))
+            .pipe(
+              Effect.catch((error) => emit({ type: "active-execution-failed", error: error.message })),
+              Effect.forkChild,
+              Effect.asVoid,
+            )
         if (command === "cancel-delayed")
           return Effect.gen(function* () {
             const operation = yield* Effect.forkChild(

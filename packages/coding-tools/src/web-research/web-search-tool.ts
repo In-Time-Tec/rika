@@ -2,7 +2,7 @@ import { Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
 import * as Policy from "../policy/coding-tool-policy"
 import * as Input from "./web-search-input-contract"
-import { Result, ToolFailure } from "../runtime/coding-tool-result"
+import { maxOutputBytes, Result, ToolFailure } from "../runtime/coding-tool-result"
 export const Request = Schema.Struct({
   _tag: Schema.tag("WebSearch"),
   objective: Input.Objective,
@@ -27,7 +27,7 @@ export const tool = Tool.make("web_search", {
 })
 export const registration = Policy.register(
   tool,
-  Policy.allow("safe", 30_000, 40_000, {
+  Policy.allow("safe", 30_000, maxOutputBytes, {
     family: "direct",
     action: "web-search",
     activeLabel: "Web Search",

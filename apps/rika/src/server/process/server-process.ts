@@ -1,15 +1,7 @@
 import * as ServerService from "@rika/product/server-service"
-import { Config, Effect, FileSystem, Option, Schema, Stream } from "effect"
+import { Effect, FileSystem, Option, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as Net from "node:net"
-
-const encode = Schema.encodeSync(Schema.UnknownFromJsonString)
-const closeDescriptor = (descriptor: number) =>
-  Effect.sync(() => process.getBuiltinModule("node:fs").closeSync(descriptor))
-const writeDescriptor = (descriptor: number, value: string) =>
-  Effect.try(() => process.getBuiltinModule("node:fs").writeFileSync(descriptor, value))
-const error = (reason: "startup-failed" | "transport-failed", cause: unknown) =>
-  ServerService.ServerServiceError.make({ reason, message: String(cause) })
 
 export const processIsAlive = (pid: number) =>
   Effect.sync(() => {
@@ -156,7 +148,7 @@ export const supersede = Effect.fn("ServerProcessStartup.supersede")(function* (
       reason: "foreign-listener",
       message: "Refusing to supersede the current Rika client process",
     })
-  if (!(yield* processIsAlive(pid))) return
+  if (yield* awaitServerRelease(pid, port, 120)) return
   yield* signalProcess(pid, "SIGTERM")
   if (yield* awaitServerRelease(pid, port, 120)) return
   yield* signalProcess(pid, "SIGKILL")
@@ -166,30 +158,3 @@ export const supersede = Effect.fn("ServerProcessStartup.supersede")(function* (
     message: `Stale Rika server PID ${pid} kept port ${port}; stop it, then run rika again`,
   })
 })
-const runtimeRestartFdEnvironment = "RIKA_INTERNAL_RUNTIME_RESTART_FD"
-const runtimeRestartFd = 3
-const RuntimeRestartMessage = Schema.Struct({
-  _tag: Schema.tag("restart"),
-  threadId: Schema.optionalKey(Schema.String),
-})
-export type RuntimeRestartMessage = typeof RuntimeRestartMessage.Type
-const decodeRuntimeRestartMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(RuntimeRestartMessage))
-const decodeRuntimeRestart = (input: unknown) => decodeRuntimeRestartMessage(input)
-let restartSignalled = false
-
-const signalRuntimeRestart = (threadId?: string) =>
-  Effect.gen(function* () {
-    const configured = yield* Config.option(Config.string(runtimeRestartFdEnvironment))
-    if (Option.isNone(configured) || restartSignalled) return
-    restartSignalled = true
-    const descriptor = Number(configured.value)
-    const message: RuntimeRestartMessage = { _tag: "restart", ...(threadId === undefined ? {} : { threadId }) }
-    yield* writeDescriptor(descriptor, `${encode(message)}\n`).pipe(Effect.ensuring(closeDescriptor(descriptor)))
-  }).pipe(Effect.mapError((cause) => error("startup-failed", `Could not report runtime restart: ${String(cause)}`)))
-
-export const runtimeRestart = {
-  runtimeRestartFdEnvironment,
-  runtimeRestartFd,
-  decodeRuntimeRestart,
-  signalRuntimeRestart,
-}

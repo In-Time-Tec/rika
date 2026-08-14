@@ -81,7 +81,7 @@ const previewUnits = (turnId: string, prompt: string, answers: ReadonlyArray<str
 const threadBrowser = (): Model => ({
   ...base(),
   currentThreadId: "thread-1",
-  threadSwitcher: { open: true, query: "", selected: 0, kind: "switch", previewScroll: 0 },
+  threadSwitcher: { open: true, query: "", selected: 0, kind: "switch" },
   threads: [
     thread({
       id: "thread-1",
@@ -97,17 +97,16 @@ const threadBrowser = (): Model => ({
     }),
     thread({ id: "thread-3", title: "TUI performance and bug audit", unread: true }),
   ],
-  threadPreview: ready({
-    threadId: "thread-1",
-    turns: [
-      {
-        prompt: "Finish the thread UI parity work.",
-        units: previewUnits("preview", "Finish the thread UI parity work.", [
-          "Merged all work into main and verified the affected paths.",
-        ]),
-      },
-    ],
-  }),
+  threadPreview: {
+    _tag: "Ready",
+    value: {
+      threadId: "thread-1",
+      requestId: 1,
+      units: previewUnits("preview", "Finish the thread UI parity work.", [
+        "Merged all work into main and verified the affected paths.",
+      ]),
+    },
+  },
 })
 
 export const scenarios = (): ReadonlyArray<readonly [string, Model, number, number]> => {
@@ -302,7 +301,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
           contextWindow: 1_050_000,
           reserveTokens: 128_000,
         },
-        usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0 },
+        usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0, includedAttempts: 0 },
         usageTime: { _tag: "Available", accumulatedMillis: 103_000 },
         usageTokens: { _tag: "Available", total: 6_811_999, uncountedAttempts: 0 },
       },
@@ -318,7 +317,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
         currentThreadId: "context-thread",
         contextDetailsOpen: true,
         contextUsage: { _tag: "Available", inputTokens: 56_120, contextWindow: 372_000, reserveTokens: 128_000 },
-        usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0 },
+        usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0, includedAttempts: 0 },
         usageTime: { _tag: "Available", accumulatedMillis: 103_000 },
       },
       24,

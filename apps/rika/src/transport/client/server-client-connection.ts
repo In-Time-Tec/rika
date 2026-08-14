@@ -1,48 +1,22 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import * as InteractiveSession from "@rika/product/interactive-session"
-import * as InteractiveEvent from "@rika/product/interactive-event"
 import type { InteractiveCommand } from "@rika/product/interactive-command"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as ServerHandshake from "@rika/product/server-service-handshake"
+import type * as ServerInteractiveConnection from "@rika/product/server-interactive-connection"
 import * as ServerFeed from "@rika/product/server-interactive-feed"
 import * as ServerService from "@rika/product/server-service"
-import * as ThreadView from "@rika/product/thread-view"
-import * as Thread from "@rika/product/thread-record"
-import { Context, Crypto, Deferred, Effect, Exit, Layer, Queue, Ref, Schema, Scope, Semaphore } from "effect"
+import { Context, Crypto, Deferred, Effect, Exit, Layer, Queue, Ref, Schema, Scope, Semaphore, Stream } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 import { makeClientMessageWriter, makePhysicalFeed, traceInteractiveEvent } from "./server-client-feed"
+import { eventForSequenceGap } from "./server-client-feed-gap"
+import { makeOutbound } from "./server-client-outbound"
 import type { ClientRequest, PhysicalFeed } from "./server-client-feed"
 import { makeInteractiveSession } from "./server-client-session"
 import { serverSocketFailure } from "./server-client-reconnect"
 import { clientMessageFrames, makeServerMessageFrameDecoder, transportError } from "../protocol/server-message-codec"
 import { defaultOutboundCapacity, json, maxFrameBytes } from "../protocol/server-protocol"
 import { makeClientHandshakePair, verifyServerHandshake } from "../protocol/server-protocol-handshake"
-
-const gapEvent = (event: InteractiveEvent.InteractiveEvent): InteractiveEvent.InteractiveEvent | undefined => {
-  if (event._tag === "ResyncRequired") return event
-  if (event._tag === "ThreadViewSnapshot")
-    return ThreadView.ResyncRequired.make({
-      threadId: event.snapshot.thread.id,
-      expectedRevision: event.snapshot.revision,
-      receivedBaseRevision: event.snapshot.revision,
-      currentRevision: event.snapshot.revision,
-    })
-  if (event._tag === "ThreadViewPatch")
-    return ThreadView.ResyncRequired.make({
-      threadId: event.patch.threadId,
-      expectedRevision: event.patch.revision,
-      receivedBaseRevision: event.patch.baseRevision,
-      currentRevision: event.patch.baseRevision,
-    })
-  if ("threadId" in event && event.threadId !== undefined)
-    return ThreadView.ResyncRequired.make({
-      threadId: Thread.ThreadId.make(String(event.threadId)),
-      expectedRevision: 0,
-      receivedBaseRevision: 0,
-      currentRevision: 0,
-    })
-  return undefined
-}
 
 export const connect = Effect.fn("ServerTransport.connect")(function* (options: {
   readonly url: string
@@ -52,6 +26,10 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
   readonly connectRole: ServerHandshake.ConnectRole
   readonly role: ServerService.Connection["role"]
 }) {
+  const interactiveConnection: ServerInteractiveConnection.Connection = {
+    initialStatus: "connected",
+    statusChanges: Stream.succeed("connected"),
+  }
   const crypto = yield* Crypto.Crypto
   const connectionScope = yield* Scope.make()
   yield* Effect.addFinalizer(() => Scope.close(connectionScope, Exit.void))
@@ -62,16 +40,16 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
     connectionScope,
   )
   const rawWriter = yield* Scope.provide(socket.writer, connectionScope)
-  const outbound = yield* Queue.bounded<string | Socket.CloseEvent>(defaultOutboundCapacity)
+  const outbound = yield* makeOutbound({ capacity: defaultOutboundCapacity, rawWriter })
   const closing = yield* Deferred.make<void>()
   const closed = yield* Deferred.make<void>()
-  const writer = (frame: string | Socket.CloseEvent) =>
+  const enqueue = (frame: string | Socket.CloseEvent, express: boolean) =>
     Deferred.isDone(closing).pipe(
       Effect.flatMap((isClosing) => {
         if (isClosing) return Effect.fail(transportError("Server connection is closing"))
         if (typeof frame === "string" && new TextEncoder().encode(frame).byteLength > maxFrameBytes)
           return Effect.fail(transportError("Server frame exceeds maximum size"))
-        return Queue.offer(outbound, frame).pipe(
+        return (express ? outbound.writeExpress(frame) : outbound.write(frame)).pipe(
           Effect.timeoutOrElse({
             duration: "1 second",
             orElse: () => Effect.fail(transportError("Server outbound queue is overloaded")),
@@ -80,7 +58,9 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
         )
       }),
     )
-  yield* Effect.forkIn(Effect.forever(Queue.take(outbound).pipe(Effect.flatMap(rawWriter))), connectionScope)
+  const writer = (frame: string | Socket.CloseEvent) => enqueue(frame, false)
+  const expressWriter = (frame: string | Socket.CloseEvent) => enqueue(frame, true)
+  yield* Effect.forkIn(outbound.run, connectionScope)
   const accepted = yield* Deferred.make<ServerHandshake.HandshakeAccepted>()
   let acceptedConnectionId: string | undefined
   const clientNonce = yield* crypto.randomUUIDv4
@@ -113,55 +93,31 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
           ).pipe(
             Effect.flatMap((message) => {
               if (message === undefined) return Effect.void
-              if (message._tag === "accepted" || message._tag === "incompatible") {
+              if (message._tag === "accepted" || message._tag === "build-mismatch") {
                 if (message.identity !== options.identity || message.clientNonce !== clientNonce)
                   return Effect.fail(transportError("Foreign server listener", "foreign-listener"))
                 if (!verifyServerHandshake(options.token, signedHandshake, message))
                   return Effect.fail(transportError("Foreign server listener", "foreign-listener"))
-                if (message._tag === "incompatible") {
-                  const validDisposition =
-                    options.connectRole === "launch"
-                      ? message.disposition === "supersede" || message.disposition === "defer"
-                      : message.disposition === "restart"
-                  if (!validDisposition)
+                if (message._tag === "build-mismatch") {
+                  if (message.buildIdentity === signedHandshake.buildIdentity)
+                    return Effect.fail(transportError("Server returned an invalid build mismatch", "foreign-listener"))
+                  if (options.connectRole !== "launch")
                     return Effect.fail(
-                      transportError("Server returned an invalid upgrade disposition", "foreign-listener"),
-                    )
-                  if (!ServerHandshake.HandshakeProtocol.isValidIncompatibility(options.connectRole, message))
-                    return Effect.fail(
-                      transportError(
-                        "Server returned an incompatible response for a compatible handshake",
-                        "foreign-listener",
-                      ),
-                    )
-                  if (message.disposition === "defer")
-                    return Effect.fail(
-                      ServerService.ServerServiceError.make({
-                        reason: "replacement-delayed",
-                        message: `Rika server replacement is delayed because server${message.serverPid === undefined ? "" : ` PID ${message.serverPid}`} owns active execution work. Try again after that work completes`,
-                        ...(message.serverPid === undefined ? {} : { serverPid: message.serverPid }),
-                      }),
+                      transportError("Server rejected an authenticated reattachment", "foreign-listener"),
                     )
                   return Effect.fail(
                     ServerService.ServerServiceError.make({
-                      reason: "incompatible-server",
-                      message: `An incompatible Rika server${message.serverPid === undefined ? "" : ` (PID ${message.serverPid})`} is still running at ${options.url}; close other Rika clients, then run rika again`,
+                      reason: "replacement-required",
+                      message: `A different Rika build${message.serverPid === undefined ? "" : ` (PID ${message.serverPid})`} is still running at ${options.url}`,
                       ...(message.serverPid === undefined ? {} : { serverPid: message.serverPid }),
                     }),
                   )
                 }
-                if (message.protocolVersion !== ServerHandshake.HandshakeProtocol.protocolVersion)
-                  return Effect.fail(
-                    transportError(
-                      `An incompatible Rika server${message.serverPid === undefined ? "" : ` (PID ${message.serverPid})`} is still running at ${options.url}; close other Rika clients, then run rika again`,
-                      "incompatible-server",
-                    ),
-                  )
                 if (
                   options.connectRole === "launch" &&
                   message.buildIdentity !== ServerHandshake.HandshakeProtocol.buildIdentity
                 )
-                  return Effect.fail(transportError("Server accepted an incompatible launch", "foreign-listener"))
+                  return Effect.fail(transportError("Server accepted a different build", "foreign-listener"))
                 return Effect.sync(() => (acceptedConnectionId = message.connectionId)).pipe(
                   Effect.andThen(Deferred.succeed(accepted, message)),
                 )
@@ -191,7 +147,7 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
                     return yield* transportError("Server sent an event for a stale interactive feed")
                   if (message.sequence < feed.expectedSequence) return
                   if (message.sequence > feed.expectedSequence) {
-                    const event = gapEvent(message.event)
+                    const event = eventForSequenceGap(message.event)
                     if (event === undefined)
                       return yield* transportError(
                         `Server interactive feed sequence gap: expected ${feed.expectedSequence}, received ${message.sequence}`,
@@ -269,7 +225,7 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
                         const sequence = nextCommandSequence
                         nextCommandSequence += 1
                         request.commands.set(sequence, done)
-                        yield* Effect.forEach(frames, write, { discard: true }).pipe(
+                        yield* Effect.forEach(frames, expressWriter, { discard: true }).pipe(
                           Effect.mapError((error) => unavailable(error.message)),
                         )
                         return sequence
@@ -376,7 +332,10 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
   )
   const whileConnected = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.raceFirst(effect, disconnected)
   const sendBestEffort = (frame: string | Socket.CloseEvent) =>
-    writer(frame).pipe(Effect.timeoutOrElse({ duration: "250 millis", orElse: () => Effect.void }), Effect.ignore)
+    expressWriter(frame).pipe(
+      Effect.timeoutOrElse({ duration: "250 millis", orElse: () => Effect.void }),
+      Effect.ignore,
+    )
   const response = yield* Effect.raceFirst(Deferred.await(accepted), disconnected).pipe(
     Effect.timeoutOrElse({
       duration: "2 seconds",
@@ -459,7 +418,11 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
                     ? Effect.void
                     : Effect.raceFirst(
                         whileConnected(
-                          runOptions.interactive!(input as ServerFeed.InteractiveInput, state.started.session),
+                          runOptions.interactive!(
+                            input as ServerFeed.InteractiveInput,
+                            state.started.session,
+                            interactiveConnection,
+                          ),
                         ).pipe(
                           Effect.exit,
                           Effect.map((outcome) => ({ _tag: "Callback" as const, outcome })),

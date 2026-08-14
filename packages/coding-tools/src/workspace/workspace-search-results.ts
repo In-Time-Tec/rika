@@ -11,4 +11,9 @@ export interface GrepResult {
   readonly filteredFileCount: number
   readonly nextCursor: string | null
   readonly regexFallbackError?: string
+  readonly deadlineReached?: boolean
+  readonly outputTruncation?: {
+    readonly keptBytes: number
+    readonly totalBytes: number
+  }
 }

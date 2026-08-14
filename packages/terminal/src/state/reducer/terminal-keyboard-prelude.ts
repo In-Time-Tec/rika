@@ -5,7 +5,6 @@ import type { ThreadItem } from "../model/terminal-thread-state"
 import type { Key } from "../../presentation/terminal/terminal-keymap"
 import { filteredThreads } from "../model/terminal-thread-navigation"
 import { expandPastedText } from "../model/terminal-composer-paste"
-import { idle } from "../model/terminal-loadable-state"
 
 const reduceKeyboardPreludeImpl = (
   model: Model,
@@ -80,13 +79,13 @@ const reduceKeyboardPreludeImpl = (
     )
     return {
       ...model,
-      threadSwitcher: { open, query: "", selected, kind: "switch", previewScroll: 0 },
+      threadSwitcher: { open, query: "", selected, kind: "switch" },
       paletteOpen: false,
       palette: { open: false, query: "", selected: 0 },
       modePicker: { ...model.modePicker, open: false },
       filePicker: { ...model.filePicker, open: false },
       shortcutsOpen: false,
-      ...(open ? {} : { threadPreview: idle }),
+      ...(open ? {} : { threadPreview: { _tag: "Idle" as const } }),
     }
   }
   return undefined

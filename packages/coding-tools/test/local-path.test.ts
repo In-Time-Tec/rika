@@ -161,4 +161,32 @@ describe("LocalPath", () => {
       expect(resolved.endsWith("/fresh/nested/file.ts")).toBe(true)
     }),
   )
+  it.effect("resolves exact workspace paths without casing correction or symlink escape", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-exact-path-" })
+        const workspace = `${parent}/workspace`
+        const outside = `${parent}/outside`
+        yield* fileSystem.makeDirectory(workspace)
+        yield* fileSystem.makeDirectory(outside)
+        yield* fileSystem.makeDirectory(`${workspace}/src`)
+        yield* fileSystem.symlink(outside, `${workspace}/escape`)
+        const found: LocalPath.ExactLookup = {
+          ...lookup(fileSystem),
+          realPath: (target) => fileSystem.realPath(target),
+        }
+        const options = { path, base: workspace }
+
+        const exact = yield* LocalPath.resolveExactWorkspacePath(found, "src", options)
+        const wrongCase = yield* Effect.flip(LocalPath.resolveExactWorkspacePath(found, "SRC", options))
+        const escaped = yield* Effect.flip(LocalPath.resolveExactWorkspacePath(found, "escape", options))
+
+        expect(exact).toBe(`${workspace}/src`)
+        expect(wrongCase).toMatchObject({ _tag: "LocalPathError", reason: "not_found" })
+        expect(escaped).toMatchObject({ _tag: "LocalPathError", reason: "outside_workspace" })
+      }),
+    ).pipe(provide(BunServices.layer)),
+  )
 })

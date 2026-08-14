@@ -2,9 +2,22 @@ import * as ProductOperation from "@rika/product/product-operation"
 import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as InteractiveSession from "@rika/product/interactive-session"
 import * as ServerFeed from "@rika/product/server-interactive-feed"
+import * as ServerInteractiveConnection from "@rika/product/server-interactive-connection"
 import * as ServerService from "@rika/product/server-service"
 import * as Thread from "@rika/product/thread-record"
-import { Cause, Clock, Deferred, Duration, Effect, Fiber, Function, Ref, Schedule, Schema } from "effect"
+import {
+  Cause,
+  Clock,
+  Deferred,
+  Duration,
+  Effect,
+  Fiber,
+  Function,
+  Ref,
+  Schedule,
+  Schema,
+  SubscriptionRef,
+} from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 import { failureKind, transportError } from "../protocol/server-message-codec"
 
@@ -15,7 +28,7 @@ const mapServerSocketFailure = (cause: unknown, accepted: boolean): ServerServic
     if (cause.reason.code === 4406)
       return transportError(
         cause.reason.closeReason ||
-          "A listener reported an unsigned server incompatibility; stop it, then run rika again",
+          "A listener reported an unsigned server build mismatch; stop it, then run rika again",
         "foreign-listener",
       )
     if (cause.reason.code === 4401)
@@ -53,11 +66,7 @@ type SupervisorContext = {
   readonly initial: ServerService.Connection
   readonly acquireReady: (
     policy: "launch" | "reattach",
-  ) => Effect.Effect<
-    ServerService.Connection,
-    ServerService.ServerServiceError | ServerService.ServerRestartRequired,
-    never
-  >
+  ) => Effect.Effect<ServerService.Connection, ServerService.ServerServiceError, never>
   readonly logicalClosed: Deferred.Deferred<void>
 }
 
@@ -68,6 +77,11 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
     interactive: NonNullable<NonNullable<Parameters<ServerService.Connection["run"]>[1]>["interactive"]>,
   ) {
     const firstSession = yield* Deferred.make<void>()
+    const connectionStatus = yield* SubscriptionRef.make<ServerInteractiveConnection.Status>("connecting")
+    const interactiveConnection: ServerInteractiveConnection.Connection = {
+      initialStatus: "connecting",
+      statusChanges: SubscriptionRef.changes(connectionStatus),
+    }
     const initialChange = yield* Deferred.make<void>()
     const sessions = yield* Ref.make<{
       readonly session: InteractiveSession.InteractiveSession | undefined
@@ -114,8 +128,10 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
                     _tag: "ExecutionFailed",
                     failure: {
                       tag: "TransportOperationFailed",
+                      category: "transport-degraded",
                       message: String(Cause.squash(cause)),
-                      retry: "user",
+                      retryable: true,
+                      retry: "automatic",
                       actor: "environment",
                     },
                   }),
@@ -143,8 +159,10 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
                         _tag: "ExecutionFailed",
                         failure: {
                           tag: "TransportDisconnected",
+                          category: "transport-degraded",
                           message: "Server transport disconnected; the action outcome is unknown and was not retried",
-                          retry: "user",
+                          retryable: true,
+                          retry: "automatic",
                           actor: "environment",
                         },
                       }),
@@ -156,8 +174,10 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
                   _tag: "ExecutionFailed",
                   failure: {
                     tag: "TransportOperationFailed",
+                    category: "transport-degraded",
                     message: String(Cause.squash(cause)),
-                    retry: "user",
+                    retryable: true,
+                    retry: "automatic",
                     actor: "environment",
                   },
                 }),
@@ -201,8 +221,8 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
         }),
       editQueued: (turnId, prompt) => mutation((session) => session.editQueued(turnId, prompt)),
       dequeue: (turnId) => mutation((session) => session.dequeue(turnId)),
-      steerQueued: (turnId, text) => mutation((session) => session.steerQueued(turnId, text)),
-      steer: (text, turnId) => mutation((session) => session.steer(text, turnId)),
+      steerQueued: (turnId, text, requestId) => mutation((session) => session.steerQueued(turnId, text, requestId)),
+      steer: (text, requestId, turnId) => mutation((session) => session.steer(text, requestId, turnId)),
       approveAuthorization: (turnId, authorizationId) =>
         mutation((session) => session.approveAuthorization(turnId, authorizationId)),
       denyAuthorization: (turnId, authorizationId) =>
@@ -219,9 +239,7 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
           yield* retryRead((session) => session.selectThread(threadId))
         }),
       readQueue: (threadId) => retryRead((session) => session.readQueue(threadId)),
-      loadOlder: (threadId, before) => retryRead((session) => session.loadOlder(threadId, before)),
-      loadNewer: (threadId, after) => retryRead((session) => session.loadNewer(threadId, after)),
-      previewThread: (threadId) => retryRead((session) => session.previewThread(threadId)),
+      previewThread: (threadId, requestId) => retryRead((session) => session.previewThread(threadId, requestId)),
       reopenThread: Effect.gen(function* () {
         yield* Ref.set(selected, { _tag: "latest" as const })
         yield* retryRead((session) => session.reopenThread)
@@ -237,6 +255,7 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
         const changed = yield* Ref.modify(sessions, (state) => [state.changed, { ...state, session }])
         yield* Deferred.succeed(changed, undefined)
         if (first) yield* Deferred.succeed(firstSession, undefined)
+        yield* SubscriptionRef.set(connectionStatus, "connected")
       })
     const runPhysical = (connection: ServerService.Connection, first: boolean) =>
       connection
@@ -249,10 +268,7 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
       connection: ServerService.Connection | undefined,
       first: boolean,
       consecutiveFailures: number,
-    ): Effect.Effect<
-      void,
-      ServerService.ServerServiceError | ServerService.ServerRestartRequired | ProductOperation.OperationUnavailable
-    > =>
+    ): Effect.Effect<void, ServerService.ServerServiceError | ProductOperation.OperationUnavailable> =>
       Effect.gen(function* () {
         const acquired = yield* Effect.exit(
           connection === undefined ? acquireReady("reattach") : Effect.succeed(connection),
@@ -265,34 +281,21 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
         return yield* recover(outcome.cause, duration, first, consecutiveFailures, acquired.value.connectionId)
       })
     const recover = (
-      cause: Cause.Cause<
-        ServerService.ServerServiceError | ServerService.ServerRestartRequired | ProductOperation.OperationUnavailable
-      >,
+      cause: Cause.Cause<ServerService.ServerServiceError | ProductOperation.OperationUnavailable>,
       duration: number | undefined,
       first: boolean,
       consecutiveFailures: number,
       connectionId?: string,
-    ): Effect.Effect<
-      void,
-      ServerService.ServerServiceError | ServerService.ServerRestartRequired | ProductOperation.OperationUnavailable
-    > =>
+    ): Effect.Effect<void, ServerService.ServerServiceError | ProductOperation.OperationUnavailable> =>
       Effect.gen(function* () {
         if (Cause.hasInterruptsOnly(cause)) return yield* Effect.failCause(cause)
         const failure = Cause.squash(cause)
-        if (
-          Schema.is(ServerService.ServerRestartRequired)(failure) ||
-          (Schema.is(ServerService.ServerServiceError)(failure) && failure.reason === "incompatible-server")
-        ) {
-          const selection = yield* Ref.get(selected)
-          return yield* ServerService.ServerRestartRequired.make({
-            message: failure.message,
-            ...(selection?._tag === "thread" ? { threadId: selection.threadId } : {}),
-          })
-        }
         if (!isDisconnectedOperation(failure) && !isReconnectableTransport(failure))
           return yield* Effect.failCause(cause)
         const current = (yield* Ref.get(sessions)).session
         if (current !== undefined) yield* invalidate(current)
+        const connectedBefore = yield* Deferred.isDone(firstSession)
+        yield* SubscriptionRef.set(connectionStatus, connectedBefore ? "reconnecting" : "connecting")
         const stableConnection = duration !== undefined && duration >= reconnectStableMilliseconds
         const nextFailure = stableConnection ? 1 : consecutiveFailures + 1
         if (stableConnection) nextReconnectDelay = yield* Schedule.toStepWithMetadata(reconnectSchedule)
@@ -320,17 +323,16 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
             ...(connectionId === undefined ? {} : { "rika.server.connection.id": connectionId }),
           }),
         )
-        const nextFirst = first && !(yield* Deferred.isDone(firstSession))
+        const nextFirst = first && !connectedBefore
         return yield* loop(undefined, nextFirst, nextFailure)
       })
+    const interactiveFiber = yield* Effect.forkChild(interactive(operationInput, stable, interactiveConnection))
     const supervisor = yield* Effect.forkChild(Effect.raceFirst(loop(initial, true, 0), Deferred.await(logicalClosed)))
     yield* Effect.raceFirst(
-      Deferred.await(firstSession),
+      Deferred.await(firstSession).pipe(Effect.andThen(Fiber.join(interactiveFiber))),
       Effect.raceFirst(Deferred.await(logicalClosed), Fiber.join(supervisor)),
+    ).pipe(
+      Effect.ensuring(Effect.all([Fiber.interrupt(interactiveFiber), Fiber.interrupt(supervisor)], { discard: true })),
     )
-    yield* Effect.raceFirst(
-      interactive(operationInput, stable),
-      Effect.raceFirst(Deferred.await(logicalClosed), Fiber.join(supervisor)),
-    ).pipe(Effect.ensuring(Fiber.interrupt(supervisor)))
   })
 }

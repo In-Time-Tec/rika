@@ -1,7 +1,6 @@
 
 
                    :
-            ●●●●●•••••::::·
   ╭─ Command Palette ────────────────────────────────────────────────────────╮
   │ >                                                                        │
   │                                                                          │
@@ -10,9 +9,10 @@
   │             mode  change mode                                    Ctrl+S  │
   │            usage  show context and usage                         Ctrl+Y  │
   │             rika  toggle fast mode                                       │
+  │        subagents  set max subagents                                      │
+  │        subagents  set max depth                                          │
   │             rika  quit                                           Ctrl+C  │
   ╰──────────────────────────────────────────────────────────────────────────╯
-       ....····:::···...........
          ......···............
             ...............
                    .

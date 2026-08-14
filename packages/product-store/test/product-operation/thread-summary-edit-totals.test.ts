@@ -14,7 +14,7 @@ import { unitOrder } from "@rika/transcript/transcript-unit-order"
 import { Clock, Context, Effect, Layer, Stream } from "effect"
 
 import { executionRoute } from "../support/product-test-current-state"
-import { productLayer, provideLayer } from "../support/operation-layer-harness"
+import { executionSessionLifecycleLayerTest, productLayer, provideLayer } from "../support/operation-layer-harness"
 import { threadLineage } from "../support/operation-selection-fixtures"
 
 const thread: Thread.Thread = {
@@ -37,7 +37,7 @@ const patch = ["--- a/src/a.ts", "+++ b/src/a.ts", "@@ -1,2 +1,3 @@", "-before",
 const editSnapshot: ExecutionProjection.Snapshot = {
   _tag: "ProjectionSnapshot",
   revision: 0,
-  checkpoint: { version: 1, cursor: "cursor-a", state: "{}" },
+  checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "cursor-a", state: "{}" },
   units: [
     {
       key: "tool:edit",
@@ -93,11 +93,11 @@ const backendFor = (snapshot: (id: Turn.TurnId) => ExecutionProjection.Snapshot)
     startTurn: (input) =>
       Effect.succeed({ runId: `${input.turnId}-run`, turnId: input.turnId, threadId: input.threadId }),
     cancelTurn: () => Effect.void,
-    steerTurn: () => Effect.void,
+    steerTurn: () => Effect.succeed({ entryId: "test-steering", sequence: 0 }),
     approveTurn: () => Effect.void,
     denyTurn: () => Effect.void,
     watchTurn: (link) => Stream.make(snapshot(Turn.TurnId.make(link.turnId))),
-    inspectTurn: () => Effect.succeed({ status: "completed" }),
+    inspectTurn: () => Effect.succeed({ status: "completed", cursor: "cursor-a" }),
   })
 
 const runPrompt = {
@@ -124,6 +124,7 @@ const durableState = Effect.gen(function* () {
   const transcriptContext = yield* Layer.build(transcriptLayer)
   const process = (backend: ExecutionGateway.Interface, nextTurnId: Turn.TurnId) =>
     productLayer({
+      executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
       repositoryLayer: threadLayer,
       turnRepositoryLayer: turnLayer,
       threadSummaryRepositoryLayer: Layer.succeedContext(summaryContext),

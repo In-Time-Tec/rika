@@ -1,7 +1,9 @@
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { Checkpoint, type Change } from "./execution-projection"
 import type { Status } from "./execution-status"
+import type { ModelPreviewEvent } from "./model-preview"
 import { AuthorizationResponse, ExecutionLink, StartTurn } from "./execution-gateway-request"
+import { SteeringInput, SteeringReceipt } from "./execution-steering"
 import {
   ApprovalResponseFailure,
   CancelTurnFailure,
@@ -14,14 +16,15 @@ import { Context, Effect, Layer, Stream } from "effect"
 
 export * from "./execution-gateway-failure"
 export * from "./execution-gateway-request"
+export * from "./execution-steering"
+export * from "./model-preview"
+
+export type WatchEvent = Change | ModelPreviewEvent
 
 export interface Interface {
   readonly startTurn: (input: StartTurn) => Effect.Effect<ExecutionLink, StartTurnFailure>
-  readonly cancelTurn: (link: ExecutionLink, reason?: string) => Effect.Effect<void, CancelTurnFailure>
-  readonly steerTurn: (
-    link: ExecutionLink,
-    input: { readonly text: string; readonly idempotencyKey: string },
-  ) => Effect.Effect<void, SteeringFailure>
+  readonly cancelTurn: (link: ExecutionLink, reason: string) => Effect.Effect<void, CancelTurnFailure>
+  readonly steerTurn: (link: ExecutionLink, input: SteeringInput) => Effect.Effect<SteeringReceipt, SteeringFailure>
   readonly approveTurn: (
     link: ExecutionLink,
     input: AuthorizationResponse,
@@ -29,11 +32,19 @@ export interface Interface {
   readonly denyTurn: (link: ExecutionLink, input: AuthorizationResponse) => Effect.Effect<void, ApprovalResponseFailure>
   readonly watchTurn: (
     link: ExecutionLink,
-    input?: { readonly prompt?: string; readonly checkpoint?: Checkpoint; readonly units?: ReadonlyArray<Unit> },
-  ) => Stream.Stream<Change, WatchTurnFailure>
+    input?: {
+      readonly prompt?: string
+      readonly checkpoint?: Checkpoint
+      readonly units?: ReadonlyArray<Unit>
+      readonly pricing?: "included" | "metered"
+    },
+  ) => Stream.Stream<WatchEvent, WatchTurnFailure>
   readonly inspectTurn: (
     link: ExecutionLink,
-  ) => Effect.Effect<{ readonly status: Status | "unavailable"; readonly cursor?: string }, InspectTurnFailure>
+  ) => Effect.Effect<
+    { readonly status: "unavailable" } | { readonly status: Status; readonly cursor: string },
+    InspectTurnFailure
+  >
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -47,7 +58,7 @@ export const layerTest = (overrides: Partial<Interface> = {}) =>
       startTurn: (input) =>
         Effect.succeed({ runId: "opaque-test-run", turnId: input.turnId, threadId: input.threadId }),
       cancelTurn: () => Effect.void,
-      steerTurn: () => Effect.void,
+      steerTurn: () => Effect.succeed({ entryId: "test-steering", sequence: 0 }),
       approveTurn: () => Effect.void,
       denyTurn: () => Effect.void,
       watchTurn: () => Stream.empty,

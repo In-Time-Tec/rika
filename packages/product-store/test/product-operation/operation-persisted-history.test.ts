@@ -10,7 +10,7 @@ import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
 
 import { executionRoute } from "../support/product-test-current-state"
-import { productLayer, provideLayer } from "../support/operation-layer-harness"
+import { executionSessionLifecycleLayerTest, productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
 import { backend } from "../support/operation-execution-fixtures"
 
@@ -43,6 +43,7 @@ describe("Operation", () => {
       const layer = Layer.merge(
         TestConsole.layer,
         productLayer({
+          executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
           repositoryLayer: ThreadRepository.memoryLayer([thread]),
           turnRepositoryLayer: TurnRepository.memoryLayer([turn]),
           backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
@@ -108,6 +109,7 @@ describe("Operation", () => {
         },
       ])
       const layer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
@@ -163,6 +165,7 @@ describe("Operation", () => {
       const turns = yield* TurnRepository.makeMemory(sourceTurns)
       const turnSequence = yield* Ref.make(0)
       const layer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
@@ -213,6 +216,7 @@ describe("Operation", () => {
         ),
       )
       const layer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
@@ -276,13 +280,14 @@ describe("Operation", () => {
       })
       const forkBackend = ExecutionGateway.Service.of({
         ...backend,
-        inspectTurn: () => Effect.succeed({ status: "running" }),
+        inspectTurn: () => Effect.succeed({ status: "running", cursor: "synthetic-running-cursor" }),
         startTurn: (input) =>
           Effect.succeed({ runId: "atomic-fork-run", turnId: input.turnId, threadId: input.threadId }),
       })
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const turnSequence = yield* Ref.make(0)
       const layer = productLayer({
+        executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, delayedTurns),
         backendLayer: Layer.succeed(ExecutionGateway.Service, forkBackend),
