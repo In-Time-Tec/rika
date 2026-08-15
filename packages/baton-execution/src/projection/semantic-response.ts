@@ -1,7 +1,6 @@
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import { cellToolName } from "./cell"
-import type { ModelResponseCommitted } from "./semantic-event"
-export { semanticTreeEvent, type SemanticTreeEvent } from "./semantic-event"
+import type { SemanticModelResponseEvent } from "./semantic-event"
 import type { Node } from "./model"
 import { encoded } from "./decoding"
 import { optionalString, record, string } from "./values"
@@ -23,7 +22,6 @@ export interface SemanticResponseProjectionInput {
     detail: string,
     discriminator: string | number,
   ) => unknown
-  readonly error: (node: Node, family: string, title: string, detail: string, discriminator: string | number) => unknown
   readonly beginOrderedResponse: () => void
   readonly endOrderedResponse: () => void
 }
@@ -31,7 +29,7 @@ export interface SemanticResponseProjectionInput {
 export const makeSemanticResponseProjection = (input: SemanticResponseProjectionInput) => {
   const putCompletedText = (
     node: Node,
-    event: ModelResponseCommitted,
+    event: SemanticModelResponseEvent,
     contentIndex: number,
     kind: "assistant" | "reasoning",
     text: string,
@@ -49,7 +47,7 @@ export const makeSemanticResponseProjection = (input: SemanticResponseProjection
     )
   }
 
-  const apply = (node: Node, event: ModelResponseCommitted) => {
+  const apply = (node: Node, event: SemanticModelResponseEvent) => {
     input.beginOrderedResponse()
     try {
       for (const [contentIndex, part] of event.response.content.entries()) {
@@ -92,15 +90,6 @@ export const makeSemanticResponseProjection = (input: SemanticResponseProjection
               "source",
               "Model cited a source",
               "A model source was recorded.",
-              `${event.operationKey}:${contentIndex}`,
-            )
-            break
-          case "error":
-            input.error(
-              node,
-              "model-error",
-              "Model response error",
-              String(part.error),
               `${event.operationKey}:${contentIndex}`,
             )
             break

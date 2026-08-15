@@ -1,4 +1,4 @@
-import type { RunTree } from "@batonfx/runtime"
+import type { SemanticTreeEvent } from "../src/projection/semantic-event"
 import { describe, expect, it } from "@effect/vitest"
 import { TreeProjector } from "../src/projection/tree"
 import type { CheckpointInstrumentation } from "../src/projection/projector-recovery"
@@ -388,7 +388,7 @@ describe("Baton tree projector", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-wide-resume", "wide")
     const stored = new Map<string, ReturnType<typeof projector.snapshot>["units"][number]>()
-    const apply = (event: RunTree.TreeEvent) => {
+    const apply = (event: SemanticTreeEvent) => {
       const change = projector.apply(event)
       for (const key of change.remove) stored.delete(key)
       for (const unit of change.upsert) stored.set(unit.key, unit)

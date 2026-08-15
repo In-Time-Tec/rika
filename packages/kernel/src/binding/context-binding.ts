@@ -73,7 +73,17 @@ const textOf = (entry: Session.Entry): string => {
   if (entry._tag === "Skill") return entry.name
   if (entry._tag === "Handoff") return entry.projectedHistory.content.map(textOfMessage).filter(Boolean).join("\n")
   if (entry._tag === "BranchSummary") return entry.summary
-  return entry.summary ?? ""
+  if (entry._tag === "ModelResponse") {
+    return entry.content
+      .flatMap((part) => {
+        if (part.type === "text" || part.type === "reasoning") return [part.text]
+        if (part.type === "tool-call") return [`${part.name}(${JSON.stringify(part.params)})`]
+        if (part.type === "tool-result") return [JSON.stringify(part.result)]
+        return []
+      })
+      .join("\n")
+  }
+  return entry._tag === "Compaction" ? (entry.summary ?? "") : ""
 }
 
 const projected = (entry: Session.Entry) => ({

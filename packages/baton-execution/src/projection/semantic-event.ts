@@ -1,27 +1,38 @@
-import type { RunEvent, RunTree } from "@batonfx/runtime"
-import type { Response, Tool } from "effect/unstable/ai"
+import type { RunEvent, RunTree, Runtime } from "@batonfx/runtime"
+import { Effect, Function } from "effect"
 
-type SemanticContentPart = Response.Part<Record<string, Tool.Any>> | Response.ErrorPart
+type ModelResponseEvent = Extract<
+  RunEvent.RunEvent,
+  { readonly _tag: "ModelResponseCommitted" | "ModelResponseInterrupted" }
+>
 
-export type ModelResponseCommitted = Omit<RunEvent.RunEvent, "_tag"> & {
-  readonly _tag: "ModelResponseCommitted"
-  readonly turn: number
-  readonly operationKey: string
-  readonly modelCallId: string
-  readonly modelAttemptId: string
-  readonly attempt: number
-  readonly response: {
-    readonly content: ReadonlyArray<SemanticContentPart>
-    readonly usage?: Response.Usage
-    readonly finishReason?: Response.FinishReason
-  }
-  readonly digest: string
+export type SemanticModelResponseEvent = ModelResponseEvent & {
+  readonly response: RunEvent.CompletedModelResponse
 }
 
-type SemanticRunEvent = Exclude<RunEvent.RunEvent, { readonly part: unknown }> | ModelResponseCommitted
+type SemanticRunEvent =
+  | Exclude<RunEvent.RunEvent, ModelResponseEvent | { readonly part: unknown }>
+  | SemanticModelResponseEvent
 
 export type SemanticTreeEvent = Omit<RunTree.TreeEvent, "event"> & {
   readonly event: SemanticRunEvent
 }
 
-export const semanticTreeEvent = (event: RunTree.TreeEvent): SemanticTreeEvent => event as SemanticTreeEvent
+type ResolveModelResponse = Runtime.Interface["resolveModelResponse"]
+
+export const resolveSemanticTreeEvent: {
+  (
+    input: RunTree.TreeEvent,
+    resolveModelResponse: ResolveModelResponse,
+  ): Effect.Effect<SemanticTreeEvent, Runtime.ResolveModelResponseError>
+  (
+    resolveModelResponse: ResolveModelResponse,
+  ): (input: RunTree.TreeEvent) => Effect.Effect<SemanticTreeEvent, Runtime.ResolveModelResponseError>
+} = Function.dual(2, (input: RunTree.TreeEvent, resolveModelResponse: ResolveModelResponse) => {
+  const event = input.event
+  return event._tag === "ModelResponseCommitted" || event._tag === "ModelResponseInterrupted"
+    ? resolveModelResponse(event).pipe(
+        Effect.map((response) => ({ ...input, event: { ...event, response } }) as SemanticTreeEvent),
+      )
+    : Effect.succeed(input as SemanticTreeEvent)
+})

@@ -15,6 +15,7 @@ import { Cause, Context, Effect, Layer, Option, Schedule, Schema, Stream } from 
 import type { KernelOptions } from "./baton-route-options"
 import { configure, makeResolver } from "./baton-route"
 import { TreeProjector } from "./projection/tree"
+import { resolveSemanticTreeEvent } from "./projection/semantic-event"
 
 /**
  * The runtime database always lives directly under the profile data root as `<dataRoot>/baton.db`,
@@ -49,6 +50,7 @@ export interface Options {
   readonly credentialStore?: Layer.Layer<ProviderCredentialStore, never, never>
   readonly openAiAccountAuth?: OpenAiAuth.ServiceInterface
   readonly subscriberQueueCapacity?: number
+  readonly scheduler?: Runtime.LayerOptions["scheduler"]
 }
 
 const message = (cause: unknown) => {
@@ -304,6 +306,7 @@ const make = (options: Options, credentialStore: ProviderCredentialStoreShape | 
           ...(input?.checkpoint === undefined ? {} : { cursor: RunTree.TreeCursor.make(input.checkpoint.cursor) }),
         }).pipe(
           Stream.provideService(Runtime.Runtime, runtime),
+          Stream.mapEffect((event) => resolveSemanticTreeEvent(event, runtime.resolveModelResponse)),
           Stream.map((event) => ({ _tag: "root" as const, event })),
         )
         const titleId = link.titleRunId
@@ -467,6 +470,7 @@ export const layer = (
         ...(options.subscriberQueueCapacity === undefined
           ? {}
           : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
+        ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
       })
       const executionLayer = Layer.effectContext(make(options, credentialStore)).pipe(Layer.provide(runtimeLayer))
       return executionLayer.pipe(

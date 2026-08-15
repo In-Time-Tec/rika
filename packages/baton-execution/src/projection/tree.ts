@@ -1,4 +1,4 @@
-import type { Run, RunEvent, RunTree } from "@batonfx/runtime"
+import type { Run, RunEvent } from "@batonfx/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import * as UnitOrder from "@rika/product/execution-transcript-contract"
 import type { Unit } from "@rika/product/execution-transcript-contract"
@@ -7,7 +7,8 @@ import { makeAuthorizationProjection } from "./authorization"
 import { cellToolName, makeCellProjection } from "./cell"
 import { makeDiagnosticProjection } from "./diagnostic"
 import { makeSubagentCardProjection } from "./subagent-card"
-import { makeSemanticResponseProjection, semanticTreeEvent, type SemanticTreeEvent } from "./semantic-response"
+import { makeSemanticResponseProjection } from "./semantic-response"
+import type { SemanticTreeEvent } from "./semantic-event"
 import { makeSteeringProjection } from "./steering"
 import { makeToolUnitProjection } from "./tool-unit"
 import { authorizationTarget, makeProjectorCheckpointCodec } from "./checkpoint"
@@ -185,7 +186,6 @@ const make = (
     removeTool: (node, rawId) => remove(toolState(node, rawId).key),
     putTool,
     notice,
-    error,
     beginOrderedResponse: () => {
       semanticOrderPart = 0
     },
@@ -286,6 +286,7 @@ const make = (
         node.phase += 1
         return
       case "ModelResponseCommitted":
+      case "ModelResponseInterrupted":
         return semanticResponse.apply(node, event)
       case "ToolExecutionStarted":
         if (event.call.name === cellToolName)
@@ -609,7 +610,7 @@ const make = (
     }
   } else restore(resume)
 
-  const applyAll = (inputs: ReadonlyArray<RunTree.TreeEvent>): Projection.Patch => {
+  const applyAll = (inputs: ReadonlyArray<SemanticTreeEvent>): Projection.Patch => {
     const first = inputs[0]
     const last = inputs.at(-1)
     if (first === undefined || last === undefined) throw new RangeError("A projector batch must contain an event")
@@ -631,9 +632,8 @@ const make = (
     const baseRevision = core.revision
     for (const input of inputs) {
       core.revision += 1
-      const semantic = semanticTreeEvent(input)
-      applyRunEvent(semantic)
-      const node = nodes.get(semantic.runId)
+      applyRunEvent(input)
+      const node = nodes.get(input.runId)
       if (node !== undefined) recovery.nodeChanged(node)
     }
     core.checkpoint = {
