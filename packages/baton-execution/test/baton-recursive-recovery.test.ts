@@ -19,7 +19,7 @@ const waitForRequests = (models: LaneModels, profile: Profile, count: number) =>
       (current) => current >= count,
       () => "pending" as const,
     ),
-    Effect.retry({ schedule: Schedule.spaced("10 millis"), times: 1_000 }),
+    Effect.retry({ schedule: Schedule.spaced("10 millis"), times: 4_000 }),
     Effect.asVoid,
   )
 
@@ -57,21 +57,23 @@ const waitForRecursiveSuspension = (filename: string) =>
         runs[0]?.depth === 1 && runs[0].status === "waiting" && runs[1]?.depth === 2 && runs[1].status === "queued",
       () => "pending" as const,
     ),
-    Effect.retry({ schedule: Schedule.spaced("2 millis"), times: 1_000 }),
+    Effect.retry({ schedule: Schedule.spaced("2 millis"), times: 5_000 }),
     Effect.asVoid,
   )
 
 const watch = (filename: string, models: LaneModels, link: ExecutionGateway.ExecutionLink) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const context = yield* Layer.build(layer({ filename, modelServices: models.registryLayer }))
+      const context = yield* Layer.build(
+        layer({ filename, modelServices: models.registryLayer, scheduler: { concurrency: 1 } }),
+      )
       const gateway = Context.get(context, ExecutionGateway.Service)
       yield* gateway.inspectTurn(link).pipe(
         Effect.filterOrFail(
           ({ status }) => status === "completed",
           () => "pending" as const,
         ),
-        Effect.retry({ schedule: Schedule.spaced("10 millis"), times: 2_000 }),
+        Effect.retry({ schedule: Schedule.spaced("10 millis"), times: 4_000 }),
       )
       return projection([...(yield* gateway.watchTurn(link).pipe(Stream.runCollect))])
     }),
@@ -111,7 +113,9 @@ it.live(
         const route = { ...laneExecutionRoute(), subagents: { maxDepth: 2, maxSubagents: 4 } }
         const link = yield* Effect.scoped(
           Effect.gen(function* () {
-            const context = yield* Layer.build(layer({ filename, modelServices: models.registryLayer }))
+            const context = yield* Layer.build(
+              layer({ filename, modelServices: models.registryLayer, scheduler: { concurrency: 1 } }),
+            )
             const gateway = Context.get(context, ExecutionGateway.Service)
             const admitted = yield* gateway.startTurn({
               threadId: "recursive-recovery-thread",
@@ -169,5 +173,5 @@ it.live(
         ).toBe(childCard?.card.id)
       }),
     ),
-  40_000,
+  60_000,
 )

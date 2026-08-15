@@ -2,13 +2,14 @@ import { RunTree, type RunEvent } from "@batonfx/runtime"
 import { DateTime } from "effect"
 import { describe, expect, it } from "@effect/vitest"
 import { TreeProjector } from "../src/projection/tree"
+import type { SemanticTreeEvent } from "../src/projection/semantic-event"
 
 let position = 0
 const treeEvent = (
   runId: string,
   event: Partial<RunEvent.RunEvent> & { readonly _tag: RunEvent.RunEvent["_tag"] },
   options: { readonly rootRunId?: string; readonly parentRunId?: string; readonly invocationId?: string } = {},
-): RunTree.TreeEvent => {
+): SemanticTreeEvent => {
   position += 1
   const rootRunId = options.rootRunId ?? "raw-root-run"
   return {
@@ -25,7 +26,7 @@ const treeEvent = (
       executableRef: {} as never,
       occurredAt: occurredAt(position),
       ...event,
-    } as RunEvent.RunEvent,
+    } as SemanticTreeEvent["event"],
     cursor: RunTree.TreeCursor.make(`tree-cursor-${position}`),
   }
 }

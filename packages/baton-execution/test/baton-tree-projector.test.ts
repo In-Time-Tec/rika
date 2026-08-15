@@ -1,6 +1,7 @@
-import type { RunTree } from "@batonfx/runtime"
+import type { SemanticTreeEvent } from "../src/projection/semantic-event"
 import { describe, expect, it } from "@effect/vitest"
 import { TreeProjector } from "../src/projection/tree"
+import type { CheckpointInstrumentation } from "../src/projection/projector-recovery"
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
 import {
   assistantOf,
@@ -387,7 +388,7 @@ describe("Baton tree projector", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-wide-resume", "wide")
     const stored = new Map<string, ReturnType<typeof projector.snapshot>["units"][number]>()
-    const apply = (event: RunTree.TreeEvent) => {
+    const apply = (event: SemanticTreeEvent) => {
       const change = projector.apply(event)
       for (const key of change.remove) stored.delete(key)
       for (const unit of change.upsert) stored.set(unit.key, unit)
@@ -721,5 +722,76 @@ describe("Baton tree projector", () => {
       status: "failed",
       reason: "OpenAiClient.createResponseStream: InvalidKey: Verify your API key is correct",
     })
+  })
+
+  it("checkpoints indexed recovery without visiting settled history and restores the next patch exactly", () => {
+    resetEventPosition()
+    const visits = new Map<string, number>()
+    const instrumentation: CheckpointInstrumentation = {
+      visit: (kind) => visits.set(kind, (visits.get(kind) ?? 0) + 1),
+    }
+    const projector = TreeProjector.make(
+      "turn-incremental-checkpoint",
+      "incremental",
+      undefined,
+      [],
+      false,
+      "metered",
+      instrumentation,
+    )
+    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
+    for (let index = 0; index < 1_000; index += 1) {
+      projector.apply(modelResponse("raw-root-run", { type: "text", text: `settled-${index}`, metadata: {} }))
+      projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: index + 1 }))
+    }
+    const call = {
+      type: "tool-call" as const,
+      id: "active-cell",
+      name: "typescript",
+      params: { code: "await activeWork" },
+      providerExecuted: false,
+      metadata: {},
+    }
+    projector.apply(treeEvent("raw-root-run", { _tag: "ToolExecutionStarted", turn: 1_000, call } as never))
+    projector.apply(
+      treeEvent("raw-root-run", { _tag: "CompactionStarted", compactionId: "active-compaction" } as never),
+    )
+    visits.clear()
+    const active = projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolProgress",
+        turn: 1_000,
+        toolCallId: "active-cell",
+        data: { _tag: "Stdout", cellId: "active-cell", sequence: 0, text: "one" },
+      } as never),
+    )
+    expect(active.revision).toBeGreaterThan(2_000)
+    expect(active.upsert).toEqual([
+      expect.objectContaining({ content: { _tag: "Block", block: expect.objectContaining({ _tag: "Cell" }) } }),
+    ])
+    expect(Object.fromEntries(visits)).toEqual({ node: 1, cell: 1, compaction: 1 })
+    const persisted = JSON.parse(active.checkpoint.state) as {
+      readonly nodes: ReadonlyArray<{ readonly cells: ReadonlyArray<readonly [string, unknown]> }>
+      readonly runningCompactions: ReadonlyArray<string>
+    }
+    expect(persisted.nodes.flatMap((node) => node.cells.map(([rawId]) => rawId))).toEqual(["active-cell"])
+    expect(persisted.runningCompactions).toHaveLength(1)
+
+    const resumed = TreeProjector.make(
+      "turn-incremental-checkpoint",
+      "incremental",
+      active.checkpoint,
+      projector.snapshot().units,
+    )
+    const next = treeEvent("raw-root-run", {
+      _tag: "ToolProgress",
+      turn: 1_000,
+      toolCallId: "active-cell",
+      data: { _tag: "Stdout", cellId: "active-cell", sequence: 1, text: "two" },
+    } as never)
+    const livePatch = projector.apply(next)
+    const resumedPatch = resumed.apply(next)
+    expect(resumedPatch).toEqual(livePatch)
+    expect(resumed.snapshot()).toEqual(projector.snapshot())
   })
 })

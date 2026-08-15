@@ -79,7 +79,14 @@ describe("Baton subagent card projection", () => {
     const completed = projector.apply(
       treeEvent(
         "raw-child-run",
-        { _tag: "RunCompleted", result: { text: "aggregate child output", turns: 1, transcript: [] as never } },
+        {
+          _tag: "RunCompleted",
+          result: {
+            text: "aggregate child output",
+            turns: 1,
+            session: { sessionId: "session:raw-child-run", leafId: "entry:raw-child-run" },
+          },
+        },
         { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
       ),
     )

@@ -126,19 +126,22 @@ const snapshotFromSelection = (
     },
   }
 }
-const resync = (snapshot: ThreadView.ThreadViewSnapshot, receivedBaseRevision = snapshot.revision) =>
+const resync = (
+  view: Pick<ThreadView.ThreadViewAccumulator, "thread" | "revision">,
+  receivedBaseRevision = view.revision,
+) =>
   ThreadView.ResyncRequired.make({
-    threadId: snapshot.thread.id,
-    expectedRevision: snapshot.revision + 1,
+    threadId: view.thread.id,
+    expectedRevision: view.revision + 1,
     receivedBaseRevision,
-    currentRevision: snapshot.revision,
+    currentRevision: view.revision,
   })
 export interface ThreadViewFeed {
   readonly publish: (event: RuntimeEvent) => ReadonlyArray<ClientEvent>
   readonly current: () => ThreadView.ThreadViewSnapshot | undefined
 }
 export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
-  let current: ThreadView.ThreadViewSnapshot | undefined
+  let current: ThreadView.ThreadViewAccumulator | undefined
   let snapshotRequired = false
   let knownThreadId: string | undefined
   const knownProjectionRevisions = new Map<string, number>()
@@ -174,19 +177,24 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
     }
   }
   const replace = (snapshot: ThreadView.ThreadViewSnapshot): ReadonlyArray<ClientEvent> => {
-    current = snapshot
+    const hydrated = ThreadView.fromSnapshot(snapshot)
+    if (Result.isFailure(hydrated)) {
+      current = undefined
+      snapshotRequired = true
+      return [resync(snapshot)]
+    }
+    current = hydrated.success
     remember(snapshot)
     snapshotRequired = false
     return [{ _tag: "ThreadViewSnapshot", snapshot }]
   }
   const patch = (value: ThreadView.ThreadViewPatch): ReadonlyArray<ClientEvent> => {
     if (current === undefined || snapshotRequired) return []
-    const applied = ThreadView.apply(current, value)
+    const applied = current.apply(value)
     if (Result.isFailure(applied)) {
       snapshotRequired = true
       return [resync(current, value.baseRevision)]
     }
-    current = applied.success
     return [{ _tag: "ThreadViewPatch", patch: value }]
   }
   const nextPatch = (
@@ -227,7 +235,7 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
         return [resync(current)]
       }
       const turnKey = String(turnId)
-      const existing = current.turns.find((entry) => String(entry.turn.id) === turnKey)
+      const existing = current.turn(turnKey)
       const knownRevision = knownProjectionRevisions.get(turnKey) ?? existing?.projectionRevision
       const isTrackedOffWindow = existing === undefined && current.hasNewer && knownRevision !== undefined
       const canInsertUnknown =
@@ -284,7 +292,10 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
           : undefined
       const removedKeys = (): ReadonlyArray<string> => {
         if (nextKeys !== undefined)
-          return existing.units.filter((unit) => !nextKeys.has(unit.key)).map((unit) => unit.key)
+          return current!
+            .units(turnKey)
+            .filter((unit) => !nextKeys.has(unit.key))
+            .map((unit) => unit.key)
         return change._tag === "ProjectionSnapshot" ? [] : change.remove
       }
       return nextPatch({
@@ -329,7 +340,7 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       if (current === undefined || event.threadId !== current.thread.id) return []
       knownProjectionRevisions.delete(String(event.turnId))
       knownUsage.delete(String(event.turnId))
-      const existing = current.turns.find((entry) => entry.turn.id === event.turnId)
+      const existing = current.turn(String(event.turnId))
       if (existing === undefined) return []
       return nextPatch({
         upsert: [],
@@ -412,5 +423,5 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
         return [event]
     }
   }
-  return { publish, current: () => current }
+  return { publish, current: () => current?.snapshot() }
 }

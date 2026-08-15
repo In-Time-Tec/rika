@@ -1,5 +1,6 @@
-import type { Run, RunTree } from "@batonfx/runtime"
+import type { Run } from "@batonfx/runtime"
 import * as Projection from "@rika/product/execution-projection"
+import type { SemanticTreeEvent } from "./semantic-event"
 
 export interface ToolState {
   readonly rawId: string
@@ -46,8 +47,8 @@ export interface Card {
 
 export interface Projector {
   readonly snapshot: () => Projection.Snapshot
-  readonly apply: (input: RunTree.TreeEvent) => Projection.Patch
-  readonly applyAll: (inputs: ReadonlyArray<RunTree.TreeEvent>) => Projection.Patch
+  readonly apply: (input: SemanticTreeEvent) => Projection.Patch
+  readonly applyAll: (inputs: ReadonlyArray<SemanticTreeEvent>) => Projection.Patch
   readonly previewRunIds: () => ReadonlyArray<string>
   readonly previewParentId: (runId: string) => string | undefined
   readonly applyTitle: (

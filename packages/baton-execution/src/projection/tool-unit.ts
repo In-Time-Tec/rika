@@ -25,10 +25,11 @@ export interface ToolUnitProjectionInput {
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
   readonly put: (unit: Unit) => void
   readonly unit: (node: Node, key: string, content: Unit["content"], part?: number) => Unit
+  readonly recover: (node: Node, tool: ToolState, active: boolean) => void
 }
 
 export const makeToolUnitProjection = (dependencies: ToolUnitProjectionInput): ToolUnitProjection => {
-  const { units, localId, put, unit } = dependencies
+  const { units, localId, put, unit, recover } = dependencies
 
   const toolState = (node: Node, rawId: string): ToolState => {
     const current = node.tools.get(rawId)
@@ -61,7 +62,9 @@ export const makeToolUnitProjection = (dependencies: ToolUnitProjectionInput): T
     const identity = toolState(node, rawId)
     const previous = toolBlock(node, rawId)
     const base = makeTool(identity.blockId, name, bounded(input, toolTextLimit), previous)
-    put(unit(node, identity.key, { _tag: "Block", block: mutate === undefined ? base : mutate(base) }))
+    const block = mutate === undefined ? base : mutate(base)
+    put(unit(node, identity.key, { _tag: "Block", block }))
+    recover(node, identity, block.status === "running")
   }
 
   const updateTool = (

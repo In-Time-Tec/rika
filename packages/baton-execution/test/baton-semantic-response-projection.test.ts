@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "@effect/vitest"
+import { RunEvent, type RunTree, type Runtime } from "@batonfx/runtime"
 import { compareUnitOrder } from "@rika/product/execution-transcript-contract"
+import { Effect, Schema } from "effect"
+import { resolveSemanticTreeEvent } from "../src/projection/semantic-event"
 import { TreeProjector } from "../src/projection/tree"
 import { modelResponseContent, resetEventPosition, treeEvent } from "./baton-projector-event-fixtures"
 
@@ -37,6 +40,44 @@ const projectFragments = (fragments: ReadonlyArray<ProviderFragment>) => {
 }
 
 describe("Baton semantic response projection", () => {
+  it.effect("hydrates compact committed and interrupted responses through the Runtime API", () =>
+    Effect.gen(function* () {
+      const tags: Array<string> = []
+      const response = yield* Schema.decodeUnknownEffect(RunEvent.CompletedModelResponse)({
+        content: [{ type: "text", text: "retained output", metadata: {} }],
+      })
+      const resolveModelResponse: Runtime.Interface["resolveModelResponse"] = (event) =>
+        Effect.sync(() => {
+          tags.push(event._tag)
+          return response
+        })
+      const compact = (tag: "ModelResponseCommitted" | "ModelResponseInterrupted"): RunTree.TreeEvent =>
+        ({
+          rootRunId: "raw-root-run",
+          runId: "raw-root-run",
+          event: {
+            _tag: tag,
+            operationKey: `operation:${tag}`,
+            ...(tag === "ModelResponseInterrupted" ? { reason: "cancel" } : {}),
+          },
+          cursor: `cursor:${tag}`,
+        }) as RunTree.TreeEvent
+
+      const committed = yield* resolveSemanticTreeEvent(compact("ModelResponseCommitted"), resolveModelResponse)
+      const interrupted = yield* resolveSemanticTreeEvent(compact("ModelResponseInterrupted"), resolveModelResponse)
+
+      expect(committed.event).toMatchObject({ _tag: "ModelResponseCommitted", response })
+      expect(interrupted.event).toMatchObject({ _tag: "ModelResponseInterrupted", response })
+      const projector = TreeProjector.make("turn-interrupted", "interrupt")
+      projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 } as never))
+      const patch = projector.apply(interrupted)
+      expect(patch.upsert).toContainEqual(
+        expect.objectContaining({ content: { _tag: "Entry", role: "assistant", text: "retained output" } }),
+      )
+      expect(tags).toEqual(["ModelResponseCommitted", "ModelResponseInterrupted"])
+    }),
+  )
+
   it("is invariant to one versus 10,000 half-empty upstream fragments", () => {
     const text = "chunk-invariant output"
     const params = JSON.stringify({ path: "src/a.ts", read_range: [2, 7] })
@@ -56,7 +97,7 @@ describe("Baton semantic response projection", () => {
     expect(many.snapshot).toEqual(one.snapshot)
   })
 
-  it("preserves normalized content ordering across text, tools, files, sources, and errors", () => {
+  it("preserves normalized content ordering across text, tools, files, and sources", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-content", "content")
     projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 } as never))
@@ -73,7 +114,6 @@ describe("Baton semantic response projection", () => {
           title: "Source",
           metadata: {},
         },
-        { type: "error", error: "provider warning", metadata: {} },
         {
           type: "tool-call",
           id: "read-call",
@@ -88,7 +128,7 @@ describe("Baton semantic response projection", () => {
       .toSorted((left, right) => compareUnitOrder(left.order, right.order))
       .map((unit) => (unit.content._tag === "Entry" ? "Assistant" : unit.content.block._tag))
 
-    expect(tags).toEqual(["Reasoning", "Assistant", "Notification", "Notification", "Error", "ToolCall"])
+    expect(tags).toEqual(["Reasoning", "Assistant", "Notification", "Notification", "ToolCall"])
   })
 
   it("rebuilds the same units from a semantic response archive", () => {

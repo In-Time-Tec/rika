@@ -1,4 +1,4 @@
-import type { Run, RunEvent, RunTree } from "@batonfx/runtime"
+import type { Run, RunEvent } from "@batonfx/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import * as UnitOrder from "@rika/product/execution-transcript-contract"
 import type { Unit } from "@rika/product/execution-transcript-contract"
@@ -7,7 +7,8 @@ import { makeAuthorizationProjection } from "./authorization"
 import { cellToolName, makeCellProjection } from "./cell"
 import { makeDiagnosticProjection } from "./diagnostic"
 import { makeSubagentCardProjection } from "./subagent-card"
-import { makeSemanticResponseProjection, semanticTreeEvent, type SemanticTreeEvent } from "./semantic-response"
+import { makeSemanticResponseProjection } from "./semantic-response"
+import type { SemanticTreeEvent } from "./semantic-event"
 import { makeSteeringProjection } from "./steering"
 import { makeToolUnitProjection } from "./tool-unit"
 import { authorizationTarget, makeProjectorCheckpointCodec } from "./checkpoint"
@@ -15,6 +16,7 @@ import { makeUsageAccounting } from "../baton-usage-accounting"
 import { type Card, type Node, type Projector } from "./model"
 import { type AuthorizationState, type ModelCallState, type ProjectorCore } from "./persistence"
 import { boundedInsert, subagentCardStatus } from "./nodes"
+import { makeProjectorRecoveryIndex, type CheckpointInstrumentation } from "./projector-recovery"
 import { bounded, boundedHead, optionalString, record, string } from "./values"
 import { projectorNames, textLimit, toolTextLimit } from "./values"
 
@@ -30,6 +32,7 @@ const make = (
   baselineUnits: ReadonlyArray<Unit> = [],
   titleExpected = false,
   pricing: "included" | "metered" = "metered",
+  instrumentation?: CheckpointInstrumentation,
 ): Projector => {
   const localId = (family: string, ...parts: ReadonlyArray<string | number>): string =>
     scopedId(family, turnId, ...parts)
@@ -51,9 +54,13 @@ const make = (
   const cardsByChild = new Map<string, Card>()
   const unitKeysByRun = new Map<string, Set<string>>()
   const authorizations = new Map<string, AuthorizationState>()
+  const recovery = makeProjectorRecoveryIndex({
+    nodes,
+    ...(instrumentation === undefined ? {} : { instrumentation }),
+  })
   let changed = new Map<string, Unit>()
   let removed = new Set<string>()
-  let batchKeys = new Set<string>()
+  let createdInBatch = new Set<string>()
   let semanticOrderPart: number | undefined
   let titleSettled = !titleExpected
 
@@ -72,6 +79,7 @@ const make = (
   })
 
   const put = (unit: Unit) => {
+    if (!units.has(unit.key) && !removed.has(unit.key)) createdInBatch.add(unit.key)
     units.set(unit.key, unit)
     changed.set(unit.key, unit)
     removed.delete(unit.key)
@@ -80,7 +88,8 @@ const make = (
   const remove = (key: string) => {
     if (!units.delete(key)) return
     changed.delete(key)
-    if (batchKeys.has(key)) removed.add(key)
+    if (createdInBatch.delete(key)) return
+    removed.add(key)
   }
 
   const parentUnit = (node: Node): Unit | undefined =>
@@ -131,15 +140,24 @@ const make = (
     localId,
     put,
     unit,
+    recover: recovery.authorizationChanged,
   })
 
-  const { toolState, toolBlock, putTool, updateTool } = makeToolUnitProjection({ units, localId, put, unit })
-
-  const { cellBlock, openCell, progressCell, completeCell, settleRunningCells } = makeCellProjection({
+  const { toolState, putTool, updateTool } = makeToolUnitProjection({
     units,
     localId,
     put,
     unit,
+    recover: recovery.toolChanged,
+  })
+
+  const { openCell, progressCell, completeCell, settleRunningCells } = makeCellProjection({
+    units,
+    localId,
+    put,
+    unit,
+    recover: recovery.cellChanged,
+    activeIds: recovery.activeCellIds,
     notice,
     error,
   })
@@ -154,6 +172,8 @@ const make = (
     localId,
     put,
     unit,
+    recoverCard: recovery.cardChanged,
+    recoverNode: recovery.nodeChanged,
   })
 
   const semanticResponse = makeSemanticResponseProjection({
@@ -166,7 +186,6 @@ const make = (
     removeTool: (node, rawId) => remove(toolState(node, rawId).key),
     putTool,
     notice,
-    error,
     beginOrderedResponse: () => {
       semanticOrderPart = 0
     },
@@ -202,7 +221,7 @@ const make = (
   const settleNodeState = (node: Node, status: "completed" | "failed" | "cancelled", detail?: string) => {
     node.status = status
     settleRunningCells(node, status === "completed" ? "cancelled" : status)
-    for (const rawId of node.tools.keys())
+    for (const rawId of recovery.activeToolIds(node))
       updateTool(node, rawId, (tool) =>
         tool.status === "running" && tool.process?.running !== true
           ? { ...tool, status: status === "completed" ? "cancelled" : status }
@@ -211,6 +230,7 @@ const make = (
     const card = cardsByChild.get(node.rawRunId)
     if (card !== undefined) updateCard(card, status === "completed" ? "complete" : status, detail)
     if (node.parentRawRunId === undefined) core.rootStatus = status
+    recovery.nodeChanged(node)
   }
 
   const settleNode = (
@@ -222,11 +242,10 @@ const make = (
     settleNodeState(node, status, detail)
     const descendants: Array<Node> = []
     const collect = (id: string): void => {
-      for (const candidate of nodes.values())
-        if (candidate.parentRawRunId === id) {
-          descendants.push(candidate)
-          collect(candidate.rawRunId)
-        }
+      for (const candidate of recovery.childrenOf(id)) {
+        descendants.push(candidate)
+        collect(candidate.rawRunId)
+      }
     }
     collect(node.rawRunId)
     for (const candidate of descendants) {
@@ -267,6 +286,7 @@ const make = (
         node.phase += 1
         return
       case "ModelResponseCommitted":
+      case "ModelResponseInterrupted":
         return semanticResponse.apply(node, event)
       case "ToolExecutionStarted":
         if (event.call.name === cellToolName)
@@ -435,6 +455,7 @@ const make = (
       case "CompactionStarted": {
         const key = localId("compaction", node.publicId, event.compactionId)
         put(unit(node, key, { _tag: "Block", block: { _tag: "Compaction", summary: "", status: "running" } }))
+        recovery.compactionChanged(key, true)
         return
       }
       case "CompactionSkipped":
@@ -456,11 +477,13 @@ const make = (
             },
           }),
         )
+        recovery.compactionChanged(key, false)
         return
       }
       case "CompactionFailed": {
         const key = localId("compaction", node.publicId, event.compactionId)
         put(unit(node, key, { _tag: "Block", block: { _tag: "Compaction", summary: "", status: "failed" } }))
+        recovery.compactionChanged(key, false)
         return
       }
       case "RunWaiting":
@@ -564,9 +587,7 @@ const make = (
     authorizations,
     pendingSteering: steering.pending,
     settledSteering: steering.settled,
-    localId,
-    toolBlock,
-    cellBlock,
+    recovery,
   })
 
   if (resume === undefined) {
@@ -589,7 +610,7 @@ const make = (
     }
   } else restore(resume)
 
-  const applyAll = (inputs: ReadonlyArray<RunTree.TreeEvent>): Projection.Patch => {
+  const applyAll = (inputs: ReadonlyArray<SemanticTreeEvent>): Projection.Patch => {
     const first = inputs[0]
     const last = inputs.at(-1)
     if (first === undefined || last === undefined) throw new RangeError("A projector batch must contain an event")
@@ -607,11 +628,13 @@ const make = (
       })
     changed = new Map()
     removed = new Set()
-    batchKeys = new Set(units.keys())
+    createdInBatch = new Set()
     const baseRevision = core.revision
     for (const input of inputs) {
       core.revision += 1
-      applyRunEvent(semanticTreeEvent(input))
+      applyRunEvent(input)
+      const node = nodes.get(input.runId)
+      if (node !== undefined) recovery.nodeChanged(node)
     }
     core.checkpoint = {
       version: Projection.projectionVersion,
@@ -680,7 +703,7 @@ const make = (
     if (!settlementChanged && !changedTitle && JSON.stringify(usage.usage()) === before) return undefined
     changed = new Map()
     removed = new Set()
-    batchKeys = new Set(units.keys())
+    createdInBatch = new Set()
     const baseRevision = core.revision
     core.revision += 1
     if (text !== undefined) core.title = { text }

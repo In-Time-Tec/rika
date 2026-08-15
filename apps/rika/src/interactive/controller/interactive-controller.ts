@@ -16,7 +16,7 @@ export type TranscriptEvent = Extract<
 
 export interface State {
   readonly model: Model
-  readonly view?: ThreadView.ThreadViewSnapshot
+  readonly view?: ThreadView.ThreadViewAccumulator
   readonly modelPreview?: ModelPreviewOverlay | undefined
 }
 

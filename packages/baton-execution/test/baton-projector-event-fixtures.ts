@@ -1,6 +1,7 @@
 import { RunTree, type RunEvent } from "@batonfx/runtime"
 import { DateTime, Function } from "effect"
 import { TreeProjector } from "../src/projection/tree"
+import type { SemanticTreeEvent } from "../src/projection/semantic-event"
 
 let position = 0
 
@@ -20,7 +21,7 @@ const treeEventImpl = (
   runId: string,
   event: Partial<RunEvent.RunEvent> & { readonly _tag: RunEvent.RunEvent["_tag"] },
   options: TreeEventOptions = {},
-): RunTree.TreeEvent => {
+): SemanticTreeEvent => {
   position += 1
   const rootRunId = options.rootRunId ?? "raw-root-run"
   return {
@@ -37,7 +38,7 @@ const treeEventImpl = (
       executableRef: {} as never,
       occurredAt: occurredAt(position),
       ...event,
-    } as RunEvent.RunEvent,
+    } as SemanticTreeEvent["event"],
     cursor: RunTree.TreeCursor.make(`tree-cursor-${position}`),
   }
 }
@@ -47,14 +48,14 @@ export const treeEvent: {
     runId: string,
     event: Partial<RunEvent.RunEvent> & { readonly _tag: RunEvent.RunEvent["_tag"] },
     options?: TreeEventOptions,
-  ): RunTree.TreeEvent
+  ): SemanticTreeEvent
   (
     event: Partial<RunEvent.RunEvent> & { readonly _tag: RunEvent.RunEvent["_tag"] },
     options?: TreeEventOptions,
-  ): (runId: string) => RunTree.TreeEvent
+  ): (runId: string) => SemanticTreeEvent
 } = Function.dual((args) => typeof args[0] === "string", treeEventImpl)
 
-const modelResponseImpl = (runId: string, part: unknown, options: TreeEventOptions = {}): RunTree.TreeEvent => {
+const modelResponseImpl = (runId: string, part: unknown, options: TreeEventOptions = {}): SemanticTreeEvent => {
   const operationKey = `model-operation-${position + 1}`
   return treeEventImpl(
     runId,
@@ -73,8 +74,8 @@ const modelResponseImpl = (runId: string, part: unknown, options: TreeEventOptio
 }
 
 export const modelResponse: {
-  (runId: string, part: unknown, options?: TreeEventOptions): RunTree.TreeEvent
-  (part: unknown, options?: TreeEventOptions): (runId: string) => RunTree.TreeEvent
+  (runId: string, part: unknown, options?: TreeEventOptions): SemanticTreeEvent
+  (part: unknown, options?: TreeEventOptions): (runId: string) => SemanticTreeEvent
 } = Function.dual((args) => typeof args[0] === "string", modelResponseImpl)
 
 const modelResponseContentImpl = (
@@ -82,7 +83,7 @@ const modelResponseContentImpl = (
   operationKey: string,
   content: ReadonlyArray<unknown>,
   options: TreeEventOptions = {},
-): RunTree.TreeEvent =>
+): SemanticTreeEvent =>
   treeEventImpl(
     runId,
     {
@@ -99,12 +100,12 @@ const modelResponseContentImpl = (
   )
 
 export const modelResponseContent: {
-  (runId: string, operationKey: string, content: ReadonlyArray<unknown>, options?: TreeEventOptions): RunTree.TreeEvent
+  (runId: string, operationKey: string, content: ReadonlyArray<unknown>, options?: TreeEventOptions): SemanticTreeEvent
   (
     operationKey: string,
     content: ReadonlyArray<unknown>,
     options?: TreeEventOptions,
-  ): (runId: string) => RunTree.TreeEvent
+  ): (runId: string) => SemanticTreeEvent
 } = Function.dual((args) => Array.isArray(args[2]), modelResponseContentImpl)
 
 export const assistantOf = (projector: ReturnType<typeof TreeProjector.make>) =>
