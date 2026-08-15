@@ -3,7 +3,7 @@ import { CellTool } from "@batonfx/repl"
 import { TestModel } from "@batonfx/test"
 import type * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
-import { Context, Effect, Layer, Scope } from "effect"
+import { Context, Effect, Layer, Ref, Scope, Stream } from "effect"
 import { LanguageModel, type Prompt } from "effect/unstable/ai"
 
 export type Profile =
@@ -21,9 +21,15 @@ export type Profile =
 export type Step = TestModel.Step
 export type Part = TestModel.Part
 
+export interface ProviderHttpEnvelope {
+  readonly request: NonNullable<AiResponse.ResponseMetadataPart["request"]>
+  readonly response: NonNullable<AiResponse.FinishPart["response"]>
+}
+
 export interface Lane {
   readonly profile?: Profile
   readonly steps: ReadonlyArray<Step>
+  readonly providerHttpEnvelope?: ProviderHttpEnvelope
 }
 
 const profiles: ReadonlyArray<Profile> = [
@@ -169,35 +175,80 @@ export const laneExecutionRoute = (mode = "test"): ExecutionRouteSnapshot.Execut
 
 const idleSteps = Array.from({ length: 16 }, () => TestModel.turn([TestModel.text("idle")]))
 
+export interface ProviderHttpEnvelopeCounts {
+  readonly request: number
+  readonly response: number
+}
+
 export interface LaneModels {
   readonly registryLayer: Layer.Layer<ModelRegistry.ModelRegistry>
   readonly requestCount: Effect.Effect<number>
   readonly requestCountFor: (profile: Profile) => Effect.Effect<number>
   readonly requestsFor: (profile: Profile) => Effect.Effect<ReadonlyArray<TestModel.Request>>
   readonly promptsFor: (profile: Profile) => Effect.Effect<ReadonlyArray<Prompt.Prompt>>
+  readonly providerHttpEnvelopeCountsFor: (profile: Profile) => Effect.Effect<ProviderHttpEnvelopeCounts>
 }
+
+const withProviderHttpEnvelope = (
+  service: LanguageModel.Service,
+  envelope: ProviderHttpEnvelope,
+  observed: Ref.Ref<ProviderHttpEnvelopeCounts>,
+): LanguageModel.Service => ({
+  ...service,
+  streamText: ((options: Parameters<LanguageModel.Service["streamText"]>[0]) => {
+    const metadata = AiResponse.makePart("response-metadata", {
+      id: "provider-response-0",
+      modelId: "provider-model",
+      timestamp: undefined,
+      request: envelope.request,
+    })
+    return Stream.concat(
+      Stream.succeed(metadata),
+      service
+        .streamText(options)
+        .pipe(Stream.map((part) => (part.type === "finish" ? { ...part, response: envelope.response } : part))),
+    ).pipe(
+      Stream.tap((part) => {
+        if (part.type === "response-metadata" && part.request === envelope.request) {
+          return Ref.update(observed, (counts) => ({ ...counts, request: counts.request + 1 }))
+        }
+        if (part.type === "finish" && part.response === envelope.response) {
+          return Ref.update(observed, (counts) => ({ ...counts, response: counts.response + 1 }))
+        }
+        return Effect.void
+      }),
+    )
+  }) as LanguageModel.Service["streamText"],
+})
 
 export const makeLaneModels = Effect.fn("BatonTestHarness.makeLaneModels")(function* (
   lanes: ReadonlyArray<Lane>,
 ): Effect.gen.Return<LaneModels, never, Scope.Scope> {
-  const declared = new Map(lanes.map((lane) => [lane.profile ?? "Root", lane.steps] as const))
+  const declared = new Map(lanes.map((lane) => [lane.profile ?? "Root", lane] as const))
   const fixtures = yield* Effect.forEach(profiles, (profile) =>
-    TestModel.make(declared.get(profile) ?? idleSteps, {
+    TestModel.make(declared.get(profile)?.steps ?? idleSteps, {
       provider: "test",
       model: "test",
       registrationKey: identityFor(profile),
     }),
   )
+  const envelopeCounts = yield* Effect.forEach(profiles, () => Ref.make({ request: 0, response: 0 }))
   const registrations = yield* Effect.forEach(fixtures, (fixture, index) =>
     Layer.build(fixture.layer).pipe(
-      Effect.flatMap((context) =>
-        ModelRegistry.registration({
+      Effect.flatMap((context) => {
+        const profile = profiles[index]!
+        const service = Context.get(context, LanguageModel.LanguageModel)
+        const envelope = declared.get(profile)?.providerHttpEnvelope
+        return ModelRegistry.registration({
           provider: "test",
           model: "test",
-          registrationKey: identityFor(profiles[index]!),
-          layer: Layer.succeed(LanguageModel.LanguageModel, Context.get(context, LanguageModel.LanguageModel)),
-        }),
-      ),
+          registrationKey: identityFor(profile),
+          layer: Layer.succeed(
+            LanguageModel.LanguageModel,
+            envelope === undefined ? service : withProviderHttpEnvelope(service, envelope, envelopeCounts[index]!),
+          ),
+        })
+      }),
     ),
   )
   return {
@@ -211,5 +262,6 @@ export const makeLaneModels = Effect.fn("BatonTestHarness.makeLaneModels")(funct
       fixtures[profiles.indexOf(profile)]!.requests.pipe(Effect.map((requests) => requests.length)),
     requestsFor: (profile) => fixtures[profiles.indexOf(profile)]!.requests,
     promptsFor: (profile) => fixtures[profiles.indexOf(profile)]!.prompts,
+    providerHttpEnvelopeCountsFor: (profile) => Ref.get(envelopeCounts[profiles.indexOf(profile)]!),
   } satisfies LaneModels
 })
