@@ -42,6 +42,10 @@ const program = Effect.gen(function* () {
   const hostScript = yield* Config.string("RIKA_TEST_SERVER_HOST_SCRIPT").pipe(
     Config.withDefault("test/fixtures/server-host.ts"),
   )
+  const configWatch = yield* Config.string("RIKA_TEST_SERVER_CONFIG_WATCH").pipe(Config.withDefault(""))
+  const configReloadDebounce = yield* Config.string("RIKA_TEST_SERVER_CONFIG_RELOAD_DEBOUNCE").pipe(
+    Config.withDefault("50"),
+  )
   const buildIdentity = yield* Config.string("RIKA_TEST_BUILD_IDENTITY").pipe(Config.withDefault(""))
   const service = yield* make()
   const connected = yield* Effect.result(
@@ -64,6 +68,8 @@ const program = Effect.gen(function* () {
             RIKA_TEST_SERVER_STARTUP_HOLD: startupHold,
             RIKA_TEST_SERVER_OUTBOUND_CAPACITY: outboundCapacity,
             ...(buildIdentity === "" ? {} : { RIKA_TEST_BUILD_IDENTITY: buildIdentity }),
+            ...(configWatch === "" ? {} : { RIKA_TEST_SERVER_CONFIG_WATCH: configWatch }),
+            ...(configWatch === "" ? {} : { RIKA_TEST_SERVER_CONFIG_RELOAD_DEBOUNCE: configReloadDebounce }),
           },
         }),
     }),

@@ -16,6 +16,9 @@ export const serve = Effect.fn("ServerTransport.serve")(function* (options: {
   readonly outboundCapacity?: number
   readonly onReady?: Effect.Effect<void, ServerService.ServerServiceError, FileSystem.FileSystem>
   readonly owner: Owner
+  readonly configWatchPaths?: ReadonlyArray<string>
+  readonly configReloadDebounceMilliseconds?: number
+  readonly configReloadDrainTimeoutMilliseconds?: number
 }) {
   const endpoint = yield* resolve(options.profile, options.dataRoot)
   const token = yield* readOrCreateToken(endpoint.tokenPath)
@@ -43,5 +46,12 @@ export const serve = Effect.fn("ServerTransport.serve")(function* (options: {
     ready,
     onReady: options.onReady ?? Effect.void,
     owner: options.owner,
+    ...(options.configWatchPaths === undefined ? {} : { configWatchPaths: options.configWatchPaths }),
+    ...(options.configReloadDebounceMilliseconds === undefined
+      ? {}
+      : { configReloadDebounceMilliseconds: options.configReloadDebounceMilliseconds }),
+    ...(options.configReloadDrainTimeoutMilliseconds === undefined
+      ? {}
+      : { configReloadDrainTimeoutMilliseconds: options.configReloadDrainTimeoutMilliseconds }),
   }).pipe(Effect.ensuring(releaseAdoptedStartup(endpoint.startupPath, endpoint.identity, process.pid)))
 })

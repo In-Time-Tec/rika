@@ -153,6 +153,10 @@ const program = Effect.gen(function* () {
     (yield* Config.string("RIKA_TEST_SERVER_UNINTERRUPTIBLE_OWNER").pipe(Config.withDefault("0"))) === "1"
   const outboundCapacity = yield* Config.int("RIKA_TEST_SERVER_OUTBOUND_CAPACITY").pipe(Config.withDefault(1_024))
   const abandonMilliseconds = Number(yield* Config.string("RIKA_TEST_SERVER_ABANDON").pipe(Config.withDefault("5000")))
+  const configWatch = yield* Config.string("RIKA_TEST_SERVER_CONFIG_WATCH").pipe(Config.withDefault(""))
+  const configReloadDebounce = Number(
+    yield* Config.string("RIKA_TEST_SERVER_CONFIG_RELOAD_DEBOUNCE").pipe(Config.withDefault("50")),
+  )
   activeWork = Number(yield* Config.string("RIKA_TEST_SERVER_INITIAL_ACTIVE_WORK").pipe(Config.withDefault("0")))
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -173,6 +177,12 @@ const program = Effect.gen(function* () {
     startupHoldMilliseconds: Number(startupHold),
     outboundCapacity,
     onReady: ServerProcessStartup.signalReady,
+    ...(configWatch === ""
+      ? {}
+      : {
+          configWatchPaths: configWatch.split(":"),
+          configReloadDebounceMilliseconds: configReloadDebounce,
+        }),
     owner: (interactive) =>
       Effect.gen(function* () {
         yield* append("owner-acquisitions.log", `${process.pid}\n`)

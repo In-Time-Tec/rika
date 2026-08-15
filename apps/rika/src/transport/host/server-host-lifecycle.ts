@@ -27,6 +27,7 @@ import { makeConnectionHandler } from "./server-host-connection"
 import { isServerPath } from "./server-websocket-server"
 import { makeInteractiveRouter } from "./server-host-feed"
 import { defaultOutboundCapacity, json } from "../protocol/server-protocol"
+import { watchConfigFileForRestart } from "../../server/process/server-config-reload"
 export const host = Effect.fn("ServerTransport.host")(function* (options: {
   readonly port: number
   readonly identity: string
@@ -40,6 +41,9 @@ export const host = Effect.fn("ServerTransport.host")(function* (options: {
   readonly ready: Deferred.Deferred<void>
   readonly onReady: Effect.Effect<void, ServerService.ServerServiceError, FileSystem.FileSystem>
   readonly owner: Owner
+  readonly configWatchPaths?: ReadonlyArray<string>
+  readonly configReloadDebounceMilliseconds?: number
+  readonly configReloadDrainTimeoutMilliseconds?: number
 }) {
   const crypto = yield* Crypto.Crypto
   const baseConsole = yield* Console.Console
@@ -196,6 +200,36 @@ export const host = Effect.fn("ServerTransport.host")(function* (options: {
     yield* scheduleAbandonment(startupGrace)
   }
   yield* options.onReady
+  if (options.configWatchPaths !== undefined && options.configWatchPaths.length > 0) {
+    const restartForConfigChange = Effect.gen(function* () {
+      yield* Effect.logInfo("server.config.reloading")
+      yield* lifecycle.beginDrain
+      yield* Effect.forkIn(
+        lifecycle
+          .drainForReplacement(prepareServerReplacement)
+          .pipe(
+            Effect.raceFirst(
+              Effect.sleep(options.configReloadDrainTimeoutMilliseconds ?? 30_000).pipe(Effect.asVoid),
+            ),
+            Effect.ensuring(Deferred.succeed(options.stopped, undefined)),
+          ),
+        hostScope,
+      )
+    })
+    yield* Effect.forkIn(
+      Effect.forEach(
+        options.configWatchPaths,
+        (filename) =>
+          watchConfigFileForRestart({
+            filename,
+            debounceMilliseconds: options.configReloadDebounceMilliseconds ?? 1_000,
+            onRestart: restartForConfigChange,
+          }),
+        { concurrency: "unbounded", discard: true },
+      ),
+      hostScope,
+    )
+  }
   yield* Effect.logInfo("server.listener.ready")
   yield* Deferred.succeed(options.ready, undefined)
   yield* Deferred.await(options.stopped)

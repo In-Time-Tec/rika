@@ -123,6 +123,8 @@ export const start = () => {
       serverProfile: Config.option(Config.string("RIKA_INTERNAL_SERVER_PROFILE")),
       serverGrace: Config.option(Config.string("RIKA_INTERNAL_SERVER_GRACE")),
       serverStartupHold: Config.option(Config.string("RIKA_INTERNAL_SERVER_STARTUP_HOLD")),
+      configReloadDebounce: Config.option(Config.string("RIKA_INTERNAL_SERVER_CONFIG_RELOAD_DEBOUNCE")),
+      configReloadDrainTimeout: Config.option(Config.string("RIKA_INTERNAL_SERVER_CONFIG_RELOAD_DRAIN_TIMEOUT")),
     }),
   )
   const hostDataRoot = environment.hostDataRoot._tag === "Some" ? environment.hostDataRoot.value : undefined
@@ -339,6 +341,15 @@ export const start = () => {
             ),
             startupHoldMilliseconds: Number(
               environment.serverStartupHold._tag === "Some" ? environment.serverStartupHold.value : "10000",
+            ),
+            configWatchPaths: [globalConfig, workspaceConfig],
+            configReloadDebounceMilliseconds: Number(
+              environment.configReloadDebounce._tag === "Some" ? environment.configReloadDebounce.value : "1000",
+            ),
+            configReloadDrainTimeoutMilliseconds: Number(
+              environment.configReloadDrainTimeout._tag === "Some"
+                ? environment.configReloadDrainTimeout.value
+                : "30000",
             ),
             onReady: signalReady,
             owner: serverOwner,
