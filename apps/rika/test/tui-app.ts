@@ -19,7 +19,7 @@ import {
   type HistoricalTranscriptFixture,
   type TuiAppQueue,
 } from "./tui-app-repositories"
-import type { Lane, LaneModels, Profile } from "./tui-app-model"
+import type { Lane, LaneModels, Profile, ProviderHttpEnvelopeCounts } from "./tui-app-model"
 import { tuiToolRuntimeLayer } from "./tui-app-tool-runtime"
 import { backendLayer, kernelPoolFor, prepareTuiRuntimeState, type RuntimeStatePreparation } from "./tui-app-backend"
 import { laneExecutionRoute, makeLaneModels } from "./tui-app-model"
@@ -90,6 +90,7 @@ export interface TuiApp {
   readonly waitModelRequests: (count: number) => Effect.Effect<void>
   readonly setConnectionStatus: (status: InteractiveConnectionStatus) => Effect.Effect<void>
   readonly modelRequestCount: Effect.Effect<number>
+  readonly modelProviderHttpEnvelopeCounts: Effect.Effect<ProviderHttpEnvelopeCounts>
   readonly modelPrompts: ReturnType<LaneModels["promptsFor"]>
   readonly modelToolNamesFor: (profile: Profile) => Effect.Effect<ReadonlyArray<ReadonlyArray<string>>>
   readonly close: () => void
@@ -358,6 +359,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     waitModelRequests: awaitModelRequests,
     setConnectionStatus: (status) => SubscriptionRef.set(connectionStatus, status),
     modelRequestCount: laneModels.requestCountFor("Root"),
+    modelProviderHttpEnvelopeCounts: laneModels.providerHttpEnvelopeCountsFor("Root"),
     modelPrompts: laneModels.promptsFor("Root"),
     modelToolNamesFor: (profile) =>
       laneModels

@@ -5,8 +5,7 @@ import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 import type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
 import { Config, Effect, Layer, Option, Redacted } from "effect"
-import type { HttpClient } from "effect/unstable/http"
-import { providerHttpClientLayer } from "./baton-provider-http"
+import { FetchHttpClient, type HttpClient } from "effect/unstable/http"
 import * as OpenAiAccountCredentials from "./openai-account-credentials"
 
 type CandidateSnapshot = ExecutionRoute.ExecutionRouteModelCandidateSnapshot
@@ -35,7 +34,7 @@ export const layer = (options: {
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
 }): Layer.Layer<ModelRegistry.ModelRegistry, Config.ConfigError | Errors.ExecutableRegistrationInvalid> => {
   const { candidate, credentialStore, openAiAccountAuth } = options
-  const httpClientLayer = options.httpClientLayer ?? providerHttpClientLayer
+  const httpClientLayer = options.httpClientLayer ?? FetchHttpClient.layer
   const registrationKey = candidate.registrationIdentity
   switch (candidate.providerConnection.protocol) {
     case "openai":
