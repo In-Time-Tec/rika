@@ -235,7 +235,7 @@ describe("server WebSocket process transport", () => {
   )
 
   test(
-    "coalesces ThreadView delivery without forcing a full resync",
+    "requests ThreadView resync without failing execution when delivery overflows",
     () =>
       run(
         Effect.gen(function* () {
@@ -248,10 +248,10 @@ describe("server WebSocket process transport", () => {
             const event = yield* client.nextEffect
             expect(event).toMatchObject({
               type: "overflow-completed",
-              tag: "ThreadViewPatch",
+              tag: "ResyncRequired",
             })
             expect(event.callbacks).toBeLessThan(12)
-            expect(event.tags).not.toContain("ResyncRequired")
+            expect(event.tags).toContain("ResyncRequired")
             expect(event.tags).toContain("ThreadViewPatch")
             expect((event.tags ?? []).includes("ExecutionFailed")).toBe(false)
             yield* client.closeEffect
@@ -276,7 +276,7 @@ describe("server WebSocket process transport", () => {
             const event = yield* client.nextEffect
             expect(event.type).toBe("slow-consumer-completed")
             expect(event.tags).toContain("ThreadViewPatch")
-            expect(event.tags).not.toContain("ResyncRequired")
+            expect(event.tags).toContain("ResyncRequired")
             expect(event.tags).not.toContain("execution.completed")
             expect(event.callbacks).toBeLessThan(10)
             yield* client.closeEffect
@@ -316,7 +316,7 @@ describe("server WebSocket process transport", () => {
   )
 
   test(
-    "coalesces a second ThreadView delivery without failing the current physical feed",
+    "requests resync when a second ThreadView delivery overflows the current physical feed",
     () =>
       run(
         Effect.gen(function* () {
@@ -329,10 +329,10 @@ describe("server WebSocket process transport", () => {
             const event = yield* client.nextEffect
             expect(event).toMatchObject({
               type: "queue-overflow-completed",
-              tag: "ThreadViewPatch",
+              tag: "ResyncRequired",
             })
             expect(event.callbacks).toBeLessThan(12)
-            expect(event.tags).not.toContain("ResyncRequired")
+            expect(event.tags).toContain("ResyncRequired")
             expect(event.tags).toContain("ThreadViewPatch")
             expect((event.tags ?? []).includes("ExecutionFailed")).toBe(false)
             yield* client.closeEffect

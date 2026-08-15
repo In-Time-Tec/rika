@@ -496,8 +496,7 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
                           tags.push(event._tag)
-                          if (event._tag === "ThreadViewPatch" && event.patch.revision >= 6)
-                            Queue.offerUnsafe(completed, undefined)
+                          if (event._tag === "ResyncRequired") Queue.offerUnsafe(completed, undefined)
                         }),
                       )
                       yield* Queue.take(completed)
@@ -528,8 +527,7 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
                           tags.push(event._tag)
-                          if (event._tag === "ThreadViewPatch" && event.patch.revision >= 6)
-                            Queue.offerUnsafe(completed, undefined)
+                          if (event._tag === "ResyncRequired") Queue.offerUnsafe(completed, undefined)
                         }),
                       )
                       yield* Queue.take(completed)
@@ -558,8 +556,7 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
                           tags.push(event._tag)
-                          if (event._tag === "ThreadViewPatch" && event.patch.revision >= 6)
-                            Queue.offerUnsafe(completed, undefined)
+                          if (event._tag === "ResyncRequired") Queue.offerUnsafe(completed, undefined)
                         }),
                       )
                       yield* Queue.take(completed)
