@@ -199,16 +199,16 @@ export const replace: {
 const terminal = (status: ThreadView.ThreadViewTurnRecord["status"]): boolean =>
   status === "completed" || status === "failed" || status === "cancelled"
 
-const reconcileImpl = (overlay: Overlay | undefined, view: ThreadView.ThreadViewSnapshot): Overlay | undefined => {
+const reconcileImpl = (overlay: Overlay | undefined, view: ThreadView.ThreadViewAccumulator): Overlay | undefined => {
   if (overlay === undefined) return undefined
-  const turn = view.turns.find((candidate) => String(candidate.turn.id) === overlay.turnId)
+  const turn = view.turn(overlay.turnId)
   if (turn === undefined || terminal(turn.turn.status)) return undefined
   return overlay
 }
 
 export const reconcile: {
-  (view: ThreadView.ThreadViewSnapshot): (overlay: Overlay | undefined) => Overlay | undefined
-  (overlay: Overlay | undefined, view: ThreadView.ThreadViewSnapshot): Overlay | undefined
+  (view: ThreadView.ThreadViewAccumulator): (overlay: Overlay | undefined) => Overlay | undefined
+  (overlay: Overlay | undefined, view: ThreadView.ThreadViewAccumulator): Overlay | undefined
 } = Function.dual(2, reconcileImpl)
 
 const activityImpl = (overlay: Overlay | undefined, turnId: string) => {
@@ -229,11 +229,11 @@ export const activity: {
 
 const unitsImpl = (
   overlay: Overlay | undefined,
-  view: ThreadView.ThreadViewSnapshot,
+  view: ThreadView.ThreadViewAccumulator,
 ): ReadonlyArray<TranscriptUnit.Unit> => {
   const current = reconcile(overlay, view)
   if (current === undefined) return []
-  const turn = view.turns.find((candidate) => String(candidate.turn.id) === current.turnId)
+  const turn = view.turn(current.turnId)
   if (turn === undefined) return []
   const result: Array<TranscriptUnit.Unit> = []
   for (const preview of current.byRun.values()) {
@@ -267,6 +267,6 @@ const unitsImpl = (
 }
 
 export const units: {
-  (view: ThreadView.ThreadViewSnapshot): (overlay: Overlay | undefined) => ReadonlyArray<TranscriptUnit.Unit>
-  (overlay: Overlay | undefined, view: ThreadView.ThreadViewSnapshot): ReadonlyArray<TranscriptUnit.Unit>
+  (view: ThreadView.ThreadViewAccumulator): (overlay: Overlay | undefined) => ReadonlyArray<TranscriptUnit.Unit>
+  (overlay: Overlay | undefined, view: ThreadView.ThreadViewAccumulator): ReadonlyArray<TranscriptUnit.Unit>
 } = Function.dual(2, unitsImpl)

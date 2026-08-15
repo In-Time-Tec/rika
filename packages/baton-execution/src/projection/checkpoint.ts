@@ -1,9 +1,9 @@
 import * as Projection from "@rika/product/execution-projection"
-import type { Block, Unit } from "@rika/product/execution-transcript-contract"
+import type { Unit } from "@rika/product/execution-transcript-contract"
 import { Function, Schema } from "effect"
 import { type Card, type Node } from "./model"
 import { type AuthorizationState, type PersistedProjector, type ProjectorCore } from "./persistence"
-import { compactNode } from "./nodes"
+import type { ProjectorRecoveryIndex } from "./projector-recovery"
 import type { UsageAccounting } from "../baton-usage-accounting"
 
 export interface AuthorizationTarget {
@@ -62,9 +62,7 @@ export interface ProjectorCheckpointInput {
   readonly authorizations: Map<string, AuthorizationState>
   readonly pendingSteering: Map<string, Projection.PendingSteering>
   readonly settledSteering: Map<string, Projection.SteeringDisposition>
-  readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
-  readonly toolBlock: (node: Node, rawId: string) => Extract<Block, { readonly _tag: "ToolCall" }> | undefined
-  readonly cellBlock: (node: Node, rawId: string) => Extract<Block, { readonly _tag: "Cell" }> | undefined
+  readonly recovery: ProjectorRecoveryIndex
 }
 
 export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): ProjectorCheckpointCodec => {
@@ -80,84 +78,14 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
     authorizations,
     pendingSteering,
     settledSteering,
-    localId,
-    toolBlock,
-    cellBlock,
+    recovery,
   } = input
 
-  const compactState = () => {
-    const retained = new Set<string>()
-    const activeNodes = [...nodes.values()].filter(
-      (node) => node.parentRawRunId === undefined || node.status === "running" || node.status === "waiting",
-    )
-    const activeRawRuns = new Set(activeNodes.map((node) => node.rawRunId))
-    for (const node of activeNodes) {
-      for (const family of ["assistant", "reasoning"] as const)
-        for (let chunk = 0; ; chunk += 1) {
-          const key = localId(family, node.publicId, node.phase, chunk)
-          if (!units.has(key)) break
-          retained.add(key)
-        }
-      if (node.parentUnitKey !== undefined) retained.add(node.parentUnitKey)
-      for (const tool of node.tools.values()) {
-        const block = toolBlock(node, tool.rawId)
-        if (block?.status === "running") retained.add(tool.key)
-      }
-      for (const cell of node.cells.values()) {
-        const block = cellBlock(node, cell.rawId)
-        if (block?.status === "running" || block?.status === "unknown") retained.add(cell.key)
-      }
-    }
-    const compactCards = [...cardsByInvocation.values()]
-    for (const card of compactCards)
-      if (card.rawChildRunId === undefined || activeRawRuns.has(card.rawChildRunId)) retained.add(card.unitKey)
-    for (const pendingAuthorization of authorizations.values()) {
-      const candidate = units.get(pendingAuthorization.unitKey)
-      if (
-        candidate?.content._tag === "Block" &&
-        candidate.content.block._tag === "AuthorizationCard" &&
-        candidate.content.block.status === "pending"
-      )
-        retained.add(pendingAuthorization.unitKey)
-    }
-    for (const [key, candidate] of units)
-      if (
-        candidate.content._tag === "Block" &&
-        candidate.content.block._tag === "Compaction" &&
-        candidate.content.block.status === "running"
-      )
-        retained.add(key)
-    const blockKeys = new Map<string, string>()
-    for (const [key, candidate] of units)
-      if (candidate.content._tag === "Block" && "id" in candidate.content.block)
-        blockKeys.set(String(candidate.content.block.id), key)
-    let expanded = true
-    while (expanded) {
-      expanded = false
-      for (const key of retained) {
-        const parentId = units.get(key)?.parentId
-        const parentKey = parentId === undefined ? undefined : blockKeys.get(parentId)
-        if (parentKey !== undefined && !retained.has(parentKey)) {
-          retained.add(parentKey)
-          expanded = true
-        }
-      }
-    }
-    const compactUnits = [...units].filter(([key]) => retained.has(key))
-    return {
-      units: compactUnits,
-      nodes: activeNodes.map((node) => compactNode(node, retained)),
-      cards: compactCards.map(({ prompt: _prompt, ...card }) => card),
-      hasOlder: core.historyOmitted || compactUnits.length < units.size,
-    }
-  }
-
   const serialize = (): string => {
-    const compact = compactState()
     const persisted: PersistedProjector = {
       turnId,
       revision: core.revision,
-      hasOlder: compact.hasOlder,
+      hasOlder: core.historyOmitted || recovery.retainedUnitCount() < units.size,
       rootStatus: core.rootStatus,
       ...(core.title === undefined ? {} : { title: core.title }),
       steeringMessages: core.steeringMessages,
@@ -165,11 +93,10 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
       pendingSteering: [...pendingSteering.values()],
       settledSteering: [...settledSteering.values()],
       ...usage.persist(),
-      nodes: compact.nodes,
-      cards: compact.cards,
-      authorizations: [...authorizations].filter(([, pendingAuthorization]) =>
-        compact.units.some(([key]) => key === pendingAuthorization.unitKey),
-      ),
+      nodes: recovery.persistedNodes(),
+      cards: recovery.persistedCards(),
+      authorizations: recovery.persistedAuthorizations(authorizations),
+      runningCompactions: recovery.persistedCompactions(),
     }
     return JSON.stringify(persisted)
   }
@@ -188,6 +115,7 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
       !Array.isArray(parsed.settledAttemptKeys) ||
       !Array.isArray(parsed.modelCalls) ||
       !Array.isArray(parsed.authorizations) ||
+      !Array.isArray(parsed.runningCompactions) ||
       !Schema.is(Schema.Array(Projection.PendingSteering))(parsed.pendingSteering) ||
       !Schema.is(Schema.Array(Projection.SteeringDisposition))(parsed.settledSteering) ||
       typeof parsed.activeAvailable !== "boolean" ||
@@ -225,7 +153,7 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
     for (const persisted of parsed.nodes) {
       if (typeof persisted.rawRunId !== "string" || typeof persisted.publicId !== "string")
         throw new TypeError("Invalid projector topology checkpoint")
-      nodes.set(persisted.rawRunId, {
+      const node: Node = {
         rawRunId: persisted.rawRunId,
         publicId: persisted.publicId,
         ...(persisted.parentRawRunId === undefined ? {} : { parentRawRunId: persisted.parentRawRunId }),
@@ -239,7 +167,11 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
         lifecycle: persisted.lifecycle,
         started: persisted.started,
         ...(persisted.attempt === undefined ? {} : { attempt: persisted.attempt }),
-      })
+      }
+      nodes.set(node.rawRunId, node)
+      recovery.nodeChanged(node)
+      for (const tool of node.tools.values()) recovery.toolChanged(node, tool, true)
+      for (const cell of node.cells.values()) recovery.cellChanged(node, cell, true)
     }
     cardsByInvocation.clear()
     cardsByChild.clear()
@@ -256,9 +188,17 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
       }
       cardsByInvocation.set(`${card.parentRawRunId}\u0000${card.rawInvocationId}`, card)
       if (card.rawChildRunId !== undefined) cardsByChild.set(card.rawChildRunId, card)
+      recovery.cardChanged(card)
     }
     authorizations.clear()
-    for (const [key, value] of parsed.authorizations) authorizations.set(key, value)
+    for (const [key, value] of parsed.authorizations) {
+      authorizations.set(key, value)
+      recovery.authorizationChanged(key, value.unitKey)
+    }
+    for (const key of parsed.runningCompactions) {
+      if (typeof key !== "string") throw new TypeError("Invalid projector compaction checkpoint")
+      recovery.compactionChanged(key, true)
+    }
     pendingSteering.clear()
     for (const value of parsed.pendingSteering) pendingSteering.set(`${value.runId}\u0000${value.entryId}`, value)
     settledSteering.clear()

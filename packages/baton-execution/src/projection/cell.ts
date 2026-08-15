@@ -79,6 +79,8 @@ export interface CellProjectionInput {
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
   readonly put: (unit: Unit) => void
   readonly unit: (node: Node, key: string, content: Unit["content"], part?: number) => Unit
+  readonly recover: (node: Node, cell: CellState, active: boolean) => void
+  readonly activeIds: (node: Node) => ReadonlyArray<string>
   readonly notice: (
     node: Node,
     family: string,
@@ -96,7 +98,7 @@ export interface CellProjectionInput {
 }
 
 export const makeCellProjection = (dependencies: CellProjectionInput): CellProjection => {
-  const { units, localId, put, unit, notice, error } = dependencies
+  const { units, localId, put, unit, recover, activeIds, notice, error } = dependencies
 
   const cellState = (node: Node, rawId: string): CellState => {
     const current = node.cells.get(rawId)
@@ -120,7 +122,9 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
   }
 
   const write = (node: Node, rawId: string, block: Cell) => {
-    put(unit(node, cellState(node, rawId).key, { _tag: "Block", block }))
+    const state = cellState(node, rawId)
+    put(unit(node, state.key, { _tag: "Block", block }))
+    recover(node, state, block.status === "running" || block.status === "unknown")
   }
 
   const withSource = (block: Cell, source: string): Cell => {
@@ -292,7 +296,7 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
   }
 
   const settleRunningCells = (node: Node, status: "complete" | "failed" | "cancelled") => {
-    for (const rawId of node.cells.keys()) {
+    for (const rawId of activeIds(node)) {
       const block = cellBlock(node, rawId)
       if (block?.status !== "running") continue
       write(node, rawId, { ...block, status })

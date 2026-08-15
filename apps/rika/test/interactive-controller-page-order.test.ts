@@ -53,7 +53,7 @@ it("projects a full snapshot beyond the old 120-unit window bound without trunca
     )
       state = InteractiveController.update(state, event).state
 
-  const keys = state.view?.turns.flatMap((value) => value.units.map((unit) => unit.key)) ?? []
+  const keys = state.view?.snapshot().turns.flatMap((value) => value.units.map((unit) => unit.key)) ?? []
   expect(keys).toHaveLength(130)
   expect(keys[0]).toBe("opening")
   expect(keys.at(-1)).toBe("final")

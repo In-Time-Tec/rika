@@ -62,6 +62,32 @@ describe("interactive ThreadView controller", () => {
     expect(applied.state.model.currentThreadTitle).toBe("Renamed")
   })
 
+  it("projects an exact patch without materializing the full ThreadView", () => {
+    const loaded = InteractiveController.update(state(), { _tag: "ThreadViewSnapshot", snapshot: snapshot() }).state
+    const view = loaded.view!
+    Object.defineProperty(view, "snapshot", {
+      value: () => {
+        throw new Error("unexpected snapshot materialization")
+      },
+    })
+    const applied = InteractiveController.update(loaded, {
+      _tag: "ThreadViewPatch",
+      patch: patch({
+        header: {
+          thread: { ...snapshot().thread, title: "Incremental" },
+          source: { projectionVersion: 1 },
+          pending: [],
+          hasOlder: false,
+          hasNewer: false,
+          usage: snapshot().usage,
+        },
+      }),
+    })
+    expect(applied.resync).toBeUndefined()
+    expect(applied.state.model.currentThreadTitle).toBe("Incremental")
+    expect(applied.state.view?.revision).toBe(5)
+  })
+
   it("requests resync for gaps, foreign threads, and nonmonotonic revisions", () => {
     const loaded = InteractiveController.update(state(), { _tag: "ThreadViewSnapshot", snapshot: snapshot() }).state
     expect(
@@ -503,7 +529,7 @@ describe("interactive ThreadView controller", () => {
 
     const reconnected = InteractiveController.update(state(), {
       _tag: "ThreadViewSnapshot",
-      snapshot: { ...discarded.state.view!, revision: 7 },
+      snapshot: { ...discarded.state.view!.snapshot(), revision: 7 },
     })
     expect(reconnected.state.model.pendingSteering).toEqual([])
     expect(

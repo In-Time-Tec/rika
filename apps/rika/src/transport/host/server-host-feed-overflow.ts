@@ -3,15 +3,14 @@ import * as ThreadView from "@rika/product/thread-view"
 import { Function, Result } from "effect"
 
 const capacity = 64
-const patchItemCapacity = 120
-const turnChangeCapacity = 6
-
 type Event = InteractiveEvent.InteractiveEvent
-type PatchEvent = Extract<Event, { readonly _tag: "ThreadViewPatch" }>
 type ViewEvent = Extract<Event, { readonly _tag: "ThreadViewSnapshot" | "ThreadViewPatch" | "ResyncRequired" }>
+type BufferedView =
+  | ViewEvent
+  | { readonly _tag: "ThreadViewAccumulator"; readonly view: ThreadView.ThreadViewAccumulator }
 
 export interface State {
-  readonly views: Map<string, ViewEvent>
+  readonly views: Map<string, BufferedView>
   readonly latest: Map<string, Event>
   readonly critical: Array<Event>
   readonly previewInvalidations: Map<string, Extract<Event, { readonly _tag: "ExecutionModelPreviewChanged" }>>
@@ -32,49 +31,6 @@ const resync = (event: Extract<Event, { readonly _tag: "ThreadViewPatch" }>): Vi
     receivedBaseRevision: event.patch.baseRevision,
     currentRevision: event.patch.baseRevision,
   })
-
-const mergePatch = (current: PatchEvent, next: PatchEvent): PatchEvent | undefined => {
-  if (
-    String(current.patch.threadId) !== String(next.patch.threadId) ||
-    current.patch.revision !== next.patch.baseRevision
-  )
-    return undefined
-  const upsert = new Map(current.patch.upsert.map((unit) => [unit.key, unit] as const))
-  const remove = new Set(current.patch.remove)
-  for (const unit of next.patch.upsert) {
-    if (remove.has(unit.key)) return undefined
-    upsert.set(unit.key, unit)
-  }
-  for (const key of next.patch.remove) {
-    if (upsert.has(key)) return undefined
-    remove.add(key)
-  }
-  const turnChanges = new Map(
-    current.patch.turnChanges.map(
-      (change) => [String(change._tag === "UpsertTurn" ? change.turn.id : change.turnId), change] as const,
-    ),
-  )
-  for (const change of next.patch.turnChanges) {
-    const key = String(change._tag === "UpsertTurn" ? change.turn.id : change.turnId)
-    const previous = turnChanges.get(key)
-    if (previous !== undefined && previous._tag !== change._tag) return undefined
-    turnChanges.set(key, change)
-  }
-  if (upsert.size + remove.size > patchItemCapacity || turnChanges.size > turnChangeCapacity) return undefined
-  const header = next.patch.header ?? current.patch.header
-  return {
-    _tag: "ThreadViewPatch",
-    patch: {
-      threadId: current.patch.threadId,
-      baseRevision: current.patch.baseRevision,
-      revision: next.patch.revision,
-      upsert: [...upsert.values()],
-      remove: [...remove],
-      turnChanges: [...turnChanges.values()],
-      ...(header === undefined ? {} : { header }),
-    },
-  }
-}
 
 const recovery = (event: Event): Event => {
   if (event._tag === "ThreadViewPatch") return resync(event)
@@ -99,8 +55,13 @@ const rememberView = (state: State, event: ViewEvent) => {
   const id = viewId(event)
   const current = state.views.get(id)
   if (current === undefined && state.views.size >= capacity) return degrade(state, event)
-  if (event._tag === "ThreadViewSnapshot" || event._tag === "ResyncRequired") {
+  if (event._tag === "ResyncRequired") {
     state.views.set(id, event)
+    return
+  }
+  if (event._tag === "ThreadViewSnapshot") {
+    const hydrated = ThreadView.fromSnapshot(event.snapshot)
+    state.views.set(id, Result.isFailure(hydrated) ? event : { _tag: "ThreadViewAccumulator", view: hydrated.success })
     return
   }
   if (current === undefined) {
@@ -109,14 +70,24 @@ const rememberView = (state: State, event: ViewEvent) => {
   }
   if (current._tag === "ResyncRequired") return
   if (current._tag === "ThreadViewPatch") {
-    state.views.set(id, mergePatch(current, event) ?? resync(event))
+    state.views.set(id, resync(event))
     return
   }
-  const applied = ThreadView.apply(current.snapshot, event.patch)
-  state.views.set(
-    id,
-    Result.isFailure(applied) ? resync(event) : { _tag: "ThreadViewSnapshot", snapshot: applied.success },
-  )
+  if (current._tag === "ThreadViewSnapshot") {
+    const hydrated = ThreadView.fromSnapshot(current.snapshot)
+    if (Result.isFailure(hydrated)) {
+      state.views.set(id, resync(event))
+      return
+    }
+    const applied = hydrated.success.apply(event.patch)
+    state.views.set(
+      id,
+      Result.isFailure(applied) ? resync(event) : { _tag: "ThreadViewAccumulator", view: hydrated.success },
+    )
+    return
+  }
+  const applied = current.view.apply(event.patch)
+  if (Result.isFailure(applied)) state.views.set(id, resync(event))
 }
 
 const rememberImpl = (state: State, event: Event) => {
@@ -194,5 +165,15 @@ export const remember: {
 
 export const events = (state: State): ReadonlyArray<Event> =>
   state.degraded === undefined
-    ? [...state.views.values(), ...state.latest.values(), ...state.critical, ...state.previewInvalidations.values()]
+    ? [
+        ...[...state.views.values()].map(
+          (event): ViewEvent =>
+            event._tag === "ThreadViewAccumulator"
+              ? { _tag: "ThreadViewSnapshot", snapshot: event.view.snapshot() }
+              : event,
+        ),
+        ...state.latest.values(),
+        ...state.critical,
+        ...state.previewInvalidations.values(),
+      ]
     : [state.degraded]

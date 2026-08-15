@@ -29,10 +29,11 @@ export interface AuthorizationProjectionInput {
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
   readonly put: (unit: Unit) => void
   readonly unit: (node: Node, key: string, content: Unit["content"], part?: number) => Unit
+  readonly recover: (key: string, unitKey: string | undefined) => void
 }
 
 export const makeAuthorizationProjection = (input: AuthorizationProjectionInput): AuthorizationProjection => {
-  const { core, units, authorizations, localId, put, unit } = input
+  const { core, units, authorizations, localId, put, unit, recover } = input
 
   const putAuthorization = (
     node: Node,
@@ -47,12 +48,14 @@ export const makeAuthorizationProjection = (input: AuthorizationProjectionInput)
     if (node.hidden) return
     const authorizationId = localId("authorization", node.publicId, request.approvalId)
     const key = localId("authorization-unit", node.publicId, request.approvalId)
-    authorizations.set(`${node.rawRunId}\u0000${waitId}`, {
+    const authorizationKey = `${node.rawRunId}\u0000${waitId}`
+    authorizations.set(authorizationKey, {
       unitKey: key,
       rawRunId: node.rawRunId,
       authorizationId,
       approvalId: request.approvalId,
     })
+    recover(authorizationKey, key)
     const fullInput = (() => {
       try {
         return typeof request.input === "string" ? request.input : (JSON.stringify(request.input) ?? "")
@@ -91,6 +94,7 @@ export const makeAuthorizationProjection = (input: AuthorizationProjectionInput)
       content: { _tag: "Block", block: { ...candidate.content.block, status } },
     })
     authorizations.delete(authorizationKey)
+    recover(authorizationKey, undefined)
   }
 
   const settleAuthorizations = (node: Node, status: "cancelled" | "expired") => {

@@ -13,7 +13,7 @@ import * as ModelPreview from "./interactive-model-preview"
 const unchanged = (state: State): Update => ({ state, preserveAnchor: false })
 
 const activeUnitActivity = (
-  entry: ThreadView.ThreadViewTurn | undefined,
+  entry: ThreadView.ThreadViewTurnState | undefined,
   modelPreview: ModelPreview.Overlay | undefined,
   model: Model,
 ): Model["activity"] => {
@@ -37,7 +37,8 @@ const clearTimeline = (model: Model): Model => ({
   eventCursor: undefined,
 })
 
-const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot, modelPreview?: ModelPreview.Overlay): Model => {
+const project = (model: Model, view: ThreadView.ThreadViewAccumulator, modelPreview?: ModelPreview.Overlay): Model => {
+  const snapshot = view.snapshot()
   const active = snapshot.turns.find(
     (entry) =>
       entry.turn.status === "accepted" ||
@@ -90,7 +91,7 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot, modelPre
     threadPreview: { _tag: "Idle" },
   }
   for (const entry of snapshot.turns) next = applyRootUnits(next, String(entry.turn.id), entry.units)
-  const previewUnits = ModelPreview.units(modelPreview, snapshot)
+  const previewUnits = ModelPreview.units(modelPreview, view)
   if (previewUnits.length > 0) next = applyRootUnits(next, String(previewUnits[0]!.turnId), previewUnits)
   if (model.currentThreadId === undefined || model.currentThreadId === String(snapshot.thread.id))
     next = overlayPendingSubmissions(next, model)
@@ -168,6 +169,143 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot, modelPre
   )
 }
 
+const projectPatch = (
+  model: Model,
+  view: ThreadView.ThreadViewAccumulator,
+  delta: ThreadView.ThreadViewDelta,
+  previousPreviewUnits: ReadonlyArray<import("@rika/transcript/transcript-unit").Unit>,
+  nextPreviewUnits: ReadonlyArray<import("@rika/transcript/transcript-unit").Unit>,
+  modelPreview: ModelPreview.Overlay | undefined,
+): Model => {
+  let next = model
+  const previewTurnId = nextPreviewUnits[0]?.turnId ?? previousPreviewUnits[0]?.turnId
+  if (previewTurnId !== undefined && previousPreviewUnits.length > 0)
+    next = applyTurnDelta(next, String(previewTurnId), {
+      upsert: [],
+      remove: previousPreviewUnits.map((unit) => unit.key),
+    })
+  for (const turn of delta.turns)
+    next = applyTurnDelta(next, turn.turnId, {
+      upsert: turn.upsert,
+      remove: turn.remove,
+    })
+  if (previewTurnId !== undefined && nextPreviewUnits.length > 0)
+    next = applyTurnDelta(next, String(previewTurnId), {
+      upsert: nextPreviewUnits,
+      remove: [],
+    })
+  const active = view.activeTurn()
+  const editing = model.editingTurnId !== undefined && view.pending.some((item) => item.id === model.editingTurnId)
+  const changedTurnIds = new Set(delta.turns.map((turn) => turn.turnId))
+  const pendingSteering = [
+    ...model.pendingSteering.filter((steering) => !changedTurnIds.has(String(steering.turnId))),
+    ...delta.turns.flatMap((turn) =>
+      (turn.current?.pendingSteering ?? []).map((steering) => ({ ...steering, turnId: turn.turnId })),
+    ),
+  ]
+  const authoritativeRequestIds = new Set(pendingSteering.map((steering) => steering.requestId))
+  const settledRequestIds = new Set(
+    delta.turns.flatMap((turn) => (turn.current?.settledSteering ?? []).map((steering) => steering.requestId)),
+  )
+  const changedUnitKeys = delta.turns.flatMap((turn) => turn.upsert.map((unit) => unit.key))
+  const steeringRequests = model.steeringRequests.filter(
+    (request) =>
+      !authoritativeRequestIds.has(request.requestId) &&
+      !settledRequestIds.has(request.requestId) &&
+      !changedUnitKeys.some((key) => key.startsWith(`${steeringUnitKeyPrefix(request.turnId, request.requestId)}:`)),
+  )
+  const previousActiveTurnId = model.activeTurnId
+  next = {
+    ...next,
+    currentThreadId: String(view.thread.id),
+    currentThreadTitle: view.thread.title,
+    activeTurnId: active === undefined ? undefined : String(active.turn.id),
+    busy: active !== undefined,
+    activity: undefined,
+    pendingSteering,
+    steeringRequests,
+    editingTurnId: editing ? model.editingTurnId : undefined,
+    editReturn: editing ? model.editReturn : undefined,
+    queue: view.pending.map((item) => ({ id: item.id, prompt: item.prompt })),
+    queueSelection: view.pending.some((item) => item.id === model.queueSelection)
+      ? model.queueSelection
+      : view.pending.at(-1)?.id,
+    queueThreadId: String(view.thread.id),
+    queueRevision: view.revision,
+  }
+  if (model.currentThreadId === undefined || model.currentThreadId === String(view.thread.id))
+    next = overlayPendingSubmissions(next, model)
+  next = { ...next, activity: activeUnitActivity(active, modelPreview, next) }
+  if (active === undefined && previousActiveTurnId !== undefined) {
+    const settled = view.turn(previousActiveTurnId)?.turn
+    if (settled?.status === "completed") next = updateModel(next, { _tag: "ExecutionCompleted", turnId: settled.id })
+    if (settled?.status === "failed") {
+      const errorUnit = [...view.units(previousActiveTurnId)].reverse().find((unit) => {
+        const content = unit.content as { _tag?: string; block?: { _tag?: string } }
+        return content._tag === "Block" && content.block?._tag === "Error"
+      })
+      const errorBlock = (
+        errorUnit?.content as
+          | { block?: { title?: string; detail?: string; category?: string; retryable?: boolean } }
+          | undefined
+      )?.block
+      const message =
+        errorBlock?.detail !== undefined && errorBlock.detail.length > 0
+          ? errorBlock.detail
+          : (errorBlock?.title ?? "Execution failed")
+      const retryable = errorBlock?.retryable ?? false
+      next = updateModel(next, {
+        _tag: "ExecutionFailed",
+        turnId: settled.id,
+        failure: {
+          tag: "TurnFailed",
+          category: errorBlock?.category ?? "operation",
+          message,
+          retryable,
+          retry: retryable ? "automatic" : "none",
+          actor: "environment",
+        },
+      })
+    }
+    if (settled?.status === "cancelled")
+      next = updateModel(next, { _tag: "ExecutionCancelled", turnId: settled.id, agentResponseArrived: false })
+  }
+  const usage = view.usage.state
+  const contextUsage = ((): NonNullable<Model["contextUsage"]> => {
+    if (usage.context !== undefined && view.usage.contextCapacity !== undefined)
+      return {
+        _tag: "Available" as const,
+        inputTokens: usage.context.inputTokens,
+        contextWindow: view.usage.contextCapacity.contextWindow,
+        reserveTokens: view.usage.contextCapacity.reserveTokens,
+      }
+    if (usage.contextPending) return { _tag: "Loading" as const }
+    if (view.turnCount === 0 && view.pending.length === 0) return { _tag: "NotStarted" as const }
+    return { _tag: "Unavailable" as const }
+  })()
+  next = updateModel(next, { _tag: "ContextUsageReplaced", contextUsage })
+  const includedAttempts = usage.includedAttempts ?? 0
+  const costUsd = usage.costNanoUsd === undefined ? undefined : usage.costNanoUsd / 1_000_000_000
+  const usageCost = ((): NonNullable<Model["usageCost"]> => {
+    if (costUsd !== undefined)
+      return { _tag: "Available", usd: costUsd, unpricedAttempts: usage.unpricedAttempts, includedAttempts }
+    if (includedAttempts > 0) return { _tag: "Included", includedAttempts }
+    return { _tag: "Unavailable" }
+  })()
+  return trimTranscriptTimeline(
+    {
+      ...next,
+      usageCost,
+      usageTokens:
+        usage.tokens?.total === undefined
+          ? { _tag: "Unavailable" }
+          : { _tag: "Available", total: usage.tokens.total, uncountedAttempts: usage.uncountedAttempts },
+      usageTime: usage.active,
+    },
+    maxInMemoryTranscriptUnits,
+  )
+}
+
 const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
   if (event._tag === "ThreadRefolding")
     return {
@@ -183,7 +321,7 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
     }
   if (event._tag === "ExecutionModelPreviewChanged") {
     if (state.view === undefined || event.threadId !== state.view.thread.id) return unchanged(state)
-    const turn = state.view.turns.find((candidate) => candidate.turn.id === event.turnId)
+    const turn = state.view.turn(String(event.turnId))
     if (
       turn === undefined ||
       (turn.turn.status !== "accepted" &&
@@ -224,13 +362,22 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
   if (event._tag === "ThreadViewSnapshot") {
     const sameThread = state.view?.thread.id === event.snapshot.thread.id
     if (sameThread && state.view !== undefined && event.snapshot.revision < state.view.revision) return unchanged(state)
-    const modelPreview = ModelPreview.reconcile(state.modelPreview, event.snapshot)
+    const hydrated = ThreadView.fromSnapshot(event.snapshot)
+    if (Result.isFailure(hydrated))
+      return {
+        state: clearPreviewStateImpl(state, undefined),
+        preserveAnchor: false,
+        resync: true,
+        rejection: "gap",
+      }
+    const view = hydrated.success
+    const modelPreview = ModelPreview.reconcile(state.modelPreview, view)
     return {
       state: {
         ...state,
-        view: event.snapshot,
+        view,
         modelPreview,
-        model: project(state.model, event.snapshot, modelPreview),
+        model: project(state.model, view, modelPreview),
       },
       preserveAnchor: sameThread,
     }
@@ -242,7 +389,8 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
       resync: true,
       rejection: "gap",
     }
-  const applied = ThreadView.apply(state.view, event.patch)
+  const previousPreviewUnits = ModelPreview.units(state.modelPreview, state.view)
+  const applied = state.view.apply(event.patch)
   if (Result.isFailure(applied)) {
     const foreign = applied.failure._tag === "ThreadViewForeignThread"
     return {
@@ -252,13 +400,20 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
       rejection: foreign ? "thread" : "revision",
     }
   }
-  const modelPreview = ModelPreview.reconcile(state.modelPreview, applied.success)
+  const modelPreview = ModelPreview.reconcile(state.modelPreview, state.view)
+  const nextPreviewUnits = ModelPreview.units(modelPreview, state.view)
   return {
     state: {
       ...state,
-      view: applied.success,
       modelPreview,
-      model: project(state.model, applied.success, modelPreview),
+      model: projectPatch(
+        state.model,
+        state.view,
+        applied.success,
+        previousPreviewUnits,
+        nextPreviewUnits,
+        modelPreview,
+      ),
     },
     preserveAnchor: false,
   }
@@ -266,10 +421,17 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
 
 const clearPreviewStateImpl = (state: State, turnId: string | undefined): State => {
   if (state.modelPreview === undefined || (turnId !== undefined && state.modelPreview.turnId !== turnId)) return state
+  if (state.view === undefined) return { ...state, modelPreview: undefined }
+  const units = ModelPreview.units(state.modelPreview, state.view)
+  const model = applyTurnDelta(state.model, state.modelPreview.turnId, {
+    upsert: [],
+    remove: units.map((unit) => unit.key),
+  })
+  const active = state.view.activeTurn()
   return {
     ...state,
     modelPreview: undefined,
-    model: state.view === undefined ? state.model : project(state.model, state.view),
+    model: { ...model, activity: activeUnitActivity(active, undefined, model) },
   }
 }
 

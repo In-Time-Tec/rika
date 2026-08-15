@@ -160,7 +160,7 @@ interface PatchOptions {
 
 const applyPatch = (state: InteractiveController.State, options: PatchOptions): InteractiveController.State => {
   const view = state.view!
-  const entry = view.turns.find((candidate) => candidate.turn.id === turnId)!
+  const entry = view.turn(String(turnId))!
   const patch: ThreadView.ThreadViewPatch = {
     threadId,
     baseRevision: view.revision,
@@ -403,7 +403,7 @@ describe("tentative model preview overlay", () => {
     ]
     state = applyPatch(state, { upsert: priorUnits })
     expect(state.modelPreview).toBe(second)
-    expect(state.view?.turns[0]?.units.map((unit) => unit.key)).toEqual(
+    expect(state.view?.snapshot().turns[0]?.units.map((unit) => unit.key)).toEqual(
       expect.arrayContaining(priorUnits.map((unit) => unit.key)),
     )
     expect(assistantText(state)).toBe("second answer")
@@ -501,7 +501,7 @@ describe("tentative model preview overlay", () => {
     const overlay = state.modelPreview
     const key = `new:${name}`
     state = applyPatch(state, { upsert: [timelineUnit(key, content)] })
-    expect(state.view?.turns[0]?.units.some((unit) => unit.key === key)).toBe(true)
+    expect(state.view?.snapshot().turns[0]?.units.some((unit) => unit.key === key)).toBe(true)
     expect(state.modelPreview).toBe(overlay)
     expect(ids(state).some((id) => id.startsWith("tentative:"))).toBe(true)
   })
@@ -525,7 +525,7 @@ describe("tentative model preview overlay", () => {
         }),
       ],
     })
-    expect(state.view?.turns[0]?.units.some((unit) => unit.key === resultKey)).toBe(true)
+    expect(state.view?.snapshot().turns[0]?.units.some((unit) => unit.key === resultKey)).toBe(true)
     expect(state.modelPreview).toBe(overlay)
 
     const usage = {
@@ -535,7 +535,7 @@ describe("tentative model preview overlay", () => {
       active: { _tag: "Available" as const, accumulatedMillis: 5 },
     }
     state = applyPatch(state, { status: "waiting", turnUsage: usage, threadUsage: usage })
-    expect(state.view?.turns[0]?.turn.status).toBe("waiting")
+    expect(state.view?.turn(String(turnId))?.turn.status).toBe("waiting")
     expect(state.view?.usage.state.costNanoUsd).toBe(12)
     expect(state.modelPreview).toBe(overlay)
     expect(assistantText(state)).toBe("still streaming")
@@ -545,7 +545,7 @@ describe("tentative model preview overlay", () => {
     let state = InteractiveController.update(loaded(), preview(1, "tentative answer")).state
     expect(state.modelPreview).toBeDefined()
     state = applyPatch(state, { status })
-    expect(state.view?.turns[0]?.turn.status).toBe(status)
+    expect(state.view?.turn(String(turnId))?.turn.status).toBe(status)
     expect(state.modelPreview).toBeUndefined()
     expect(ids(state).some((id) => id.startsWith("tentative:"))).toBe(false)
   })

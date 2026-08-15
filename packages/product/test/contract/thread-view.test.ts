@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Schema } from "effect"
+import { Result, Schema } from "effect"
 import * as ThreadView from "../../src/thread/model/thread-view"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 
@@ -62,6 +62,16 @@ const snapshot = () =>
     hasNewer: false,
     usage: usage(),
   })
+
+const apply = (
+  current: ThreadView.ThreadViewSnapshot,
+  change: ThreadView.ThreadViewPatch,
+): Result.Result<ThreadView.ThreadViewSnapshot, ThreadView.ThreadViewApplyError> => {
+  const hydrated = ThreadView.fromSnapshot(current)
+  if (Result.isFailure(hydrated)) return hydrated
+  const applied = hydrated.success.apply(change)
+  return Result.isFailure(applied) ? applied : Result.succeed(hydrated.success.snapshot())
+}
 
 const patch = (changes: Record<string, unknown> = {}) =>
   decodePatch({
@@ -141,7 +151,7 @@ describe("ThreadView contract", () => {
       ],
     })
 
-    const result = ThreadView.apply(current, change)
+    const result = apply(current, change)
     expect(result._tag).toBe("Success")
     if (result._tag !== "Success") return
     expect(result.success).toMatchObject({
@@ -165,7 +175,7 @@ describe("ThreadView contract", () => {
 
   it("adds and removes whole Turn views with the same reducer", () => {
     const current = snapshot()
-    const result = ThreadView.apply(
+    const result = apply(
       current,
       patch({
         remove: ["unit:1"],
@@ -184,7 +194,7 @@ describe("ThreadView contract", () => {
   })
 
   it("requires resync for stale bases and skipped revisions", () => {
-    const stale = ThreadView.apply(snapshot(), patch({ baseRevision: 6, revision: 7 }))
+    const stale = apply(snapshot(), patch({ baseRevision: 6, revision: 7 }))
     expect(stale).toMatchObject({
       _tag: "Failure",
       failure: {
@@ -195,7 +205,7 @@ describe("ThreadView contract", () => {
         currentRevision: 4,
       },
     })
-    const skipped = ThreadView.apply(snapshot(), patch({ revision: 6 }))
+    const skipped = apply(snapshot(), patch({ revision: 6 }))
     expect(skipped).toMatchObject({
       _tag: "Failure",
       failure: { _tag: "ResyncRequired", expectedRevision: 5, receivedBaseRevision: 4, currentRevision: 4 },
@@ -203,7 +213,7 @@ describe("ThreadView contract", () => {
   })
 
   it("rejects foreign and non-monotonic patches with closed errors", () => {
-    expect(ThreadView.apply(snapshot(), patch({ threadId: "other" }))).toMatchObject({
+    expect(apply(snapshot(), patch({ threadId: "other" }))).toMatchObject({
       _tag: "Failure",
       failure: {
         _tag: "ThreadViewForeignThread",
@@ -211,7 +221,7 @@ describe("ThreadView contract", () => {
         receivedThreadId: "other",
       },
     })
-    expect(ThreadView.apply(snapshot(), patch({ revision: 4 }))).toMatchObject({
+    expect(apply(snapshot(), patch({ revision: 4 }))).toMatchObject({
       _tag: "Failure",
       failure: {
         _tag: "ThreadViewNonMonotonicRevision",
@@ -224,30 +234,83 @@ describe("ThreadView contract", () => {
 
   it("rejects duplicate, conflicting, missing, and orphan item changes", () => {
     const duplicate = unit("turn", "duplicate", 2)
-    expect(ThreadView.apply(snapshot(), patch({ upsert: [duplicate, duplicate] }))).toMatchObject({
+    expect(apply(snapshot(), patch({ upsert: [duplicate, duplicate] }))).toMatchObject({
       _tag: "Failure",
       failure: { _tag: "ThreadViewDuplicateItem", collection: "upsert", key: "duplicate" },
     })
-    expect(
-      ThreadView.apply(snapshot(), patch({ upsert: [unit("turn", "unit:1", 1)], remove: ["unit:1"] })),
-    ).toMatchObject({
+    expect(apply(snapshot(), patch({ upsert: [unit("turn", "unit:1", 1)], remove: ["unit:1"] }))).toMatchObject({
       _tag: "Failure",
       failure: { _tag: "ThreadViewInvalidPatch", reason: "conflicting-item-change", key: "unit:1" },
     })
-    expect(ThreadView.apply(snapshot(), patch({ remove: ["missing"] }))).toMatchObject({
+    expect(apply(snapshot(), patch({ remove: ["missing"] }))).toMatchObject({
       _tag: "Failure",
       failure: { _tag: "ThreadViewInvalidPatch", reason: "missing-item", key: "missing" },
     })
-    expect(ThreadView.apply(snapshot(), patch({ upsert: [unit("missing-turn", "orphan", 2)] }))).toMatchObject({
+    expect(apply(snapshot(), patch({ upsert: [unit("missing-turn", "orphan", 2)] }))).toMatchObject({
       _tag: "Failure",
       failure: { _tag: "ThreadViewInvalidPatch", reason: "missing-turn", key: "missing-turn" },
     })
-    expect(
-      ThreadView.apply(snapshot(), patch({ upsert: [{ ...unit("turn", "unit:1", 1), revision: 0 }] })),
-    ).toMatchObject({
+    expect(apply(snapshot(), patch({ upsert: [{ ...unit("turn", "unit:1", 1), revision: 0 }] }))).toMatchObject({
       _tag: "Failure",
       failure: { _tag: "ThreadViewInvalidPatch", reason: "unit-revision-regressed", key: "unit:1" },
     })
+  })
+
+  it("applies a tiny patch without reading or materializing the unrelated view", () => {
+    let reads = 0
+    const units = Array.from({ length: 10_000 }, (_, index) => {
+      const value = unit("turn", `unit:${index}`, index)
+      return new Proxy(value, {
+        get(target, property, receiver) {
+          reads += 1
+          return Reflect.get(target, property, receiver)
+        },
+      })
+    })
+    const current = {
+      ...snapshot(),
+      turns: [{ ...snapshot().turns[0]!, units }],
+    } as ThreadView.ThreadViewSnapshot
+    const hydrated = ThreadView.fromSnapshot(current)
+    expect(hydrated._tag).toBe("Success")
+    if (hydrated._tag !== "Success") return
+    const unchangedTurn = hydrated.success.turn("turn")
+    reads = 0
+    const applied = hydrated.success.apply(
+      patch({ upsert: [unit("turn", "unit:new", 10_001)], baseRevision: 4, revision: 5 }),
+    )
+    expect(applied._tag).toBe("Success")
+    expect(reads).toBe(0)
+    expect(hydrated.success.revision).toBe(5)
+    expect(hydrated.success.turn("turn")).toBe(unchangedTurn)
+    expect(reads).toBe(0)
+    expect(hydrated.success.snapshot().turns[0]?.units).toHaveLength(10_001)
+    expect(reads).toBeGreaterThan(0)
+  })
+
+  it("keeps the accumulator unchanged after an invalid transaction or revision gap", () => {
+    const hydrated = ThreadView.fromSnapshot(snapshot())
+    expect(hydrated._tag).toBe("Success")
+    if (hydrated._tag !== "Success") return
+    const before = hydrated.success.snapshot()
+    const invalid = hydrated.success.apply(patch({ remove: ["unit:1"], upsert: [unit("missing-turn", "orphan", 2)] }))
+    expect(invalid).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "ThreadViewInvalidPatch", reason: "missing-turn", key: "missing-turn" },
+    })
+    expect(hydrated.success.snapshot()).toBe(before)
+    const gap = hydrated.success.apply(patch({ baseRevision: 5, revision: 6 }))
+    expect(gap).toMatchObject({
+      _tag: "Failure",
+      failure: {
+        _tag: "ResyncRequired",
+        expectedRevision: 5,
+        receivedBaseRevision: 5,
+        currentRevision: 4,
+      },
+    })
+    expect(hydrated.success.snapshot()).toBe(before)
+    expect(hydrated.success.apply(patch())).toMatchObject({ _tag: "Success", success: { revision: 5 } })
   })
 
   it("round-trips every closed apply error through its schema", () => {

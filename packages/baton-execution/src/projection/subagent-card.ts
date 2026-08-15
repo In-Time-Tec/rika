@@ -46,10 +46,24 @@ export interface SubagentCardProjectionInput {
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
   readonly put: (unit: Unit) => void
   readonly unit: (node: Node, key: string, content: Unit["content"], part?: number) => Unit
+  readonly recoverCard: (card: Card) => void
+  readonly recoverNode: (node: Node) => void
 }
 
 export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): SubagentCardProjection => {
-  const { core, units, nodes, unitKeysByRun, cardsByInvocation, cardsByChild, localId, put, unit } = input
+  const {
+    core,
+    units,
+    nodes,
+    unitKeysByRun,
+    cardsByInvocation,
+    cardsByChild,
+    localId,
+    put,
+    unit,
+    recoverCard,
+    recoverNode,
+  } = input
 
   const cardFor = (
     node: Node,
@@ -77,6 +91,7 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
       ...(memberKey === undefined ? {} : { memberKey }),
     }
     cardsByInvocation.set(invocationKey, card)
+    recoverCard(card)
     const block: Extract<Block, { readonly _tag: "SubagentCard" }> = {
       _tag: "SubagentCard",
       id: card.publicId,
@@ -163,13 +178,17 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
             block: { ...candidate.content.block, prompt: card.prompt, promptTruncated: card.promptTruncated },
           },
         })
+      recoverCard(card)
     }
     if (card === undefined || card.rawChildRunId !== undefined) return
     card.rawChildRunId = childRawRunId
     cardsByChild.set(childRawRunId, card)
+    recoverCard(card)
     const child = nodes.get(childRawRunId)
     if (child !== undefined) {
-      nodes.set(childRawRunId, { ...child, parentUnitKey: card.unitKey, parentBlockId: card.blockId })
+      const linkedChild = { ...child, parentUnitKey: card.unitKey, parentBlockId: card.blockId }
+      nodes.set(childRawRunId, linkedChild)
+      recoverNode(linkedChild)
       for (const key of unitKeysByRun.get(childRawRunId) ?? []) {
         const candidate = units.get(key)
         if (candidate !== undefined && candidate.parentId === undefined)

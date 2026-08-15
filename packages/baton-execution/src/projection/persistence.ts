@@ -59,6 +59,7 @@ export interface PersistedProjector {
   }>
   readonly cards: ReadonlyArray<PersistedCard>
   readonly authorizations: ReadonlyArray<readonly [string, AuthorizationState]>
+  readonly runningCompactions: ReadonlyArray<string>
 }
 
 export interface ProjectorCore {
