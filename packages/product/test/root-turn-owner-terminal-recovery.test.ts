@@ -594,3 +594,72 @@ it.effect("recovers typed errors and defects at every projection boundary", () =
     )
   }),
 )
+
+
+it.effect("terminalizes a turn whose watch stream repeatedly dies with the same defect instead of reconnecting forever", () =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>()
+    let attempts = 0
+    let failures = 0
+    const replaced = new Array<ReadonlyArray<unknown>>()
+    const owner = yield* make(
+      { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
+      {
+        get: () => Effect.void,
+        replaceUnits: (_updated, units) =>
+          Effect.sync(() => {
+            replaced.push(units)
+            return {
+              turn: _updated,
+              units,
+              checkpointGeneration: replaced.length,
+              revision: 1,
+              state: {
+                status: "failed",
+                usage: ExecutionProjection.emptyUsageState(),
+                steering: { steeringMessages: 0, followUpMessages: 0 },
+              },
+              projectionVersion: ExecutionProjection.projectionVersion,
+            }
+          }),
+      } as TranscriptRepository.Interface,
+      {
+        watchTurn: () =>
+          Stream.fromEffect(
+            Effect.gen(function* () {
+              attempts += 1
+              if (attempts === 1) yield* Deferred.succeed(started, undefined)
+              failures += 1
+              return yield* Effect.die(new RangeError("Baton projector steering text exceeds 4096"))
+            }),
+          ),
+      } as ExecutionGateway.Interface,
+    )
+    const fiber = yield* Effect.forkChild(owner.watchTurn(turn.id))
+    yield* Deferred.await(started)
+
+    yield* TestClock.adjust("99 millis")
+    expect(attempts).toBe(1)
+    yield* TestClock.adjust("1 millis")
+    yield* TestClock.adjust("199 millis")
+    expect(attempts).toBe(2)
+    expect(failures).toBe(2)
+    yield* TestClock.adjust("1 millis")
+
+    expect(replaced).toHaveLength(1)
+    const result = yield* Fiber.join(fiber)
+    expect(attempts).toBe(3)
+    expect(failures).toBe(3)
+    expect(replaced).toHaveLength(1)
+    expect(result.status).toBe("failed")
+    expect(result.state.status).toBe("failed")
+    const failureUnit = replaced[0]?.[0] as {
+      content: { block: { _tag: string; category: string; retryable: boolean } }
+    }
+    expect(failureUnit.content.block).toMatchObject({
+      _tag: "Error",
+      category: "projection-defect",
+      retryable: false,
+    })
+  }),
+)
