@@ -18,8 +18,8 @@ const time = (model: Model, now: number): string =>
   model.usageTime?._tag === "Available" ? formatActiveTime(activeTimeAt(model.usageTime, now)) : `${activeTimeIcon} —`
 const cached = (model: Model): string => {
   const context = model.contextUsage
-  if (context?._tag !== "Available" || context.inputTokens === 0) return "—"
-  return `${Math.round((context.inputCacheRead / context.inputTokens) * 100)}%`
+  if (context?._tag !== "Available" || context.inputTotal === 0) return "—"
+  return `${Math.round((context.inputCacheRead / context.inputTotal) * 100)}%`
 }
 
 const contextDetailsImpl = (model: Model, width: number, height: number, now: number): StyledText => {

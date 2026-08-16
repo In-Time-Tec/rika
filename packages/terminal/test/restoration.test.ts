@@ -140,7 +140,7 @@ it.effect("renders responsive context tracks and per-cell mode commit wipe color
     surface.update({
       ...initial("/work", "high"),
       currentThreadId: "thread",
-      contextUsage: { _tag: "Available", inputTokens: 50, inputCacheRead: 25, contextWindow: 100, reserveTokens: 0 },
+      contextUsage: { _tag: "Available", inputTokens: 50, inputCacheRead: 25, inputTotal: 50, contextWindow: 100, reserveTokens: 0 },
       modeCommit: { from: "medium", to: "high", tick: 2 },
     })
     const filled = modeLabel().filter((chunk) => chunk.text === meterGlyphs.fill)
@@ -159,6 +159,7 @@ test("retains the authoritative root context reading while a following turn wait
     _tag: "Available" as const,
     inputTokens: 20_000,
     inputCacheRead: 5_000,
+    inputTotal: 20_000,
     contextWindow: 272_000,
     reserveTokens: 13_600,
   }
@@ -172,14 +173,14 @@ test("drains threshold flashes and compaction vacuum ticks only on animation tic
   const before = {
     ...initial("/work", "high"),
     activity: { _tag: "Compacting" as const },
-    contextUsage: { _tag: "Available" as const, inputCacheRead: 0, inputTokens: 80, contextWindow: 110, reserveTokens: 10 },
+    contextUsage: { _tag: "Available" as const, inputCacheRead: 0, inputTokens: 80, inputTotal: 80, contextWindow: 110, reserveTokens: 10 },
   }
-  const compacted = { _tag: "Available" as const, inputTokens: 20, inputCacheRead: 0, contextWindow: 110, reserveTokens: 10 }
+  const compacted = { _tag: "Available" as const, inputTokens: 20, inputCacheRead: 0, inputTotal: 20, contextWindow: 110, reserveTokens: 10 }
   let model = update(before, { _tag: "ContextUsageReplaced", contextUsage: compacted })
   expect(model.contextAnimation).toMatchObject({ compactFromPercent: 80, compactTick: 0 })
   for (let index = 0; index < 17; index += 1) model = update(model, { _tag: "AnimationTicked" })
   expect(model.contextAnimation.compactTick).toBeUndefined()
-  const threshold = { _tag: "Available" as const, inputTokens: 76, inputCacheRead: 0, contextWindow: 110, reserveTokens: 10 }
+  const threshold = { _tag: "Available" as const, inputTokens: 76, inputCacheRead: 0, inputTotal: 76, contextWindow: 110, reserveTokens: 10 }
   model = update(
     { ...before, activity: undefined, contextUsage: { ...before.contextUsage, inputTokens: 70 } },
     { _tag: "ContextUsageReplaced", contextUsage: threshold },

@@ -2446,7 +2446,7 @@
           "width": 1
         },
         {
-          "text": "Cached     25%",
+          "text": "Cached     100%",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2464,10 +2464,10 @@
             }
           },
           "attributes": 0,
-          "width": 14
+          "width": 15
         },
         {
-          "text": "                                                   ",
+          "text": "                                                  ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -2485,7 +2485,7 @@
             }
           },
           "attributes": 0,
-          "width": 51
+          "width": 50
         },
         {
           "text": "│",

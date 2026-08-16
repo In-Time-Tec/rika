@@ -140,6 +140,7 @@ const project = (model: Model, view: ThreadView.ThreadViewAccumulator, modelPrev
         _tag: "Available" as const,
         inputTokens: usage.context.inputTokens,
         inputCacheRead: usage.tokens?.input.cacheRead ?? 0,
+        inputTotal: usage.tokens?.input.total ?? 0,
         contextWindow: snapshot.usage.contextCapacity.contextWindow,
         reserveTokens: snapshot.usage.contextCapacity.reserveTokens,
       }
@@ -278,6 +279,7 @@ const projectPatch = (
         _tag: "Available" as const,
         inputTokens: usage.context.inputTokens,
         inputCacheRead: usage.tokens?.input.cacheRead ?? 0,
+        inputTotal: usage.tokens?.input.total ?? 0,
         contextWindow: view.usage.contextCapacity.contextWindow,
         reserveTokens: view.usage.contextCapacity.reserveTokens,
       }

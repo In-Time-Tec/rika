@@ -8,6 +8,7 @@ export const ContextUsage = Schema.Union([
     _tag: Schema.tag("Available"),
     inputTokens: Schema.Finite,
     inputCacheRead: Schema.Finite,
+    inputTotal: Schema.Finite,
     contextWindow: Schema.Finite,
     reserveTokens: Schema.Finite,
   }),
