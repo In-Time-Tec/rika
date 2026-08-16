@@ -266,3 +266,16 @@ plus the live baton.db re-query gate after real sessions run on 0.5.36.
   and canonicalizes system prompts (any system text reads its canonical ~1,902-token prefix). The
   shipped escalation and 1h markers still take effect on direct Anthropic; through the gateway the
   5m conversation caching already carries the result, but a gateway ttl pass-through is worth a fix.
+
+
+## 0.5.37 / 0.27.2 fixes
+
+- Cached percentage: the Context & Usage line divided aggregate thread cacheRead by the CURRENT
+  context size (e.g. 2742% on warm threads). Now the state carries the aggregate input total and
+  renders cacheRead / inputTotal.
+- Duplicate message rendering: the model preview lane cleared only when the Run ended, so a
+  committed message kept its tentative copy through tool loops. Baton now discards the published
+  preview frame the moment its response commits (without closing the claim-wide sink), so the
+  tentative unit retires when the committed unit appears.
+- Live telemetry after the fixes on the installed 0.5.37: 99.93% cached on Anthropic with 100.0%
+  continuation reads.
