@@ -33,7 +33,7 @@ test("uses padded full-size mode and context sections while compact content stay
     contextDetails(
       {
         ...model,
-        contextUsage: { _tag: "Available", inputTokens: 1_000, contextWindow: 10_000, reserveTokens: 1_000 },
+        contextUsage: { _tag: "Available", inputTokens: 1_000, inputCacheRead: 900, contextWindow: 10_000, reserveTokens: 1_000 },
       },
       54,
       16,
@@ -70,7 +70,7 @@ test("renders honest empty states instead of Unknown when no usage exists yet", 
     contextDetails(
       {
         ...base,
-        contextUsage: { _tag: "Available", inputTokens: 10, contextWindow: 100, reserveTokens: 10 },
+        contextUsage: { _tag: "Available", inputCacheRead: 0, inputTokens: 10, contextWindow: 100, reserveTokens: 10 },
         usageCost: { _tag: "Included", includedAttempts: 2 },
       },
       54,

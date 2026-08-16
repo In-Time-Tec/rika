@@ -749,14 +749,16 @@ it.effect("carries a harness refinement into the instructions the root agent is 
     }
     const configured = yield* configure({ executionRoute, workspace: "/workspace", kernel, harnessSnapshot })
     const root = configured.resolverEntries[0]!
-    const instructions = "agent" in root ? (root.agent.instructions ?? "") : ""
-    expect(instructions).toContain("PROOF_OF_A_CARRIED_REFINEMENT")
+    const rootSupplemental = "agent" in root ? root.agent.open((agent) => agent.supplemental ?? "") : ""
+    expect(rootSupplemental).toContain("PROOF_OF_A_CARRIED_REFINEMENT")
     const conversational = configured.resolverEntries.filter(
       (entry) => "agent" in entry && entry.agent.name !== "rika-title",
     )
     expect(conversational).toHaveLength(8)
     expect(
-      conversational.every((entry) => (entry.agent.instructions ?? "").includes("PROOF_OF_A_CARRIED_REFINEMENT")),
+      conversational.every((entry) =>
+        entry.agent.open((agent) => (agent.supplemental ?? "").includes("PROOF_OF_A_CARRIED_REFINEMENT")),
+      ),
     ).toBe(true)
     expect(conversational.filter((entry) => entry.agent.name === "rika-task")).toHaveLength(1)
   }),

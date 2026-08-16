@@ -287,7 +287,7 @@ describe("interactive ThreadView controller", () => {
       usageCost: { _tag: "Available", usd: 0.375, unpricedAttempts: 1, includedAttempts: 0 },
       usageTokens: { _tag: "Available", total: 42, uncountedAttempts: 1 },
       usageTime: { _tag: "Available", accumulatedMillis: 900, activeSince: 1_000 },
-      contextUsage: { _tag: "Available", inputTokens: 30, contextWindow: 100, reserveTokens: 10 },
+      contextUsage: { _tag: "Available", inputTokens: 30, inputCacheRead: 5, contextWindow: 100, reserveTokens: 10 },
     })
   })
 

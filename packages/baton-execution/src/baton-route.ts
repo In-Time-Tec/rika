@@ -163,6 +163,7 @@ const agentDefinition = (
   routed: RoutedModel,
   name: string,
   agentInstructions: string,
+  supplementalInstructions: string | undefined,
   tools: ReadonlyArray<Tool.Any>,
   environment: AgentEnvironment,
   children: AgentManifest.AgentManifest["children"],
@@ -179,6 +180,7 @@ const agentDefinition = (
     Agent.make({
       name: `rika-${name.toLowerCase()}`,
       instructions: agentInstructions,
+      ...(supplementalInstructions === undefined ? {} : { supplemental: supplementalInstructions }),
       model: routed.selection,
       policy: TurnPolicy.both(TurnPolicy.recurs(80), TurnPolicy.forever),
       toolScheduling: tools.length === 0 ? { maxConcurrency: 1, parallelSafe: [] } : CellTool.scheduling,
@@ -382,10 +384,7 @@ export const configure = (
       channelBytes: limits.channelBytes,
       cellDeadlineMillis: limits.cellDeadlineMillis,
     })
-    const withSurface = (own: string) =>
-      supplemental === ""
-        ? agentInstructionsWith(cellSurface, own)
-        : agentInstructionsWith(`${cellSurface}\n\n${supplemental}`, own)
+    const withSurface = (own: string) => agentInstructionsWith(cellSurface, own)
     const roleInstructions = {
       Oracle: profileInstructions.Oracle,
       Librarian: profileInstructions.Librarian,
@@ -402,6 +401,7 @@ export const configure = (
         routed[name],
         name,
         withSurface(roleInstructions[name]),
+        supplemental === "" ? undefined : supplemental,
         [CellTool.tool],
         environment(name),
         childSelections,
@@ -416,6 +416,7 @@ export const configure = (
       routed.Title,
       "Title",
       profileInstructions.title,
+      undefined,
       [],
       environment("Title"),
       [],
@@ -433,6 +434,7 @@ export const configure = (
       routed.Root,
       "Root",
       withSurface(profileInstructions.root),
+      supplemental === "" ? undefined : supplemental,
       [CellTool.tool],
       environment("Root"),
       childSelections,

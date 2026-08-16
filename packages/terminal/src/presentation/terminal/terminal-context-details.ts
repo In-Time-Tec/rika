@@ -16,6 +16,11 @@ const cost = (model: Model): string => {
 }
 const time = (model: Model, now: number): string =>
   model.usageTime?._tag === "Available" ? formatActiveTime(activeTimeAt(model.usageTime, now)) : `${activeTimeIcon} —`
+const cached = (model: Model): string => {
+  const context = model.contextUsage
+  if (context?._tag !== "Available" || context.inputTokens === 0) return "—"
+  return `${Math.round((context.inputCacheRead / context.inputTokens) * 100)}%`
+}
 
 const contextDetailsImpl = (model: Model, width: number, height: number, now: number): StyledText => {
   const chunks: Array<TextChunk> = []
@@ -79,6 +84,7 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
   line(" ".repeat(width), (value) => dim(fg(colors.text)(value)))
   if (!compact) line("")
   line(`Cost       ${cost(model)}`)
+  line(`Cached     ${cached(model)}`)
   line(`Active     ${time(model, now)}`)
   if (!compact) line("")
   if (!compact && emptyReason !== undefined) line(emptyReason, (value) => dim(fg(colors.text)(value)))
