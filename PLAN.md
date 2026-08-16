@@ -223,3 +223,15 @@ R4 adaptive TTL (needs a Baton policy input), R5 tail-only compaction with seam 
 R6 full cross-profile stable-prefix unification (per-profile split shipped; cross-profile ordering
 needs prompt-quality validation), R9 switchboard server-side normalization (separate infra),
 plus the live baton.db re-query gate after real sessions run on 0.27.0.
+
+
+## Live wire verification (switchboard, 2026-08-16)
+
+- B1 shipped policy verified against the real gateway: explicit system (1h) + last-block (5m) markers
+  yield a 99.5% continuation hit (read 3597 of 3613 tokens; only the 14-token tail written).
+- Composition verdict: a top-level `cache_control` automatic field overrides explicit per-block
+  markers (the explicit 1h system marker was ignored, the whole prefix landed in the 5m bucket).
+  B2 stays caller opt-in permanently; the tools-caching gap remains a follow-up (Effect AI beta.98
+  cannot mark tools per-message).
+- The switchboard appears to normalize system prefixes itself (a fresh system string still read the
+  canonical ~1902-token prefix) — server-side normalization partially exists; revisit R9 accordingly.
