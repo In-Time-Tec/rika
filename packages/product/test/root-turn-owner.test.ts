@@ -635,14 +635,11 @@ it.effect("retries unknown steering admissions with one identity and journals de
       } as ExecutionGateway.Interface,
     )
     expect(yield* oversizedOwner.recoverSteeringAdmissions).toMatchObject({
-      completed: [],
-      rejected: [{ admission: { source: { id: oversizedSource.id } }, failure: { kind: "rejected" } }],
-      pending: true,
+      completed: [{ admission: { source: { id: oversizedSource.id } } }],
+      pending: false,
     })
-    expect(oversizedAttempts).toBe(0)
-    expect(yield* oversizedRepository.listSteeringAdmissions).toMatchObject([
-      { outcome: { _tag: "Rejected", failure: { kind: "rejected" } } },
-    ])
+    expect(oversizedAttempts).toBe(1)
+    expect(yield* oversizedRepository.listSteeringAdmissions).toEqual([])
   }),
 )
 

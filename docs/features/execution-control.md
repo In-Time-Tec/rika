@@ -2,7 +2,7 @@
 
 Users may steer queued text into the active Execution and cancel durable work. Enter in the composer always submits normally: while a Turn is active, the prompt becomes a Pending Turn. Enter on a selected queue row withdraws that exact row and steers its text. Queued image input cannot be steered.
 
-Steering text is limited to 4,096 characters, and an Execution accepts at most 64 pending steering requests. A globally unique request identity follows each command through Baton's idempotent admission, while the returned opaque run and entry identity owns reconciliation.
+The composer keeps steers at most 4,096 characters as an input-box convenience. Baton runtime message steers — for example child-settled results — are not limited by that convenience. An Execution accepts at most 64 pending steering requests. A globally unique request identity follows each command through Baton's idempotent admission, while the returned opaque run and entry identity owns reconciliation.
 
 A queued row is withdrawn when its durable steering admission is prepared. Baton acceptance completes the handoff and deletes the source Pending Turn; later consumption projects exactly one user transcript entry at its event position, while terminal discard creates no transcript entry. Identity, not text, count, assistant completion, or FIFO position, distinguishes requests, so identical steering messages remain independent. An unknown admission outcome retries the same identity. A definitive rejection restores the source at its original FIFO position.
 

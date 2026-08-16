@@ -98,15 +98,7 @@ it("removes discarded steering without synthesizing a transcript unit", () => {
   )
 })
 
-it("rejects accepted steering that cannot fit the bounded projection checkpoint", () => {
-  const oversized = TreeProjector.make("turn-oversized-steering", "initial")
-  expect(() =>
-    oversized.apply(
-      accepted("entry-oversized", "request-oversized", 0, "x".repeat(Projection.SteeringTextMaxCharacters + 1)),
-    ),
-  ).toThrow(`steering text exceeds ${Projection.SteeringTextMaxCharacters}`)
-  expect(oversized.snapshot().state.steering.pending).toEqual([])
-
+it("caps pending steering entries at the bounded projection checkpoint", () => {
   const full = TreeProjector.make("turn-full-steering", "initial")
   const filled = full.applyAll(
     Array.from({ length: Projection.PendingSteeringMaxEntries }, (_, index) =>

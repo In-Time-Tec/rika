@@ -1,6 +1,6 @@
 import { Function, Schema } from "effect"
 import { identityKey } from "@rika/transcript/transcript-unit-identity"
-import { PendingSteeringMaxEntries, SteeringTextMaxCharacters } from "./execution-steering"
+import { PendingSteeringMaxEntries } from "./execution-steering"
 
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -9,7 +9,7 @@ export const PendingSteering = Schema.Struct({
   entryId: Schema.String,
   requestId: Schema.String,
   sequence: Count,
-  text: Schema.String.check(Schema.isMaxLength(SteeringTextMaxCharacters)),
+  text: Schema.String,
 })
 export type PendingSteering = typeof PendingSteering.Type
 

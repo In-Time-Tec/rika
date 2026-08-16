@@ -56,8 +56,6 @@ export const makeSteeringProjection = (input: {
         message.role === "user" ? message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])) : [],
       )
       .join("")
-    if (text.length > Projection.SteeringTextMaxCharacters)
-      throw new RangeError(`Baton projector steering text exceeds ${Projection.SteeringTextMaxCharacters}`)
     boundedInsert(
       pending,
       entryKey(runId, event.entryId),
