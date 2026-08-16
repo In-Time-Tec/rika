@@ -251,3 +251,18 @@ Open follow-ups (documented): B3 prompt-prefix diagnostics events, R5 tail-only 
 seam breakpoint, R6 full cross-profile stable-prefix unification (per-profile split shipped),
 R9 switchboard normalization review (the gateway already appears to normalize system prefixes),
 plus the live baton.db re-query gate after real sessions run on 0.5.36.
+
+
+## Live product verification (2026-08-16, real Rika 0.5.36 sessions through the switchboard)
+
+- `rika update` upgraded the installed CLI 0.5.34 → 0.5.36, then two real Opus 5 runs in a scratch
+  workspace produced: run 1 cold write of the 5,278-token prefix, then 100.0% reads on both tool-loop
+  continuations (5,278 → 5,702 read, 258-424 written per call). Run 2 in a NEW thread hit 99.9% on its
+  very first call (system prefix warm cross-thread), 100.0% on its continuation. Aggregate across all
+  seven Anthropic calls: 99.93%; main runs only: 99.95%. Title runs reuse the shared prefix too.
+- The user's earlier DeepSeek (runinfra) sessions on the old build already showed 95-99.7% via
+  implicit prefix caching; single-call runs are cold one-shots by design.
+- Gateway findings: the switchboard ignores the `ttl` field (the 1h markers land in the 5m bucket)
+  and canonicalizes system prompts (any system text reads its canonical ~1,902-token prefix). The
+  shipped escalation and 1h markers still take effect on direct Anthropic; through the gateway the
+  5m conversation caching already carries the result, but a gateway ttl pass-through is worth a fix.
