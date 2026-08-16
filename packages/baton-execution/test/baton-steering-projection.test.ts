@@ -98,15 +98,7 @@ it("removes discarded steering without synthesizing a transcript unit", () => {
   )
 })
 
-it("rejects accepted steering that cannot fit the bounded projection checkpoint", () => {
-  const oversized = TreeProjector.make("turn-oversized-steering", "initial")
-  expect(() =>
-    oversized.apply(
-      accepted("entry-oversized", "request-oversized", 0, "x".repeat(Projection.SteeringTextMaxCharacters + 1)),
-    ),
-  ).toThrow(`steering text exceeds ${Projection.SteeringTextMaxCharacters}`)
-  expect(oversized.snapshot().state.steering.pending).toEqual([])
-
+it("caps pending steering entries at the bounded projection checkpoint", () => {
   const full = TreeProjector.make("turn-full-steering", "initial")
   const filled = full.applyAll(
     Array.from({ length: Projection.PendingSteeringMaxEntries }, (_, index) =>
@@ -120,4 +112,58 @@ it("rejects accepted steering that cannot fit the bounded projection checkpoint"
     resumed.apply(accepted("entry-overflow", "request-overflow", Projection.PendingSteeringMaxEntries, "one too many")),
   ).toThrow(`pending steering entries exceeds ${Projection.PendingSteeringMaxEntries}`)
   expect(resumed.snapshot().state.steering.pending).toHaveLength(Projection.PendingSteeringMaxEntries)
+})
+
+
+it("projects oversized steering text without applying the user input limit", () => {
+  const projector = TreeProjector.make("turn-oversized-accepted", "initial")
+  const oversized = "x".repeat(Projection.SteeringTextMaxCharacters + 5_000)
+  const admission = projector.apply(accepted("entry-oversized", "request-oversized", 0, oversized))
+  expect(admission.state.steering.pending).toEqual([
+    { runId, entryId: "entry-oversized", requestId: "request-oversized", sequence: 0, text: oversized },
+  ])
+  expect(admission.upsert).toEqual([])
+
+  const resumed = TreeProjector.make("turn-oversized-accepted", "initial", admission.checkpoint, projector.snapshot().units)
+  expect(resumed.snapshot().state.steering.pending).toEqual(admission.state.steering.pending)
+  const consumption = resumed.apply(consumed("entry-oversized"))
+  expect(consumption.state.steering.pending).toEqual([])
+  expect(consumption.upsert).toContainEqual(
+    expect.objectContaining({
+      key: Projection.steeringUnitKey("turn-oversized-accepted", runId, "request-oversized", "entry-oversized", 0),
+      content: { _tag: "Entry", role: "user", text: oversized },
+    }),
+  )
+})
+
+it("projects oversized message-backed steering delivered by the runtime", () => {
+  const projector = TreeProjector.make("turn-message-backed", "initial")
+  const body = "y".repeat(Projection.SteeringTextMaxCharacters + 5_000)
+  const messageBacked = treeEvent(runId, {
+    _tag: "SteeringAccepted",
+    entryId: "entry-message",
+    steeringSequence: 0,
+    idempotencyKey: "message:child-settled:run-child",
+    digest: "digest-message",
+    prompt: {
+      content: [
+        {
+          options: { baton: { message: { from: "run:run-child", messageId: "child-settled:run-child" } } },
+          role: "user",
+          content: [{ type: "text", text: body }],
+        },
+      ],
+    } as never,
+  })
+  const admission = projector.apply(messageBacked)
+  expect(admission.state.steering.pending).toEqual([
+    { runId, entryId: "entry-message", requestId: "message:child-settled:run-child", sequence: 0, text: body },
+  ])
+  const consumption = projector.apply(consumed("entry-message"))
+  expect(consumption.upsert).toContainEqual(
+    expect.objectContaining({
+      key: Projection.steeringUnitKey("turn-message-backed", runId, "message:child-settled:run-child", "entry-message", 0),
+      content: { _tag: "Entry", role: "user", text: body },
+    }),
+  )
 })

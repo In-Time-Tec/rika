@@ -7,7 +7,35 @@ import * as TurnQueuePromotion from "../repository/turn-repository-queue"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import { Cause, Clock, Effect, Fiber, Schema, Scope, Semaphore, Stream } from "effect"
+
+export const ProjectionDefectMaxConsecutiveAttempts = 3
+
+const projectionDefectKey = (turnId: Turn.TurnId) => `turn:${turnId}:projection-defect`
+
+const projectionDefectUnit = (turn: Turn.AgentExecutionTurn, revision: number, detail: string): TranscriptUnit.Unit => {
+  const key = projectionDefectKey(turn.id)
+  return {
+    key,
+    turnId: turn.id,
+    order: TranscriptOrdering.unitOrder(key, Number.MAX_SAFE_INTEGER),
+    revision,
+    executionOutcome: { status: "failed", reason: detail },
+    content: {
+      _tag: "Block",
+      block: {
+        _tag: "Error",
+        title: "Turn projection failed",
+        detail,
+        turnId: turn.id,
+        category: "projection-defect",
+        retryable: false,
+      },
+    },
+  }
+}
 
 export interface Lifecycle {
   readonly run: (turnId: Turn.TurnId) => Effect.Effect<void, Error>
@@ -246,14 +274,6 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
     Effect.uninterruptibleMask((restore) => {
       if (admission.outcome._tag === "Rejected") return Effect.succeed(rejection(admission, false))
       if (admission.outcome._tag === "Accepted") return completeAcceptedSteering(admission, true)
-      if (admission.input.text.length > ExecutionGateway.SteeringTextMaxCharacters)
-        return rejectSteering(
-          admission,
-          ExecutionGateway.SteeringFailure.make({
-            kind: "rejected",
-            message: `Steering text exceeds ${ExecutionGateway.SteeringTextMaxCharacters} characters`,
-          }),
-        )
       return Effect.exit(restore(backend.steerTurn(admission.target, admission.input))).pipe(
         Effect.flatMap((outcome): Effect.Effect<SteeringAdmissionOutcome, TurnRepository.RepositoryError> => {
           if (outcome._tag === "Success")
@@ -300,10 +320,6 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
     prepareSteering: (target, input) =>
       ownerAdmission.withPermits(1)(
         Effect.gen(function* () {
-          if (input.text.length > ExecutionGateway.SteeringTextMaxCharacters)
-            return yield* TurnRepository.RepositoryError.make({
-              message: `Steering text exceeds ${ExecutionGateway.SteeringTextMaxCharacters} characters`,
-            })
           return yield* turns.prepareSteeringAdmission(
             target,
             input,
@@ -315,10 +331,6 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
     prepareQueuedSteering: (source, target, input) =>
       ownerAdmission.withPermits(1)(
         Effect.gen(function* () {
-          if (input.text.length > ExecutionGateway.SteeringTextMaxCharacters)
-            return yield* TurnRepository.RepositoryError.make({
-              message: `Steering text exceeds ${ExecutionGateway.SteeringTextMaxCharacters} characters`,
-            })
           return yield* turns.prepareQueuedSteeringAdmission(
             source,
             target,
@@ -382,6 +394,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           : "metered"
         let latestChange: ExecutionProjection.Change | undefined
         let retryDelay = 100
+        let consecutiveDefects = 0
         while (true) {
           let progressed = false
           let callbackCause: Cause.Cause<never> | undefined
@@ -464,6 +477,40 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           if (attempt._tag === "Failure") {
             if (callbackCause !== undefined) return yield* Effect.failCause(callbackCause)
             if (Cause.hasInterrupts(attempt.cause)) return yield* Effect.interrupt
+            if (Cause.hasDies(attempt.cause)) {
+              consecutiveDefects += 1
+              if (consecutiveDefects >= ProjectionDefectMaxConsecutiveAttempts) {
+                const detail = Cause.pretty(attempt.cause)
+                yield* Effect.logError("root-turn-owner.watch.defect_terminal").pipe(
+                  Effect.annotateLogs({
+                    "rika.turn.id": String(turnId),
+                    "rika.defect.attempts": consecutiveDefects,
+                    "rika.failure.message": detail,
+                  }),
+                )
+                const projection = yield* transcripts.get(turnId)
+                const now = yield* Clock.currentTimeMillis
+                const revision =
+                  (projection?.units.reduce((maximum, unit) => Math.max(maximum, unit.revision), -1) ?? -1) + 1
+                const units = [...(projection?.units ?? []), projectionDefectUnit(turn, revision, detail)]
+                yield* transcripts.replaceUnits({ ...turn, status: "failed", updatedAt: now }, units)
+                return {
+                  turnId: String(turnId),
+                  status: "failed",
+                  state: {
+                    status: "failed",
+                    usage: ExecutionProjection.emptyUsageState(),
+                    steering: { steeringMessages: 0, followUpMessages: 0 },
+                  },
+                  units,
+                  ...(projection?.projectorCheckpoint === undefined
+                    ? {}
+                    : { checkpoint: projection.projectorCheckpoint }),
+                }
+              }
+            } else {
+              consecutiveDefects = 0
+            }
             const delay = progressed ? 100 : retryDelay
             retryDelay = Math.min(delay * 2, 5_000)
             yield* Effect.logWarning("root-turn-owner.watch.reconnecting").pipe(
@@ -477,6 +524,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
             continue
           }
           const { hasUncommittedTerminal, inspection, stored } = attempt.value
+          consecutiveDefects = 0
           if (hasUncommittedTerminal || inspection.status === "running") {
             const delay = progressed ? 100 : retryDelay
             retryDelay = Math.min(delay * 2, 5_000)

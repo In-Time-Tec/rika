@@ -4,7 +4,7 @@ export const SteeringTextMaxCharacters = 4_096
 export const PendingSteeringMaxEntries = 64
 
 export const SteeringInput = Schema.Struct({
-  text: Schema.String.check(Schema.isMaxLength(SteeringTextMaxCharacters)),
+  text: Schema.String,
   idempotencyKey: Schema.String,
 })
 export type SteeringInput = typeof SteeringInput.Type
