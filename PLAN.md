@@ -235,3 +235,19 @@ plus the live baton.db re-query gate after real sessions run on 0.27.0.
   cannot mark tools per-message).
 - The switchboard appears to normalize system prefixes itself (a fresh system string still read the
   canonical ~1902-token prefix) — server-side normalization partially exists; revisit R9 accordingly.
+
+
+## Execution status (final for this pass)
+
+Shipped and published: Baton 0.27.0 + 0.27.1 (npm) with cache breakpoint policy, per-purpose
+gating, supplemental system block, Anthropic automatic caching opt-in, and adaptive idle-gap
+conversation escalation (0.27.1). Rika 0.5.35 + 0.5.36 (GitHub releases) with the Baton pin,
+stable/dynamic system split, and the % cached line in the Context & Usage preview. Live wire
+verification through the switchboard: 99.5% continuation cache hit (3597 of 3613 tokens read);
+the automatic-caching field overrides explicit markers, so it stays opt-in. Both repos run
+`bun run check` and `bun run test` green (the bun-cleanup load flake pre-dates this work).
+
+Open follow-ups (documented): B3 prompt-prefix diagnostics events, R5 tail-only compaction with
+seam breakpoint, R6 full cross-profile stable-prefix unification (per-profile split shipped),
+R9 switchboard normalization review (the gateway already appears to normalize system prefixes),
+plus the live baton.db re-query gate after real sessions run on 0.5.36.
