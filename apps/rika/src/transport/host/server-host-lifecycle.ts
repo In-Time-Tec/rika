@@ -120,9 +120,24 @@ export const host = Effect.fn("ServerTransport.host")(function* (options: {
   const interactive = makeInteractiveRouter({ crypto, options, requestByInput, routes })
   const ownerScope = yield* Scope.make()
   const serverScope = yield* Scope.make()
+  const operationReady = yield* Deferred.make<Operation.Interface>()
+  const { prepareServerReplacement, stopAbandonedExecutionWork, stopExecutionWorkForShutdown } =
+    makeExecutionControls(operationReady)
+  /**
+   * A replacement Server adopts this one's durable work, so the exit that hands over must not
+   * cancel it. Every other exit ends the work for good and has to say so in durable state.
+   */
+  const handingOver = yield* Ref.make(false)
+  const drainForHandover = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Ref.set(handingOver, true).pipe(Effect.andThen(effect))
   yield* Effect.addFinalizer((exit) =>
     lifecycle.beginDrain.pipe(
       Effect.andThen(FiberSet.clear(hostWork)),
+      Effect.andThen(
+        Ref.get(handingOver).pipe(
+          Effect.flatMap((replacing) => (replacing ? Effect.void : stopExecutionWorkForShutdown)),
+        ),
+      ),
       Effect.andThen(
         Effect.raceFirst(
           FiberSet.awaitEmpty(hostWork).pipe(Effect.andThen(Scope.close(ownerScope, exit))),
@@ -159,8 +174,6 @@ export const host = Effect.fn("ServerTransport.host")(function* (options: {
     ),
   )
   const server = yield* Scope.provide(BunHttpServer.make({ hostname: "127.0.0.1", port: options.port }), serverScope)
-  const operationReady = yield* Deferred.make<Operation.Interface>()
-  const { prepareServerReplacement, stopAbandonedExecutionWork } = makeExecutionControls(operationReady)
   const handle = makeConnectionHandler({
     options,
     crypto,
@@ -181,6 +194,7 @@ export const host = Effect.fn("ServerTransport.host")(function* (options: {
     interactive,
     operationReady,
     prepareServerReplacement,
+    drainForHandover,
     requestStop: Deferred.succeed(options.stopped, undefined).pipe(Effect.asVoid),
   })
   const app = Effect.gen(function* () {
@@ -205,12 +219,10 @@ export const host = Effect.fn("ServerTransport.host")(function* (options: {
       yield* Effect.logInfo("server.config.reloading")
       yield* lifecycle.beginDrain
       yield* Effect.forkIn(
-        lifecycle
-          .drainForReplacement(prepareServerReplacement)
-          .pipe(
-            Effect.raceFirst(Effect.sleep(options.configReloadDrainTimeoutMilliseconds ?? 30_000).pipe(Effect.asVoid)),
-            Effect.ensuring(Deferred.succeed(options.stopped, undefined)),
-          ),
+        drainForHandover(lifecycle.drainForReplacement(prepareServerReplacement)).pipe(
+          Effect.raceFirst(Effect.sleep(options.configReloadDrainTimeoutMilliseconds ?? 30_000).pipe(Effect.asVoid)),
+          Effect.ensuring(Deferred.succeed(options.stopped, undefined)),
+        ),
         hostScope,
       )
     })
