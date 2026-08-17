@@ -779,7 +779,31 @@ it("documents flat child groups and refuses local work delegated to web-only Lib
   expect(profileInstructions.Librarian).toContain("local-capable Task or Oracle child")
 })
 
-it.effect("pins every agent with no budget dimension so runs are never capped by model calls, tool calls, tokens, or handoffs", () =>
+const budgetDimensions = ["modelCalls", "toolCalls", "totalTokens", "childRuns", "handoffs", "depth", "deadline"]
+
+it.effect("resolves every live agent with an unlimited budget so the execution host can never substitute a ceiling", () =>
+  configure({
+    executionRoute: { ...testExecutionRoute(), tokenBudget: 12_000 },
+    workspace: "/workspace",
+    kernel,
+  }).pipe(
+    Effect.map((configured) => {
+      expect(configured.resolverEntries.length).toBeGreaterThan(0)
+      for (const resolution of configured.resolverEntries) {
+        if (!("agent" in resolution)) continue
+        const budget = resolution.agent.budget
+        expect(budget, `${resolution.agent.name} must carry an explicit budget the host cannot default`).toBeDefined()
+        for (const dimension of budgetDimensions)
+          expect(
+            (budget as Record<string, unknown>)[dimension],
+            `${resolution.agent.name} must not cap ${dimension}`,
+          ).toBeUndefined()
+      }
+    }),
+  ),
+)
+
+it.effect("pins every agent with the same unlimited budget it resolves, so the attested pin matches the executed run", () =>
   configure({
     executionRoute: { ...testExecutionRoute(), tokenBudget: 12_000 },
     workspace: "/workspace",
@@ -790,7 +814,7 @@ it.effect("pins every agent with no budget dimension so runs are never capped by
       expect(entries.length).toBeGreaterThan(0)
       for (const entry of entries) {
         expect(entry.manifest.budget, `${profileNameOf(entry)} must pin an empty budget`).toEqual({})
-        for (const dimension of ["modelCalls", "toolCalls", "totalTokens", "childRuns", "handoffs", "depth", "deadline"])
+        for (const dimension of budgetDimensions)
           expect(
             (entry.manifest.budget as Record<string, unknown>)[dimension],
             `${profileNameOf(entry)} must not cap ${dimension}`,

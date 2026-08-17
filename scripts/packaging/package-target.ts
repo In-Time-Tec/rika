@@ -14,6 +14,10 @@ const buildFailure = (cause: unknown): string => {
 
 const PackageManifestJson = Schema.fromJsonString(Schema.Struct({ version: Schema.String }))
 
+const WorkspaceCatalogJson = Schema.fromJsonString(
+  Schema.Struct({ workspaces: Schema.Struct({ catalog: Schema.Record(Schema.String, Schema.String) }) }),
+)
+
 class PackageError extends Data.TaggedError("PackageError")<{
   readonly operation: string
   readonly message: string
@@ -32,6 +36,41 @@ const program = Effect.gen(function* () {
   const manifest = yield* fileSystem
     .readFileString(path.join(root, "apps/rika/package.json"))
     .pipe(Effect.flatMap(Schema.decodeUnknownEffect(PackageManifestJson)))
+
+  /**
+   * A compiled binary embeds whatever is installed in node_modules, not what the catalog pins. A
+   * stale install therefore ships a product built against dependency versions the repository never
+   * resolved, and nothing downstream can detect it: the source, the lockfile, and the version
+   * string all look correct. Compare the installed manifest of every catalog-pinned dependency
+   * against the version the catalog names, and refuse to build on any mismatch.
+   */
+  const assertInstalledDependencies = Effect.fn("Package.assertInstalledDependencies")(() =>
+    Effect.gen(function* () {
+      const catalog = yield* fileSystem
+        .readFileString(path.join(root, "package.json"))
+        .pipe(Effect.flatMap(Schema.decodeUnknownEffect(WorkspaceCatalogJson)))
+      const pinned = Object.entries(catalog.workspaces.catalog).filter(([name]) => name.startsWith("@batonfx/"))
+      const drift = yield* Effect.forEach(pinned, ([name, expected]) =>
+        Effect.try({
+          try: () => Bun.resolveSync(`${name}/package.json`, path.join(root, "apps/rika")),
+          catch: () => packageError("install", `${name} is not installed`),
+        }).pipe(
+          Effect.flatMap((manifestPath) => fileSystem.readFileString(manifestPath)),
+          Effect.flatMap(Schema.decodeUnknownEffect(PackageManifestJson)),
+          Effect.map(({ version }) =>
+            version === expected ? [] : [`${name} installed ${version}, catalog pins ${expected}`],
+          ),
+          Effect.orElseSucceed(() => [`${name} could not be resolved from the workspace root`]),
+        ),
+      )
+      const mismatches = drift.flat()
+      if (mismatches.length === 0) return
+      return yield* packageError(
+        "install",
+        `node_modules does not match the catalog; run bun install before packaging so the binary embeds the pinned dependencies:\n${mismatches.join("\n")}`,
+      )
+    }),
+  )
 
   const buildIdentity = Effect.fn("Package.buildIdentity")(() =>
     Effect.gen(function* () {
@@ -110,6 +149,7 @@ const program = Effect.gen(function* () {
         Effect.succeed(stage),
         () =>
           Effect.gen(function* () {
+            yield* assertInstalledDependencies()
             const { identity } = yield* buildIdentity()
             yield* checkedBuild("client-main.ts", path.join(bin, "rika"), target, identity)
             yield* checkedBuild("interactive-main.ts", path.join(bin, ".rika-interactive"), target, identity)
