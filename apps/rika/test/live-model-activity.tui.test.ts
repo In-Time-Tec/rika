@@ -66,7 +66,9 @@ test(
                 model.part("\n\n**LIVE_MARKDOWN_STYLED**\n\n"),
                 model.part("LIVE_MARKDOWN_FINAL"),
               ],
-              { streamPartDelayMillis: 750 },
+              // Each part must stay on screen long enough for the mid-stream assertion to see it.
+              // The frame waits poll, so the pace only has to exceed a render, not a fixed guess.
+              { streamPartDelayMillis: 400 },
             ),
           ],
         })
@@ -96,7 +98,7 @@ test(
         const app = yield* TuiApp.tuiApp({
           script: [
             model.turn([model.part(beyondOldBoundary), model.part("\nLIVE_STREAM_FINAL_MARKER")], {
-              streamPartDelayMillis: 750,
+              streamPartDelayMillis: 400,
             }),
           ],
         })
@@ -134,7 +136,7 @@ test(
               ),
             ]),
             model.turn([model.part("SECOND_CALL_STREAMING"), model.part("\nSECOND_CALL_FINAL")], {
-              streamPartDelayMillis: 750,
+              streamPartDelayMillis: 400,
             }),
           ],
         })

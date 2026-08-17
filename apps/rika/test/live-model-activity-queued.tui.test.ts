@@ -12,7 +12,9 @@ test(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
           script: [
-            model.text("FIRST_QUEUE_HEAD", 5_000),
+            // Queueing the follow-up while the head answer is pending measures well under a
+            // second, so the head is held with several times that margin.
+            model.text("FIRST_QUEUE_HEAD", 2_000),
             model.turn([model.reasoning("Promoted reasoning trace."), model.part("PROMOTED_ANSWER_COMPLETE")], {
               streamPartDelayMillis: 250,
             }),

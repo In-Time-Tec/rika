@@ -19,7 +19,9 @@ test(
                 model.text("RESPONSIVE_CHILD_SETTLEMENT_RETRY_ACKNOWLEDGED"),
               ],
             },
-            { profile: "Task", steps: [model.text("RESPONSIVE_CHILD_RESULT", 5_000)] },
+            // Typing while the child streams measures well under a second, so the child answer is
+            // held with several times that margin rather than for five seconds.
+            { profile: "Task", steps: [model.text("RESPONSIVE_CHILD_RESULT", 2_000)] },
           ],
         })
 

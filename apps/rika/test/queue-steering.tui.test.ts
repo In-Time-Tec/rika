@@ -56,7 +56,9 @@ test(
           script: [
             model.turn(
               [model.binding({ module: "workspace", operation: "read", input: { path: "fixture.txt" } }, "queue-read")],
-              { delayMillis: 10_000 },
+              // Filling and steering the queue measures ~0.5s; this keeps several times that
+              // margin without the test sitting out the remainder of the answer.
+              { delayMillis: 4_000 },
             ),
             model.text("STEERED_CONTINUATION_COMPLETE"),
             ...Array.from({ length: 9 }, (_, index) => model.text(`DRAINED_${index}`)),
@@ -143,7 +145,9 @@ test(
         const app = yield* TuiApp.tuiApp({
           height: 36,
           inspectTranscript: true,
-          script: [model.text("HELLO_COMPLETE", 10_000), model.text("HI_COMPLETE")],
+          // Steering the queued row measures ~0.5s, so the active answer stays pending with
+          // several times that margin instead of holding the turn open for ten seconds.
+          script: [model.text("HELLO_COMPLETE", 4_000), model.text("HI_COMPLETE")],
         })
 
         yield* Effect.promise(() => app.type("Hello"))
@@ -364,7 +368,9 @@ test(
           height: 42,
           inspectTranscript: true,
           script: [
-            model.text("CANCELLED_RESPONSE_MUST_NOT_RENDER", 10_000),
+            // The queue is filled and cancelled well inside a second, so the answer that must
+            // never render is held several times that instead of for ten seconds.
+            model.text("CANCELLED_RESPONSE_MUST_NOT_RENDER", 4_000),
             ...Array.from({ length: 9 }, (_, index) => model.text(`CANCEL_DRAINED_${index}`)),
           ],
         })
@@ -433,7 +439,9 @@ test(
           height: 36,
           inspectTranscript: true,
           script: [
-            model.failure("EXPECTED_ACTIVE_FAILURE", 10_000),
+            // Queueing, steering, and editing before the failure lands measures ~0.7s, so the
+            // failure is held several times that rather than for ten seconds.
+            model.failure("EXPECTED_ACTIVE_FAILURE", 4_000),
             model.text("FAIL_DRAINED_0"),
             model.text("FAIL_DRAINED_1"),
           ],
