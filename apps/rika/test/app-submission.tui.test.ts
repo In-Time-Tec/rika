@@ -73,7 +73,9 @@ test(
         const app = yield* TuiApp.tuiApp({
           // Keep the first provider response pending long enough that a constrained CI runner
           // cannot cross the active-to-idle boundary while the second prompt is being entered.
-          script: [model.text("SLOW_FIRST_ANSWER", 20_000), model.text("QUEUED_SECOND_ANSWER")],
+          // Entering and queueing the prompt measures ~0.5s, so this leaves several times that
+          // margin without the test sitting out the rest of a twenty-second answer.
+          script: [model.text("SLOW_FIRST_ANSWER", 4_000), model.text("QUEUED_SECOND_ANSWER")],
         })
         yield* Effect.promise(() => app.type("First slow prompt."))
         app.pressEnter()
@@ -183,7 +185,9 @@ test(
           script: [
             model.turn(
               [model.binding({ module: "workspace", operation: "read", input: { path: "fixture.txt" } }, "steer-read")],
-              { delayMillis: 12_000 },
+              // Selecting the queued row and steering it measures ~0.5s, so this holds the turn
+              // open with several times that margin rather than for a full twelve seconds.
+              { delayMillis: 4_000 },
             ),
             model.text("ACTIVE_STEER_COMPLETE"),
           ],
