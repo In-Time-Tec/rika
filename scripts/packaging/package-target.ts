@@ -60,16 +60,14 @@ const program = Effect.gen(function* () {
           Effect.map(({ version }) =>
             version === expected ? [] : [`${name} installed ${version}, catalog pins ${expected}`],
           ),
-          Effect.catch(() => Effect.succeed([`${name} could not be resolved from the workspace root`])),
+          Effect.orElseSucceed(() => [`${name} could not be resolved from the workspace root`]),
         ),
       )
       const mismatches = drift.flat()
       if (mismatches.length === 0) return
-      return yield* Effect.fail(
-        packageError(
-          "install",
-          `node_modules does not match the catalog; run bun install before packaging so the binary embeds the pinned dependencies:\n${mismatches.join("\n")}`,
-        ),
+      return yield* packageError(
+        "install",
+        `node_modules does not match the catalog; run bun install before packaging so the binary embeds the pinned dependencies:\n${mismatches.join("\n")}`,
       )
     }),
   )
