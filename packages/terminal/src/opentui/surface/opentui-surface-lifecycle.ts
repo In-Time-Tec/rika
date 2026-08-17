@@ -1,12 +1,14 @@
 import { CliRenderEvents } from "@opentui/core"
 import type { Model } from "../../state/model/terminal-state"
-import { restingFrame } from "../rendering/opentui-animation-frame"
+import { idleSpinnerFrame, spinnerInterval } from "../rendering/opentui-spinner"
+import { animationActive, goalAnimationActive } from "./opentui-surface-content"
+import { welcomeAnimationActive, welcomeAnimationSettled } from "./opentui-welcome-state"
 import { SurfaceLayout } from "./opentui-surface-layout"
 
 export abstract class SurfaceLifecycle extends SurfaceLayout {
   update(model: Model, preserveTranscriptAnchor = false): void {
     const previousModel = this.model
-    if (model.busy && previousModel?.busy !== true) this.publishWorkingFrame(restingFrame)
+    if (model.busy && previousModel?.busy !== true) this.publishWorkingFrame(idleSpinnerFrame)
     else if (!model.busy && previousModel?.busy === true) this.publishWorkingFrame(undefined)
     const transcriptLayout = this.renderTranscript(model, preserveTranscriptAnchor)
     this.renderLayout(
@@ -19,8 +21,19 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
       transcriptLayout.sidebarVisible,
       transcriptLayout.threadSidebarVisible,
     )
-    if (this.animationShouldRun(model)) this.animation.start()
-    else this.animation.stop()
+    const loaderActive = animationActive(model)
+    if (this.options.animate !== false && loaderActive) {
+      this.loaderController.start(spinnerInterval, () => this.tickLoader())
+    } else if (this.options.animate === false || !loaderActive) this.loaderController.stop()
+    const welcomeActive =
+      welcomeAnimationActive(model) &&
+      !welcomeAnimationSettled(this.welcomeController.phase, this.welcomeController.impulses)
+    if (this.options.animate !== false && welcomeActive) {
+      this.welcomeController.start(spinnerInterval, () => this.tickWelcome())
+    } else if (this.options.animate === false || !welcomeActive) this.welcomeController.stop()
+    const goalActive = goalAnimationActive(model)
+    if (this.options.animate !== false && goalActive) this.goalController.start(spinnerInterval, () => this.tickGoal())
+    else if (this.options.animate === false || !goalActive) this.goalController.stop()
     this.updateOverlay(
       model,
       transcriptLayout.contentLeft,
@@ -32,9 +45,10 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true
-    this.animation.stop()
+    this.loaderController.release()
     this.welcomeController.release()
-    if (this.publishedFrame !== undefined) this.publishWorkingFrame(undefined)
+    this.goalController.release()
+    if (this.loaderController.publishedFrame !== undefined) this.publishWorkingFrame(undefined)
     this.sidebarController.release()
     this.hoverController.release()
     this.toastController.release()

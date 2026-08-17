@@ -29,8 +29,7 @@ import {
   type TranscriptUnitCacheEntry,
 } from "../rendering/opentui-render-transcript-revision"
 import { transcriptUnitBuilder } from "../rendering/opentui-render-unit"
-import { isAnimatedChunk, wrapTextToWidth } from "../rendering/opentui-render-window"
-import { animationFrame } from "../rendering/opentui-animation-frame"
+import { wrapTextToWidth } from "../rendering/opentui-render-window"
 import { splitStyledLines } from "../rendering/opentui-transcript-styled-lines"
 import { renderMarkdownLines, toOpenColor } from "../rendering/terminal-text-adapter"
 import type { Model } from "../../state/model/terminal-state"
@@ -47,6 +46,7 @@ const buildTranscriptUnitBundles = (
   builder: ReturnType<typeof transcriptUnitBuilder>,
   unit: TranscriptUnit,
   revision: string,
+  spinnerGlyph: string,
   onToggle: (unitId: string) => void,
 ): TranscriptUnitCacheEntry => {
   const built = builder.renderUnit(unit)
@@ -71,17 +71,15 @@ const buildTranscriptUnitBundles = (
       const band = lines.slice(start, start + transcriptRenderableBandRows)
       const content = bandContent(band)
       const key = start === 0 ? `${range.unit}:${section}` : `${range.unit}:${section}:${lineOffset + start}`
-      const animatedChunks =
-        range.animated === true
-          ? content.chunks.flatMap((chunk, index) => (isAnimatedChunk(chunk) ? [index] : []))
-          : []
+      const spinnerChunk =
+        range.animated === true ? content.chunks.findIndex((chunk) => chunk.text === spinnerGlyph) : -1
       const descriptor: TranscriptRenderableDescriptor = {
         key,
         revision: `${revision}#${rangeIndex}${section === "header" ? "h" : "b"}:${lineOffset + start}`,
         content,
         ...(section === "header" ? { selectable: !range.expandable } : {}),
         ...(range.targets === undefined ? {} : { targets: range.targets }),
-        ...(animatedChunks.length === 0 ? {} : { animatedChunks }),
+        ...(spinnerChunk < 0 ? {} : { spinnerChunk }),
         ...(section === "header" && range.expandable
           ? {
               onMouseDown: (event: MouseEvent) => {
@@ -261,8 +259,8 @@ const reconcileTranscriptRenderables = ({
         existing.revision = descriptor.revision
         existing.renderable.content = descriptor.content
       }
-      if (descriptor.animatedChunks === undefined) delete existing.animatedChunks
-      else existing.animatedChunks = descriptor.animatedChunks
+      if (descriptor.spinnerChunk === undefined) delete existing.spinnerChunk
+      else existing.spinnerChunk = descriptor.spinnerChunk
       existing.renderable.selectable = descriptor.selectable ?? true
       existing.renderable.onMouseDown = (event) => handleMouseDown(existing.renderable, event)
       return existing
@@ -277,7 +275,7 @@ const reconcileTranscriptRenderables = ({
       key: descriptor.key,
       revision: descriptor.revision,
       renderable,
-      ...(descriptor.animatedChunks === undefined ? {} : { animatedChunks: descriptor.animatedChunks }),
+      ...(descriptor.spinnerChunk === undefined ? {} : { spinnerChunk: descriptor.spinnerChunk }),
     }
     records.set(record.key, record)
     return record
@@ -305,24 +303,16 @@ const reconcileTranscriptRenderables = ({
   return children
 }
 
-/**
- * Repaints every animated row. Each row resolves its own glyph from its key, so rows animate out of
- * step with one another without holding any per-row animation state.
- */
-export const updateTranscriptAnimations =
-  (elapsedMillis: number) => (records: ReadonlyMap<string, TranscriptRenderableRecord>) => {
+export const updateTranscriptSpinners =
+  (glyph: string) => (records: ReadonlyMap<string, TranscriptRenderableRecord>) => {
     for (const record of records.values()) {
-      if (record.animatedChunks === undefined) continue
-      const glyph = animationFrame(record.key, elapsedMillis)
-      const chunks = [...record.renderable.content.chunks]
-      let changed = false
-      for (const index of record.animatedChunks) {
-        const chunk = chunks[index]
-        if (chunk === undefined || chunk.text === glyph) continue
-        chunks[index] = { ...chunk, text: glyph }
-        changed = true
-      }
-      if (changed) record.renderable.content = new StyledText(chunks)
+      if (record.spinnerChunk === undefined) continue
+      const content = record.renderable.content
+      const chunks = [...content.chunks]
+      const chunk = chunks[record.spinnerChunk]
+      if (chunk === undefined) continue
+      chunks[record.spinnerChunk] = { ...chunk, text: glyph }
+      record.renderable.content = new StyledText(chunks)
     }
   }
 
@@ -338,7 +328,7 @@ const transcriptRenderInputChanged = (
   previous.detailSelection !== input.detailSelection ||
   previous.width !== input.width ||
   previous.windowEnd !== input.windowEnd ||
-  previous.compactionShimmer !== input.compactionShimmer
+  previous.animationTick !== input.animationTick
 
 interface ProjectTranscriptRowsOptions {
   readonly renderer: CliRenderer
@@ -353,7 +343,7 @@ interface ProjectTranscriptRowsOptions {
   readonly bandTargetTop: number | undefined
   readonly mountAnchorKey: string | undefined
   readonly viewportHeight: number
-  readonly restingGlyph: string
+  readonly spinnerGlyph: string
   readonly renderInput: TranscriptRenderInput | undefined
   readonly unitCache: TranscriptRowsCache
   readonly onToggle: (unitId: string) => void
@@ -370,7 +360,7 @@ export const projectTranscriptRows = (options: ProjectTranscriptRowsOptions) => 
     detailSelection: model.detailSelection,
     width: model.width,
     windowEnd: options.windowEnd,
-    compactionShimmer: model.compactionShimmer,
+    animationTick: model.animationTick,
   }
   if (!transcriptRenderInputChanged(options.renderInput, input)) return undefined
   const previousExpandedRows = options.renderInput?.expandedRowKeys
@@ -381,7 +371,7 @@ export const projectTranscriptRows = (options: ProjectTranscriptRowsOptions) => 
   )
     options.renderer.clearSelection()
   const boundedModel = boundedTranscriptModel(model, options.windowEnd)
-  const builder = transcriptUnitBuilder(boundedModel, options.restingGlyph)
+  const builder = transcriptUnitBuilder(boundedModel, options.spinnerGlyph)
   const expandedSet = new Set(boundedModel.expandedRowKeys)
   const unitCache: TranscriptRowsCache = new Map()
   const orderedBundles: Array<{
@@ -410,7 +400,7 @@ export const projectTranscriptRows = (options: ProjectTranscriptRowsOptions) => 
     let entry: TranscriptUnitCacheEntry
     if (cached !== undefined && cached.revision === revision) entry = cached
     else if (tentative === undefined)
-      entry = buildTranscriptUnitBundles(builder, unit, revision, options.onToggle)
+      entry = buildTranscriptUnitBundles(builder, unit, revision, options.spinnerGlyph, options.onToggle)
     else
       entry = buildTentativeTranscriptUnitBundles(
         unitKey,

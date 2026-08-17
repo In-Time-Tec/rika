@@ -7,7 +7,7 @@ export interface TranscriptRenderableRecord {
   readonly key: string
   revision: string
   readonly renderable: TextRenderable
-  animatedChunks?: ReadonlyArray<number>
+  spinnerChunk?: number
 }
 
 export interface TranscriptRenderableDescriptor {
@@ -15,7 +15,7 @@ export interface TranscriptRenderableDescriptor {
   readonly revision: string
   readonly content: StyledText
   readonly selectable?: boolean
-  readonly animatedChunks?: ReadonlyArray<number>
+  readonly spinnerChunk?: number
   readonly targets?: ReadonlyArray<PathTarget>
   readonly onMouseDown?: TextRenderable["onMouseDown"]
 }
@@ -52,7 +52,7 @@ export interface TranscriptRenderInput {
   readonly detailSelection: Model["detailSelection"]
   readonly width: number
   readonly windowEnd: number
-  readonly compactionShimmer: Model["compactionShimmer"]
+  readonly animationTick: number
 }
 
 export interface ChangedFileRow {

@@ -311,19 +311,22 @@ it.effect("owns a continuous welcome cadence and stops it when transcript conten
         ).welcomeController.child.content.chunks,
       )
     const first = renderedWelcome()
-    clock.advance(120)
+    clock.advance(100)
     const second = renderedWelcome()
     clock.advance(3_200)
-    expect(surface.animationDiagnostics().elapsedMillis).toBe(3_320)
+    const local = surface as unknown as {
+      readonly welcomeController: { readonly phase: number; readonly running: boolean }
+    }
+    expect(local.welcomeController.phase).toBe(33)
     expect(globalTicks).toBe(0)
     expect(second).not.toBe(first)
     expect(renderedWelcome()).not.toBe(first)
     model = { ...model, entries: [{ role: "user", text: "hello" }] }
     surface.update(model)
-    const stoppedAt = surface.animationDiagnostics().elapsedMillis
-    expect(surface.animationDiagnostics().running).toBe(false)
+    const stoppedAt = local.welcomeController.phase
+    expect(local.welcomeController.running).toBe(false)
     clock.advance(1_000)
-    expect(surface.animationDiagnostics().elapsedMillis).toBe(stoppedAt)
+    expect(local.welcomeController.phase).toBe(stoppedAt)
     expect(globalTicks).toBe(0)
   }).pipe(Effect.scoped),
 )

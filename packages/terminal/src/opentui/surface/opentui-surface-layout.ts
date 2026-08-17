@@ -5,9 +5,10 @@ import { boundedThreadSidebarWidth, contentColumnWidth, isNarrow } from "../../s
 import { colors } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { shortcutsContent } from "./opentui-composer-region"
+import { formatActivity } from "../../state/model/terminal-activity-state"
 import { truncateToWidth } from "../../presentation/terminal/terminal-format"
+import { loaderFrame, spinnerFrames } from "../rendering/opentui-spinner"
 import { renderSidebar } from "../rendering/opentui-render-block"
-import { animationFrame } from "../rendering/opentui-animation-frame"
 import { panelLoading, compactWorkspace } from "./opentui-surface-content"
 import { queueContentWidth, wrappedRowCount } from "../../state/model/terminal-layout-composer"
 import { displayInput } from "../../state/model/terminal-composer-state"
@@ -156,6 +157,12 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       ? ""
       : ` ${compactWorkspace(model.workspace)}${model.branch === undefined ? "" : ` (${model.branch})`} `
     const panelLoadingLabel = panelLoading(model)
+    const activityLabel = formatActivity(
+      model.activity,
+      model.activity?._tag === "Retrying"
+        ? Math.max(0, Math.ceil((model.activity.nextAt - this.currentTimeMillis()) / 1000))
+        : model.retryCountdown,
+    )
     const statusChanged =
       previousModel === undefined ||
       previousModel.activity !== model.activity ||
@@ -164,8 +171,18 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       previousModel.busy !== model.busy ||
       panelLoading(previousModel) !== panelLoadingLabel
     if (statusChanged) {
-      this.inputBox.bottomTitle = ""
-      this.renderStatusLabel(model)
+      if (model.connectionStatus !== undefined || activityLabel !== undefined || panelLoadingLabel !== undefined) {
+        const statusName = model.connectionStatus ?? activityLabel ?? panelLoadingLabel!
+        this.inputBox.bottomTitle = ""
+        this.statusLabel.content = new StyledText([
+          fg(toOpenColor(colors.text))(" "),
+          fg(toOpenColor(colors.blue))(loaderFrame(statusName, this.loaderController.phase)),
+          dim(fg(toOpenColor(colors.text))(` ${statusName} `)),
+        ])
+      } else {
+        this.inputBox.bottomTitle = ""
+        this.statusLabel.content = ""
+      }
     }
     const goalChanged =
       previousModel === undefined ||
@@ -211,7 +228,7 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       previousModel.height !== model.height
     if (sidebarChanged)
       this.sidebar.content = threadSidebarVisible
-        ? renderSidebar(model, animationFrame("thread-sidebar", this.animation.elapsedMillis()))
+        ? renderSidebar(model, spinnerFrames[this.loaderController.phase % spinnerFrames.length]!)
         : ""
     this.changedFilesBox.visible = sidebarVisible
     if (this.changedFilesBox.visible) {

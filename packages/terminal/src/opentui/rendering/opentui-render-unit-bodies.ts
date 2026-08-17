@@ -2,7 +2,7 @@ import { Function } from "effect"
 import { bold, dim, fg, type StyledText, type TextChunk } from "@opentui/core"
 import { cellGlyph, cellOutputTruncated, formatCellDuration } from "@rika/transcript/cell-presentation"
 import { highlightLines } from "../../presentation/markdown/syntax-highlighter"
-import { animatedChunk, wrapBodyText } from "./opentui-render-window"
+import { wrapBodyText } from "./opentui-render-window"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
 import type { Model } from "../../state/model/terminal-state"
 import { colors } from "../../presentation/terminal/terminal-theme"
@@ -83,10 +83,8 @@ const renderCellBodyImpl = (
   else if (block.status === "complete") icon = "✓"
   else if (block.status === "cancelled") icon = "⊘"
   else if (block.status === "unknown") icon = "?"
-  const iconChunk = fg(cellStatusColor(block.status))(icon)
   const header: Array<TextChunk> = [
-    running ? animatedChunk(iconChunk) : iconChunk,
-    fg(colors.text)(" "),
+    fg(cellStatusColor(block.status))(`${icon} `),
     fg(colors.subtle)(cellGlyph(block.visual)),
   ]
   if (block.summary.length > 0) {

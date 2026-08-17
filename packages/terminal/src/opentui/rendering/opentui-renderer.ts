@@ -6,7 +6,7 @@ import { toOpenColor } from "./terminal-text-adapter"
 import { orderedTranscriptItems, transcriptUnits } from "../../presentation/transcript/transcript-row"
 import { offsetUnitRange } from "./opentui-render-transcript-window"
 import { transcriptUnitBuilder } from "./opentui-render-unit"
-import { restingFrame } from "./opentui-animation-frame"
+import { idleSpinnerFrame } from "./opentui-spinner"
 import type { UnitLineRange } from "./opentui-render-transcript-window"
 const terminalColors = Object.values(colors).filter((value): value is TerminalColor => value instanceof TerminalColor)
 const restoreTerminalColor = (value: RGBA): TerminalColor | undefined => {
@@ -48,7 +48,7 @@ export const buildTranscript: {
   (spinnerFrame?: string): (model: Model) => TranscriptBuild
 } = Function.dual(
   (args) => typeof args[0] !== "string",
-  (model: Model, spinnerFrame = restingFrame): TranscriptBuild => {
+  (model: Model, spinnerFrame = idleSpinnerFrame): TranscriptBuild => {
     const builder = transcriptUnitBuilder(model, spinnerFrame)
     const chunks: Array<TextChunk> = []
     const ranges: Array<UnitLineRange> = []

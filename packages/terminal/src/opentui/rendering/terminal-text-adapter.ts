@@ -1,4 +1,3 @@
-import { animatedChunk, isAnimatedChunk } from "./opentui-render-window"
 import { Function } from "effect"
 import { RGBA, StyledText, type TextChunk } from "@opentui/core"
 import {
@@ -60,7 +59,7 @@ export const toOpenColor: {
 export const toOpenChunk = (chunk: TerminalTextChunk | TextChunk): TextChunk => {
   const fg = toOpenColor(chunk.fg),
     bg = toOpenColor(chunk.bg)
-  const open: TextChunk = {
+  return {
     __isChunk: true,
     text: chunk.text,
     ...(fg === undefined ? {} : { fg }),
@@ -68,7 +67,6 @@ export const toOpenChunk = (chunk: TerminalTextChunk | TextChunk): TextChunk => 
     ...(chunk.attributes === undefined ? {} : { attributes: chunk.attributes }),
     ...(chunk.link === undefined ? {} : { link: chunk.link }),
   }
-  return isAnimatedChunk(chunk as TextChunk) ? animatedChunk(open) : open
 }
 export const toOpenText = (text: TerminalStyledText): StyledText => new StyledText(text.chunks.map(toOpenChunk))
 const terminalChunk = (chunk: TextChunk): TerminalTextChunk => ({

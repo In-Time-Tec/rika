@@ -117,7 +117,7 @@ export interface TranscriptRenderableDescriptor {
   readonly revision: string
   readonly content: StyledText
   readonly selectable?: boolean
-  readonly animatedChunks?: ReadonlyArray<number>
+  readonly spinnerChunk?: number
   readonly targets?: ReadonlyArray<PathTarget>
   readonly onMouseDown?: TextRenderable["onMouseDown"]
 }

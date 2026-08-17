@@ -5,11 +5,6 @@ import { Effect } from "effect"
 import stringWidth from "string-width"
 import { Surface } from "../../src/opentui/surface/opentui-surface"
 import { maxMountedTranscriptEntries } from "../../src/opentui/rendering/opentui-render-transcript-window"
-import {
-  animationFrame,
-  animationIntervalMillis,
-  restingFrame,
-} from "../../src/opentui/rendering/opentui-animation-frame"
 
 import { initial, type Model } from "../../src/state/model/terminal-state"
 import { loading, ready } from "../../src/state/model/terminal-loadable-state"
@@ -370,12 +365,12 @@ test("publishes the running-tool spinner frame while the selected agent is worki
       try {
         surface.update(working)
         yield* openTui(() => setup.renderOnce())
-        expect(frames).toEqual([restingFrame])
-        expect(header()).toContain(restingFrame)
+        expect(frames).toEqual(["⠭"])
+        expect(header()).toContain("⠭")
 
-        clock.advance(animationIntervalMillis)
+        clock.advance(100)
         expect(frames).toHaveLength(2)
-        expect(header()).toContain(animationFrame("tool:title-spinner:header", animationIntervalMillis))
+        expect(header()).toContain(frames.at(-1))
 
         surface.update({ ...working, busy: false, activity: undefined, activeTurnId: undefined })
         expect(frames.at(-1)).toBeUndefined()
@@ -481,14 +476,11 @@ test("keeps the status spinner moving across a tool-result lull without feed eve
       try {
         surface.update(model)
         yield* openTui(() => setup.renderOnce())
-        const statusFrame = () => styledTextValue(surface.statusLabel.content).trim().split(" ")[0]!
-        const frames = [statusFrame()]
-        for (let step = 0; step < 20; step += 1) {
-          clock.advance(animationIntervalMillis)
-          frames.push(statusFrame())
-        }
-        expect(styledTextValue(surface.statusLabel.content)).toContain("Waiting")
-        expect(new Set(frames).size).toBeGreaterThan(1)
+        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Waiting")
+        clock.advance(100)
+        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Waiting")
+        clock.advance(100)
+        expect(styledTextValue(surface.statusLabel.content)).toContain("≋ Waiting")
       } finally {
         surface.destroy()
         setup.renderer.destroy()

@@ -44,7 +44,7 @@ export abstract class SurfaceTranscriptMount extends SurfaceModeLabel {
     const modeColor = colors[model.mode]
     if (welcomeVisible(model)) {
       const welcomeWidth = this.welcomeWidthFor(model)
-      const welcomePhase = this.options.animate === false ? model.animationTick : this.welcomePhase()
+      const welcomePhase = this.options.animate === false ? model.animationTick : this.welcomeController.phase
       const impulses = this.welcomeController.impulses
       const welcomeKey = `${welcomeWidth}:${model.height}:${welcomePhase}:${model.mode}:${impulses.length}`
       const existingWelcome = this.welcomeController.child
@@ -66,7 +66,7 @@ export abstract class SurfaceTranscriptMount extends SurfaceModeLabel {
       }
     } else {
       const renderModel = sidebarWidth === 0 && !threadSidebarVisible ? model : { ...model, width: contentWidth }
-      this.transcriptPane.update(renderModel, preserveAnchor, this.animation.elapsedMillis())
+      this.transcriptPane.update(renderModel, preserveAnchor, this.toolSpinner.toBraille())
     }
     return { sidebarWidth, contentLeft, contentWidth, renderedInputHeight, sidebarVisible, threadSidebarVisible }
   }
