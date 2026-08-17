@@ -31,6 +31,15 @@ type RouteSnapshot = ExecutionRoute.ExecutionRouteSnapshot
 type ResolvedAgent = ExecutableResolver.StaticAgentExecutable["agent"]
 
 /**
+ * Rika caps execution only by subagent depth and count, both carried by the tree policy. Every
+ * other dimension stays unlimited, so a long thread is never terminated by a run budget. A
+ * BudgetLimits with no dimension set is the exact way to express that: `remaining === undefined`
+ * short-circuits each charge. This is stated explicitly rather than by omitting the option, because
+ * an omitted budget is an absent opinion that a host is free to fill with a default ceiling.
+ */
+const unlimitedBudget = {} as const satisfies AgentManifest.AgentManifest["budget"]
+
+/**
  * The exact values the Session's kernel is built from. The admitted profile pin is derived from
  * these and from nothing else, so a pin can never describe a kernel the host did not run.
  */
@@ -182,6 +191,7 @@ const agentDefinition = (
       model: routed.selection,
       toolScheduling: tools.length === 0 ? { maxConcurrency: 1, parallelSafe: [] } : CellTool.scheduling,
       metadata: { productProfile: name },
+      budget: unlimitedBudget,
     }),
     tools,
   )
@@ -197,7 +207,7 @@ const agentDefinition = (
       ...capabilities.services,
     ],
     policy: { _tag: "Portable", policy: agent.policy.snapshot! },
-    budget: agent.budget ?? {},
+    budget: unlimitedBudget,
     children,
     ...(compaction === undefined ? {} : { compaction }),
   })

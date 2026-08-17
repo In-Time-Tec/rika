@@ -338,6 +338,20 @@ describe("tentative model preview overlay", () => {
     expect(assistantText(state)).toBe("new fence")
   })
 
+  it("renders a committed assistant message once after Baton discards the frame on commit", () => {
+    const text = "Breakage began at 2b8aabb."
+    let state = InteractiveController.update(loaded(), preview(1, text, {}, "")).state
+    expect(assistantText(state)).toBe(text)
+
+    state = InteractiveController.update(state, previewCleared(0)).state
+    state = applyPatch(state, {
+      upsert: [timelineUnit("committed:answer", { _tag: "Entry", role: "assistant", text })],
+    })
+
+    expect(state.model.entries.filter((entry) => entry.role === "assistant" && entry.text === text)).toHaveLength(1)
+    expect(ids(state).some((id) => id.startsWith("tentative:"))).toBe(false)
+  })
+
   it("uses a synthetic overflow clear only to invalidate the current identity", () => {
     let state = InteractiveController.update(loaded(), preview(1, "before overflow", {}, "")).state
     state = InteractiveController.update(state, previewCleared(0)).state
