@@ -51,8 +51,14 @@ export interface ResolverOptions {
       workspace: string,
     ) => Effect.Effect<Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>>
   }
-  readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
-  readonly harnessSnapshot?: HarnessState.HarnessState
+  /**
+   * A harness pin encodes the workspace scope it was read for, so a recovered Run resolves the
+   * capabilities of the workspace its own registration pinned rather than one the Server chose.
+   */
+  readonly capabilities?: (workspace: string) => Effect.Effect<{
+    readonly skills: ReadonlyArray<ExecutionPins.SkillPin>
+    readonly harnessSnapshot: HarnessState.HarnessState
+  }>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
   readonly credentialStore?: ProviderCredentialStoreShape
   readonly openAiAccountAuth?: OpenAiAuth.ServiceInterface

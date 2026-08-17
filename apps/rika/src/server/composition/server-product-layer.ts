@@ -9,7 +9,7 @@ import { lazyBackendLayer } from "./lazy-execution-backend"
 import { workspacePaths } from "@rika/configuration/configuration-paths"
 import * as ServerConfiguration from "./server-configuration-adapter"
 import * as ServerExecution from "./server-execution-layer"
-import { kernelPoolsFor, pinnedCapabilities } from "./server-pinned-capabilities"
+import { kernelPoolsFor, pinnedCapabilitiesFor } from "./server-pinned-capabilities"
 import * as ServerAuth from "./server-auth-layer"
 import { resolvedContextLayer, workspaceExecutionRoute } from "./server-execution-route"
 import type { ServerProductOptions } from "./server-auth-layer"
@@ -134,7 +134,7 @@ const createOperationLayerImpl = (
        * This scope is the Server's, which is the lifetime the pool actually has.
        */
       const kernelPool = yield* kernelPoolsFor(kernelOptions)
-      const { harnessSnapshot, skills } = yield* pinnedCapabilities({
+      const capabilities = yield* pinnedCapabilitiesFor({
         ...kernelOptions,
         workspace: workspaceRoot,
         toolRuntimeLayer: kernelOptions.toolRuntimeLayer(workspaceRoot),
@@ -142,8 +142,7 @@ const createOperationLayerImpl = (
       const backendLayer = configuredBackendLayer({
         filename: options.batonDatabase,
         kernelPool,
-        skills,
-        harnessSnapshot,
+        capabilities,
         credentialStore: ServerAuth.createProviderCredentialStoreLayer(options.database, options.profileIdentity),
         openAiAccountAuth,
         ...(testModel === undefined ? {} : { testModel }),

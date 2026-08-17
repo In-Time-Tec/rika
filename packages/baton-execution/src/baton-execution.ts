@@ -63,8 +63,18 @@ export interface Options {
       >
     >
   }
-  readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
-  readonly harnessSnapshot?: HarnessState.HarnessState
+  /**
+   * The skills and harness one Execution pins, resolved for the workspace that Execution runs in.
+   *
+   * A harness pin encodes the workspace scope it was read for, so a Server that pinned one snapshot
+   * from its own startup directory registered a pin every Turn in a different workspace then failed
+   * to verify: the resolver recomputes the expectation from the Run's own workspace and reads a
+   * different pin than the one the Server admitted.
+   */
+  readonly capabilities?: (workspace: string) => Effect.Effect<{
+    readonly skills: ReadonlyArray<ExecutionPins.SkillPin>
+    readonly harnessSnapshot: HarnessState.HarnessState
+  }>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry, never, never>
   readonly credentialStore?: Layer.Layer<ProviderCredentialStore, never, never>
   readonly openAiAccountAuth?: OpenAiAuth.ServiceInterface
@@ -223,13 +233,16 @@ const make = (options: Options, credentialStore: ProviderCredentialStoreShape | 
         Effect.gen(function* () {
           const turnKernelPool =
             options.kernelPool === undefined ? undefined : yield* options.kernelPool.forWorkspace(input.workspace)
+          const turnCapabilities =
+            options.capabilities === undefined ? undefined : yield* options.capabilities(input.workspace)
           const configured = yield* configure({
             executionRoute: input.executionRoute,
             workspace: input.workspace,
             kernel: kernelOptions(options),
             ...(turnKernelPool === undefined ? {} : { kernelPool: turnKernelPool }),
-            ...(options.skills === undefined ? {} : { skills: options.skills }),
-            ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
+            ...(turnCapabilities === undefined
+              ? {}
+              : { skills: turnCapabilities.skills, harnessSnapshot: turnCapabilities.harnessSnapshot }),
             ...(credentialStore === undefined ? {} : { credentialStore }),
             ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
             ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
@@ -482,8 +495,7 @@ export const layer = (
         resolver: makeResolver({
           kernel: kernelOptions(options),
           ...(options.kernelPool === undefined ? {} : { kernelPool: options.kernelPool }),
-          ...(options.skills === undefined ? {} : { skills: options.skills }),
-          ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
+          ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
           ...(credentialStore === undefined ? {} : { credentialStore }),
           ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
           ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),

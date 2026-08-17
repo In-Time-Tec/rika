@@ -579,13 +579,16 @@ export const makeResolver = (options: ResolverOptions): ExecutableResolver.Inter
          */
         const kernelPool =
           options.kernelPool === undefined ? undefined : yield* options.kernelPool.forWorkspace(context.workspace)
+        const capabilities =
+          options.capabilities === undefined ? undefined : yield* options.capabilities(context.workspace)
         const configured = yield* configure({
           executionRoute: context.executionRoute,
           workspace: context.workspace,
           kernel: options.kernel,
           ...(kernelPool === undefined ? {} : { kernelPool }),
-          ...(options.skills === undefined ? {} : { skills: options.skills }),
-          ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
+          ...(capabilities === undefined
+            ? {}
+            : { skills: capabilities.skills, harnessSnapshot: capabilities.harnessSnapshot }),
           ...(options.credentialStore === undefined ? {} : { credentialStore: options.credentialStore }),
           ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
           ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),

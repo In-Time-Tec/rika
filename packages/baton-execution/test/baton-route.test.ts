@@ -847,3 +847,41 @@ it.effect("keeps subagent depth and fan-out as the only pinned execution limits"
     }),
   ),
 )
+
+it.effect("registers the harness pin the resolver expects for the same workspace and refuses one from another", () =>
+  Effect.gen(function* () {
+    const executionRoute = testExecutionRoute()
+    const empty = HarnessState.empty("global")
+    const snapshotFor = (scope: string) => ({ ...empty, scope })
+    const one = yield* configure({
+      executionRoute,
+      workspace: "/one",
+      kernel,
+      harnessSnapshot: snapshotFor("workspace:one"),
+    })
+    const another = yield* configure({
+      executionRoute,
+      workspace: "/another",
+      kernel,
+      harnessSnapshot: snapshotFor("workspace:another"),
+    })
+    const harnessPinOf = (configured: Configured) =>
+      configured.registrations.find((registration) => registration.codec === "@batonfx/harness/snapshot")?.pin
+
+    /**
+     * A harness pin is derived from the snapshot the workspace was read for, so two workspaces pin
+     * two values. A Server that registered one of them for every Turn made the resolver, which
+     * recomputes the expectation from the Run's own workspace, reject a registration it required.
+     */
+    expect(harnessPinOf(one)).toBeDefined()
+    expect(harnessPinOf(another)).toBeDefined()
+    expect(harnessPinOf(one)).not.toBe(harnessPinOf(another))
+
+    const required = ExecutableRegistration.requiredPinsForActiveExecutable({
+      ref: one.executable.ref,
+      manifest: one.executable.manifest,
+    })
+    expect(required.has(harnessPinOf(one)!)).toBe(true)
+    expect(required.has(harnessPinOf(another)!)).toBe(false)
+  }),
+)
