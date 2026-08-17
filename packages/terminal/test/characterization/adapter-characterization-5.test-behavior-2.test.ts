@@ -309,16 +309,15 @@ it.effect("removes its listeners on destroy", () =>
     expect(opentui.selectionHandlers.size).toBe(selectionCount - 1)
   }),
 )
-it.effect("ignores a queued loader tick after destroy", () =>
+it.effect("ignores a queued animation frame after destroy", () =>
   Effect.gen(function* () {
     const { surface } = yield* createScoped(handlers())
-    const loader = surface as unknown as { loaderPhase: number; tickLoader: () => void }
-    const phase = loader.loaderPhase
+    const animated = surface as unknown as { onAnimationFrame: () => boolean }
 
     surface.destroy()
-    loader.tickLoader()
 
-    expect(loader.loaderPhase).toBe(phase)
+    expect(animated.onAnimationFrame()).toBe(false)
+    expect(surface.animationDiagnostics().running).toBe(false)
   }),
 )
 it.effect("renders mode picker, filtered palette, sidebar visibility, and notice transitions", () =>

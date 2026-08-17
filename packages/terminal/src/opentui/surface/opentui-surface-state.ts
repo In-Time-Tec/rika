@@ -11,8 +11,7 @@ import { Effect, type Fiber } from "effect"
 import type { Key } from "../../presentation/terminal/terminal-keymap"
 import type { Model } from "../../state/model/terminal-state"
 import type { WelcomeController } from "./opentui-welcome-controller"
-import type { GoalController } from "./opentui-goal-controller"
-import type { LoaderController } from "./opentui-loader-controller"
+import type { AnimationRunner } from "./opentui-animation-runner"
 import type { HoverController } from "./opentui-hover-controller"
 import { PointerController } from "./opentui-pointer-controller"
 import type { PathTarget } from "../../presentation/transcript/transcript-tool-detail-types"
@@ -96,15 +95,15 @@ export class SurfaceState {
   public quitConfirmation!: TextRenderable
   protected lastPaste: { readonly text: string; readonly at: number } | undefined
   protected welcomeController!: WelcomeController
-  protected goalController!: GoalController
-  protected loaderController!: LoaderController
+  protected animation!: AnimationRunner
+  protected publishedFrame: string | undefined
+  protected publishedAny = false
   protected hoverController!: HoverController
   protected readonly pointerController = new PointerController()
   protected model: Model | undefined
   protected changedFilesHoveredRow: number | undefined
   protected clock!: OpenTuiClock
   protected currentTimeMillis!: () => number
-  protected toolSpinner!: { step(): void; toBraille(): string }
   protected destroyed = false
   protected junkBuffer: Array<Key> = []
   protected junkTimer: Fiber.Fiber<void> | undefined
@@ -115,21 +114,10 @@ export class SurfaceState {
     return this.transcriptPane.mountedRowCount()
   }
   public animationDiagnostics(): {
-    readonly loaderRunning: boolean
-    readonly welcomeRunning: boolean
-    readonly goalRunning: boolean
-    readonly loaderPhase: number
-    readonly welcomePhase: number
-    readonly goalPhase: number
+    readonly running: boolean
+    readonly elapsedMillis: number
   } {
-    return {
-      loaderRunning: this.loaderController.running,
-      welcomeRunning: this.welcomeController.running,
-      goalRunning: this.goalController.running,
-      loaderPhase: this.loaderController.phase,
-      welcomePhase: this.welcomeController.phase,
-      goalPhase: this.goalController.phase,
-    }
+    return { running: this.animation.running, elapsedMillis: this.animation.elapsedMillis() }
   }
   public transcriptDiagnostics(): TranscriptPaneDiagnostics {
     return this.transcriptPane.diagnostics()

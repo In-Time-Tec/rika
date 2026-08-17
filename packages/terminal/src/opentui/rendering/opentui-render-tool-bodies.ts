@@ -46,7 +46,7 @@ export interface ToolBodyContext {
   readonly line: () => number
   readonly nestedRanges: Array<UnitLineRange>
   readonly rowExpanded: (id: string) => boolean
-  readonly highlight: (text: string) => void
+  readonly highlight: (text: string, icon?: string, running?: boolean) => void
   readonly statusIcon: (failed: boolean, running: boolean, cancelled?: boolean) => TextChunk
   readonly marker: (expanded: boolean) => TextChunk
 }
@@ -66,7 +66,9 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
     const counts = [...counters].map(([counter, count]) => plural(count, counter)).join(", ")
     if (selected)
       highlight(
-        `${iconChar(failed, running, spinnerFrame, cancelled)} ${running ? "Exploring" : "Explored"} ${counts.length > 0 ? counts : "workspace"}${markerText(expanded)}`,
+        ` ${running ? "Exploring" : "Explored"} ${counts.length > 0 ? counts : "workspace"}${markerText(expanded)}`,
+        iconChar(failed, running, spinnerFrame, cancelled),
+        running,
       )
     else {
       append(statusIcon(failed, running, cancelled))
@@ -167,7 +169,9 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
     const counts = `${added > 0 ? ` +${added}` : ""}${removed > 0 ? ` -${removed}` : ""}`
     if (selected)
       highlight(
-        `${iconChar(failed, running, spinnerFrame, cancelled)} ${verb} ${label}${counts}${markerText(expanded)}`,
+        ` ${verb} ${label}${counts}${markerText(expanded)}`,
+        iconChar(failed, running, spinnerFrame, cancelled),
+        running,
       )
     else {
       append(statusIcon(failed, running, cancelled))
@@ -259,7 +263,9 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
       const exit = failed ? ` (exit code: ${exitCode ?? 1})` : ""
       const cancellation = cancelled ? " (cancelled)" : ""
       highlight(
-        `${running ? spinnerFrame : "$"} ${lines.join("\n    ")}${exit}${cancellation}${expandable ? markerText(expanded) : ""}`,
+        ` ${lines.join("\n    ")}${exit}${cancellation}${expandable ? markerText(expanded) : ""}`,
+        running ? spinnerFrame : "$",
+        running,
       )
     } else {
       const highlighted = cancelled ? undefined : highlightShellCommand(command)
@@ -304,7 +310,9 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
     const running = units.some((unit) => unit.block.status === "running")
     if (selected)
       highlight(
-        `${iconChar(failedCount > 0, running, spinnerFrame, cancelledCount > 0)} ${running ? "Running" : "Ran"} ${plural(units.length, "command")}${failedCount > 0 ? `, ${failedCount} failed` : ""}${cancelledCount > 0 ? `, ${cancelledCount} cancelled` : ""}${markerText(expanded)}`,
+        ` ${running ? "Running" : "Ran"} ${plural(units.length, "command")}${failedCount > 0 ? `, ${failedCount} failed` : ""}${cancelledCount > 0 ? `, ${cancelledCount} cancelled` : ""}${markerText(expanded)}`,
+        iconChar(failedCount > 0, running, spinnerFrame, cancelledCount > 0),
+        running,
       )
     else {
       append(statusIcon(failedCount > 0, running, cancelledCount > 0))
@@ -344,7 +352,10 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
           )
           append(italic(fg(colors.amber)(" (cancelled)")))
         } else {
-          append(dim(fg(colors.text)("$ ")))
+          if (unit.block.status === "running") {
+            append(statusIcon(false, true))
+            append(fg(colors.text)(" "))
+          } else append(dim(fg(colors.text)("$ ")))
           const rows = shellCommandText(unit.block)
             .split("\n")
             .flatMap((current) => wrapStyledLine(highlightShellCommand(current)[0] ?? [], commandWidth))
@@ -359,7 +370,13 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
           append(fg(colors.text)("\n"))
           append(dim(fg(colors.text)(wrapBodyText(output!, transcriptWrapWidth(model.width), "     "))))
         }
-        context.nestedRanges.push({ start, end: context.line(), unit: childId, expandable })
+        context.nestedRanges.push({
+          start,
+          end: context.line(),
+          unit: childId,
+          expandable,
+          animated: unit.block.status === "running",
+        })
       }
   }
   return { renderExploreBody, renderEditBody, renderShellSingleBody, renderShellBody }

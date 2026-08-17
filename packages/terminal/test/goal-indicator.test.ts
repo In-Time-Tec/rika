@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { goalFrames, spinnerFrames, statusSpinnerFrames } from "../src/opentui/rendering/opentui-spinner"
+import { animationFrame } from "../src/opentui/rendering/opentui-animation-frame"
 import { goalAnimationActive, goalIndicatorVisible } from "../src/opentui/surface/opentui-surface-content"
 import { formatGoalElapsed } from "../src/state/model/terminal-goal"
 import { initial, type Model } from "../src/state/model/terminal-state"
@@ -14,11 +14,12 @@ const model = (goal?: Model["goal"], width = 120): Model => ({
 const active = { objective: "land R4", status: "active" as const, startedAtMillis: 0 }
 
 describe("goal frame set", () => {
-  it("is its own frame set, disjoint from the loader and status spinners", () => {
-    const sets = [goalFrames, spinnerFrames, statusSpinnerFrames]
-    for (const [index, left] of sets.entries())
-      for (const right of sets.slice(index + 1)) expect(left.filter((frame) => right.includes(frame))).toEqual([])
-    expect(goalFrames.length).toBeGreaterThan(1)
+  it("animates out of step with the status line it sits beside", () => {
+    const elapsed = Array.from({ length: 200 }, (_, step) => step * 30)
+    const goal = elapsed.map((millis) => animationFrame("goal", millis))
+    const status = elapsed.map((millis) => animationFrame("status", millis))
+    expect(new Set(goal).size).toBeGreaterThan(1)
+    expect(goal).not.toEqual(status)
   })
 })
 

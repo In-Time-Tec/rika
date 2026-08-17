@@ -11,7 +11,8 @@ import {
   _giantSubagentModel,
   _collapsedSubagentModel,
 } from "./opentui-surface-characterization-7-support"
-test("ticks status and running-tool spinners every 100ms without rebuilding transcript bodies", () =>
+import { animationIntervalMillis, restingFrame } from "../../src/opentui/rendering/opentui-animation-frame"
+test("animates status and running-tool glyphs on its own cadence without rebuilding transcript bodies", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const clock = new ManualClock()
@@ -57,25 +58,27 @@ test("ticks status and running-tool spinners every 100ms without rebuilding tran
         yield* openTui(() => setup.renderOnce())
         const body = records().get("tool:long-running:body")!.renderable
         const firstBodyContent = body.content
-        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
-        expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toContain("⠭")
+        const header = () => styledTextValue(records().get("tool:long-running:header")!.renderable.content)
+        const statusGlyph = () => styledTextValue(surface.statusLabel.content).trim().split(" ")[0]!
+        expect(styledTextValue(surface.statusLabel.content)).toContain("Thinking 5 tok")
+        expect(header()).toContain(restingFrame)
 
-        clock.advance(99)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
-        expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toContain("⠭")
+        clock.advance(animationIntervalMillis - 1)
+        expect(header()).toContain(restingFrame)
         clock.advance(1)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Thinking 5 tok")
-        expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toMatch(/[⠀-⣿] sleep 5/u)
+        expect(header()).not.toContain(restingFrame)
         expect(body.content).toBe(firstBodyContent)
 
-        clock.advance(100)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≋ Thinking 5 tok")
-        clock.advance(100)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Thinking 5 tok")
-        clock.advance(100)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
-        clock.advance(100)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
+        const glyphs = new Set([statusGlyph()])
+        const headers = new Set([header()])
+        for (let step = 0; step < 20; step += 1) {
+          clock.advance(animationIntervalMillis)
+          glyphs.add(statusGlyph())
+          headers.add(header())
+        }
+        expect(glyphs.size).toBeGreaterThan(1)
+        expect(headers.size).toBeGreaterThan(1)
+        expect(styledTextValue(surface.statusLabel.content)).toContain("Thinking 5 tok")
         expect(body.content).toBe(firstBodyContent)
       } finally {
         surface.destroy()
@@ -104,7 +107,7 @@ test("advances selected-thread active time with the injected clock and freezes c
       try {
         surface.update(active)
         expect(styledTextValue(surface.modeLabel.content)).toContain("◷ 0s")
-        clock.advance(1_000)
+        clock.advance(animationIntervalMillis * 17)
         expect(styledTextValue(surface.modeLabel.content)).toContain("◷ 1s")
 
         surface.update({

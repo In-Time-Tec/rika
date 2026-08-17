@@ -2,7 +2,7 @@ import { createTestRenderer, ManualClock } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { Surface } from "../../src/opentui/surface/opentui-surface"
-import { goalFrames, spinnerInterval } from "../../src/opentui/rendering/opentui-spinner"
+import { animationFamilies, animationIntervalMillis } from "../../src/opentui/rendering/opentui-animation-frame"
 import { initial, type Model } from "../../src/state/model/terminal-state"
 import type { GoalIndicator } from "../../src/state/model/terminal-goal"
 import { openTui, styledTextValue } from "./opentui-surface-characterization-1-support"
@@ -49,7 +49,9 @@ test("renders the goal in the top-left corner only while it is active", () =>
       expect(surface.goalLabel.top).toBe(0)
       expect(surface.goalLabel.left).toBe(1)
       expect(label(surface)).toContain("Goal 0s")
-      expect(goalFrames.some((frame) => label(surface).includes(frame))).toBe(true)
+      expect(animationFamilies.some((family) => family.frames.some((frame) => label(surface).includes(frame)))).toBe(
+        true,
+      )
 
       surface.update({ ...base(), goal: goal("complete") })
       expect(label(surface)).toBe("")
@@ -61,7 +63,7 @@ test("advances the goal elapsed time and its own frame set on each tick", () =>
     withSurface(({ surface, clock }) => {
       surface.update({ ...base(), goal: goal() })
       const first = label(surface)
-      clock.advance(32_000)
+      clock.advance(animationIntervalMillis * 534)
       expect(label(surface)).toContain("Goal 32s")
       expect(label(surface)).not.toBe(first)
 
@@ -93,9 +95,9 @@ test("never advances the goal frame when the surface is constructed without anim
         { clock, animate: false },
       )
       surface.update({ ...base(), goal: goal() })
-      expect(surface.animationDiagnostics().goalRunning).toBe(false)
-      clock.advance(spinnerInterval * 1_000)
-      expect(surface.animationDiagnostics().goalPhase).toBe(0)
+      expect(surface.animationDiagnostics().running).toBe(false)
+      clock.advance(animationIntervalMillis * 1_000)
+      expect(surface.animationDiagnostics().elapsedMillis).toBe(0)
       surface.destroy()
       setup.renderer.destroy()
     }),

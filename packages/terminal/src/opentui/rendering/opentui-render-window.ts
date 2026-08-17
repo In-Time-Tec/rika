@@ -1,6 +1,7 @@
 import { Function } from "effect"
+import type { TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
-import { idleSpinnerFrame } from "./opentui-spinner"
+import { restingFrame } from "./opentui-animation-frame"
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" })
 const wrapTextToWidthImpl = (text: string, width: number): ReadonlyArray<string> => {
@@ -53,7 +54,7 @@ export const wrapBodyText: {
     arg2: Parameters<typeof wrapBodyTextImpl>[2],
   ): ReturnType<typeof wrapBodyTextImpl>
 } = Function.dual(3, wrapBodyTextImpl)
-const iconCharImpl = (failed: boolean, running: boolean, frame = idleSpinnerFrame, cancelled = false): string => {
+const iconCharImpl = (failed: boolean, running: boolean, frame = restingFrame, cancelled = false): string => {
   if (running) return frame
   if (cancelled) return "⊘"
   return failed ? "✕" : "✓"
@@ -72,6 +73,24 @@ export const iconChar: {
     arg3?: Parameters<typeof iconCharImpl>[3],
   ): (arg0: Parameters<typeof iconCharImpl>[0]) => ReturnType<typeof iconCharImpl>
 } = Function.dual((args) => args.length >= 2 && typeof args[1] === "boolean", iconCharImpl)
+
+/**
+ * Marks a chunk as the animated glyph of its row. The repaint pass rewrites marked chunks in place
+ * instead of searching rendered text for a character, so a row animates because it was built to,
+ * not because its icon happened to match the frame the search was looking for.
+ */
+const animationMark = Symbol.for("rika.animatedChunk")
+
+interface MarkedChunk extends TextChunk {
+  readonly [animationMark]?: true
+}
+
+export const animatedChunk = (chunk: TextChunk): TextChunk => {
+  const marked: MarkedChunk = { ...chunk, [animationMark]: true }
+  return marked
+}
+
+export const isAnimatedChunk = (chunk: TextChunk): boolean => (chunk as MarkedChunk)[animationMark] === true
 
 export const markerText = (expanded: boolean): string => (expanded ? " ▾" : " ▸")
 

@@ -34,6 +34,7 @@ import {
   wrapTextToWidth,
   wrapBodyText,
   iconChar,
+  animatedChunk,
   markerText,
   cancelledAgentLabel,
   failedAgentLabel,
@@ -72,13 +73,19 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     chunks.push(...bordered)
   }
   const statusIcon = (failed: boolean, running: boolean, cancelled = false): TextChunk => {
-    if (running) return fg(colors.blue)(spinnerFrame)
+    if (running) return animatedChunk(fg(colors.blue)(spinnerFrame))
     if (cancelled) return fg(colors.amber)("⊘")
     return failed ? fg(colors.red)("✕") : fg(colors.green)("✓")
   }
   const marker = (expanded: boolean): TextChunk => fg(colors.subtle)(expanded ? " ▾" : " ▸")
   const rowExpanded = (id: string): boolean => model.expandedRowKeys.includes(id)
-  const highlight = (text: string) => append(bold(fg(colors.blue)(text)))
+  const highlight = (text: string, icon?: string, running = false) => {
+    if (icon !== undefined) {
+      const chunk = bold(fg(colors.blue)(icon))
+      append(running ? animatedChunk(chunk) : chunk)
+    }
+    append(bold(fg(colors.blue)(text)))
+  }
   let nestedRanges: Array<UnitLineRange> = []
   const renderEntryBody = (index: number) => {
     const entry = model.entries[index]!
@@ -212,7 +219,9 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       (agent ? running || unit.block.detail.length > 0 : output !== undefined && output.length > 0)
     if (selected)
       highlight(
-        `${iconChar(failed, running, spinnerFrame, cancelled)} ${label}${agent ? "" : detail}${shellFailure}${expandable ? markerText(expanded) : ""}`,
+        ` ${label}${agent ? "" : detail}${shellFailure}${expandable ? markerText(expanded) : ""}`,
+        iconChar(failed, running, spinnerFrame, cancelled),
+        running,
       )
     else {
       append(statusIcon(failed, running, cancelled))

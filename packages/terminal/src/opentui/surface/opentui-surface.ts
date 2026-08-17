@@ -16,11 +16,9 @@ import { Clock, Effect, Clock as EffectClock, Schema } from "effect"
 import { boundedThreadSidebarWidth } from "../../state/model/terminal-layout-state"
 import { colors, spacing } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
-import { ToolSpinner } from "../rendering/opentui-spinner"
 import { SurfaceLifecycle } from "./opentui-surface-lifecycle"
 import { WelcomeController } from "./opentui-welcome-controller"
-import { GoalController } from "./opentui-goal-controller"
-import { LoaderController } from "./opentui-loader-controller"
+import { AnimationRunner } from "./opentui-animation-runner"
 import { HoverController } from "./opentui-hover-controller"
 import type { Handlers, SurfaceOptions } from "./opentui-surface-state"
 import { ProjectedEditorRenderable } from "./opentui-surface-renderables"
@@ -76,11 +74,9 @@ export class Surface extends SurfaceLifecycle {
     this.renderer = renderer
     this.handlers = handlers
     this.options = options
-    this.toolSpinner = new ToolSpinner()
     this.clock = options.clock ?? new SystemClock()
-    this.welcomeController = new WelcomeController({ clock: this.clock, destroyed: () => this.destroyed })
-    this.loaderController = new LoaderController({ clock: this.clock })
-    this.goalController = new GoalController({ clock: this.clock })
+    this.welcomeController = new WelcomeController()
+    this.animation = new AnimationRunner(this.clock, () => this.onAnimationFrame())
     this.hoverController = new HoverController({ renderer, destroyed: () => this.destroyed })
     const monotonicStartedAt = this.clock.now()
     const epochStartedAt = options.epochMillis ?? Effect.runSync(Clock.currentTimeMillis)
@@ -477,7 +473,7 @@ export class AdapterError extends Schema.TaggedErrorClass<AdapterError>()("TuiAd
 const adapterError = (cause: unknown) => AdapterError.make({ message: String(cause) })
 
 export { renderTranscriptStyled } from "../rendering/opentui-renderer"
-export { probeNativeAsset } from "../rendering/opentui-spinner"
+export { probeNativeAsset } from "../rendering/opentui-native-probe"
 
 export const create = (handlers: Handlers) =>
   Effect.tryPromise({

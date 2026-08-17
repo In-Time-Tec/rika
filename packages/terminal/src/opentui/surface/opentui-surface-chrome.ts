@@ -6,10 +6,16 @@ import { contentColumnWidth } from "../../state/model/terminal-layout-state"
 import { spacing, colors } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { formatActivity } from "../../state/model/terminal-activity-state"
-import { loaderFrame, spinnerFrames, spinnerInterval } from "../rendering/opentui-spinner"
+import { animationFrame, animationIntervalMillis } from "../rendering/opentui-animation-frame"
 import { renderSidebar } from "../rendering/opentui-render-block"
-import { goalAnimationActive, goalIndicatorVisible, panelLoading, welcomeContent } from "./opentui-surface-content"
-import { goalLabelContent } from "./opentui-goal-controller"
+import {
+  animationActive,
+  goalAnimationActive,
+  goalIndicatorVisible,
+  panelLoading,
+  welcomeContent,
+} from "./opentui-surface-content"
+import { goalLabelContent } from "./opentui-goal-label"
 import { welcomeAnimationActive, welcomeAnimationSettled } from "./opentui-welcome-state"
 import { ToastController } from "./opentui-toast-controller"
 import { SurfaceOverlay } from "./opentui-surface-overlay"
@@ -44,9 +50,9 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
     return Math.max(1, contentColumnWidth(model) - spacing.transcript * 2)
   }
   protected publishWorkingFrame(frame: string | undefined): void {
-    if (this.loaderController.published && this.loaderController.publishedFrame === frame) return
-    this.loaderController.published = true
-    this.loaderController.publishedFrame = frame
+    if (this.publishedAny && this.publishedFrame === frame) return
+    this.publishedAny = true
+    this.publishedFrame = frame
     this.handlers.workingFrame?.(frame)
   }
   protected refreshUsageHoverAfterLayout(): void {
@@ -58,82 +64,94 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
       this.renderer.requestRender()
     })
   }
-  protected tickWelcome(): void {
-    if (this.destroyed || !this.welcomeController.running) return
+  protected welcomePhase(): number {
+    return Math.floor(this.animation.elapsedMillis() / animationIntervalMillis)
+  }
+  protected renderWelcome(): void {
     const current = this.model
-    if (current === undefined || !welcomeAnimationActive(current) || this.welcomeController.child === undefined) return
-    if (welcomeAnimationSettled(this.welcomeController.phase, this.welcomeController.impulses)) {
-      this.welcomeController.stop()
-      return
-    }
-    this.welcomeController.advance()
+    if (this.destroyed || current === undefined || this.welcomeController.child === undefined) return
+    if (!welcomeAnimationActive(current)) return
+    const phase = this.welcomePhase()
+    this.welcomeController.expire(phase)
     const welcomeWidth = this.welcomeWidthFor(current)
     const impulses = this.welcomeController.impulses
-    this.welcomeController.key = `${welcomeWidth}:${current.height}:${this.welcomeController.phase}:${current.mode}:${impulses.length}`
-    this.welcomeController.child.content = welcomeContent(
-      welcomeWidth,
-      current.height,
-      this.welcomeController.phase,
-      current.mode,
-      impulses,
-    )
-    this.renderer.requestRender()
+    const key = `${welcomeWidth}:${current.height}:${phase}:${current.mode}:${impulses.length}`
+    if (this.welcomeController.key === key) return
+    this.welcomeController.key = key
+    this.welcomeController.child.content = welcomeContent(welcomeWidth, current.height, phase, current.mode, impulses)
   }
   protected strikeWelcomeOrb(event: MouseEvent): void {
     const current = this.model
     const child = this.welcomeController.child
     if (this.destroyed || current === undefined || child === undefined) return
-    this.welcomeController.strike(this.welcomeWidthFor(current), current.height, event.x - child.x, event.y - child.y)
-    if (this.options.animate !== false && welcomeAnimationActive(current))
-      this.welcomeController.start(spinnerInterval, () => this.tickWelcome())
-    this.renderer.requestRender()
-  }
-  protected tickGoal(): void {
-    if (this.destroyed || !this.goalController.running) return
-    const current = this.model
-    if (current === undefined || !goalAnimationActive(current)) return
-    this.goalController.advance()
-    this.renderGoalLabel(current)
+    this.welcomeController.strike(
+      this.welcomeWidthFor(current),
+      current.height,
+      event.x - child.x,
+      event.y - child.y,
+      this.welcomePhase(),
+    )
+    if (this.options.animate !== false && welcomeAnimationActive(current)) this.animation.start()
     this.renderer.requestRender()
   }
   protected renderGoalLabel(model: Model): void {
     this.goalLabel.content = goalIndicatorVisible(model)
-      ? goalLabelContent(this.goalController.frame, this.currentTimeMillis() - model.goal!.startedAtMillis)
+      ? goalLabelContent(
+          animationFrame("goal", this.animation.elapsedMillis()),
+          this.currentTimeMillis() - model.goal!.startedAtMillis,
+        )
       : ""
   }
-  protected tickLoader(): void {
-    if (this.destroyed || !this.loaderController.running) return
-    this.loaderController.advance()
-    this.handlers.animationTick?.()
-    this.toolSpinner.step()
+  protected renderStatusLabel(model: Model): void {
+    const label =
+      model.connectionStatus ??
+      formatActivity(
+        model.activity,
+        model.activity?._tag === "Retrying"
+          ? Math.max(0, Math.ceil((model.activity.nextAt - this.currentTimeMillis()) / 1000))
+          : model.retryCountdown,
+      ) ??
+      panelLoading(model)
+    if (label === undefined) {
+      this.statusLabel.content = ""
+      return
+    }
+    this.statusLabel.content = new StyledText([
+      fg(toOpenColor(colors.text))(" "),
+      fg(toOpenColor(colors.blue))(animationFrame("status", this.animation.elapsedMillis())),
+      dim(fg(toOpenColor(colors.text))(` ${label} `)),
+    ])
+  }
+  /** True while any element still has something to animate. */
+  protected animationShouldRun(model: Model): boolean {
+    if (this.options.animate === false) return false
+    return (
+      animationActive(model) ||
+      goalAnimationActive(model) ||
+      (welcomeAnimationActive(model) && !welcomeAnimationSettled(this.welcomePhase(), this.welcomeController.impulses))
+    )
+  }
+  /**
+   * The surface's single animation frame. Every animated element reads the same elapsed clock and
+   * derives its own glyph from its own identity, so nothing is synchronised by construction.
+   */
+  protected onAnimationFrame(): boolean {
+    if (this.destroyed) return false
+    const elapsed = this.animation.elapsedMillis()
     const current = this.model
     if (current !== undefined) {
-      const label =
-        current.connectionStatus ??
-        formatActivity(
-          current.activity,
-          current.activity?._tag === "Retrying"
-            ? Math.max(0, Math.ceil((current.activity.nextAt - this.currentTimeMillis()) / 1000))
-            : undefined,
-        ) ??
-        panelLoading(current)
-      if (label !== undefined)
-        this.statusLabel.content = new StyledText([
-          fg(toOpenColor(colors.text))(" "),
-          fg(toOpenColor(colors.blue))(loaderFrame(label, current.animationTick + this.loaderController.phase)),
-          dim(fg(toOpenColor(colors.text))(` ${label} `)),
-        ])
-      const glyph = this.toolSpinner.toBraille()
-      if (current.busy) this.publishWorkingFrame(glyph)
+      if (animationActive(current)) this.handlers.animationTick?.()
+      this.renderStatusLabel(current)
+      if (goalAnimationActive(current)) this.renderGoalLabel(current)
+      if (current.busy) this.publishWorkingFrame(animationFrame("working", elapsed))
       if (current.usageDisplay === "time" && current.usageTime?._tag === "Available") this.renderModeLabel(current)
-      this.transcriptPane.updateSpinner(glyph)
+      this.transcriptPane.updateAnimations(elapsed)
+      this.renderWelcome()
       if (current.threadSidebar.open)
-        this.sidebar.content = renderSidebar(
-          current,
-          spinnerFrames[this.loaderController.phase % spinnerFrames.length]!,
-        )
+        this.sidebar.content = renderSidebar(current, animationFrame("thread-sidebar", elapsed))
     }
     this.renderer.requestRender()
+    return current !== undefined && this.animationShouldRun(current)
   }
   protected toastController!: ToastController
   protected initializeToast(): void {

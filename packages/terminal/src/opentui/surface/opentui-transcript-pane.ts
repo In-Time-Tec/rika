@@ -37,11 +37,12 @@ import {
 } from "./opentui-transcript-pane-geometry"
 import {
   projectTranscriptRows,
-  updateTranscriptSpinners,
+  updateTranscriptAnimations,
   type TranscriptPathTarget,
   type TranscriptRowsCache,
 } from "./opentui-transcript-renderables"
 import { TranscriptVirtualDocument } from "./opentui-transcript-virtual-document"
+import { restingFrame } from "../rendering/opentui-animation-frame"
 
 export interface TranscriptPaneHandlers {
   readonly scroll?: (offset: number) => void
@@ -103,7 +104,7 @@ export class TranscriptPane {
   private scrollbarSyncing = false
   private scrollGeneration = 0
   private manualScrollPosition = false
-  private spinnerGlyph = ""
+  private animationElapsedMillis = 0
   private staticContent = false
   private destroyed = false
   private readonly geometry: TranscriptPaneGeometry
@@ -205,9 +206,9 @@ export class TranscriptPane {
     this.projectScrollbarVisibility()
   }
 
-  update(model: Model, preserveAnchor = false, spinnerGlyph = this.spinnerGlyph): void {
+  update(model: Model, preserveAnchor = false, elapsedMillis = this.animationElapsedMillis): void {
     if (this.destroyed) return
-    this.spinnerGlyph = spinnerGlyph
+    this.animationElapsedMillis = elapsedMillis
     this.staticContent = false
     const previousModel = this.model
     this.model = model
@@ -259,7 +260,7 @@ export class TranscriptPane {
         model.items.length <= maxMountedTranscriptEntries
           ? model.items.length
           : Math.min(this.windowEnd, model.items.length)
-    this.render(spinnerGlyph)
+    this.render()
     this.mountAnchorKey = undefined
     if (threadChanged) this.dispatchViewport({ _tag: "ResetCommanded" })
     if (preservePosition) {
@@ -356,9 +357,9 @@ export class TranscriptPane {
     this.dispatchViewport({ _tag: "FollowCommanded" })
   }
 
-  updateSpinner(glyph: string): void {
-    this.spinnerGlyph = glyph
-    updateTranscriptSpinners(glyph)(this.records)
+  updateAnimations(elapsedMillis: number): void {
+    this.animationElapsedMillis = elapsedMillis
+    updateTranscriptAnimations(elapsedMillis)(this.records)
   }
 
   mountedRowCount(): number {
@@ -465,7 +466,7 @@ export class TranscriptPane {
     this.model = undefined
   }
 
-  private render(toolSpinnerGlyph: string): void {
+  private render(): void {
     const model = this.model
     if (model === undefined) return
     this.scroll.content.justifyContent = "flex-end"
@@ -483,7 +484,7 @@ export class TranscriptPane {
       bandTargetTop: this.bandTargetTop,
       mountAnchorKey: this.mountAnchorKey,
       viewportHeight: this.scroll.viewport.height,
-      spinnerGlyph: toolSpinnerGlyph,
+      restingGlyph: restingFrame,
       renderInput: this.renderInput,
       unitCache: this.unitCache,
       onToggle: (unitId) => this.handlers.clickToggle?.(unitId),
