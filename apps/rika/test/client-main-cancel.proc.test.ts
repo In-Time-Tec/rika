@@ -90,6 +90,10 @@ test(
             },
           ],
           script,
+          undefined,
+          [],
+          undefined,
+          sideEffect,
         )
         expect(result.timedOut, result.output).toBe(false)
         expect(result.actionsCompleted).toBe(2)
