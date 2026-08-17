@@ -24,10 +24,3 @@ export const profileInstructions = {
     "You may delegate recursively while the model-visible child tools are available; Baton's pinned tree policy guards depth and direct-child admission. " +
     `${RoleToolkits.delegationCapabilityGuidance} ${childGroupGuidance}`,
 } as const
-
-export const agentBudget = {
-  modelCalls: 64,
-  toolCalls: 256,
-  totalTokens: 10_000_000,
-  handoffs: 32,
-} as const
