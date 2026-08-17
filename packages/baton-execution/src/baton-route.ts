@@ -8,7 +8,6 @@ import {
   ModelRegistry,
   Pins,
   ToolExecutor,
-  TurnPolicy,
 } from "@batonfx/core"
 import { ModelRoute } from "@batonfx/providers"
 import { Errors, ExecutableRegistration, ExecutableResolver } from "@batonfx/runtime"
@@ -22,7 +21,7 @@ import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registra
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Function, Layer, Schema, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
-import { agentBudget, profileInstructions } from "./baton-agent-profile"
+import { profileInstructions } from "./baton-agent-profile"
 import * as CandidateRegistry from "./baton-candidate-registry"
 import * as Registration from "./baton-registration"
 
@@ -169,7 +168,6 @@ const agentDefinition = (
   children: AgentManifest.AgentManifest["children"],
   applicationContextPin: ReturnType<typeof applicationPin>,
   compaction: AgentManifest.CompactionIdentity | undefined,
-  tokenBudget: number | undefined,
   kernelProfilePin: Pins.CapabilityPin | undefined,
   capabilities: {
     readonly skills: ReadonlyArray<AgentManifest.NamedCapability>
@@ -182,13 +180,8 @@ const agentDefinition = (
       instructions: agentInstructions,
       ...(supplementalInstructions === undefined ? {} : { supplemental: supplementalInstructions }),
       model: routed.selection,
-      policy: TurnPolicy.both(TurnPolicy.recurs(80), TurnPolicy.forever),
       toolScheduling: tools.length === 0 ? { maxConcurrency: 1, parallelSafe: [] } : CellTool.scheduling,
       metadata: { productProfile: name },
-      budget: {
-        ...agentBudget,
-        ...(tokenBudget === undefined ? {} : { totalTokens: tokenBudget }),
-      },
     }),
     tools,
   )
@@ -407,7 +400,6 @@ export const configure = (
         childSelections,
         contextPin,
         compactionIdentity,
-        route.tokenBudget,
         kernelProfilePin,
         pinnedCapabilities,
       )
@@ -422,7 +414,6 @@ export const configure = (
       [],
       contextPin,
       undefined,
-      route.tokenBudget,
       undefined,
       { skills: [], services: [] },
     )
@@ -440,7 +431,6 @@ export const configure = (
       childSelections,
       contextPin,
       compactionIdentity,
-      route.tokenBudget,
       kernelProfilePin,
       pinnedCapabilities,
     )

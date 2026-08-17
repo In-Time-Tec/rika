@@ -128,10 +128,7 @@ it.effect("builds exact closed root and title executables with role-specific too
     expect(rootToolNames).toEqual([CellTool.name])
     expect(configured.profiles.Title!.manifest.tools).toEqual([])
     for (const profile of Object.values(configured.profiles)) {
-      expect(profile.manifest.budget.totalTokens).toBe(10_000_000)
-      expect(profile.manifest.budget.modelCalls).toBeGreaterThan(0)
-      expect(profile.manifest.budget.childRuns).toBeUndefined()
-      expect(profile.manifest.budget.depth).toBeUndefined()
+      expect(profile.manifest.budget).toEqual({})
     }
     for (const name of conversationalProfiles) {
       expect(configured.profiles[name]!.manifest.tools.map(({ name: toolName }) => toolName)).toEqual([CellTool.name])
@@ -283,7 +280,7 @@ it.effect("changes executable identity for candidate order and workspace", () =>
   }),
 )
 
-it.effect("pins the product token budget into every Agent manifest", () =>
+it.effect("never pins a routed token budget into an Agent manifest", () =>
   Effect.gen(function* () {
     const executable = yield* configure({
       executionRoute: { ...testExecutionRoute(), tokenBudget: 12_000 },
@@ -292,7 +289,7 @@ it.effect("pins the product token budget into every Agent manifest", () =>
     })
     expect(
       executable.executable.manifest.entries.every(
-        (entry) => entry._tag !== "Agent" || entry.manifest.budget.totalTokens === 12_000,
+        (entry) => entry._tag !== "Agent" || entry.manifest.budget.totalTokens === undefined,
       ),
     ).toBe(true)
   }),
@@ -781,3 +778,44 @@ it("documents flat child groups and refuses local work delegated to web-only Lib
   expect(profileInstructions.Librarian).toContain("refuse and tell the parent")
   expect(profileInstructions.Librarian).toContain("local-capable Task or Oracle child")
 })
+
+it.effect("pins every agent with no budget dimension so runs are never capped by model calls, tool calls, tokens, or handoffs", () =>
+  configure({
+    executionRoute: { ...testExecutionRoute(), tokenBudget: 12_000 },
+    workspace: "/workspace",
+    kernel,
+  }).pipe(
+    Effect.map((configured) => {
+      const entries = agentEntries(configured)
+      expect(entries.length).toBeGreaterThan(0)
+      for (const entry of entries) {
+        expect(entry.manifest.budget, `${profileNameOf(entry)} must pin an empty budget`).toEqual({})
+        for (const dimension of ["modelCalls", "toolCalls", "totalTokens", "childRuns", "handoffs", "depth", "deadline"])
+          expect(
+            (entry.manifest.budget as Record<string, unknown>)[dimension],
+            `${profileNameOf(entry)} must not cap ${dimension}`,
+          ).toBeUndefined()
+      }
+    }),
+  ),
+)
+
+it.effect("pins every agent with an unbounded turn policy so no framework turn cap can stop a run", () =>
+  configure({ executionRoute: testExecutionRoute(), workspace: "/workspace", kernel }).pipe(
+    Effect.map((configured) => {
+      for (const entry of agentEntries(configured)) {
+        expect(entry.manifest.policy._tag, `${profileNameOf(entry)} must pin a portable policy`).toBe("Portable")
+        if (entry.manifest.policy._tag !== "Portable") continue
+        expect(entry.manifest.policy.policy, `${profileNameOf(entry)} must run forever`).toEqual({ _tag: "Forever" })
+      }
+    }),
+  ),
+)
+
+it.effect("keeps subagent depth and fan-out as the only pinned execution limits", () =>
+  configure({ executionRoute: testExecutionRoute(), workspace: "/workspace", kernel }).pipe(
+    Effect.map(() => {
+      expect(testExecutionRoute().subagents).toEqual({ maxDepth: 1, maxSubagents: 4 })
+    }),
+  ),
+)
