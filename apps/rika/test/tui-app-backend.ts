@@ -12,7 +12,7 @@ import * as ServerKernel from "../src/server/composition/server-kernel-layer"
 
 export interface BackendOptions {
   readonly filename: string
-  readonly kernelPool: Context.Context<BatonExecution.KernelPoolServices>
+  readonly kernelPool: NonNullable<Parameters<typeof BatonExecution.layer>[0]["kernelPool"]>
   readonly registryLayer: LaneModels["registryLayer"]
   readonly toolRuntimeLayer: Layer.Layer<ToolRuntime.Service>
   readonly queryFactoryLayer: Layer.Layer<ThreadQuery.Factory>
@@ -47,7 +47,10 @@ export const kernelPoolFor = (options: {
   readonly dataRoot: string
   readonly queryFactoryLayer: Layer.Layer<ThreadQuery.Factory>
   readonly toolRuntimeLayer: Layer.Layer<ToolRuntime.Service>
-}) => Layer.build(ServerKernel.layer(kernelOptions(options)).pipe(Layer.provide(BunServices.layer)))
+}) =>
+  Layer.build(ServerKernel.layer(kernelOptions(options)).pipe(Layer.provide(BunServices.layer))).pipe(
+    Effect.map((context) => ({ forWorkspace: () => Effect.succeed(context), built: Effect.succeed([context]) })),
+  )
 
 export const backendLayer = (options: BackendOptions) =>
   BatonExecution.layer({

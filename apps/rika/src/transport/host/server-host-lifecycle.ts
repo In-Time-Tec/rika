@@ -208,9 +208,7 @@ export const host = Effect.fn("ServerTransport.host")(function* (options: {
         lifecycle
           .drainForReplacement(prepareServerReplacement)
           .pipe(
-            Effect.raceFirst(
-              Effect.sleep(options.configReloadDrainTimeoutMilliseconds ?? 30_000).pipe(Effect.asVoid),
-            ),
+            Effect.raceFirst(Effect.sleep(options.configReloadDrainTimeoutMilliseconds ?? 30_000).pipe(Effect.asVoid)),
             Effect.ensuring(Deferred.succeed(options.stopped, undefined)),
           ),
         hostScope,

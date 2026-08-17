@@ -161,7 +161,7 @@ describe("LocalPath", () => {
       expect(resolved.endsWith("/fresh/nested/file.ts")).toBe(true)
     }),
   )
-  it.effect("resolves exact workspace paths without casing correction or symlink escape", () =>
+  it.effect("resolves exact paths without casing correction and reaches beyond the workspace", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem
@@ -172,6 +172,7 @@ describe("LocalPath", () => {
         yield* fileSystem.makeDirectory(workspace)
         yield* fileSystem.makeDirectory(outside)
         yield* fileSystem.makeDirectory(`${workspace}/src`)
+        yield* fileSystem.makeDirectory(`${outside}/sibling`)
         yield* fileSystem.symlink(outside, `${workspace}/escape`)
         const found: LocalPath.ExactLookup = {
           ...lookup(fileSystem),
@@ -181,11 +182,17 @@ describe("LocalPath", () => {
 
         const exact = yield* LocalPath.resolveExactWorkspacePath(found, "src", options)
         const wrongCase = yield* Effect.flip(LocalPath.resolveExactWorkspacePath(found, "SRC", options))
-        const escaped = yield* Effect.flip(LocalPath.resolveExactWorkspacePath(found, "escape", options))
+        const symlinked = yield* LocalPath.resolveExactWorkspacePath(found, "escape", options)
+        const absolute = yield* LocalPath.resolveExactWorkspacePath(found, `${outside}/sibling`, options)
+        const relative = yield* LocalPath.resolveExactWorkspacePath(found, "../outside/sibling", options)
+        const missing = yield* Effect.flip(LocalPath.resolveExactWorkspacePath(found, `${outside}/absent`, options))
 
         expect(exact).toBe(`${workspace}/src`)
         expect(wrongCase).toMatchObject({ _tag: "LocalPathError", reason: "not_found" })
-        expect(escaped).toMatchObject({ _tag: "LocalPathError", reason: "outside_workspace" })
+        expect(symlinked).toBe(`${workspace}/escape`)
+        expect(absolute).toBe(`${outside}/sibling`)
+        expect(relative).toBe(`${outside}/sibling`)
+        expect(missing).toMatchObject({ _tag: "LocalPathError", reason: "not_found" })
       }),
     ).pipe(provide(BunServices.layer)),
   )

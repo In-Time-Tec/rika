@@ -573,11 +573,17 @@ export const makeResolver = (options: ResolverOptions): ExecutableResolver.Inter
         const active = input.manifest.entries.find((entry) => entry.pin === input.ref.active)
         if (active === undefined) return yield* Errors.ExecutablePinMissing.make({ runId: input.runId, ref: input.ref })
         const context = yield* Registration.read(Registration.codecs.applicationContext, input.registrations)
+        /**
+         * A recovered Run resolves the kernel for the workspace its own registration pinned, so a
+         * Run adopted by a Server started elsewhere still runs its cells against its own workspace.
+         */
+        const kernelPool =
+          options.kernelPool === undefined ? undefined : yield* options.kernelPool.forWorkspace(context.workspace)
         const configured = yield* configure({
           executionRoute: context.executionRoute,
           workspace: context.workspace,
           kernel: options.kernel,
-          ...(options.kernelPool === undefined ? {} : { kernelPool: options.kernelPool }),
+          ...(kernelPool === undefined ? {} : { kernelPool }),
           ...(options.skills === undefined ? {} : { skills: options.skills }),
           ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
           ...(options.credentialStore === undefined ? {} : { credentialStore: options.credentialStore }),

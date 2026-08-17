@@ -92,6 +92,8 @@ export const cellInstructions = (facts: CellInstructionFacts): string =>
     facts.workspaceState === undefined
       ? `Your workspace is ${JSON.stringify(facts.workspace)}.`
       : `Your workspace is ${JSON.stringify(facts.workspace)} and it is ${facts.workspaceState}.`,
+    "A relative path resolves from your workspace, and an absolute path is read and written as given,",
+    "so a sibling repository is reachable through the same workspace tools rather than through the shell.",
     `Cell stdout and stderr are each capped at ${bytes(facts.channelBytes)}; page big results at 16KB per page.`,
     "Run shell commands with rika.processes.start; it is the supported shell path.",
     "The kernel exposes a `rika` object your cell code can await. It is not a tool; the only tool",

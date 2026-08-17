@@ -59,14 +59,13 @@ describe("Runtime workspace tools", () => {
     }).pipe(provide(environment.runtime))
   })
 
-  it.effect("lists an exact workspace directory and rejects files, casing guesses, and escapes", () => {
+  it.effect("lists an exact workspace directory and rejects files and casing guesses", () => {
     const environment = TestEnvironment.make()
     return Effect.gen(function* () {
       const runtime = yield* Runtime.Service
       const listed = yield* runtime.run({ _tag: "List", path: "src", depth: 2 })
       const file = yield* Effect.flip(runtime.run({ _tag: "List", path: "a.txt" }))
       const wrongCase = yield* Effect.flip(runtime.run({ _tag: "List", path: "SRC" }))
-      const escaped = yield* Effect.flip(runtime.run({ _tag: "List", path: ".." }))
 
       expect(listed).toMatchObject({
         entries: [
@@ -80,7 +79,6 @@ describe("Runtime workspace tools", () => {
       expect(file).toMatchObject({ tool: "list", category: "invalid_input" })
       expect(file.message).toContain("Not a directory: a.txt")
       expect(wrongCase).toMatchObject({ tool: "list", category: "not_found" })
-      expect(escaped).toMatchObject({ tool: "list", category: "access_denied" })
     }).pipe(provide(environment.runtime))
   })
 

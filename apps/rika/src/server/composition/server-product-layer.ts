@@ -9,7 +9,7 @@ import { lazyBackendLayer } from "./lazy-execution-backend"
 import { workspacePaths } from "@rika/configuration/configuration-paths"
 import * as ServerConfiguration from "./server-configuration-adapter"
 import * as ServerExecution from "./server-execution-layer"
-import { kernelPoolFor, pinnedCapabilities } from "./server-pinned-capabilities"
+import { kernelPoolsFor, pinnedCapabilities } from "./server-pinned-capabilities"
 import * as ServerAuth from "./server-auth-layer"
 import { resolvedContextLayer, workspaceExecutionRoute } from "./server-execution-route"
 import type { ServerProductOptions } from "./server-auth-layer"
@@ -124,7 +124,8 @@ const createOperationLayerImpl = (
         runtimeVersion: Bun.version,
         goalRepositoryLayer: goalRepositories,
         queryFactory,
-        toolRuntimeLayer: defaultWorkspaceToolRuntimeLayer(workspaceRoot, effectiveConfigForWorkspace),
+        toolRuntimeLayer: (workspace: string) =>
+          defaultWorkspaceToolRuntimeLayer(workspace, effectiveConfigForWorkspace),
       }
       /**
        * One pool for the Server, built here rather than inside an Agent environment or a cell.
@@ -132,8 +133,12 @@ const createOperationLayerImpl = (
        * that cell, so a pool owned by either would be released while later turns still needed it.
        * This scope is the Server's, which is the lifetime the pool actually has.
        */
-      const kernelPool = yield* kernelPoolFor(kernelOptions)
-      const { harnessSnapshot, skills } = yield* pinnedCapabilities(kernelOptions)
+      const kernelPool = yield* kernelPoolsFor(kernelOptions)
+      const { harnessSnapshot, skills } = yield* pinnedCapabilities({
+        ...kernelOptions,
+        workspace: workspaceRoot,
+        toolRuntimeLayer: kernelOptions.toolRuntimeLayer(workspaceRoot),
+      })
       const backendLayer = configuredBackendLayer({
         filename: options.batonDatabase,
         kernelPool,

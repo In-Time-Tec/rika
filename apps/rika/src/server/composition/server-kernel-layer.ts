@@ -10,7 +10,7 @@ import * as SkillFileSystem from "@rika/extensions/skill-file-system"
 import * as ArtifactStore from "@rika/kernel/artifact-store"
 import * as KernelComposition from "@rika/kernel/kernel-composition"
 import * as GoalService from "@rika/product/goal-service"
-import { Effect, FileSystem, Layer, Path } from "effect"
+import { Effect, FileSystem, Function, Layer, Path, Scope } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 
 export { workspaceDigest, harnessStoreLayer, effectiveHarness } from "./server-kernel-harness"
@@ -133,3 +133,15 @@ export const layer = (
       return Layer.mergeAll(composed, calls)
     }),
   ).pipe(Layer.provide(SkillFileSystem.fileSystemLayer), Layer.provide(BunServices.layer))
+
+/**
+ * One kernel context, built on a caller-owned scope. The Server keys these by workspace, so the
+ * type of a built pool is named here rather than restated where the map that holds them is made.
+ */
+export const buildLayer: {
+  (scope: Scope.Scope): (options: Options) => ReturnType<typeof buildLayerImpl>
+  (options: Options, scope: Scope.Scope): ReturnType<typeof buildLayerImpl>
+} = Function.dual(2, (options: Options, scope: Scope.Scope) => buildLayerImpl(options, scope))
+
+const buildLayerImpl = (options: Options, scope: Scope.Scope) =>
+  Layer.buildWithScope(layer(options).pipe(Layer.provide(BunServices.layer)), scope)

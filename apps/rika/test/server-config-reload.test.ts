@@ -2,11 +2,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Config, Effect, FileSystem, Layer, Path, Ref, type Scope } from "effect"
 import type { PlatformError } from "effect/PlatformError"
-import {
-  configFileChanged,
-  stateOf,
-  watchConfigFileForRestart,
-} from "../src/server/process/server-config-reload"
+import { configFileChanged, stateOf, watchConfigFileForRestart } from "../src/server/process/server-config-reload"
 
 const debounceMilliseconds = 50
 
@@ -14,9 +10,7 @@ const provideLayer = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.scoped(Layer.build(BunServices.layer).pipe(Effect.flatMap((context) => Effect.provide(effect, context))))
 
 const withDirectory = (
-  run: (
-    directory: string,
-  ) => Effect.Effect<void, PlatformError, FileSystem.FileSystem | Path.Path | Scope.Scope>,
+  run: (directory: string) => Effect.Effect<void, PlatformError, FileSystem.FileSystem | Path.Path | Scope.Scope>,
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
@@ -80,7 +74,8 @@ describe("config file reload watcher", () => {
         yield* settle()
         expect(yield* Ref.get(restarts)).toBe(1)
       }),
-    ).pipe(provideLayer))
+    ).pipe(provideLayer),
+  )
 
   it.live("does not restart when only a no-op write lands", () =>
     withDirectory((directory) =>
@@ -95,7 +90,8 @@ describe("config file reload watcher", () => {
         yield* settle()
         expect(yield* Ref.get(restarts)).toBe(0)
       }),
-    ).pipe(provideLayer))
+    ).pipe(provideLayer),
+  )
 
   it.live("does not restart on invalid content and restarts once the file becomes valid", () =>
     withDirectory((directory) =>
@@ -112,7 +108,8 @@ describe("config file reload watcher", () => {
         yield* fileSystem.writeFileString(filename, '{"logging":{"level":"error"}}')
         expect(yield* restartCount(restarts)).toBe(1)
       }),
-    ).pipe(provideLayer))
+    ).pipe(provideLayer),
+  )
 
   it.live("restarts when a missing settings file is created", () =>
     withDirectory((directory) =>
@@ -125,7 +122,8 @@ describe("config file reload watcher", () => {
         yield* fileSystem.writeFileString(filename, '{"logging":{"level":"debug"}}')
         expect(yield* restartCount(restarts)).toBe(1)
       }),
-    ).pipe(provideLayer))
+    ).pipe(provideLayer),
+  )
 
   it.live("restarts once across a burst of rapid writes", () =>
     withDirectory((directory) =>
@@ -142,5 +140,6 @@ describe("config file reload watcher", () => {
         }
         expect(yield* restartCount(restarts)).toBe(1)
       }),
-    ).pipe(provideLayer))
+    ).pipe(provideLayer),
+  )
 })

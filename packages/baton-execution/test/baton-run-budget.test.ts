@@ -53,9 +53,10 @@ const driverAllocation = (filename: string, runId: string): unknown => {
   const database = new Database(filename, { readonly: true })
   try {
     const row = database
-      .query<{ readonly driver_checkpoint_json: string | null }, [string]>(
-        "SELECT driver_checkpoint_json FROM baton_runs WHERE run_id = ?",
-      )
+      .query<
+        { readonly driver_checkpoint_json: string | null },
+        [string]
+      >("SELECT driver_checkpoint_json FROM baton_runs WHERE run_id = ?")
       .get(runId)
     return row?.driver_checkpoint_json == null ? undefined : allocationOf(JSON.parse(row.driver_checkpoint_json))
   } finally {

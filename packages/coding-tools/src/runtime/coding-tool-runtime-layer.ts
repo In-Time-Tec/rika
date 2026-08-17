@@ -65,14 +65,6 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
       }
       const localPathError = (value: string, cause: unknown) => {
         if (!Schema.is(LocalPath.LocalPathError)(cause)) return operationError(cause)
-        if (cause.reason === "outside_workspace")
-          return runtimeError({
-            category: "access_denied",
-            message: `Path is outside the workspace: ${value}`,
-            outcome: "known",
-            recovery: "after_change",
-            nextAction: "Call the tool with a path inside the workspace",
-          })
         if (cause.reason === "ambiguous_case")
           return runtimeError({
             category: "conflict",
