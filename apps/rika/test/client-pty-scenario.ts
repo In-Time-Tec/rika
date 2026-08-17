@@ -57,6 +57,7 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
   serverEnvironment?: Readonly<Record<string, string | undefined>>,
   entrypointArguments: ReadonlyArray<string> = [],
   serverDataRoot?: string,
+  expectedWorkspaceFile?: string,
 ) {
   const fs = yield* FileSystem.FileSystem
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -138,6 +139,19 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     names.filter((name) => name.startsWith("client-") && name.endsWith(".jsonl") && !name.endsWith(".open.jsonl")),
     (name) => fs.readFileString(`${activeDataRoot}/diagnostics/${name}`),
   )
+  /**
+   * A cell writes its file from the Server, which outlives the client the helper just closed, so the
+   * write can land a moment after the process exits. Waiting for the name the caller expects makes
+   * the listing a settled observation rather than a race against that tail.
+   */
+  if (expectedWorkspaceFile !== undefined)
+    yield* waitUntil(
+      Effect.map(
+        Effect.all([fs.readDirectory(workspace), fs.readDirectory(clientWorkspace)]),
+        ([workspaceNames, clientNames]) =>
+          workspaceNames.includes(expectedWorkspaceFile) || clientNames.includes(expectedWorkspaceFile),
+      ),
+    ).pipe(Effect.ignore)
   const created = (yield* fs.readDirectory(clientWorkspace)).filter((name) => !before.has(name))
   yield* Effect.forEach(created, (name) =>
     fs.remove(`${clientWorkspace}/${name}`, { recursive: true }).pipe(Effect.ignore),
