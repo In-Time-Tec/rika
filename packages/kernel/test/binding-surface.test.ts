@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import * as McpDiscovery from "@rika/extensions/mcp-discovery"
 import { Schema } from "effect"
 import { cellInstructions, make, surfaceOf, type Options } from "../src/binding/binding-modules"
+import * as WorkspaceBinding from "../src/binding/workspace-binding"
 
 const options: Options = {
   workspace: "/workspace",
@@ -105,6 +106,25 @@ it("states the kernel house rules from its mounted workspace and limits", () => 
   expect(text).toContain("pre-mounted globals; never import")
   expect(text).toContain("Variables persist across all your cells; accumulate state")
   expect(text).toContain('Your workspace is "/actual/workspace" and it is empty.')
-  expect(text).toContain("page big results at 16KB per page")
+  /**
+   * The channel bound is stated once, from the value the kernel actually enforces. Naming a second,
+   * smaller number beside it read as the real budget, so cells piped their own output through head
+   * and paid another cell to see the rest.
+   */
+  expect(text).toContain("capped at 16KB")
+  expect(text).toContain("rather than piping it through head or tail")
   expect(text).toContain("Run shell commands with rika.processes.start")
+  expect(text).toContain("rika.processes.status({ processId, waitMillis })")
+})
+
+/**
+ * A schema carries its constraints on its AST, but the surface named only the field, so a model had
+ * to guess the shape and learn the bound from a refusal. Recorded refusals were all of one kind:
+ * `range` sent as `{ start, end }` when it is a two-element array, `depth` sent as 10 against a
+ * maximum of 8. Each guess cost a turn.
+ */
+it("names the bound and the shape each input actually enforces", () => {
+  const surface = surfaceOf([WorkspaceBinding.module] as never)
+  expect(surface).toContain("range: [start, end]")
+  expect(surface).toContain("depth: 1-8")
 })
