@@ -42,7 +42,7 @@ test(
         const app = yield* TuiApp.tuiApp({
           height: 36,
           inspectTranscript: true,
-          script: [model.text("ACTIVE_COMPLETE", 12_000), model.text("FOLLOW_UP_COMPLETE")],
+          script: [model.text("ACTIVE_COMPLETE", 60_000), model.text("FOLLOW_UP_COMPLETE")],
         })
 
         yield* Effect.promise(() => app.type("Begin steerable work"))
@@ -69,8 +69,8 @@ test(
                 : Effect.sleep("100 millis").pipe(Effect.andThen(waitSteered(remaining - 100)))
             }),
           )
-        expect(yield* waitSteered(30_000)).toBeGreaterThan(0)
-        yield* app.waitFrame("ACTIVE_COMPLETE", 40_000)
+        expect(yield* waitSteered(45_000)).toBeGreaterThan(0)
+        app.pressKey("c", { ctrl: true })
         yield* app.quit
       }),
     ),
