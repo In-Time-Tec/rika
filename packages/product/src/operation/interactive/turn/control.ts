@@ -22,10 +22,14 @@ export const makeInteractiveControl = (input: {
   readonly notifyTurnChanged: (turn: Pick<Turn.Turn, "id" | "threadId">) => Effect.Effect<void, never, never>
   readonly fail: typeof operationError
 }) => {
-  const validateSteering = (text: string) =>
-    text.length > ExecutionGateway.SteeringTextMaxCharacters
-      ? input.fail(`Steering text exceeds ${ExecutionGateway.SteeringTextMaxCharacters} characters`)
-      : Effect.void
+  /**
+   * A steer carries whatever the caller wrote, and a queued turn's prompt has no size bound of its
+   * own, so any prompt past the composer's convenience limit reached this path and was refused.
+   * The refusal consumed the queued row and delivered nothing, which read as a steer that silently
+   * vanished. Baton bounds a steering prompt by the same message limits as any other prompt, and
+   * the projection stopped enforcing this number when it stopped throwing on oversized internal
+   * steers, so enforcing it here only rejected work the rest of the system accepts.
+   */
   const editQueued = (id: string, prompt: string) =>
     Effect.gen(function* () {
       const turnId = Turn.TurnId.make(id)
@@ -57,7 +61,6 @@ export const makeInteractiveControl = (input: {
           return yield* input.fail(`Steering target ${targetTurnId} is no longer the active turn`)
         if (turn._tag !== "AgentExecution" || turn.executionLink === undefined)
           return yield* input.fail(`Turn ${turn.id} has no persisted execution link`)
-        yield* validateSteering(text)
         yield* input.rootTurnOwner.prepareSteering(turn.executionLink, {
           text,
           idempotencyKey: requestId,
@@ -88,7 +91,6 @@ export const makeInteractiveControl = (input: {
             .join("") ??
           candidate.prompt ??
           text
-        yield* validateSteering(steeringText)
         yield* Effect.uninterruptible(
           Effect.gen(function* () {
             const prepared = yield* input.rootTurnOwner.prepareQueuedSteering(candidate.id, turn.executionLink!, {

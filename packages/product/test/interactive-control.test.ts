@@ -150,3 +150,53 @@ it.effect("rejects queued images before preparing a steering admission", () =>
     ])
   }),
 )
+
+/**
+ * A queued turn becomes steering text when the user promotes it into a running turn, and a prompt
+ * carries no size bound of its own — a pasted stack trace, a file, a diff. Refusing those on
+ * delivery consumed the queued row and delivered nothing, so the steer vanished with no admission
+ * and no report. Baton bounds a steering prompt by the same message limits as any other prompt, so
+ * a long one is admitted rather than dropped.
+ */
+it.effect("admits a queued prompt longer than the composer convenience limit", () =>
+  Effect.gen(function* () {
+    const oversized = "x".repeat(ExecutionGateway.SteeringTextMaxCharacters + 1)
+    const bigQueued = { ...queued, prompt: oversized }
+    let prepared = 0
+    const failures: Array<string> = []
+    const control = makeInteractiveControl({
+      turns: {
+        get: (id) => {
+          if (id === bigQueued.id) return Effect.succeed(bigQueued)
+          if (id === active.id) return Effect.succeed(active)
+          return Effect.void
+        },
+      } as TurnRepository.Interface,
+      transcripts: {} as TranscriptRepository.Interface,
+      backend: {} as ExecutionGateway.Interface,
+      rootTurnOwner: {
+        prepareQueuedSteering: (_source, target, steering) =>
+          Effect.sync(() => {
+            prepared += 1
+            return {
+              admission: { target, input: steering, source: bigQueued, preparedAt: 1, outcome: { _tag: "Accepted" } },
+              queue: { threadId, revision: 1, queuedCount: 0, becameNonempty: false },
+              queueChanged: false,
+            }
+          }) as never,
+      } as RootTurnOwner.Interface,
+      active: Effect.succeed(active),
+      dispatch: (event) => {
+        if (event._tag === "ExecutionControlFailed") failures.push(event.failure.message)
+      },
+      queueMutation: () => ({ _tag: "QueueUpdated" }) as never,
+      notifyTurnChanged: () => Effect.void,
+      fail: operationError,
+    })
+
+    yield* control.steerQueued(bigQueued.id, bigQueued.prompt, "oversized-request")
+
+    expect(prepared).toBe(1)
+    expect(failures).toEqual([])
+  }),
+)

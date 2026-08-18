@@ -22,7 +22,12 @@ const idlePhysicalFootprintCeiling: Readonly<Record<IdleRole, number>> = {
 
 const idlePhysicalGrowthCeiling = 100
 const retainedGrowthCeiling = 150
-const turnCount = 12
+/**
+ * Long enough that the collector sweeps at least once inside the run. A shorter run samples one
+ * rising sawtooth tooth and reports its height as retention, which is what made this gate fail on
+ * about half its runs against a server whose live set never grew.
+ */
+const turnCount = 30
 
 const median = (values: ReadonlyArray<number>): number => {
   const sorted = [...values].sort((left, right) => left - right)
@@ -58,24 +63,22 @@ test.skipIf(process.platform !== "darwin")(
   () =>
     run(
       Effect.gen(function* () {
-        const observations = [yield* observeHeldSession(), yield* observeHeldSession()]
+        /**
+         * One run long enough to contain a collector sweep, rather than two short runs medianed
+         * together. Two runs that each sample a single rising sawtooth tooth agree with each other
+         * and are both wrong; a run that spans a sweep measures what actually survived it.
+         */
+        const observation = yield* observeHeldSession()
         for (const role of roles) {
-          const growthByRun = observations.map((observation) =>
-            retainedGrowthMebibytes(turnSeries(observation, role).physicalFootprintMebibytes),
-          )
-          const aggregateGrowth = median(growthByRun)
-          const diagnostics = observations
-            .map((observation) => {
-              const series = turnSeries(observation, role)
-              return `physical=[${series.physicalFootprintMebibytes.map((value) => value.toFixed(0)).join(", ")}], RSS=[${series.rssMebibytes.map((value) => value.toFixed(0)).join(", ")}]`
-            })
-            .join("; ")
+          const series = turnSeries(observation, role)
+          const growth = retainedGrowthMebibytes(series.physicalFootprintMebibytes)
+          const diagnostics = `physical=[${series.physicalFootprintMebibytes.map((value) => value.toFixed(0)).join(", ")}], RSS=[${series.rssMebibytes.map((value) => value.toFixed(0)).join(", ")}]`
           expect(
-            aggregateGrowth,
-            `${role} retained physical growth by run [${growthByRun.map((value) => value.toFixed(1)).join(", ")}] MiB; ${diagnostics}`,
+            growth,
+            `${role} retained physical growth ${growth.toFixed(1)} MiB; ${diagnostics}`,
           ).toBeLessThanOrEqual(retainedGrowthCeiling)
         }
-        for (const observation of observations) expect(observation.survivingPids).toEqual([])
+        expect(observation.survivingPids).toEqual([])
       }),
     ),
   300_000,

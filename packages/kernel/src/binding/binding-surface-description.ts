@@ -6,6 +6,41 @@ import type { BindingRequirements } from "./binding-requirements"
  * themselves, so a binding that is added, removed, or renamed cannot drift from what a model is told
  * it has — and a surface nothing describes is one a model will decline to use.
  */
+/**
+ * The bound a field actually enforces, in the words a caller writes it.
+ *
+ * A schema carries its constraints as checks on its AST, but the surface named only the field, so a
+ * model had to guess the shape and learn the bound from a refusal. Every guess cost a turn, and the
+ * refusals were identical in kind: `range` sent as `{ start, end }` when it is a two-element array,
+ * `depth` sent as 10 against a maximum of 8, `limit` sent as 50 against 20.
+ */
+const boundsOf = (schema: unknown): string | undefined => {
+  const ast = (schema as { readonly ast?: { readonly _tag?: string; readonly checks?: ReadonlyArray<unknown> } }).ast
+  if (ast === undefined) return undefined
+  let minimum: number | undefined
+  let maximum: number | undefined
+  let length: number | undefined
+  for (const check of ast.checks ?? []) {
+    const meta = (check as { readonly annotations?: { readonly meta?: Record<string, unknown> } }).annotations?.meta
+    if (meta === undefined) continue
+    const tag = meta._tag
+    if (tag === "isGreaterThan" && typeof meta.exclusiveMinimum === "number") minimum = meta.exclusiveMinimum + 1
+    if (tag === "isGreaterThanOrEqualTo" && typeof meta.minimum === "number") minimum = meta.minimum
+    if (tag === "isLessThan" && typeof meta.exclusiveMaximum === "number") maximum = meta.exclusiveMaximum - 1
+    if (tag === "isLessThanOrEqualTo" && typeof meta.maximum === "number") maximum = meta.maximum
+    if (tag === "isLengthBetween" && meta.minimum === meta.maximum && typeof meta.minimum === "number")
+      length = meta.minimum
+  }
+  if (ast._tag === "Arrays")
+    return length === undefined
+      ? "[]"
+      : `[${Array.from({ length }, (_, index) => (index === 0 ? "start" : "end")).join(", ")}]`
+  if (minimum !== undefined && maximum !== undefined) return `${minimum}-${maximum}`
+  if (maximum !== undefined) return `<=${maximum}`
+  if (minimum !== undefined) return `>=${minimum}`
+  return undefined
+}
+
 const shapeOf = (fields: Record<string, unknown> | undefined): string => {
   if (fields === undefined) return "…"
   /**
@@ -58,7 +93,10 @@ export const surfaceOf = (modules: ReadonlyArray<HostBindingRegistry.Module<Bind
             // A field whose value is one of several shapes is named by those shapes, because a model
             // told only the field name reads it as "any value" and writes a string.
             const members = value.members ?? value.schema?.members
-            if (members === undefined) return field
+            if (members === undefined) {
+              const bounds = boundsOf(value.schema ?? value)
+              return bounds === undefined ? field : `${field}: ${bounds}`
+            }
             return `${field}: ${members.map((member) => shapeOf(member.fields ?? member.schema?.fields)).join("|")}`
           })
           return `${operation.name}(${fields.length === 0 ? "" : `{ ${fields.join(", ")} }`})`
@@ -94,8 +132,10 @@ export const cellInstructions = (facts: CellInstructionFacts): string =>
       : `Your workspace is ${JSON.stringify(facts.workspace)} and it is ${facts.workspaceState}.`,
     "A relative path resolves from your workspace, and an absolute path is read and written as given,",
     "so a sibling repository is reachable through the same workspace tools rather than through the shell.",
-    `Cell stdout and stderr are each capped at ${bytes(facts.channelBytes)}; page big results at 16KB per page.`,
+    `Cell stdout and stderr are each capped at ${bytes(facts.channelBytes)}, so read a result whole rather than piping it through head or tail and paying a second cell to see the rest.`,
     "Run shell commands with rika.processes.start; it is the supported shell path.",
+    "Wait for one with rika.processes.status({ processId, waitMillis }), which returns as soon as the",
+    "process settles. Sleeping inside a cell spends the cell's own deadline on waiting instead.",
     "The kernel exposes a `rika` object your cell code can await. It is not a tool; the only tool",
     "name that exists is typescript. Example cell body:",
     "",

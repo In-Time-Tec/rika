@@ -1,0 +1,78 @@
+import { Effect } from "effect"
+import { expect, test } from "vitest"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
+import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
+import * as TuiApp from "./tui-app"
+import { model } from "./tui-app-model"
+
+type QueueSnapshot = Effect.Success<ReturnType<TuiApp.TuiApp["queue"]>>
+
+const waitQueue = (
+  app: TuiApp.TuiApp,
+  threadId: Thread.ThreadId,
+  predicate: (queue: QueueSnapshot) => boolean,
+  remaining = 10_000,
+): Effect.Effect<QueueSnapshot, never> =>
+  app.queue(threadId).pipe(
+    Effect.flatMap((queue) =>
+      predicate(queue) || remaining <= 0
+        ? Effect.succeed(queue)
+        : Effect.sleep("50 millis").pipe(Effect.andThen(waitQueue(app, threadId, predicate, remaining - 50))),
+    ),
+    Effect.orDie,
+  )
+
+/**
+ * A prompt typed while a turn runs is queued, and steering that row sends its text to the running
+ * turn. A queued prompt carries no size bound of its own, so a long one — a pasted stack trace, a
+ * file, a diff — always exceeded the composer's 4096-character convenience limit. Enforcing that
+ * limit on delivery consumed the queued row and delivered nothing, so the steer vanished with no
+ * pending entry, no settled entry, and no report. Baton bounds a steering prompt by the same
+ * message limits as any other prompt, and the projection stopped enforcing this number when it
+ * stopped throwing on oversized internal steers.
+ */
+test(
+  "delivers a steer whose text exceeds the composer convenience limit",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const threadId = Thread.ThreadId.make("tui-thread-0")
+        const activeTurnId = Turn.TurnId.make("tui-turn-0")
+        const app = yield* TuiApp.tuiApp({
+          height: 36,
+          inspectTranscript: true,
+          script: [model.text("ACTIVE_COMPLETE", 60_000), model.text("FOLLOW_UP_COMPLETE")],
+        })
+
+        yield* Effect.promise(() => app.type("Begin steerable work"))
+        app.pressEnter()
+        yield* app.waitModelRequests(1)
+
+        const oversized = `OVERSIZE${"z".repeat(ExecutionGateway.SteeringTextMaxCharacters)}`
+        yield* Effect.promise(() => app.type(oversized))
+        app.pressEnter()
+        yield* waitQueue(app, threadId, (queue) => queue.turns.some((turn) => turn.prompt.startsWith("OVERSIZE")))
+
+        app.pressArrow("up")
+        yield* Effect.sleep("500 millis")
+        app.pressEnter()
+
+        const waitSteered = (remaining: number): Effect.Effect<number, never> =>
+          app.transcript(activeTurnId).pipe(
+            Effect.orDie,
+            Effect.flatMap((projection) => {
+              const steering = projection?.state.steering
+              const count = (steering?.pending?.length ?? 0) + (steering?.settled?.length ?? 0)
+              return count > 0 || remaining <= 0
+                ? Effect.succeed(count)
+                : Effect.sleep("100 millis").pipe(Effect.andThen(waitSteered(remaining - 100)))
+            }),
+          )
+        expect(yield* waitSteered(45_000)).toBeGreaterThan(0)
+        app.pressKey("c", { ctrl: true })
+        yield* app.quit
+      }),
+    ),
+  120_000,
+)
