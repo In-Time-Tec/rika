@@ -45,7 +45,7 @@
     },
     "apps/rika": {
       "name": "@rika/cli",
-      "version": "0.5.45",
+      "version": "0.5.46",
       "bin": {
         "rika": "./dist/client-main.js",
       },
