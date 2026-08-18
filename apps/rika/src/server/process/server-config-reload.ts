@@ -3,9 +3,7 @@ import { Effect, FileSystem, Function, Path, Schema, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { createHash } from "node:crypto"
 
-export type ConfigFileState =
-  | { readonly _tag: "missing" }
-  | { readonly _tag: "present"; readonly hash: string }
+export type ConfigFileState = { readonly _tag: "missing" } | { readonly _tag: "present"; readonly hash: string }
 
 export const stateOf = (text: string): ConfigFileState => ({
   _tag: "present",
@@ -44,9 +42,9 @@ export const nearestExistingAncestor = (
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const walk = (directory: string): Effect.Effect<string, PlatformError, FileSystem.FileSystem | Path.Path> =>
-      fileSystem.exists(directory).pipe(
-        Effect.flatMap((exists) => (exists ? Effect.succeed(directory) : walk(path.dirname(directory)))),
-      )
+      fileSystem
+        .exists(directory)
+        .pipe(Effect.flatMap((exists) => (exists ? Effect.succeed(directory) : walk(path.dirname(directory)))))
     return yield* walk(path.dirname(filename))
   })
 
@@ -85,13 +83,11 @@ export const watchConfigFileForRestart = (
         )
         const inspect = () =>
           Effect.gen(function* () {
-            const settled = yield* fileSystem
-              .watch(watchDirectory)
-              .pipe(
-                Stream.map(() => undefined),
-                Stream.debounce(options.debounceMilliseconds),
-                Stream.runHead,
-              )
+            const settled = yield* fileSystem.watch(watchDirectory).pipe(
+              Stream.map(() => undefined),
+              Stream.debounce(options.debounceMilliseconds),
+              Stream.runHead,
+            )
             if (settled === undefined) return "continue" as const
             const current = yield* readConfigFile(options.filename)
             if (!configFileChanged(baseline.state, current.state)) return "continue" as const

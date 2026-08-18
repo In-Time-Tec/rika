@@ -39,6 +39,7 @@ type ConnectionContext = {
   readonly interactive: InteractiveRouter
   readonly operationReady: Deferred.Deferred<import("@rika/product/product-operation-service").Interface>
   readonly prepareServerReplacement: Effect.Effect<void>
+  readonly drainForHandover: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   readonly requestStop: Effect.Effect<void>
 }
 
@@ -62,6 +63,7 @@ export const makeConnectionHandler = (context: ConnectionContext) => {
     routes,
     operationReady,
     prepareServerReplacement,
+    drainForHandover,
     requestStop,
   } = context
   const activeConnectionsRef = activeConnections
@@ -149,9 +151,9 @@ export const makeConnectionHandler = (context: ConnectionContext) => {
                   if (responseQueued !== undefined) {
                     yield* lifecycle.beginDrain
                     yield* Effect.forkIn(
-                      lifecycle
-                        .drainForReplacement(prepareServerReplacement)
-                        .pipe(Effect.ensuring(Deferred.await(responseQueued).pipe(Effect.andThen(requestStop)))),
+                      drainForHandover(lifecycle.drainForReplacement(prepareServerReplacement)).pipe(
+                        Effect.ensuring(Deferred.await(responseQueued).pipe(Effect.andThen(requestStop))),
+                      ),
                       hostScope,
                     )
                   }

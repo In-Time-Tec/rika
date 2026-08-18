@@ -41,7 +41,10 @@ describe("server config change restart", () => {
 
             yield* writeSettings(settings, '{"logging":{"level":"debug"}}')
 
-            yield* waitUntil(Effect.sync(() => !alive(firstHost)), 10_000)
+            yield* waitUntil(
+              Effect.sync(() => !alive(firstHost)),
+              10_000,
+            )
 
             const second = yield* start(root, 350, 0, false, 1_024, 0, false, undefined, 0, watchEnvironment(settings))
             const secondEvent = yield* attachedEffect(second)
@@ -78,7 +81,10 @@ describe("server config change restart", () => {
             expect(yield* hostAcquisitions(root)).toEqual([String(host)])
 
             yield* writeSettings(settings, '{"logging":{"level":"error"}}')
-            yield* waitUntil(Effect.sync(() => !alive(host)), 10_000)
+            yield* waitUntil(
+              Effect.sync(() => !alive(host)),
+              10_000,
+            )
           } finally {
             yield* cleanRoot(root)
           }

@@ -7,7 +7,7 @@ import * as ExecutionPins from "@rika/kernel/execution-pins"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 import type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
-import { Context, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 
 type RouteSnapshot = ExecutionRoute.ExecutionRouteSnapshot
 
@@ -42,9 +42,23 @@ export interface ConfiguredExecutable {
 
 export interface ResolverOptions {
   readonly kernel: KernelOptions
-  readonly kernelPool?: Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>
-  readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
-  readonly harnessSnapshot?: HarnessState.HarnessState
+  /**
+   * A Server answers every workspace, so a Run resolves the kernel for the workspace its own
+   * registration pinned rather than sharing one the Server chose at startup.
+   */
+  readonly kernelPool?: {
+    readonly forWorkspace: (
+      workspace: string,
+    ) => Effect.Effect<Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>>
+  }
+  /**
+   * A harness pin encodes the workspace scope it was read for, so a recovered Run resolves the
+   * capabilities of the workspace its own registration pinned rather than one the Server chose.
+   */
+  readonly capabilities?: (workspace: string) => Effect.Effect<{
+    readonly skills: ReadonlyArray<ExecutionPins.SkillPin>
+    readonly harnessSnapshot: HarnessState.HarnessState
+  }>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
   readonly credentialStore?: ProviderCredentialStoreShape
   readonly openAiAccountAuth?: OpenAiAuth.ServiceInterface

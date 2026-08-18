@@ -84,7 +84,29 @@ export const makeExecutionControls = (operationReady: Deferred.Deferred<Operatio
         ),
       ),
     )
-  return { prepareServerReplacement, stopAbandonedExecutionWork }
+  /**
+   * Settle active execution on shutdown, whatever ended the process.
+   *
+   * Abandonment already cancelled work when the last client went away and stayed away, but a Server
+   * that exits before that timer fires — the ordinary case when every client disconnects at once —
+   * left its Runs exactly as they were. A Run persisted as `running` or `waiting` reads as healthy
+   * to reconciliation, which resurrects it on the next start, so a killed session came back showing
+   * subagents working against a process that no longer exists. Waiting is bounded because a Server
+   * that cannot reach its own store must still exit.
+   */
+  const stopExecutionWorkForShutdown = Effect.logInfo("server.shutdown.cancelling").pipe(
+    Effect.andThen(stopExecutionWork),
+    Effect.andThen(Effect.logInfo("server.shutdown.cancelled")),
+    Effect.timeoutOrElse({
+      duration: "2 seconds",
+      orElse: () => Effect.logWarning("server.shutdown.cancel.timeout").pipe(Effect.asVoid),
+    }),
+    Effect.catch((error) =>
+      Effect.logError("server.shutdown.cancel_failed").pipe(Effect.annotateLogs("rika.failure.kind", String(error))),
+    ),
+  )
+
+  return { prepareServerReplacement, stopAbandonedExecutionWork, stopExecutionWorkForShutdown }
 }
 
 export const handleOperation = (context: OperationContext) => {

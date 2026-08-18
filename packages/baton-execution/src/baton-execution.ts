@@ -40,12 +40,41 @@ export interface Options {
    * The kernel a cell runs in, already built and owned by the caller's scope. It outlives every
    * cell, so a host builds it once where a Server-lifetime scope exists rather than letting the
    * first cell that needs one decide how long it lives.
+   *
+   * A Server answers every workspace, so this resolves per workspace rather than being one value.
+   * A kernel carries the working directory its cells run in and the root its `rika.workspace.*`
+   * surface is mounted on, so one Server-wide kernel made those disagree with the Turn's own
+   * workspace for every Thread except whichever one happened to start the Server.
    */
-  readonly kernelPool?:
-    | Context.Context<KernelPoolServices>
-    | Context.Context<KernelPoolServices | KernelStateStore.KernelStateStore>
-  readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
-  readonly harnessSnapshot?: HarnessState.HarnessState
+  readonly kernelPool?: {
+    /** The kernel that answers cells for one workspace, built on first use and reused after. */
+    readonly forWorkspace: (
+      workspace: string,
+    ) => Effect.Effect<
+      Context.Context<KernelPoolServices> | Context.Context<KernelPoolServices | KernelStateStore.KernelStateStore>
+    >
+    /**
+     * Every kernel built so far. A Session is closed by thread, not by workspace, and a thread that
+     * moved between workspaces has state in more than one, so closing asks all of them.
+     */
+    readonly built: Effect.Effect<
+      ReadonlyArray<
+        Context.Context<KernelPoolServices> | Context.Context<KernelPoolServices | KernelStateStore.KernelStateStore>
+      >
+    >
+  }
+  /**
+   * The skills and harness one Execution pins, resolved for the workspace that Execution runs in.
+   *
+   * A harness pin encodes the workspace scope it was read for, so a Server that pinned one snapshot
+   * from its own startup directory registered a pin every Turn in a different workspace then failed
+   * to verify: the resolver recomputes the expectation from the Run's own workspace and reads a
+   * different pin than the one the Server admitted.
+   */
+  readonly capabilities?: (workspace: string) => Effect.Effect<{
+    readonly skills: ReadonlyArray<ExecutionPins.SkillPin>
+    readonly harnessSnapshot: HarnessState.HarnessState
+  }>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry, never, never>
   readonly credentialStore?: Layer.Layer<ProviderCredentialStore, never, never>
   readonly openAiAccountAuth?: OpenAiAuth.ServiceInterface
@@ -202,13 +231,18 @@ const make = (options: Options, credentialStore: ProviderCredentialStoreShape | 
     const gateway = ExecutionGateway.Service.of({
       startTurn: (input) =>
         Effect.gen(function* () {
+          const turnKernelPool =
+            options.kernelPool === undefined ? undefined : yield* options.kernelPool.forWorkspace(input.workspace)
+          const turnCapabilities =
+            options.capabilities === undefined ? undefined : yield* options.capabilities(input.workspace)
           const configured = yield* configure({
             executionRoute: input.executionRoute,
             workspace: input.workspace,
             kernel: kernelOptions(options),
-            ...(options.kernelPool === undefined ? {} : { kernelPool: options.kernelPool }),
-            ...(options.skills === undefined ? {} : { skills: options.skills }),
-            ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
+            ...(turnKernelPool === undefined ? {} : { kernelPool: turnKernelPool }),
+            ...(turnCapabilities === undefined
+              ? {}
+              : { skills: turnCapabilities.skills, harnessSnapshot: turnCapabilities.harnessSnapshot }),
             ...(credentialStore === undefined ? {} : { credentialStore }),
             ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
             ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
@@ -421,25 +455,26 @@ const make = (options: Options, credentialStore: ProviderCredentialStoreShape | 
         ),
     })
     const unavailable = (cause: unknown) => ExecutionSessionLifecycle.Unavailable.make({ message: message(cause) })
-    const pool =
-      options.kernelPool === undefined ? Option.none() : Context.getOption(options.kernelPool, KernelPool.KernelPool)
-    const stateStore =
-      options.kernelPool === undefined
-        ? Option.none()
-        : Context.getOption(options.kernelPool, KernelStateStore.KernelStateStore)
+    const builtPools = options.kernelPool === undefined ? Effect.succeed([]) : options.kernelPool.built
     const lifecycle = ExecutionSessionLifecycle.Service.of({
       requestCancellation: (input) => runtime.cancelSession(input).pipe(Effect.mapError(unavailable)),
       awaitTerminal: (input) => runtime.awaitSessionTerminal(input).pipe(Effect.mapError(unavailable)),
       closeKernel: ({ sessionId }) =>
-        Option.match(pool, {
-          onNone: () => Effect.void,
-          onSome: (service) => service.close(sessionId).pipe(Effect.mapError(unavailable)),
-        }),
+        Effect.flatMap(builtPools, (pools) =>
+          Effect.forEach(
+            pools.flatMap((pool) => Option.toArray(Context.getOption(pool, KernelPool.KernelPool))),
+            (service) => service.close(sessionId).pipe(Effect.mapError(unavailable)),
+            { discard: true },
+          ),
+        ),
       dropKernelState: ({ sessionId }) =>
-        Option.match(stateStore, {
-          onNone: () => Effect.void,
-          onSome: (service) => service.drop(sessionId).pipe(Effect.mapError(unavailable)),
-        }),
+        Effect.flatMap(builtPools, (pools) =>
+          Effect.forEach(
+            pools.flatMap((pool) => Option.toArray(Context.getOption(pool, KernelStateStore.KernelStateStore))),
+            (service) => service.drop(sessionId).pipe(Effect.mapError(unavailable)),
+            { discard: true },
+          ),
+        ),
     })
     return Context.make(ExecutionGateway.Service, gateway).pipe(
       Context.add(ExecutionSessionLifecycle.Service, lifecycle),
@@ -460,8 +495,7 @@ export const layer = (
         resolver: makeResolver({
           kernel: kernelOptions(options),
           ...(options.kernelPool === undefined ? {} : { kernelPool: options.kernelPool }),
-          ...(options.skills === undefined ? {} : { skills: options.skills }),
-          ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
+          ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
           ...(credentialStore === undefined ? {} : { credentialStore }),
           ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
           ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),

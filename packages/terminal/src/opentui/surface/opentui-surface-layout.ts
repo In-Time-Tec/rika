@@ -104,8 +104,7 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       if (renderedRows >= availableRows) break
       queueChunks.push(fg(toOpenColor(colors.muted))(label))
       renderedRows += 1
-      if (index < steeringLabels.length - 1 || queueLength > 0)
-        queueChunks.push(fg(toOpenColor(colors.text))("\n"))
+      if (index < steeringLabels.length - 1 || queueLength > 0) queueChunks.push(fg(toOpenColor(colors.text))("\n"))
     }
     hintTop = renderedRows
     for (const [offset, item] of queue.slice(start, end).entries()) {
