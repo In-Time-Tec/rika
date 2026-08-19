@@ -12,7 +12,7 @@ import { Command } from "effect/unstable/cli"
 import { command, version } from "../../command/root/rika-command"
 import { interactiveTui } from "./interactive-process-loop"
 import { layer as serverLayer } from "../../transport/client/server-client-transport"
-import { globalPaths, workspacePaths } from "@rika/configuration/configuration-paths"
+import { globalPaths } from "@rika/configuration/configuration-paths"
 import { provideLayerScoped } from "./process-layer"
 import { makeDispatcherLayer } from "./process-startup-dispatcher"
 import { saveModePreference } from "./mode-preference"
@@ -65,9 +65,7 @@ export const start = () => {
   })
   const database = paths.database
   const globalLayout = globalPaths(home)
-  const workspaceLayout = workspacePaths(process.cwd())
   const globalConfig = globalLayout.settings
-  const workspaceConfig = workspaceLayout.settings
   let editor: string | undefined
   if (environment.visual._tag === "Some") editor = environment.visual.value
   else if (environment.editor._tag === "Some") editor = environment.editor.value
@@ -84,7 +82,6 @@ export const start = () => {
   const dispatcherLayer = makeDispatcherLayer({
     database,
     globalConfig,
-    workspaceConfig,
     serverRuntime,
     environment,
     version,

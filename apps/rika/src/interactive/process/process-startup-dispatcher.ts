@@ -7,17 +7,17 @@ import * as ProductOperation from "@rika/product/product-operation"
 import * as ServerHandshake from "@rika/product/server-service-handshake"
 import * as ServerService from "@rika/product/server-service"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
+import { workspacePaths } from "@rika/configuration/configuration-paths"
 import { Effect, Layer, Cause, Clock, References, Schema } from "effect"
 import * as Logging from "../../diagnostics/diagnostic-file-logging"
 import { spawn as spawnServer } from "../../server/process/server-process-spawn"
 import { provideLayerScoped } from "./process-layer"
 import { loadSettingsFile, failureKind, withClientWorkspace } from "./process-configuration"
-import { loadModePreference } from "./mode-preference"
+import { loadModePreference, resolveModeDefault } from "./mode-preference"
 
 type DispatcherContext = {
   readonly database: string
   readonly globalConfig: string
-  readonly workspaceConfig: string
   readonly serverRuntime: { readonly executable: string; readonly arguments: ReadonlyArray<string> }
   readonly environment: any
   readonly version: string
@@ -29,21 +29,25 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
   const {
     database,
     globalConfig,
-    workspaceConfig,
     serverRuntime,
     environment,
     version,
     clientOwnedInteractiveFunction,
     setClientModeConfiguration,
   } = context
-  const observedProgram = <A, E>(role: Logging.ProcessRole, dataRoot: string, program: Effect.Effect<A, E>) =>
+  const observedProgram = <A, E>(
+    role: Logging.ProcessRole,
+    dataRoot: string,
+    workspace: string,
+    program: (defaultMode: string) => Effect.Effect<A, E>,
+  ) =>
     Clock.currentTimeMillis.pipe(
       Effect.flatMap((startedAt) =>
         Effect.logInfo("process.started").pipe(
           Effect.andThen(
             Effect.gen(function* () {
               const globalSettings = yield* loadSettingsFile(globalConfig)
-              const workspaceSettings = yield* loadSettingsFile(workspaceConfig)
+              const workspaceSettings = yield* loadSettingsFile(workspacePaths(workspace).settings)
               const effectiveConfig = yield* ConfigurationService.effectiveConfiguration().pipe(
                 provideLayerScoped(
                   ConfigurationService.memoryConfigurationLayer({
@@ -54,12 +58,17 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
               )
               const modeNames = Object.keys(effectiveConfig.settings.modes)
               const rememberedMode = yield* loadModePreference(dataRoot, modeNames)
+              const defaultMode = resolveModeDefault(
+                workspaceSettings.defaultMode ?? globalSettings.defaultMode,
+                rememberedMode,
+                effectiveConfig.settings.defaultMode,
+              )
               setClientModeConfiguration({
                 routes: ModelRouteLabel.modeRouteLabels(effectiveConfig.settings),
-                defaultMode: effectiveConfig.settings.defaultMode,
+                defaultMode,
                 ...(rememberedMode === undefined ? {} : { rememberedMode }),
               })
-              return yield* program.pipe(
+              return yield* program(defaultMode).pipe(
                 Effect.provideService(
                   References.MinimumLogLevel,
                   Logging.minimumLevel(effectiveConfig.settings.logging.level),
@@ -93,18 +102,28 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
     Effect.gen(function* () {
       const server = yield* ServerService.Service
       return Operation.Service.of({
-        run: Effect.fn("Operation.dispatch")((input) =>
-          DataRoot.canonicalDataRoot(database).pipe(
+        run: Effect.fn("Operation.dispatch")((input) => {
+          const workspace =
+            (input._tag === "Interactive" || input._tag === "Run" || input._tag === "Review") &&
+            input.workspace !== undefined
+              ? input.workspace
+              : process.cwd()
+          return DataRoot.canonicalDataRoot(database).pipe(
             Effect.flatMap((dataRoot) =>
-              observedProgram(
-                "client",
-                dataRoot,
+              observedProgram("client", dataRoot, workspace, (defaultMode) =>
                 Effect.scoped(
                   Effect.gen(function* () {
                     const clientInput = withClientWorkspace(input, process.cwd())
+                    const resolvedClientInput =
+                      (clientInput._tag === "Interactive" ||
+                        clientInput._tag === "Run" ||
+                        clientInput._tag === "Review") &&
+                      clientInput.mode === undefined
+                        ? { ...clientInput, mode: defaultMode }
+                        : clientInput
                     let clientKind: ServerHandshake.Handshake["clientKind"]
-                    if (clientInput._tag === "Interactive") clientKind = "interactive"
-                    else if (clientInput._tag === "Run") clientKind = "run"
+                    if (resolvedClientInput._tag === "Interactive") clientKind = "interactive"
+                    else if (resolvedClientInput._tag === "Run") clientKind = "run"
                     else clientKind = "product"
                     const connected = yield* Effect.result(
                       server
@@ -134,7 +153,9 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                                   : { RIKA_TEST_MODEL_SCRIPT: environment.testModelScript.value }),
                                 ...(environment.testMediaAnalyzerResponse._tag === "None"
                                   ? {}
-                                  : { RIKA_TEST_MEDIA_ANALYZER_RESPONSE: environment.testMediaAnalyzerResponse.value }),
+                                  : {
+                                      RIKA_TEST_MEDIA_ANALYZER_RESPONSE: environment.testMediaAnalyzerResponse.value,
+                                    }),
                                 ...(environment.testMediaAnalyzerError._tag === "None"
                                   ? {}
                                   : { RIKA_TEST_MEDIA_ANALYZER_ERROR: environment.testMediaAnalyzerError.value }),
@@ -147,10 +168,10 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                       const connection = connected.success
                       yield* Effect.logInfo("server.connected")
                       yield* connection
-                        .run(clientInput, {
+                        .run(resolvedClientInput, {
                           stdout: (text) => Effect.sync(() => process.stdout.write(text)),
                           stderr: (text) => Effect.sync(() => process.stderr.write(text)),
-                          ...(clientInput._tag === "Interactive"
+                          ...(resolvedClientInput._tag === "Interactive"
                             ? { interactive: clientOwnedInteractiveFunction }
                             : {}),
                         })
@@ -159,7 +180,7 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                             Schema.is(ProductOperation.OperationUnavailable)(error)
                               ? error
                               : ProductOperation.OperationUnavailable.make({
-                                  operation: clientInput._tag,
+                                  operation: resolvedClientInput._tag,
                                   message: error.message,
                                 }),
                           ),
@@ -168,7 +189,7 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                       return
                     }
                     return yield* ProductOperation.OperationUnavailable.make({
-                      operation: clientInput._tag,
+                      operation: resolvedClientInput._tag,
                       message: connected.failure.message,
                     })
                   }),
@@ -185,8 +206,8 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                 ? error
                 : ProductOperation.OperationUnavailable.make({ operation: input._tag, message: String(error) }),
             ),
-          ),
-        ),
+          )
+        }),
       })
     }),
   )

@@ -2,7 +2,7 @@
 
 Rika maps each configured mode name to a main route, an Oracle route, and optional per-agent routes. A direct route names `provider` and `model`; it does not need a model alias. `effort` defaults to the inherited route's effort or `medium`, and `fast` is optional. A new mode requires `main`; an omitted `oracle` inherits `main`. Task and Surgeon inherit main, while Librarian, Painter, ReadThread, and Review inherit Oracle. Any inherited agent route can be replaced under the mode's `agents` map.
 
-`modes` may contain any non-empty names. Once a global or Workspace file declares `modes`, those user-defined maps form the complete effective mode set instead of extending the built-in `low`, `medium`, `high`, and `ultra` set. Workspace entries merge over global entries by mode, role, and agent. `defaultMode` must name a mode in that final set.
+`modes` may contain any non-empty names. Once a global or Workspace file declares `modes`, those user-defined maps form the complete effective mode set instead of extending the built-in `low`, `medium`, `high`, and `ultra` set. Workspace entries merge over global entries by mode, role, and agent. When configured, `defaultMode` must name a mode in that final set. When omitted, a valid remembered selection becomes the execution default; otherwise Rika uses the effective built-in default.
 
 `modelRoutes.title` and `modelRoutes.compaction` independently select the thread-title and compaction-summary models. They accept the same direct or alias route shape. Each accepted Turn pins every resolved model, ordered candidate list, options, limits, authentication kind, non-secret credential identity, and provider connection. Later settings or account changes affect only newly admitted work.
 

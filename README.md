@@ -45,7 +45,7 @@ rika-dev --version
 
 ## Configuration
 
-Global settings live at `~/.config/rika/settings.json`. A workspace can override them with `.rika/settings.json`. Credentials stay out of JSON: a provider override names the environment variable that supplies its API key. Mode names and routes are configurable, and direct provider/model routes do not require aliases.
+Global settings live at `~/.config/rika/settings.json`. A workspace can override them with `.rika/settings.json`. Credentials stay out of JSON: a provider override names the environment variable that supplies its API key. Mode names and routes are configurable, and direct provider/model routes do not require aliases. When `defaultMode` is omitted, Rika remembers the last mode committed in the picker and uses it for later Turns and process restarts. A configured `defaultMode` remains the fallback when no mode is selected explicitly.
 
 ```json
 {

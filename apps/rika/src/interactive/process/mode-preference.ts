@@ -1,9 +1,19 @@
-import { Effect, FileSystem, Schema } from "effect"
+import { Effect, FileSystem, Function, Schema } from "effect"
 
 const Preference = Schema.Struct({ version: Schema.Literal(1), mode: Schema.NonEmptyString })
 const PreferenceFile = Schema.fromJsonString(Preference)
 
 const filename = (dataRoot: string) => `${dataRoot}/mode.json`
+
+const resolveModeDefaultImpl = (
+  configuredDefaultMode: string | undefined,
+  rememberedMode: string | undefined,
+  fallbackMode: string,
+) => configuredDefaultMode ?? rememberedMode ?? fallbackMode
+export const resolveModeDefault: {
+  (rememberedMode: string | undefined, fallbackMode: string): (configuredDefaultMode: string | undefined) => string
+  (configuredDefaultMode: string | undefined, rememberedMode: string | undefined, fallbackMode: string): string
+} = Function.dual(3, resolveModeDefaultImpl)
 
 export const loadModePreference = Effect.fn("ModePreference.load")(function* (
   dataRoot: string,
