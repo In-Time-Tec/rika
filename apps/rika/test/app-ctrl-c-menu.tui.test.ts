@@ -155,7 +155,7 @@ test(
 )
 
 test(
-  "archives the current thread and activates a new thread with Ctrl+N",
+  "archives the current thread and activates a new empty thread with Ctrl+N",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -165,6 +165,8 @@ test(
         })
 
         yield* createCurrentThread(app)
+        expect(app.frame()).toContain("Create the current thread.")
+        expect(app.frame()).toContain("CURRENT_THREAD_READY")
 
         app.pressKey("c", { ctrl: true })
         yield* app.waitFrame("Ctrl+N Archive and new thread")
@@ -175,6 +177,11 @@ test(
           title: "New thread",
           archived: false,
         })
+        yield* app.waitFrame("Welcome to Rika")
+        yield* app.settled
+        const replacement = yield* app.nextFrame
+        expect(replacement).not.toContain("Create the current thread.")
+        expect(replacement).not.toContain("CURRENT_THREAD_READY")
 
         yield* app.quit
       }),
