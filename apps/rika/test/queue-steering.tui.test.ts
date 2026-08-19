@@ -21,12 +21,11 @@ const waitQueue = (
   budgetMillis = 20_000,
 ): Effect.Effect<QueueSnapshot, never> =>
   Effect.gen(function* () {
-    const start = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-    while (true) {
+    const started = performance.now()
+    for (;;) {
       const queue = yield* app.queue(threadId).pipe(Effect.orDie)
       if (predicate(queue)) return queue
-      const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-      if (now - start >= budgetMillis)
+      if (performance.now() - started >= budgetMillis)
         return yield* Effect.die(
           `queue condition was not met: ${queue.turns.map((turn) => String(turn.id)).join(", ")}`,
         )
