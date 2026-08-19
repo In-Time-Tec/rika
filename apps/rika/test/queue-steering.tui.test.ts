@@ -18,15 +18,20 @@ const waitQueue = (
   app: TuiApp.TuiApp,
   threadId: Thread.ThreadId,
   predicate: (queue: QueueSnapshot) => boolean,
-  remaining = 20_000,
+  budgetMillis = 20_000,
 ): Effect.Effect<QueueSnapshot, never> =>
   Effect.gen(function* () {
-    const queue = yield* app.queue(threadId).pipe(Effect.orDie)
-    if (predicate(queue)) return queue
-    if (remaining <= 0)
-      return yield* Effect.die(`queue condition was not met: ${queue.turns.map((turn) => String(turn.id)).join(", ")}`)
-    yield* Effect.sleep("10 millis")
-    return yield* waitQueue(app, threadId, predicate, remaining - 10)
+    const start = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
+    while (true) {
+      const queue = yield* app.queue(threadId).pipe(Effect.orDie)
+      if (predicate(queue)) return queue
+      const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
+      if (now - start >= budgetMillis)
+        return yield* Effect.die(
+          `queue condition was not met: ${queue.turns.map((turn) => String(turn.id)).join(", ")}`,
+        )
+      yield* Effect.sleep("10 millis")
+    }
   })
 
 const selectQueue = (app: TuiApp.TuiApp, prompts: ReadonlyArray<string>, target: number) =>

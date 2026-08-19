@@ -12,15 +12,26 @@ const waitQueue = (
   app: TuiApp.TuiApp,
   threadId: Thread.ThreadId,
   predicate: (queue: QueueSnapshot) => boolean,
-  remaining = 60_000,
+  budgetMillis = 60_000,
 ): Effect.Effect<QueueSnapshot, never> =>
-  app.queue(threadId).pipe(
-    Effect.flatMap((queue) =>
-      predicate(queue) || remaining <= 0
-        ? Effect.succeed(queue)
-        : Effect.sleep("50 millis").pipe(Effect.andThen(waitQueue(app, threadId, predicate, remaining - 50))),
-    ),
-    Effect.orDie,
+  Effect.flatMap(
+    Effect.clockWith((clock) => clock.currentTimeMillis),
+    (start) => {
+      const poll = (): Effect.Effect<QueueSnapshot, never> =>
+        app.queue(threadId).pipe(
+          Effect.flatMap((queue) =>
+            Effect.flatMap(
+              Effect.clockWith((clock) => clock.currentTimeMillis),
+              (now) =>
+                predicate(queue) || now - start >= budgetMillis
+                  ? Effect.succeed(queue)
+                  : Effect.sleep("50 millis").pipe(Effect.andThen(poll())),
+            ),
+          ),
+          Effect.orDie,
+        )
+      return poll()
+    },
   )
 
 /**
