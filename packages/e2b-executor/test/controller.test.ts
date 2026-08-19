@@ -76,6 +76,15 @@ describe("Controller", () => {
           RIKA_EXECUTOR_ID: "assignment-1:g1",
         },
       })
+      expect(Object.keys(harness.provider.creates[0]!.environment).sort()).toEqual([
+        "RIKA_CHECKPOINT_OBJECT_PREFIX",
+        "RIKA_EXECUTOR_ASSIGNMENT_ID",
+        "RIKA_EXECUTOR_CONTROLLER_URL",
+        "RIKA_EXECUTOR_GENERATION",
+        "RIKA_EXECUTOR_ID",
+        "RIKA_EXECUTOR_TARGET",
+        "RIKA_EXECUTOR_TEMPLATE_BUILD_ID",
+      ])
       const bootstrap = harness.provider.bootstraps[0]!.credential
       expect(String(bootstrap)).toBe("<redacted:executor-bootstrap>")
       expect(json(first)).not.toContain(Redacted.value(bootstrap))
