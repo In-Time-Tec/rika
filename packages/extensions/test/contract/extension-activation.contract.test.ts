@@ -1,5 +1,5 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { McpToolSource } from "@batonfx/mcp"
+import { McpToolSource } from "tenetkit/mcp"
 import { expect, it } from "@effect/vitest"
 import { Crypto, Effect, Layer, PlatformError } from "effect"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"

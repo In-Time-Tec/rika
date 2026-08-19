@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { NestedOperation } from "@batonfx/core"
+import { NestedOperation } from "tenetkit"
 import { Context, Effect } from "effect"
 import { TestClock } from "effect/testing"
 import * as GoalBinding from "@rika/kernel/goal-binding"

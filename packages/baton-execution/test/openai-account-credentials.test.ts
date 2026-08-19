@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
-import { ModelRegistry } from "@batonfx/core"
-import { OpenAi } from "@batonfx/providers"
+import { ModelRegistry } from "tenetkit"
+import { OpenAi } from "tenetkit/ai"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import { Chat, LanguageModel } from "effect/unstable/ai"
@@ -62,7 +62,7 @@ it.effect("refuses a different logged-in account before exposing its credentials
       fromRikaAuth(service({ acquire: Effect.succeed(credential("other")) }), "expected").acquire,
     )
     expect(failure).toMatchObject({
-      _tag: "@batonfx/providers/OpenAiAccountCredentialError",
+      _tag: "tenetkit/ai/OpenAiAccountCredentialError",
       operation: "acquire",
     })
     const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(failure)

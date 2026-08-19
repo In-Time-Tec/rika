@@ -1,4 +1,4 @@
-import { HarnessOverview, HarnessState } from "@batonfx/harness"
+import { HarnessOverview, HarnessState } from "tenetkit/harness"
 
 export interface Input {
   readonly harness: HarnessState.HarnessState

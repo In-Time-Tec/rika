@@ -1,4 +1,4 @@
-import type { HostBindingRegistry } from "@batonfx/repl"
+import type { HostBindingRegistry } from "tenetkit/repl"
 import type { BindingRequirements, Options } from "./binding-requirements"
 import * as ArtifactsBinding from "./artifacts-binding"
 import * as ContextBinding from "./context-binding"

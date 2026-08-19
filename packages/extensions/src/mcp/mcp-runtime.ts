@@ -1,4 +1,4 @@
-import { McpToolSource, OAuth } from "@batonfx/mcp"
+import { McpToolSource, OAuth } from "tenetkit/mcp"
 import { Context, Crypto, Effect, Layer, Schema, Scope } from "effect"
 import type { Server } from "./mcp-configuration"
 import * as McpOAuth from "./mcp-oauth-service"

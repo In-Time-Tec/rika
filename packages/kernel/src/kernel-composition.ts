@@ -1,5 +1,5 @@
-import { KernelPool, KernelStateStore } from "@batonfx/repl"
-import { BunKernelPool, workerModule, workerSupportModules } from "@batonfx/repl/bun"
+import { KernelPool, KernelStateStore } from "tenetkit/repl"
+import { BunKernelPool, workerModule, workerSupportModules } from "tenetkit/repl/bun"
 
 /**
  * Where the kernel worker lives in an ordinary install. A packaging step needs it to ship the worker
@@ -26,7 +26,7 @@ export const kernelBinaries = (input: {
         workerModule: input.join(input.executableDirectory, ".rika-kernel-worker.js"),
         runtimeCommand: input.join(input.executableDirectory, ".rika-kernel-runtime"),
       }
-import { HostBindingRegistry } from "@batonfx/repl"
+import { HostBindingRegistry } from "tenetkit/repl"
 import { Duration, Layer } from "effect"
 import type { FileSystem, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
@@ -86,7 +86,7 @@ export const state = (
 /**
  * One Server-scoped pool of Bun kernels, one per Session.
  *
- * `workerModule` is resolved by `@batonfx/repl/bun` against its own module URL: the worker is not an
+ * `workerModule` is resolved by `tenetkit/repl/bun` against its own module URL: the worker is not an
  * importable entrypoint and its layout is an implementation detail, so a host must never name a dist
  * path itself. A host whose modules are compiled into a single executable is the exception — that URL
  * no longer names a file anything can spawn — so it supplies the path it shipped the worker to.

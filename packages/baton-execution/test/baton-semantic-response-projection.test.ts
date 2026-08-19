@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "@effect/vitest"
-import { RunEvent, type RunTree, type Runtime } from "@batonfx/runtime"
+import { RunEvent, type RunTree, type Runtime } from "tenetkit/runtime"
 import { compareUnitOrder } from "@rika/product/execution-transcript-contract"
 import { Effect, Schema } from "effect"
 import { resolveSemanticTreeEvent } from "../src/projection/semantic-event"

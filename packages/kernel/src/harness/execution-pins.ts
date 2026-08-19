@@ -1,5 +1,5 @@
-import { Pins, type AgentManifest } from "@batonfx/core"
-import { HarnessSnapshot, HarnessState } from "@batonfx/harness"
+import { Pins, type AgentManifest } from "tenetkit"
+import { HarnessSnapshot, HarnessState } from "tenetkit/harness"
 
 /**
  * One registration record a durable host must supply for every Execution of the manifest that pins

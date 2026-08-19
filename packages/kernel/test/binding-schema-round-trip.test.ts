@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Schema } from "effect"
-import { HostBindingRegistry } from "@batonfx/repl"
+import { HostBindingRegistry } from "tenetkit/repl"
 import type * as McpDiscovery from "@rika/extensions/mcp-discovery"
 import { make as makeModules, moduleNames, type BindingRequirements } from "@rika/kernel/binding-modules"
 

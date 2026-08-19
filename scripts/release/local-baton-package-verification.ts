@@ -1,7 +1,11 @@
 import { Data, Effect, FileSystem, Path, Schema } from "effect"
 import { directoryDigest } from "../upstream/upstream-content-digest"
 
-export const batonPackages = ["core", "mcp", "providers", "runtime", "skills", "harness", "repl", "test"] as const
+/**
+ * TenetKit ships one package with subpath exports, so the list holds whole package names rather
+ * than the scope-relative suffixes the thirteen `@batonfx/*` packages needed.
+ */
+export const tenetkitPackages = ["tenetkit"] as const
 
 class LocalBatonSmokeError extends Data.TaggedError("LocalBatonSmokeError")<{
   readonly step: string
@@ -37,10 +41,9 @@ export const verifyInstalledBatonPackages = Effect.fn("LocalBatonSmoke.verifyIns
       : []
     const installed: Array<InstalledBatonPackage> = []
 
-    for (const packageName of batonPackages) {
-      const name = `@batonfx/${packageName}`
-      const rootDirectory = path.join(nodeModules, "@batonfx", packageName)
-      const manifestSuffix = `node_modules/@batonfx/${packageName}/package.json`
+    for (const name of tenetkitPackages) {
+      const rootDirectory = path.join(nodeModules, ...name.split("/"))
+      const manifestSuffix = `node_modules/${name}/package.json`
       const candidates = (yield* fileSystem.exists(rootDirectory))
         ? [rootDirectory]
         : storeEntries

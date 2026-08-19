@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
-import { ModelRegistry } from "@batonfx/core"
-import { TestModel } from "@batonfx/test"
+import { ModelRegistry } from "tenetkit"
+import { TestModel } from "tenetkit/test"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Database } from "bun:sqlite"

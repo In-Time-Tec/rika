@@ -6,8 +6,8 @@ import {
   type Resource,
   SkillRegistryError,
 } from "./skill-registry-model"
-import { SkillSource } from "@batonfx/core"
-import { SkillLoader } from "@batonfx/skills"
+import { SkillSource } from "tenetkit"
+import { SkillLoader } from "tenetkit/skills"
 import { Crypto, Effect, Encoding, FileSystem, Layer, Path } from "effect"
 import { SkillFileSystem } from "./skill-file-system"
 

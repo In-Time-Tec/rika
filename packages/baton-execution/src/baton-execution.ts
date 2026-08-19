@@ -1,9 +1,9 @@
-import { ModelRegistry } from "@batonfx/core"
-import type { HarnessState } from "@batonfx/harness"
-import { KernelPool, KernelStateStore } from "@batonfx/repl"
+import { ModelRegistry } from "tenetkit"
+import type { HarnessState } from "tenetkit/harness"
+import { KernelPool, KernelStateStore } from "tenetkit/repl"
 import type * as ExecutionPins from "@rika/kernel/execution-pins"
 import type * as CellCallContext from "./baton-cell-call-context"
-import { Approval, Run, RunTree, Runtime } from "@batonfx/runtime"
+import { Approval, Run, RunTree, Runtime } from "tenetkit/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import type { Status } from "@rika/product/execution-status"
@@ -104,9 +104,9 @@ const approvalFailure = (cause: unknown): ExecutionGateway.ApprovalResponseFailu
 const steeringFailure = (cause: Runtime.SteerError): ExecutionGateway.SteeringFailure =>
   ExecutionGateway.SteeringFailure.make({
     kind:
-      cause._tag === "@batonfx/runtime/RunNotFound" ||
-      cause._tag === "@batonfx/runtime/RunTerminal" ||
-      cause._tag === "@batonfx/runtime/SteeringConflict"
+      cause._tag === "tenetkit/runtime/RunNotFound" ||
+      cause._tag === "tenetkit/runtime/RunTerminal" ||
+      cause._tag === "tenetkit/runtime/SteeringConflict"
         ? "rejected"
         : "unknown",
     message: message(cause),
@@ -355,7 +355,7 @@ const make = (options: Options, credentialStore: ProviderCredentialStoreShape | 
                 Stream.take(1),
                 Stream.mapEffect(() => runtime.snapshot(titleId)),
                 Stream.map((snapshot) => ({ _tag: "title" as const, snapshot })),
-                Stream.catchTag("@batonfx/runtime/RunNotFound", () =>
+                Stream.catchTag("tenetkit/runtime/RunNotFound", () =>
                   Stream.succeed({ _tag: "title" as const, snapshot: undefined }),
                 ),
               )
@@ -450,7 +450,7 @@ const make = (options: Options, credentialStore: ProviderCredentialStoreShape | 
               ? { status: "unavailable" as const }
               : { status: status(root.run.status), cursor: inspection.cursor }
           }),
-          Effect.catchTag("@batonfx/runtime/RunNotFound", () => Effect.succeed({ status: "unavailable" as const })),
+          Effect.catchTag("tenetkit/runtime/RunNotFound", () => Effect.succeed({ status: "unavailable" as const })),
           Effect.mapError((cause) => ExecutionGateway.InspectTurnFailure.make({ message: message(cause) })),
         ),
     })

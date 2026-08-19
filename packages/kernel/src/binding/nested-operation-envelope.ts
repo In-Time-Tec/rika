@@ -1,5 +1,5 @@
-import { NestedOperation, ToolContext } from "@batonfx/core"
-import type { HostBindingRegistry } from "@batonfx/repl"
+import { NestedOperation, ToolContext } from "tenetkit"
+import type { HostBindingRegistry } from "tenetkit/repl"
 import { Effect, Function, Schema } from "effect"
 
 export type Requirements = NestedOperation.NestedOperations | ToolContext.ToolContext
@@ -13,21 +13,21 @@ export const NestedOperationFailed = Schema.Struct({
 export type NestedOperationFailed = typeof NestedOperationFailed.Type
 
 const failed = (kind: string, failure: NestedOperation.Failure): NestedOperationFailed => {
-  if (failure._tag === "@batonfx/core/NestedOperationDivergence")
+  if (failure._tag === "tenetkit/core/NestedOperationDivergence")
     return NestedOperationFailed.make({
       _tag: "NestedOperationFailed",
       reason: "divergence",
       kind,
       message: `nested operation ${failure.ordinal} recorded ${failure.recordedKind} and was requested as ${failure.requestedKind}`,
     })
-  if (failure._tag === "@batonfx/core/NestedOperationUnknown")
+  if (failure._tag === "tenetkit/core/NestedOperationUnknown")
     return NestedOperationFailed.make({
       _tag: "NestedOperationFailed",
       reason: "unknown",
       kind,
       message: `nested operation ${failure.operationId} crossed its boundary with an unobserved outcome`,
     })
-  if (failure._tag === "@batonfx/core/NestedOperationDenied")
+  if (failure._tag === "tenetkit/core/NestedOperationDenied")
     return NestedOperationFailed.make({
       _tag: "NestedOperationFailed",
       reason: "denied",
@@ -76,7 +76,7 @@ export const nested: {
         typeof error === "object" &&
         error !== null &&
         "_tag" in error &&
-        String(error._tag).startsWith("@batonfx/core/")
+        String(error._tag).startsWith("tenetkit/core/")
           ? failed(request.kind, error as NestedOperation.Failure)
           : (error as E),
       ),

@@ -7,9 +7,9 @@ import {
   HarnessState,
   HarnessStore,
   Refinement,
-} from "@batonfx/harness"
-import { ToolContext } from "@batonfx/core"
-import type { HostBindingRegistry } from "@batonfx/repl"
+} from "tenetkit/harness"
+import { ToolContext } from "tenetkit"
+import type { HostBindingRegistry } from "tenetkit/repl"
 import * as ScopePolicy from "../harness/harness-scope-policy"
 import { nested, NestedOperationFailed, operation, type Requirements } from "./nested-operation-envelope"
 
@@ -32,7 +32,7 @@ const SnapshotInput = Schema.Struct({ scope: Schema.optionalKey(Scope) })
 const OverviewInput = Schema.Struct({ scope: Schema.optionalKey(Scope) })
 
 /**
- * `baseSnapshot` is REQUIRED here even though `@batonfx/harness` types it optional. HarnessStore
+ * `baseSnapshot` is REQUIRED here even though `tenetkit/harness` types it optional. HarnessStore
  * offers only load and save with no compare-and-swap, so every mutation is a whole-scope
  * read-modify-write and two concurrent cells would silently lose an update. Requiring the baseline
  * turns that race into an observable `baseline-drift` rejection the model can retry.

@@ -1,4 +1,4 @@
-import type { Run } from "@batonfx/runtime"
+import type { Run } from "tenetkit/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import type { SemanticTreeEvent } from "./semantic-event"
 

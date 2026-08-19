@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type { HostBindingRegistry } from "@batonfx/repl"
+import type { HostBindingRegistry } from "tenetkit/repl"
 import { ThreadContract } from "@rika/coding-tools/thread-tool-contract"
 import * as ThreadQuery from "@rika/product/thread-query-service"
 import * as ThreadToolAction from "@rika/product/thread-tool-action"

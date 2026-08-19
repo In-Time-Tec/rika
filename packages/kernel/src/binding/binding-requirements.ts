@@ -1,5 +1,5 @@
-import type { Session } from "@batonfx/core"
-import type { HarnessStore } from "@batonfx/harness"
+import type { Session } from "tenetkit"
+import type { HarnessStore } from "tenetkit/harness"
 import type * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import type * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry"
 import type * as McpDiscovery from "@rika/extensions/mcp-discovery"

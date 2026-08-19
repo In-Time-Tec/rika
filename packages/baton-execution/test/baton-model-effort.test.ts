@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { Anthropic, OpenAi } from "@batonfx/providers"
+import { Anthropic, OpenAi } from "tenetkit/ai"
 import * as Settings from "@rika/configuration/configuration-settings"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
 

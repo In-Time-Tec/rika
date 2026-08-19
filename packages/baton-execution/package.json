@@ -12,12 +12,7 @@
     "./baton-test-harness": "./src/baton-test-harness.ts"
   },
   "dependencies": {
-    "@batonfx/repl": "catalog:",
-    "@batonfx/harness": "catalog:",
-    "@batonfx/core": "catalog:",
-    "@batonfx/providers": "catalog:",
-    "@batonfx/runtime": "catalog:",
-    "@batonfx/test": "catalog:",
+    "tenetkit": "catalog:",
     "@rika/coding-tools": "workspace:*",
     "@rika/kernel": "workspace:*",
     "@rika/product": "workspace:*",

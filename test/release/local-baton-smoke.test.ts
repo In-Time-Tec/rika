@@ -2,14 +2,14 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Path } from "effect"
 import {
-  batonPackages,
+  tenetkitPackages,
   verifyInstalledBatonPackages,
   type PackedBatonPackage,
 } from "../../scripts/release/local-baton-package-verification"
 import {
   batonReleaseInventoryError,
-  batonReleasePackages,
-  batonTarballName,
+  tenetkitReleasePackages,
+  tenetkitTarballName,
   catalogBatonVersion,
   manifestWithLocalBatonTarballs,
   provisionProvenHostArchive,
@@ -20,11 +20,11 @@ import { directoryDigest } from "../../scripts/upstream/upstream-content-digest"
 const version = "0.20.2"
 const evidence: BatonReleaseEvidence = {
   schemaVersion: 1,
-  packages: batonReleasePackages.map((packageName) => ({
-    name: `@batonfx/${packageName}`,
+  packages: tenetkitReleasePackages.map((packageName) => ({
+    name: packageName,
     version,
-    filename: `batonfx-${packageName}-${version}.tgz`,
-    sha256: packageName.padEnd(64, "0"),
+    filename: tenetkitTarballName(packageName, version),
+    sha256: packageName.replaceAll("@", "").replaceAll("/", "-").padEnd(64, "0"),
   })),
 }
 const checksumNames = [...evidence.packages.map(({ filename }) => filename), "release-evidence.json"]
@@ -37,9 +37,9 @@ it.layer(BunServices.layer)("local Baton release smoke", (test) => {
     expect(rootManifest.scripts["local-baton-smoke"]).toBe("bun run scripts/release/local-baton-smoke.ts")
   })
 
-  test("rewrites all eight consumed packages and only Baton catalog entries", () => {
-    expect(batonPackages).toEqual(["core", "mcp", "providers", "runtime", "skills", "harness", "repl", "test"])
-    const catalog = Object.fromEntries(batonPackages.map((packageName) => [`@batonfx/${packageName}`, version]))
+  test("rewrites every consumed package and only TenetKit catalog entries", () => {
+    expect(tenetkitPackages).toEqual(["tenetkit"])
+    const catalog = Object.fromEntries(tenetkitPackages.map((packageName) => [packageName, version]))
     const manifest = {
       name: "consumer",
       workspaces: { packages: ["packages/*"], catalog: { ...catalog, effect: "4.0.0" } },
@@ -47,10 +47,7 @@ it.layer(BunServices.layer)("local Baton release smoke", (test) => {
 
     expect(catalogBatonVersion(catalog)).toBe(version)
     const tarballs = Object.fromEntries(
-      batonPackages.map((packageName) => [
-        `@batonfx/${packageName}`,
-        `file:/release/${batonTarballName(packageName, version)}`,
-      ]),
+      tenetkitPackages.map((packageName) => [packageName, `file:/release/${tenetkitTarballName(packageName, version)}`]),
     )
     expect(manifestWithLocalBatonTarballs(manifest, "/release", version)).toEqual({
       ...manifest,
@@ -65,16 +62,16 @@ it.layer(BunServices.layer)("local Baton release smoke", (test) => {
     })
   })
 
-  test("accepts only Baton's exact thirteen-package evidence and fourteen-entry checksum inventory", () => {
-    expect(batonReleasePackages).toHaveLength(13)
-    expect(checksumNames).toHaveLength(14)
+  test("accepts only TenetKit's exact three-package evidence and four-entry checksum inventory", () => {
+    expect(tenetkitReleasePackages).toHaveLength(3)
+    expect(checksumNames).toHaveLength(4)
     expect(batonReleaseInventoryError(evidence, version, checksumNames)).toBeUndefined()
     expect(
       batonReleaseInventoryError({ ...evidence, packages: evidence.packages.slice(1) }, version, checksumNames),
     ).toContain("exact current public package release train")
     expect(
       batonReleaseInventoryError(
-        { ...evidence, packages: [...evidence.packages, { ...evidence.packages[0]!, name: "@batonfx/rogue" }] },
+        { ...evidence, packages: [...evidence.packages, { ...evidence.packages[0]!, name: "@tenetkit/rogue" }] },
         version,
         checksumNames,
       ),
@@ -87,14 +84,13 @@ it.layer(BunServices.layer)("local Baton release smoke", (test) => {
     )
   })
 
-  test("rejects a mixed or non-exact consumed Baton catalog", () => {
-    const catalog = Object.fromEntries(batonPackages.map((packageName) => [`@batonfx/${packageName}`, version]))
-    expect(() => catalogBatonVersion({ ...catalog, "@batonfx/test": "0.20.1" })).toThrow("one exact version")
-    expect(() => catalogBatonVersion({ ...catalog, "@batonfx/test": "^0.20.2" })).toThrow("one exact version")
+  test("rejects a mixed or non-exact consumed TenetKit catalog", () => {
+    const catalog = Object.fromEntries(tenetkitPackages.map((packageName) => [packageName, version]))
+    expect(() => catalogBatonVersion({ ...catalog, tenetkit: "^0.20.2" })).toThrow("not exact semver")
     expect(() => catalogBatonVersion(Object.fromEntries(Object.entries(catalog).slice(1)))).toThrow("one exact version")
   })
 
-  test.effect("locates every exact package when harness and repl are only in the isolated store", () =>
+  test.effect("locates every exact package when it is only in the isolated store", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem
@@ -110,46 +106,53 @@ it.layer(BunServices.layer)("local Baton release smoke", (test) => {
           yield* fileSystem.writeFileString(path.join(directory, "dist", "index.js"), source)
         })
 
-        for (const packageName of batonPackages) {
-          const name = `@batonfx/${packageName}`
+        for (const name of tenetkitPackages) {
           const manifest = `${JSON.stringify({ name, version }, undefined, 2)}
 `
-          const source = `export const packageName = ${JSON.stringify(packageName)}
+          const source = `export const packageName = ${JSON.stringify(name)}
 `
-          const packedDirectory = path.join(packedRoot, packageName)
+          const packedDirectory = path.join(packedRoot, name.replaceAll("/", "-"))
           yield* writePackage(packedDirectory, manifest, source)
           packedPackages.set(name, {
             manifest: manifest.trim(),
             directoryDigest: yield* directoryDigest(packedDirectory),
           })
-          const installedDirectory =
-            packageName === "harness" || packageName === "repl"
-              ? path.join(
-                  isolatedRoot,
-                  "node_modules",
-                  ".bun",
-                  `${packageName}-exact`,
-                  "node_modules",
-                  "@batonfx",
-                  packageName,
-                )
-              : path.join(isolatedRoot, "node_modules", "@batonfx", packageName)
+          // Only in Bun's isolated store, never at the node_modules root: the resolver has to find
+          // it through the store the way a real isolated install lays it out.
+          const installedDirectory = path.join(
+            isolatedRoot,
+            "node_modules",
+            ".bun",
+            `${name.replaceAll("/", "-")}-exact`,
+            "node_modules",
+            ...name.split("/"),
+          )
           yield* writePackage(installedDirectory, manifest, source)
           installedDirectories.set(name, installedDirectory)
         }
 
-        const harnessManifest = `${JSON.stringify({ name: "@batonfx/harness", version }, undefined, 2)}
+        // A second copy carrying the right manifest but the wrong bytes must not be mistaken for
+        // the packed package; only the digest separates it from the real one.
+        const tamperedName = tenetkitPackages[0]
+        const tamperedManifest = `${JSON.stringify({ name: tamperedName, version }, undefined, 2)}
 `
         yield* writePackage(
-          path.join(isolatedRoot, "node_modules", ".bun", "harness-tampered", "node_modules", "@batonfx", "harness"),
-          harnessManifest,
+          path.join(
+            isolatedRoot,
+            "node_modules",
+            ".bun",
+            `${tamperedName.replaceAll("/", "-")}-tampered`,
+            "node_modules",
+            ...tamperedName.split("/"),
+          ),
+          tamperedManifest,
           "tampered",
         )
 
-        expect(yield* fileSystem.exists(path.join(isolatedRoot, "node_modules", "@batonfx", "harness"))).toBe(false)
-        expect(yield* fileSystem.exists(path.join(isolatedRoot, "node_modules", "@batonfx", "repl"))).toBe(false)
+        for (const name of tenetkitPackages)
+          expect(yield* fileSystem.exists(path.join(isolatedRoot, "node_modules", ...name.split("/")))).toBe(false)
         const installed = yield* verifyInstalledBatonPackages({ isolatedRoot, version, packedPackages })
-        expect(installed.map(({ name }) => name)).toEqual(batonPackages.map((name) => `@batonfx/${name}`))
+        expect(installed.map(({ name }) => name)).toEqual([...tenetkitPackages])
         for (const item of installed)
           expect(item.directory).toBe(yield* fileSystem.realPath(installedDirectories.get(item.name)!))
       }),

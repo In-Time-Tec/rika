@@ -8,14 +8,14 @@ import {
 } from "../src/server/composition/server-runtime-recovery"
 
 test("recognises the Baton schema checksum mismatch in every shape it arrives", () => {
-  expect(isSchemaChecksumMismatch({ _tag: "@batonfx/runtime/SchemaChecksumMismatch" })).toBe(true)
+  expect(isSchemaChecksumMismatch({ _tag: "tenetkit/runtime/SchemaChecksumMismatch" })).toBe(true)
   expect(
     isSchemaChecksumMismatch({
-      message: 'StartTurnFailure: {"_tag":"@batonfx/runtime/SchemaChecksumMismatch","source":"/x/baton.db"}',
+      message: 'StartTurnFailure: {"_tag":"tenetkit/runtime/SchemaChecksumMismatch","source":"/x/baton.db"}',
     }),
   ).toBe(true)
-  expect(isSchemaChecksumMismatch('{"_tag":"@batonfx/runtime/SchemaChecksumMismatch"}')).toBe(true)
-  expect(isSchemaChecksumMismatch({ _tag: "@batonfx/runtime/RunNotFound" })).toBe(false)
+  expect(isSchemaChecksumMismatch('{"_tag":"tenetkit/runtime/SchemaChecksumMismatch"}')).toBe(true)
+  expect(isSchemaChecksumMismatch({ _tag: "tenetkit/runtime/RunNotFound" })).toBe(false)
   expect(isSchemaChecksumMismatch(undefined)).toBe(false)
 })
 

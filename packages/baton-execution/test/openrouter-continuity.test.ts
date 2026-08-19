@@ -2,8 +2,8 @@ import { describe, expect, it } from "@effect/vitest"
 import { Chat, LanguageModel } from "effect/unstable/ai"
 import { Config, Context, Effect, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
-import { ModelRegistry } from "@batonfx/core"
-import { OpenRouter } from "@batonfx/providers"
+import { ModelRegistry } from "tenetkit"
+import { OpenRouter } from "tenetkit/ai"
 
 const captured: Array<{ readonly url: string; readonly body: string }> = []
 

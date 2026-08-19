@@ -8,11 +8,11 @@ import {
   ModelRegistry,
   Pins,
   ToolExecutor,
-} from "@batonfx/core"
-import { ModelRoute } from "@batonfx/providers"
-import { Errors, ExecutableRegistration, ExecutableResolver } from "@batonfx/runtime"
-import type { HarnessState } from "@batonfx/harness"
-import { Cell, CellTool, KernelPool } from "@batonfx/repl"
+} from "tenetkit"
+import { ModelRoute } from "tenetkit/ai"
+import { Errors, ExecutableRegistration, ExecutableResolver } from "tenetkit/runtime"
+import type { HarnessState } from "tenetkit/harness"
+import { Cell, CellTool, KernelPool } from "tenetkit/repl"
 import * as CellCallContext from "./baton-cell-call-context"
 import * as BindingModules from "@rika/kernel/binding-modules"
 import * as HarnessPromptSections from "@rika/kernel/harness-prompt-sections"
@@ -233,7 +233,7 @@ const workspaceState = (workspace: string): Effect.Effect<"empty" | "not empty">
   )
 
 const deadlineFailure = (failure: Cell.CellFailure, deadlineMillis: number): Cell.CellFailure => {
-  if (failure._tag !== "@batonfx/repl/CellExecutionFailed") return failure
+  if (failure._tag !== "tenetkit/repl/CellExecutionFailed") return failure
   const exceeded =
     failure.name === "Celltimed-out" || (failure.name === "Cellaborted" && failure.durationMillis >= deadlineMillis)
   if (!exceeded) return failure

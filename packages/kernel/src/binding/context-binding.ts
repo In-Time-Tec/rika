@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
-import { Prompt, Session, SessionHistory, ToolContext } from "@batonfx/core"
-import type { HostBindingRegistry } from "@batonfx/repl"
+import { Prompt, Session, SessionHistory, ToolContext } from "tenetkit"
+import type { HostBindingRegistry } from "tenetkit/repl"
 import { operation } from "./nested-operation-envelope"
 
 export const name = "context"

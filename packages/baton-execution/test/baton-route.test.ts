@@ -1,8 +1,8 @@
 import { expect, it } from "@effect/vitest"
-import { ExecutableManifest } from "@batonfx/core"
-import { HarnessState } from "@batonfx/harness"
-import { CellTool } from "@batonfx/repl"
-import { ExecutableRegistration } from "@batonfx/runtime"
+import { ExecutableManifest } from "tenetkit"
+import { HarnessState } from "tenetkit/harness"
+import { CellTool } from "tenetkit/repl"
+import { ExecutableRegistration } from "tenetkit/runtime"
 import * as Settings from "@rika/configuration/configuration-settings"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
@@ -109,7 +109,7 @@ it.effect("builds exact closed root and title executables with role-specific too
     expect(configured.resolverEntries).toHaveLength(9)
     const rootResolution = configured.resolverEntries[0]!
     expect("agent" in rootResolution ? rootResolution.agent.model : undefined).toMatchObject({
-      provider: "@batonfx/providers",
+      provider: "tenetkit/ai",
       model: "ordered-route",
     })
     expect(configured.executable.manifest.version).toBe("2")
@@ -866,7 +866,7 @@ it.effect("registers the harness pin the resolver expects for the same workspace
       harnessSnapshot: snapshotFor("workspace:another"),
     })
     const harnessPinOf = (configured: Configured) =>
-      configured.registrations.find((registration) => registration.codec === "@batonfx/harness/snapshot")?.pin
+      configured.registrations.find((registration) => registration.codec === "tenetkit/harness/snapshot")?.pin
 
     /**
      * A harness pin is derived from the snapshot the workspace was read for, so two workspaces pin

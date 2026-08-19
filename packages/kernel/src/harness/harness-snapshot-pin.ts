@@ -1,5 +1,5 @@
-import { HarnessOverview, HarnessRegistration, HarnessSnapshot, HarnessState } from "@batonfx/harness"
-import type { AgentManifest } from "@batonfx/core"
+import { HarnessOverview, HarnessRegistration, HarnessSnapshot, HarnessState } from "tenetkit/harness"
+import type { AgentManifest } from "tenetkit"
 import { Effect, Function } from "effect"
 
 /** The capability name a pinned harness snapshot is registered under on every Rika Agent manifest. */

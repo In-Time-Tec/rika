@@ -1,5 +1,5 @@
-import { NestedOperation, Session, ToolContext } from "@batonfx/core"
-import type { HostBindingRegistry } from "@batonfx/repl"
+import { NestedOperation, Session, ToolContext } from "tenetkit"
+import type { HostBindingRegistry } from "tenetkit/repl"
 import { Context, Effect, Function, Layer, Option, Ref, Scope } from "effect"
 
 /**

@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Errors, RunStore, RunTree, Runtime } from "@batonfx/runtime"
+import { Errors, RunStore, RunTree, Runtime } from "tenetkit/runtime"
 import { Context, Effect, Layer, Random, Stream } from "effect"
 import { configure, makeResolver } from "../src/baton-route"
 import { laneExecutionRoute, makeLaneModels } from "../src/baton-test-harness"
@@ -80,7 +80,7 @@ it.live(
                 ),
               ).toMatchObject({
                 _tag: "Failure",
-                failure: { _tag: "@batonfx/runtime/SteeringConflict" },
+                failure: { _tag: "tenetkit/runtime/SteeringConflict" },
               })
 
               if (reason === "cancelled") {
@@ -117,7 +117,7 @@ it.live(
                 ),
               ).toMatchObject({
                 _tag: "Failure",
-                failure: { _tag: "@batonfx/runtime/RunTerminal" },
+                failure: { _tag: "tenetkit/runtime/RunTerminal" },
               })
 
               for (const settlement of ["root-blocked", "tree-terminal"] as const) {

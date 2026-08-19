@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { HarnessState, HarnessStore } from "@batonfx/harness"
+import { HarnessState, HarnessStore } from "tenetkit/harness"
 import { Context, Effect } from "effect"
 import * as HarnessBinding from "@rika/kernel/harness-binding"
 import { mountModules } from "./binding-support"

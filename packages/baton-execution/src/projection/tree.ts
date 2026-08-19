@@ -1,4 +1,4 @@
-import type { Run, RunEvent } from "@batonfx/runtime"
+import type { Run, RunEvent } from "tenetkit/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import * as UnitOrder from "@rika/product/execution-transcript-contract"
 import type { Unit } from "@rika/product/execution-transcript-contract"

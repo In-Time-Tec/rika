@@ -1,5 +1,5 @@
-import { Pins } from "@batonfx/core"
-import { KernelProfile } from "@batonfx/repl"
+import { Pins } from "tenetkit"
+import { KernelProfile } from "tenetkit/repl"
 import { bindingsDigest, type Environment } from "./binding/binding-epoch"
 
 const runtimeName = "bun"

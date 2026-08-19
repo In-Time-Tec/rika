@@ -1,4 +1,4 @@
-import { OpenAi } from "@batonfx/providers"
+import { OpenAi } from "tenetkit/ai"
 import type * as OpenAiAuthContract from "@rika/product/openai-auth-contract"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { Effect, Function, Redacted } from "effect"

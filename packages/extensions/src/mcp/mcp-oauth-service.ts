@@ -1,5 +1,5 @@
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
-import { OAuth } from "@batonfx/mcp"
+import { OAuth } from "tenetkit/mcp"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import {
@@ -58,10 +58,10 @@ const service = (
       Effect.mapError((cause: unknown) => {
         let detail = `OAuth ${operation} failed`
         if (typeof cause === "object" && cause !== null && "_tag" in cause) {
-          if (cause._tag === "@batonfx/mcp/OAuthExpired") detail = "OAuth callback state is invalid or expired"
-          else if (cause._tag === "@batonfx/mcp/OAuthDenied") detail = "OAuth authorization was denied"
+          if (cause._tag === "tenetkit/mcp/OAuthExpired") detail = "OAuth callback state is invalid or expired"
+          else if (cause._tag === "tenetkit/mcp/OAuthDenied") detail = "OAuth authorization was denied"
           else if (
-            cause._tag === "@batonfx/mcp/OAuthProviderError" &&
+            cause._tag === "tenetkit/mcp/OAuthProviderError" &&
             "operation" in cause &&
             typeof cause.operation === "string"
           )

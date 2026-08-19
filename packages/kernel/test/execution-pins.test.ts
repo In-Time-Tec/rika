@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { HarnessEntry, HarnessState } from "@batonfx/harness"
+import { HarnessEntry, HarnessState } from "tenetkit/harness"
 import { Effect } from "effect"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import * as SnapshotPin from "@rika/kernel/harness-snapshot-pin"
@@ -80,7 +80,7 @@ describe("harness snapshot on the Agent manifest", () => {
 
   it("registers the payload under Baton's own harness codec", () => {
     const pinned = ExecutionPins.harness(state([entry("a", "c")]))
-    expect(pinned.registrations[0]).toMatchObject({ codec: "@batonfx/harness/snapshot", version: "1" })
+    expect(pinned.registrations[0]).toMatchObject({ codec: "tenetkit/harness/snapshot", version: "1" })
   })
 
   it.effect("registers a payload that reconstructs the exact pinned snapshot", () =>
