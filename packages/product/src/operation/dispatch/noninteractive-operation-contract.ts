@@ -32,7 +32,7 @@ export interface Dependencies {
   readonly makeThreadId: Effect.Effect<Thread.ThreadId>
   readonly makeTurnId: Effect.Effect<Turn.TurnId>
   readonly resolveExecutionRoute: (
-    mode: ModeId,
+    mode?: ModeId,
     tuning?: undefined,
     workspace?: string,
   ) => Effect.Effect<import("@rika/product/execution-route-snapshot").ExecutionRouteSnapshot, OperationError, never>

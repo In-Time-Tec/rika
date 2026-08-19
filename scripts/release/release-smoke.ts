@@ -15,7 +15,7 @@ const mapFailure = (step: string) =>
 
 const NamedItemsJson = Schema.fromJsonString(Schema.Array(Schema.Struct({ name: Schema.String })))
 const ThreadsJson = Schema.fromJsonString(Schema.Array(Schema.Struct({ id: Schema.String })))
-const UnknownJson = Schema.UnknownFromJsonString
+const UnknownJson = Schema.fromJsonString(Schema.Unknown)
 const PackageManifestJson = Schema.fromJsonString(Schema.Struct({ version: Schema.String }))
 
 const program = Effect.scoped(

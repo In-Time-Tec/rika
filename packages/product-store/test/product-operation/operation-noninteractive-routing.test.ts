@@ -114,7 +114,7 @@ describe("Operation", () => {
 
   it.effect("pins the selected mode for non-interactive runs", () =>
     Effect.gen(function* () {
-      const modes = yield* Ref.make<ReadonlyArray<string>>([])
+      const modes = yield* Ref.make<ReadonlyArray<string | undefined>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const layer = productLayer({
         executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),

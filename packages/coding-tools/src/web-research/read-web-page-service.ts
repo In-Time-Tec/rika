@@ -2,11 +2,11 @@ import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { Input } from "./read-web-page-contract"
 
-export class HttpError extends Schema.TaggedErrorClass<HttpError>()("ReadWebPageHttpError", {
+export class HttpError extends Schema.TaggedError<HttpError>()("ReadWebPageHttpError", {
   message: Schema.String,
 }) {}
 
-export class ContentError extends Schema.TaggedErrorClass<ContentError>()("ReadWebPageContentError", {
+export class ContentError extends Schema.TaggedError<ContentError>()("ReadWebPageContentError", {
   reason: Schema.Literals(["invalid_input", "content_unavailable"]),
   message: Schema.String,
 }) {}

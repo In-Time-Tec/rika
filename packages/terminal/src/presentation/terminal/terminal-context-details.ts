@@ -5,7 +5,7 @@ import { activeTimeAt, activeTimeIcon, formatActiveTime } from "../../state/mode
 import type { Model } from "../../state/model/terminal-state"
 import * as ContextMeter from "../../state/model/terminal-context-meter"
 import { meterGlyphs } from "../../state/model/terminal-context-meter-glyph"
-import { colors } from "./terminal-theme"
+import { colors, modeColor } from "./terminal-theme"
 import { truncateToWidth } from "./terminal-format"
 
 const cost = (model: Model): string => {
@@ -53,7 +53,7 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
         ? ContextMeter.loadingMeter(model.animationTick, { cells })
         : Array(cells).fill(meterGlyphs.track)
       ).join(""),
-      (value) => fg(colors[model.mode])(value),
+      (value) => fg(modeColor(model.mode))(value),
     )
   else if (availableContext !== undefined) {
     const streaming = model.busy && model.activity?._tag !== "Compacting"
@@ -70,7 +70,7 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
           })
         : meter.glyphs
     if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
-    chunks.push(fg(colors[model.mode])(glyphs.join("")), bold(fg(colors[model.mode])(` ${meter.percent}%`)))
+    chunks.push(fg(modeColor(model.mode))(glyphs.join("")), bold(fg(modeColor(model.mode))(` ${meter.percent}%`)))
   }
   if (!compact) line("")
   line(compact ? `Used       ${used}` : `Used        ${used}`)

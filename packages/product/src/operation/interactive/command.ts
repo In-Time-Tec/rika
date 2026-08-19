@@ -46,6 +46,8 @@ export const InteractiveCommand = Schema.Union([
   Schema.Struct({ _tag: Schema.tag("Cancel") }),
   Schema.Struct({ _tag: Schema.tag("Quit") }),
   Schema.Struct({ _tag: Schema.tag("NewThread") }),
+  Schema.Struct({ _tag: Schema.tag("ArchiveThread") }),
+  Schema.Struct({ _tag: Schema.tag("ArchiveAndNewThread") }),
   Schema.Struct({
     _tag: Schema.tag("SelectThread"),
     threadId: Schema.String,
@@ -88,6 +90,10 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
       return session.quit
     case "NewThread":
       return session.newThread
+    case "ArchiveThread":
+      return session.archiveThread
+    case "ArchiveAndNewThread":
+      return session.archiveAndNewThread
     case "SelectThread":
       return session.selectThread(command.threadId)
     case "ReadQueue":

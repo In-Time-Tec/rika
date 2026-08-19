@@ -42,7 +42,7 @@ class LocalBatonSmokeError extends Data.TaggedError("LocalBatonSmokeError")<{
 
 const failure = (step: string, message: string) => new LocalBatonSmokeError({ step, message })
 
-const UnknownJson = Schema.UnknownFromJsonString
+const UnknownJson = Schema.fromJsonString(Schema.Unknown)
 const encodeManifest = (manifest: RootManifest): string => Schema.encodeSync(UnknownJson)(manifest)
 
 const tenetkitTarballNameImpl = (packageName: string, version: string): string =>
@@ -92,8 +92,7 @@ export const catalogBatonVersion = (catalog: Readonly<Record<string, string>>): 
   if (versions.size !== 1 || versions.has(undefined))
     throw new Error("Rika must pin every TenetKit package to one exact version")
   const version = [...versions][0]!
-  if (!/^\d+\.\d+\.\d+$/.test(version))
-    throw new Error(`Rika TenetKit catalog version is not exact semver: ${version}`)
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`Rika TenetKit catalog version is not exact semver: ${version}`)
   return version
 }
 

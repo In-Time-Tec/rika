@@ -4,7 +4,7 @@ import { Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Thread, ThreadId, ThreadLineage } from "@rika/product/thread-record"
 
-export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadRepositoryError", {
+export class RepositoryError extends Schema.TaggedError<RepositoryError>()("ThreadRepositoryError", {
   message: Schema.String,
 }) {}
 
@@ -29,6 +29,7 @@ export interface ListInput {
 
 export interface Interface {
   readonly create: (input: CreateInput) => Effect.Effect<Thread, RepositoryError>
+  readonly archiveAndCreate: (currentId: ThreadId, input: CreateInput) => Effect.Effect<Thread, RepositoryError>
   readonly get: (id: ThreadId) => Effect.Effect<Thread | undefined, RepositoryError>
   readonly list: (input?: ListInput) => Effect.Effect<ReadonlyArray<Thread>, RepositoryError>
   readonly listAll: Effect.Effect<ReadonlyArray<Thread>, RepositoryError>
@@ -127,22 +128,33 @@ export const layer = Layer.effect(
         WHERE id = ${id}`.pipe(Effect.mapError(repositoryError))
       return yield* requireThread(id)
     })
+    const insert = Effect.fn("ThreadRepository.insert")(function* (input: CreateInput) {
+      yield* sql`INSERT INTO rika_workspaces (path, created_at) VALUES (${input.workspace}, ${input.now}) ON CONFLICT(path) DO NOTHING`.pipe(
+        Effect.mapError(repositoryError),
+      )
+      const lineage = yield* Schema.encodeEffect(LineageJson)(input.lineage ?? { _tag: "Original" }).pipe(
+        Effect.mapError(repositoryError),
+      )
+      yield* sql`INSERT INTO rika_threads (id, workspace, title, labels_json, pinned, archived, lineage_json, created_at, updated_at)
+        VALUES (${input.id}, ${input.workspace}, ${input.title}, '[]', 0, 0, ${lineage}, ${input.now}, ${input.now})`.pipe(
+        Effect.mapError(repositoryError),
+      )
+      return yield* requireThread(input.id)
+    })
     return Service.of({
       create: Effect.fn("ThreadRepository.create")(function* (input) {
+        return yield* sql.withTransaction(insert(input)).pipe(Effect.mapError(repositoryError))
+      }),
+      archiveAndCreate: Effect.fn("ThreadRepository.archiveAndCreate")(function* (currentId, input) {
         return yield* sql
           .withTransaction(
             Effect.gen(function* () {
-              yield* sql`INSERT INTO rika_workspaces (path, created_at) VALUES (${input.workspace}, ${input.now}) ON CONFLICT(path) DO NOTHING`.pipe(
+              yield* requireThread(currentId)
+              const created = yield* insert(input)
+              yield* sql`UPDATE rika_threads SET archived = 1, updated_at = ${input.now} WHERE id = ${currentId}`.pipe(
                 Effect.mapError(repositoryError),
               )
-              const lineage = yield* Schema.encodeEffect(LineageJson)(input.lineage ?? { _tag: "Original" }).pipe(
-                Effect.mapError(repositoryError),
-              )
-              yield* sql`INSERT INTO rika_threads (id, workspace, title, labels_json, pinned, archived, lineage_json, created_at, updated_at)
-                VALUES (${input.id}, ${input.workspace}, ${input.title}, '[]', 0, 0, ${lineage}, ${input.now}, ${input.now})`.pipe(
-                Effect.mapError(repositoryError),
-              )
-              return yield* requireThread(input.id)
+              return created
             }),
           )
           .pipe(Effect.mapError(repositoryError))

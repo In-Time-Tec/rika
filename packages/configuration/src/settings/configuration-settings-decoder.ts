@@ -1,12 +1,11 @@
 import { Function, Schema } from "effect"
-import { modeIds } from "../model-routing/behavior-mode"
-import { defaults as modelDefaults, presetIds, presets } from "../model-routing/model-preset"
+import { presetIds, presets } from "../model-routing/model-preset"
 import { supportedEfforts } from "../model-routing/model-catalog"
 import type { ModelRoute } from "../model-routing/model-route"
 import { providerDefaults } from "./configuration-defaults"
 import type { ConfigurationSettingsInput } from "./configuration-settings-input"
 
-export class ConfigurationSettingsFileError extends Schema.TaggedErrorClass<ConfigurationSettingsFileError>()(
+export class ConfigurationSettingsFileError extends Schema.TaggedError<ConfigurationSettingsFileError>()(
   "ConfigurationSettingsFileError",
   { path: Schema.String, message: Schema.String },
 ) {}
@@ -55,6 +54,8 @@ export const decodeSettingsInput: {
   exactKeys(path, "Configuration", value, [
     "providers",
     "modelAliases",
+    "defaultMode",
+    "modes",
     "modelRoutes",
     "subagents",
     "keymap",
@@ -149,7 +150,17 @@ export const decodeSettingsInput: {
       "credentialIdentity",
       "streamingOnly",
       "promptCaching",
+      ...(name === "openai" ? ["api"] : []),
     ])
+    if (
+      providerConnection.api !== undefined &&
+      providerConnection.api !== "responses" &&
+      providerConnection.api !== "chat-completions"
+    )
+      throw ConfigurationSettingsFileError.make({
+        path,
+        message: `Provider ${name} api must be responses or chat-completions`,
+      })
     if (providerConnection.streamingOnly !== undefined && typeof providerConnection.streamingOnly !== "boolean")
       throw ConfigurationSettingsFileError.make({ path, message: `Provider ${name} streamingOnly must be a boolean` })
     if (providerConnection.promptCaching !== undefined && typeof providerConnection.promptCaching !== "boolean")
@@ -209,11 +220,6 @@ export const decodeSettingsInput: {
     for (const [name, alias] of Object.entries(value.modelAliases)) {
       if (name.length === 0 || !object(alias))
         throw ConfigurationSettingsFileError.make({ path, message: "Model alias names must be non-empty" })
-      if (name in modelDefaults)
-        throw ConfigurationSettingsFileError.make({
-          path,
-          message: `Model alias ${name} cannot replace a built-in model alias`,
-        })
       exactKeys(path, `Model alias ${name}`, alias, [
         "preset",
         "provider",
@@ -228,7 +234,7 @@ export const decodeSettingsInput: {
           path,
           message: `Model alias ${name} supportsMedia must be true or false`,
         })
-      if (typeof alias.provider !== "string" || !(alias.provider in providerDefaults))
+      if (typeof alias.provider !== "string" || !Object.hasOwn(providerDefaults, alias.provider))
         throw ConfigurationSettingsFileError.make({ path, message: `Model alias ${name} provider is unknown` })
       if (
         !Array.isArray(alias.candidates) ||
@@ -342,55 +348,63 @@ export const decodeSettingsInput: {
       }
     }
   }
+  const roleRoute = (owner: string, route: unknown) => {
+    if (!object(route)) throw ConfigurationSettingsFileError.make({ path, message: `${owner} must be a route object` })
+    exactKeys(path, owner, route, ["alias", "model", "provider", "effort", "fast"])
+    const hasAlias = route.alias !== undefined
+    const hasModel = route.model !== undefined
+    if (hasAlias === hasModel)
+      throw ConfigurationSettingsFileError.make({ path, message: `${owner} must set exactly one of alias or model` })
+    if (hasAlias && (typeof route.alias !== "string" || route.alias.length === 0))
+      throw ConfigurationSettingsFileError.make({ path, message: `${owner} alias must be non-empty` })
+    if (hasModel && (typeof route.model !== "string" || route.model.length === 0))
+      throw ConfigurationSettingsFileError.make({ path, message: `${owner} model must be non-empty` })
+    if (hasAlias) {
+      if (route.provider !== undefined)
+        throw ConfigurationSettingsFileError.make({ path, message: `${owner} alias route cannot set provider` })
+    } else if (typeof route.provider !== "string" || !Object.hasOwn(providerDefaults, route.provider)) {
+      throw ConfigurationSettingsFileError.make({ path, message: `${owner} direct route must set a known provider` })
+    }
+    if (route.effort !== undefined && !supportedEfforts.some((supportedEffort) => supportedEffort === route.effort))
+      throw ConfigurationSettingsFileError.make({
+        path,
+        message: `${owner} effort must be one of ${supportedEfforts.join(", ")}`,
+      })
+    if (route.fast !== undefined && typeof route.fast !== "boolean")
+      throw ConfigurationSettingsFileError.make({ path, message: `${owner} fast must be true or false` })
+  }
+  if (value.defaultMode !== undefined && (typeof value.defaultMode !== "string" || value.defaultMode.length === 0))
+    throw ConfigurationSettingsFileError.make({ path, message: "Default mode must be a non-empty string" })
+  if (value.modes !== undefined) {
+    if (!object(value.modes)) throw ConfigurationSettingsFileError.make({ path, message: "Modes must be an object" })
+    if (Object.keys(value.modes).length === 0)
+      throw ConfigurationSettingsFileError.make({ path, message: "Modes must not be empty" })
+    for (const [mode, configured] of Object.entries(value.modes)) {
+      if (mode.length === 0 || !object(configured))
+        throw ConfigurationSettingsFileError.make({ path, message: "Mode names must be non-empty and map to objects" })
+      exactKeys(path, `Mode ${mode}`, configured, ["main", "oracle", "agents"])
+      if (configured.main !== undefined) roleRoute(`Mode ${mode} main`, configured.main)
+      if (configured.oracle !== undefined) roleRoute(`Mode ${mode} oracle`, configured.oracle)
+      if (configured.agents !== undefined) {
+        if (!object(configured.agents))
+          throw ConfigurationSettingsFileError.make({ path, message: `Mode ${mode} agents must be an object` })
+        exactKeys(path, `Mode ${mode} agents`, configured.agents, [
+          "librarian",
+          "painter",
+          "readThread",
+          "review",
+          "surgeon",
+          "task",
+        ])
+        for (const [agent, route] of Object.entries(configured.agents)) roleRoute(`Mode ${mode} agent ${agent}`, route)
+      }
+    }
+  }
   if (value.modelRoutes !== undefined) {
     if (!object(value.modelRoutes))
       throw ConfigurationSettingsFileError.make({ path, message: "Model routes must be an object" })
-    exactKeys(path, "Model routes", value.modelRoutes, ["modes", "title", "agents", "compaction"])
-    const roleRoute = (owner: string, route: unknown) => {
-      if (typeof route === "string") {
-        if (route.length === 0)
-          throw ConfigurationSettingsFileError.make({ path, message: `${owner} alias must be non-empty` })
-        return
-      }
-      if (!object(route))
-        throw ConfigurationSettingsFileError.make({ path, message: `${owner} must be an alias or an object` })
-      exactKeys(path, owner, route, ["alias", "effort", "fast"])
-      if (typeof route.alias !== "string" || route.alias.length === 0)
-        throw ConfigurationSettingsFileError.make({ path, message: `${owner} alias must be non-empty` })
-      if (route.effort !== undefined && !supportedEfforts.some((supportedEffort) => supportedEffort === route.effort))
-        throw ConfigurationSettingsFileError.make({
-          path,
-          message: `${owner} effort must be one of ${supportedEfforts.join(", ")}`,
-        })
-      if (route.fast !== undefined && typeof route.fast !== "boolean")
-        throw ConfigurationSettingsFileError.make({ path, message: `${owner} fast must be true or false` })
-    }
-    if (value.modelRoutes.modes !== undefined) {
-      if (!object(value.modelRoutes.modes))
-        throw ConfigurationSettingsFileError.make({ path, message: "Model route modes must be an object" })
-      exactKeys(path, "Model route modes", value.modelRoutes.modes, modeIds)
-      for (const [mode, roles] of Object.entries(value.modelRoutes.modes)) {
-        if (!object(roles))
-          throw ConfigurationSettingsFileError.make({ path, message: `Model route mode ${mode} must be an object` })
-        exactKeys(path, `Model route mode ${mode}`, roles, ["main", "oracle"])
-        for (const [role, route] of Object.entries(roles)) roleRoute(`Model route mode ${mode} ${role}`, route)
-      }
-    }
+    exactKeys(path, "Model routes", value.modelRoutes, ["title", "compaction"])
     if (value.modelRoutes.title !== undefined) roleRoute("Model route title", value.modelRoutes.title)
-    if (value.modelRoutes.agents !== undefined) {
-      if (!object(value.modelRoutes.agents))
-        throw ConfigurationSettingsFileError.make({ path, message: "Model route agents must be an object" })
-      exactKeys(path, "Model route agents", value.modelRoutes.agents, [
-        "librarian",
-        "painter",
-        "readThread",
-        "review",
-        "surgeon",
-        "task",
-      ])
-      for (const [agent, route] of Object.entries(value.modelRoutes.agents))
-        roleRoute(`Model route agent ${agent}`, route)
-    }
     if (value.modelRoutes.compaction !== undefined) roleRoute("Model route compaction", value.modelRoutes.compaction)
   }
   if (value.subagents !== undefined) {

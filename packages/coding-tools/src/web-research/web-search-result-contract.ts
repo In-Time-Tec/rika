@@ -8,7 +8,7 @@ export const SearchResult = Schema.Struct({
 export type SearchResult = typeof SearchResult.Type
 export const ProviderFailureKind = Schema.Literals(["authentication", "rate-limit", "timeout", "transport", "response"])
 export type ProviderFailureKind = typeof ProviderFailureKind.Type
-export class ProviderFailure extends Schema.TaggedErrorClass<ProviderFailure>()("WebSearchProviderFailure", {
+export class ProviderFailure extends Schema.TaggedError<ProviderFailure>()("WebSearchProviderFailure", {
   provider: Schema.String,
   kind: ProviderFailureKind,
   message: Schema.String,

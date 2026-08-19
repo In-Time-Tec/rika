@@ -483,7 +483,7 @@ type Captured = ReturnType<Awaited<ReturnType<typeof createTestRenderer>>["captu
 
 const channel = (value: number): number => Math.round(value <= 1 ? value * 255 : value)
 const stableFrame = (frame: string): string => frame.replaceAll(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/g, "⠿")
-const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const prettyJson = (value: unknown, depth = 0): string => {
   if (value === null || typeof value !== "object") return encodeJson(value)
   const indent = "  ".repeat(depth)

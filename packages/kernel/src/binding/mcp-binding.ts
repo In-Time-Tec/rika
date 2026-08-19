@@ -11,13 +11,13 @@ export const name = "mcp"
  * data. The bootstrap Proxy over `rika.mcp.<server>.<tool>` resolves names lazily, so this is the
  * only thing standing between a typo and `undefined is not a function`.
  */
-export class McpBindingNotFound extends Schema.TaggedErrorClass<McpBindingNotFound>()("McpBindingNotFound", {
+export class McpBindingNotFound extends Schema.TaggedError<McpBindingNotFound>()("McpBindingNotFound", {
   module: Schema.String,
   operation: Schema.optionalKey(Schema.String),
   message: Schema.String,
 }) {}
 
-export class McpCallFailed extends Schema.TaggedErrorClass<McpCallFailed>()("McpCallFailed", {
+export class McpCallFailed extends Schema.TaggedError<McpCallFailed>()("McpCallFailed", {
   server: Schema.String,
   phase: Schema.Literals(["connect", "discover", "call"]),
   message: Schema.String,

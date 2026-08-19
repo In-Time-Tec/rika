@@ -38,6 +38,7 @@ export interface InteractiveLoop {
   pendingJobControlPause: boolean
   releaseJobControlPause: (() => boolean) | undefined
   openingPath: boolean
+  ctrlCMenuVisible: boolean
 }
 
 export interface InteractiveRuntimeContext {

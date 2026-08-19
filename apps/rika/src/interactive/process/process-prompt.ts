@@ -18,7 +18,7 @@ const imageMediaType = (path: string) => {
   return "application/octet-stream"
 }
 
-export class PromptAttachmentError extends Schema.TaggedErrorClass<PromptAttachmentError>()("PromptAttachmentError", {
+export class PromptAttachmentError extends Schema.TaggedError<PromptAttachmentError>()("PromptAttachmentError", {
   index: Schema.Int,
   path: Schema.String,
   message: Schema.String,

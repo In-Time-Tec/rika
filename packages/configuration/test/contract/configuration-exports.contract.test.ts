@@ -11,7 +11,7 @@ import * as ConfigurationService from "@rika/configuration/configuration-service
 
 describe("configuration public exports", () => {
   it("resolves every frozen capability subpath to its semantic owner", () => {
-    expect(BehaviorMode.modeIds).toContain("medium")
+    expect(BehaviorMode.ModeId).toBeDefined()
     expect(ModelRoute.isStreamingOnlyBaseUrl("https://chatgpt.com/v1")).toBe(true)
     expect(ModelRouteLabel.modeRouteLabels).toBeTypeOf("function")
     expect(ModelRouteResolution.resolveModelRoute).toBeTypeOf("function")

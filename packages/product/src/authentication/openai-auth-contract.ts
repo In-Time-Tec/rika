@@ -28,12 +28,12 @@ export const CredentialDisk = Schema.Struct({
   refreshedAt: Schema.Finite,
 })
 
-export class AuthError extends Schema.TaggedErrorClass<AuthError>()("OpenAiAuthError", {
+export class AuthError extends Schema.TaggedError<AuthError>()("OpenAiAuthError", {
   kind: Schema.Literals(["cancelled", "timeout", "host", "network", "protocol", "account-mismatch", "login-required"]),
   message: Schema.String,
 }) {}
 
-export class StoreError extends Schema.TaggedErrorClass<StoreError>()("OpenAiCredentialStoreError", {
+export class StoreError extends Schema.TaggedError<StoreError>()("OpenAiCredentialStoreError", {
   kind: Schema.Literals(["missing", "corrupt", "unsafe", "busy", "io"]),
   message: Schema.String,
 }) {}

@@ -90,7 +90,7 @@ test(
         yield* app.waitFrame("Max depth set to 2")
         const settings = yield* FileSystem.FileSystem.pipe(
           Effect.flatMap((fileSystem) => fileSystem.readFileString(workspacePaths(app.workspace).settings)),
-          Effect.flatMap(Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)),
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))),
         )
         expect(settings).toEqual({ subagents: { maxDepth: 2 } })
 

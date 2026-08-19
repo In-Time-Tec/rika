@@ -38,7 +38,7 @@ export const Request = Schema.Union([
 ])
 type Request = typeof Request.Type
 type Result = CodingToolResult.Result
-export class ToolError extends Schema.TaggedErrorClass<ToolError>()("ToolError", {
+export class ToolError extends Schema.TaggedError<ToolError>()("ToolError", {
   tool: Schema.String,
   message: Schema.String,
   kind: Schema.Literals(["operation", "timeout"]),

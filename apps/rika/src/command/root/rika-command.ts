@@ -1,7 +1,7 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Console, Effect, FileSystem, Option, Stdio } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
-import { modeIds, type ModeId } from "@rika/configuration/behavior-mode"
+import type { ModeId } from "@rika/configuration/behavior-mode"
 import { authCommand } from "../product/auth-command"
 import { configurationCommand } from "../product/configuration-command"
 import { diagnosticsCommand } from "../product/diagnostics-command"
@@ -18,7 +18,7 @@ import { version } from "../../platform/application-version"
 
 export { version }
 
-const mode = Flag.choice("mode", modeIds).pipe(Flag.withAlias("m"), Flag.optional)
+const mode = Flag.string("mode").pipe(Flag.withAlias("m"), Flag.optional)
 const workspace = Flag.directory("workspace").pipe(Flag.optional)
 const thread = Flag.string("thread").pipe(Flag.optional)
 const ephemeral = Flag.boolean("ephemeral")

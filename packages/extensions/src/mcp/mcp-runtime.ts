@@ -4,7 +4,7 @@ import type { Server } from "./mcp-configuration"
 import * as McpOAuth from "./mcp-oauth-service"
 import { Host } from "./mcp-oauth-service"
 
-export class Diagnostic extends Schema.TaggedErrorClass<Diagnostic>()("@rika/extensions/McpDiagnostic", {
+export class Diagnostic extends Schema.TaggedError<Diagnostic>()("@rika/extensions/McpDiagnostic", {
   server: Schema.String,
   phase: Schema.Literals(["connect", "discover", "call"]),
   message: Schema.String,

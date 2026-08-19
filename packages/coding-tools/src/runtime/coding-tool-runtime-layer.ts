@@ -373,7 +373,7 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
                   ...(request.strategy === undefined ? {} : { strategy: request.strategy }),
                   ...(request.githubSearchType === undefined ? {} : { githubSearchType: request.githubSearchType }),
                 })
-                return bounded(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(results))
+                return bounded(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(results))
               }
               case "ReadWebPage":
                 return bounded(

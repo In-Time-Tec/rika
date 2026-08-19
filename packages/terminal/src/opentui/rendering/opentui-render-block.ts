@@ -6,7 +6,7 @@ import stringWidth from "string-width"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
 import type { ChangedFile } from "../../state/model/terminal-changed-file"
 import type { Model } from "../../state/model/terminal-state"
-import { colors } from "../../presentation/terminal/terminal-theme"
+import { colors, modeColor } from "../../presentation/terminal/terminal-theme"
 import { escapeControlCharacters, formatBytes, truncateToWidth } from "../../presentation/terminal/terminal-format"
 import { renderDiff } from "../../presentation/tool/diff-renderer"
 import { fg, dim, bg, underline, StyledText } from "@opentui/core"
@@ -249,7 +249,7 @@ const sidebarFileRowsImpl = (model: Model, innerWidth: number): ReadonlyArray<Ch
         model.changedFiles._tag === "Ready" ? model.changedFiles.value : [],
         innerWidth,
         true,
-        colors[model.mode],
+        modeColor(model.mode),
       )
     : fileTreeRows(
         model.filePicker.items._tag === "Ready"
@@ -257,7 +257,7 @@ const sidebarFileRowsImpl = (model: Model, innerWidth: number): ReadonlyArray<Ch
           : [],
         innerWidth,
         false,
-        colors[model.mode],
+        modeColor(model.mode),
       )
 
 export const sidebarFileRows: {
@@ -300,7 +300,7 @@ export const renderChangedFiles: {
         model.changedFiles._tag === "Ready" ? model.changedFiles.value : [],
         innerWidth,
         true,
-        colors[model.mode],
+        modeColor(model.mode),
       ),
       hoveredRow,
     ),

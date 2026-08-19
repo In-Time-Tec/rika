@@ -290,7 +290,7 @@
           "width": 6
         },
         {
-          "text": "  ",
+          "text": "   ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -308,7 +308,7 @@
             }
           },
           "attributes": 0,
-          "width": 2
+          "width": 3
         },
         {
           "text": "high",
@@ -332,7 +332,7 @@
           "width": 4
         },
         {
-          "text": "    ",
+          "text": "   ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -350,7 +350,7 @@
             }
           },
           "attributes": 0,
-          "width": 4
+          "width": 3
         },
         {
           "text": "ultra",

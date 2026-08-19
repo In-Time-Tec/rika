@@ -4,7 +4,7 @@ import { ExecutionRouteSnapshot, toExecutionRouteSnapshot } from "../../src/exec
 
 const model = (role: string) => ({
   role,
-  alias: "primary",
+  selection: "primary",
   registrationIdentity: "stable-route-id",
   effort: "high",
   fast: false,
@@ -13,7 +13,7 @@ const model = (role: string) => ({
       model: "gpt-5",
       providerConnection: {
         provider: "openai",
-        protocol: "openai",
+        protocol: "openai-responses",
         baseUrl: "https://api.openai.com/v1",
         authentication: "api-key" as const,
         apiKeyEnvironment: "OPENAI_API_KEY",
@@ -28,7 +28,7 @@ const model = (role: string) => ({
 
 test("canonical route conversion preserves every branch and field", () => {
   const route = {
-    version: 2 as const,
+    version: 3 as const,
     mode: "default",
     subagents: { maxDepth: 2, maxSubagents: 3 },
     compaction: { strategy: "default" as const, summaryPrompt: "Pinned summary prompt" },
@@ -46,17 +46,12 @@ test("canonical route conversion preserves every branch and field", () => {
   expect(snapshot.agents.task.candidates[0]?.providerConnection).toEqual(route.main.candidates[0]?.providerConnection)
 })
 
-test("decodes the previous persisted route and always re-encodes the current version", () => {
+test("round-trips the current contract and rejects pre-migration versions", () => {
   const current = routeWithModels()
-  const { subagents: _subagents, ...withoutSubagents } = current
-  const previous = { ...withoutSubagents, version: 1 as const }
-  const decoded = Schema.decodeUnknownSync(ExecutionRouteSnapshot)(previous)
-  expect(decoded).toEqual({
-    ...withoutSubagents,
-    version: 2,
-    subagents: { maxDepth: 1, maxSubagents: 4 },
-  })
+  const decoded = Schema.decodeUnknownSync(ExecutionRouteSnapshot)(current)
+  expect(decoded).toEqual(current)
   expect(Schema.encodeSync(ExecutionRouteSnapshot)(decoded)).toEqual(decoded)
+  expect(() => Schema.decodeUnknownSync(ExecutionRouteSnapshot)({ ...current, version: 2 })).toThrow()
 })
 
 test("preserves the pinned OpenAI account identity and rejects incomplete account routes", () => {
@@ -66,7 +61,7 @@ test("preserves the pinned OpenAI account identity and rejects incomplete accoun
       ...candidate,
       providerConnection: {
         provider: "openai",
-        protocol: "openai",
+        protocol: "openai-responses",
         baseUrl: "https://api.openai.com/v1",
         authentication: "account" as const,
         credentialIdentity: "account-fingerprint",
@@ -74,7 +69,7 @@ test("preserves the pinned OpenAI account identity and rejects incomplete accoun
     })),
   })
   const route = {
-    version: 2 as const,
+    version: 3 as const,
     mode: "default",
     subagents: { maxDepth: 1, maxSubagents: 4 },
     compaction: { strategy: "default" as const, summaryPrompt: "Pinned summary prompt" },
@@ -105,7 +100,7 @@ test("preserves the pinned OpenAI account identity and rejects incomplete accoun
 
 test("malformed, adapter-shaped, and future route branches are rejected", () => {
   expect(() => toExecutionRouteSnapshot({ mode: "default", main: model("main") })).toThrow("Malformed execution route")
-  expect(() => toExecutionRouteSnapshot({ version: 2, mode: "default", main: {}, oracle: model("oracle") })).toThrow(
+  expect(() => toExecutionRouteSnapshot({ version: 3, mode: "default", main: {}, oracle: model("oracle") })).toThrow(
     "Malformed execution route",
   )
   expect(() => toExecutionRouteSnapshot({ ...routeWithModels(), version: 1 })).toThrow(
@@ -123,7 +118,7 @@ test("malformed, adapter-shaped, and future route branches are rejected", () => 
 })
 
 const routeWithModels = () => ({
-  version: 2 as const,
+  version: 3 as const,
   mode: "default",
   subagents: { maxDepth: 4, maxSubagents: 4 },
   compaction: { strategy: "default" as const, summaryPrompt: "Pinned summary prompt" },

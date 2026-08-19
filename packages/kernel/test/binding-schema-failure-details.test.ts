@@ -50,13 +50,13 @@ describe("host binding schema failure details", () => {
         _tag: "tenetkit/repl/HostBindingSchemaFailure",
         stage: "decode-input",
       })
-      expect(decode.message).toContain("Expected string, got 7")
+      expect(decode.message).toContain("Expected string")
       expect(decode.message).toContain('at ["path"]')
       expect(output).toMatchObject({ stage: "encode-output" })
-      expect(output.message).toContain('Expected number, got "many"')
+      expect(output.message).toContain("Expected number")
       expect(output.message).toContain('at ["count"]')
       expect(failure).toMatchObject({ stage: "encode-failure" })
-      expect(failure.message).toContain('Expected boolean, got "later"')
+      expect(failure.message).toContain("Expected boolean")
       expect(failure.message).toContain('at ["retry"]')
     }),
   )

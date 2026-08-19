@@ -25,20 +25,17 @@ export const workspaceExecutionRoute =
     >
     readonly openAiAccountStatus?: Effect.Effect<OpenAiAuthContract.Status, { readonly message: string }>
   }) =>
-  (
-    mode: "low" | "medium" | "high" | "ultra",
-    tuning: { readonly fastMode?: boolean } | undefined,
-    workspace: string,
-  ) => {
+  (mode: string | undefined, tuning: { readonly fastMode?: boolean } | undefined, workspace: string) => {
     if (input.testModel !== undefined) return Effect.succeed(ExecutionRouteSnapshot.testExecutionRoute(mode))
     return Effect.gen(function* () {
       const configuration = yield* input.effectiveConfigForWorkspace(workspace)
+      const selectedMode = mode ?? configuration.settings.defaultMode
       const resolve = (openAiAccountFingerprint?: string) =>
         Effect.try({
           try: () =>
             ExecutionRouteResolution.resolve(
               configuration.settings,
-              mode,
+              selectedMode,
               tuning,
               openAiAccountFingerprint === undefined ? undefined : { openAiAccountFingerprint },
             ),
@@ -59,7 +56,7 @@ export const workspaceExecutionRoute =
         model.candidates.some(
           (candidate) =>
             candidate.providerConnection.provider === "openai" &&
-            candidate.providerConnection.protocol === "openai" &&
+            candidate.providerConnection.protocol === "openai-responses" &&
             candidate.providerConnection.baseUrl === Settings.Defaults.providerDefaults.openai.baseUrl,
         ),
       )

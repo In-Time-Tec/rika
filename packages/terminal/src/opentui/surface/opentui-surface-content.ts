@@ -5,7 +5,7 @@ import type { Model, Mode } from "../../state/model/terminal-state"
 import type { ThreadItem } from "../../state/model/terminal-thread-state"
 import { isLoading } from "../../state/model/terminal-loadable-state"
 import { activeTimeIcon } from "../../state/model/terminal-activity-time"
-import { colors, spacing } from "../../presentation/terminal/terminal-theme"
+import { colors, modeColor, spacing } from "../../presentation/terminal/terminal-theme"
 import { contentColumnWidth } from "../../state/model/terminal-layout-state"
 import { homeRelativePath } from "../../presentation/terminal/terminal-format"
 import { orbGeometry, orbRows, type OrbImpulse } from "./opentui-welcome-orb"
@@ -64,7 +64,7 @@ export const formatCost = (usd: number): string =>
 export const modeLabelWidth = (text: string): number => stringWidth(text.replaceAll(activeTimeIcon, "x"))
 
 const modeShade = (mode: Mode, intensity: number): string => {
-  const hex = colors[mode].slice(1)
+  const hex = modeColor(mode).slice(1)
   const red = Number.parseInt(hex.slice(0, 2), 16)
   const green = Number.parseInt(hex.slice(2, 4), 16)
   const blue = Number.parseInt(hex.slice(4, 6), 16)
@@ -93,7 +93,7 @@ const welcomeContentImpl = (
   if (height < 20)
     return new StyledText([
       fg(colors.text)("\n"),
-      fg(colors[mode])(`${" ".repeat(Math.max(0, Math.floor((width - 15) / 2)))}Welcome to Rika`),
+      fg(modeColor(mode))(`${" ".repeat(Math.max(0, Math.floor((width - 15) / 2)))}Welcome to Rika`),
       fg(colors.text)("\n\n"),
       fg(colors.text)(`${" ".repeat(Math.max(0, Math.floor((width - 24) / 2)))}ctrl+o commands   ? help`),
     ])
@@ -108,7 +108,7 @@ const welcomeContentImpl = (
   const chunks: TextChunk[] = [fg(colors.text)("\n".repeat(top))]
   const copyTop = Math.max(0, Math.floor((geometry.rows - 5) / 2))
   const copy = new Map<number, ReadonlyArray<TextChunk>>([
-    [copyTop, [bold(fg(colors[mode])("Welcome to Rika"))]],
+    [copyTop, [bold(fg(modeColor(mode))("Welcome to Rika"))]],
     [copyTop + 3, [bold(fg(colors.text)("ctrl+o")), fg(colors.muted)(" for commands")]],
     [copyTop + 4, [bold(fg(colors.text)("?")), fg(colors.muted)(" for shortcuts")]],
   ])

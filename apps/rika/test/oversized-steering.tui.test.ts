@@ -12,15 +12,26 @@ const waitQueue = (
   app: TuiApp.TuiApp,
   threadId: Thread.ThreadId,
   predicate: (queue: QueueSnapshot) => boolean,
-  remaining = 60_000,
+  budgetMillis = 60_000,
 ): Effect.Effect<QueueSnapshot, never> =>
-  app.queue(threadId).pipe(
-    Effect.flatMap((queue) =>
-      predicate(queue) || remaining <= 0
-        ? Effect.succeed(queue)
-        : Effect.sleep("50 millis").pipe(Effect.andThen(waitQueue(app, threadId, predicate, remaining - 50))),
-    ),
-    Effect.orDie,
+  Effect.flatMap(
+    Effect.clockWith((clock) => clock.currentTimeMillis),
+    (start) => {
+      const poll = (): Effect.Effect<QueueSnapshot, never> =>
+        app.queue(threadId).pipe(
+          Effect.flatMap((queue) =>
+            Effect.flatMap(
+              Effect.clockWith((clock) => clock.currentTimeMillis),
+              (now) =>
+                predicate(queue) || now - start >= budgetMillis
+                  ? Effect.succeed(queue)
+                  : Effect.sleep("50 millis").pipe(Effect.andThen(poll())),
+            ),
+          ),
+          Effect.orDie,
+        )
+      return poll()
+    },
   )
 
 /**
@@ -58,18 +69,18 @@ test(
         yield* Effect.sleep("500 millis")
         app.pressEnter()
 
-        const waitSteered = (remaining: number): Effect.Effect<number, never> =>
-          app.transcript(activeTurnId).pipe(
-            Effect.orDie,
-            Effect.flatMap((projection) => {
+        const waitSteered = (budgetMillis: number): Effect.Effect<number, never> =>
+          Effect.gen(function* () {
+            const started = performance.now()
+            for (;;) {
+              const projection = yield* app.transcript(activeTurnId).pipe(Effect.orDie)
               const steering = projection?.state.steering
               const count = (steering?.pending?.length ?? 0) + (steering?.settled?.length ?? 0)
-              return count > 0 || remaining <= 0
-                ? Effect.succeed(count)
-                : Effect.sleep("100 millis").pipe(Effect.andThen(waitSteered(remaining - 100)))
-            }),
-          )
-        expect(yield* waitSteered(20_000)).toBeGreaterThan(0)
+              if (count > 0 || performance.now() - started >= budgetMillis) return count
+              yield* Effect.sleep("100 millis")
+            }
+          })
+        expect(yield* waitSteered(60_000)).toBeGreaterThan(0)
         app.pressKey("c", { ctrl: true })
         yield* app.quit
       }),

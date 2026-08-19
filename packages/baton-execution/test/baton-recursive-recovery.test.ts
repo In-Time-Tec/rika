@@ -141,8 +141,12 @@ it.live(
         const oracleRequests = yield* models.requestsFor("Oracle")
         const rootRequest = rootRequests[1] ?? (yield* Effect.die("missing resumed root request"))
         const taskRequest = taskRequests[1] ?? (yield* Effect.die("missing resumed child request"))
-        expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(rootRequest.prompt)).toContain(childResult)
-        expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(taskRequest.prompt)).toContain(grandchildResult)
+        expect(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(rootRequest.prompt)).toContain(
+          childResult,
+        )
+        expect(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(taskRequest.prompt)).toContain(
+          grandchildResult,
+        )
         expect(taskRequests[0]?.tools.map(({ name }) => name).toSorted()).toEqual([
           "run_child",
           "run_child_group",

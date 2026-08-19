@@ -4,7 +4,7 @@ import { workspaceDirectory, workspacePaths } from "@rika/configuration/configur
 import { mkdir, rm, parseChangedFiles } from "./process-files"
 import { Schema } from "effect"
 
-class ExternalBoundaryError extends Schema.TaggedErrorClass<ExternalBoundaryError>()("ExternalBoundaryError", {
+class ExternalBoundaryError extends Schema.TaggedError<ExternalBoundaryError>()("ExternalBoundaryError", {
   operation: Schema.String,
   message: Schema.String,
 }) {}

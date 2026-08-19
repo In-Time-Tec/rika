@@ -5,6 +5,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
 import { productLayer, Service } from "@rika/product/product-operation-service"
 import * as Thread from "@rika/product/thread-record"
+import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ThreadQuery from "@rika/product/thread-query-service"
@@ -68,9 +69,16 @@ export interface TuiApp {
   readonly pressPageDown: Effect.Effect<void>
   readonly clickText: (text: string) => Effect.Effect<void>
   readonly clickComposer: Effect.Effect<void>
+  readonly submit: (prompt: string) => Effect.Effect<void>
   readonly frame: () => string
   readonly nextFrame: Effect.Effect<string>
   readonly spans: () => CapturedSpans
+  readonly thread: (threadId: string) => Effect.Effect<Thread.Thread | undefined, ThreadRepository.RepositoryError>
+  readonly waitThread: (
+    threadId: string,
+    predicate: (thread: Thread.Thread) => boolean,
+    timeoutMillis?: number,
+  ) => Effect.Effect<Thread.Thread, ThreadRepository.RepositoryError>
   readonly transcript: (
     turnId: Turn.TurnId,
   ) => Effect.Effect<TranscriptPage.Projection | undefined, TranscriptRepository.RepositoryError>
@@ -252,6 +260,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     },
   })
   const operation = Context.get(yield* Layer.buildWithScope(operationLayer, resourceScope), Service)
+  const threads = Context.get(repositoryContext, ThreadRepository.Service)
   const transcripts =
     options.inspectTranscript === true ? Context.get(repositoryContext, TranscriptRepository.Service) : undefined
   const queue = makeTuiAppQueue(repositoryContext)
@@ -326,9 +335,24 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
       yield* Effect.promise(() => setup.flush())
       yield* Effect.promise(() => setup.mockMouse.click(2, (options.height ?? 30) - 2))
     }).pipe(Effect.asVoid),
+    submit: (prompt) =>
+      session?.submit(prompt, "medium", [], undefined).pipe(Effect.orDie) ??
+      Effect.die("TUI interactive session is not ready"),
     frame,
     nextFrame: Effect.promise(() => setup.flush()).pipe(Effect.andThen(Effect.sync(frame))),
     spans: () => setup.captureSpans(),
+    thread: (threadId) => threads.get(Thread.ThreadId.make(threadId)),
+    waitThread: (threadId, predicate, timeoutMillis = 10_000) =>
+      Effect.gen(function* () {
+        const started = currentWallTime()
+        for (;;) {
+          const thread = yield* threads.get(Thread.ThreadId.make(threadId))
+          if (thread !== undefined && predicate(thread)) return thread
+          if (currentWallTime() - started >= timeoutMillis)
+            return yield* Effect.die(`tui-app timed out waiting on thread ${threadId}`)
+          yield* Effect.sleep("20 millis")
+        }
+      }),
     transcript: (turnId) => transcripts?.get(turnId) ?? Effect.die("TUI transcript inspection was not requested"),
     queue,
     waitTranscript: (turnId, predicate, timeoutMillis = 10_000) =>

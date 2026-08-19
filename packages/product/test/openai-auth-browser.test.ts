@@ -18,7 +18,9 @@ describe("OpenAI browser authentication", () => {
       expect(credential.generation).toBe(Option.getOrThrow(store.value()).generation)
       expect(credential.fingerprint).toBe(Option.getOrThrow(store.value()).fingerprint)
       expect(credential.fingerprint).not.toContain("account-secret")
-      expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(credential)).not.toContain("refresh-secret")
+      expect(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(credential)).not.toContain(
+        "refresh-secret",
+      )
       expect(String(credential.accountId)).not.toContain("account-secret")
     }).pipe(provideLayer(dependencies(store.layer, http, host)))
   })
@@ -65,7 +67,7 @@ describe("OpenAI browser authentication", () => {
     return Effect.gen(function* () {
       expect((yield* run("cancelled")).kind).toBe("cancelled")
       expect((yield* run("timeout")).kind).toBe("timeout")
-      expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(yield* run("cancelled"))).toBe(
+      expect(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(yield* run("cancelled"))).toBe(
         '{"_tag":"OpenAiAuthError","kind":"cancelled","message":"safe cancelled"}',
       )
     })

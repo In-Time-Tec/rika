@@ -5,7 +5,7 @@ import * as ServerService from "@rika/product/server-service"
 import { Config, Effect, Layer, Option, Schema } from "effect"
 import { layer as serverLayer } from "../../apps/rika/src/transport/client/server-client-transport"
 
-class WarmConfigurationError extends Schema.TaggedErrorClass<WarmConfigurationError>()("WarmConfigurationError", {
+class WarmConfigurationError extends Schema.TaggedError<WarmConfigurationError>()("WarmConfigurationError", {
   message: Schema.String,
 }) {}
 

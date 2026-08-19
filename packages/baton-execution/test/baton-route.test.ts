@@ -24,7 +24,7 @@ const agentEntries = (configured: Configured) =>
 
 const profileNameOf = (entry: ReturnType<typeof agentEntries>[number]) => entry.manifest.name.replace("rika-", "")
 
-const modelCandidates = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
+const modelCandidates = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 /**
  * Values a host holds as credentials. A registration that carried any of these would leak it into
@@ -46,13 +46,13 @@ it.effect("resolves complete ordered model candidates deterministically", () =>
       tokenBudget: 12_000,
     })
     expect(first).toEqual(second)
-    expect(first.version).toBe(2)
+    expect(first.version).toBe(3)
     expect(first.subagents).toEqual({ maxDepth: 1, maxSubagents: 4 })
     expect(first.tokenBudget).toBe(12_000)
     expect(first.main.registrationIdentity).toMatch(/^rika:model:v1:[a-f0-9]{64}$/)
     expect(first.main.candidates).toHaveLength(Settings.Defaults.settingsDefaults.models.luna!.candidates.length)
     expect(first.main.candidates[0]?.providerOptions?.max_output_tokens).toBe(128_000)
-    const mainAlias = Settings.Defaults.settingsDefaults.modes.medium.main.alias
+    const mainAlias = "luna"
     const orderedSettings = {
       ...Settings.Defaults.settingsDefaults,
       models: {
@@ -60,6 +60,13 @@ it.effect("resolves complete ordered model candidates deterministically", () =>
         [mainAlias]: {
           ...Settings.Defaults.settingsDefaults.models[mainAlias]!,
           candidates: ["ordered-a", "ordered-b"],
+        },
+      },
+      modes: {
+        ...Settings.Defaults.settingsDefaults.modes,
+        medium: {
+          ...Settings.Defaults.settingsDefaults.modes.medium!,
+          main: { alias: mainAlias, effort: "medium" as const },
         },
       },
     }
@@ -303,7 +310,7 @@ it.effect("resolves an openai candidate through its configured api key environme
       model: "gpt-5.6-sol",
       providerConnection: {
         provider: "openai",
-        protocol: "openai",
+        protocol: "openai-responses",
         baseUrl: "https://switchboard.example/v1",
         authentication: "api-key" as const,
         apiKeyEnvironment: "SWITCHBOARD_API_KEY",
@@ -329,6 +336,38 @@ it.effect("resolves an openai candidate through its configured api key environme
   }),
 )
 
+it.effect("routes an OpenAI Chat Completions candidate through the released compatible adapter", () =>
+  Effect.gen(function* () {
+    const route = testExecutionRoute()
+    const candidate = {
+      ...route.main.candidates[0]!,
+      model: "custom-chat-model",
+      providerConnection: {
+        provider: "openai",
+        protocol: "openai-chat-completions",
+        baseUrl: "https://chat-compatible.example/openai/v1",
+        authentication: "api-key" as const,
+        apiKeyEnvironment: "CHAT_COMPATIBLE_API_KEY",
+      },
+      registrationIdentity:
+        "chat-compatible-registration" as (typeof route.main.candidates)[number]["registrationIdentity"],
+      providerOptions: { max_tokens: 4_096 },
+    }
+    const executionRoute = { ...route, main: { ...route.main, candidates: [candidate] } }
+    const configured = yield* configure({ executionRoute, workspace: "/workspace", kernel }).pipe(
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromEnv({ env: { CHAT_COMPATIBLE_API_KEY: "switchboard-secret" } }),
+      ),
+    )
+    const root = configured.resolverEntries[0]!
+    const selection = "agent" in root ? root.agent.model : undefined
+    expect(modelCandidates(selection?.registrationKey ?? "[]")).toEqual([
+      ["openai", "custom-chat-model", "chat-compatible-registration"],
+    ])
+  }),
+)
+
 it.effect("reports the missing api key environment variable by name instead of a redacted registry failure", () =>
   Effect.gen(function* () {
     const route = testExecutionRoute()
@@ -337,7 +376,7 @@ it.effect("reports the missing api key environment variable by name instead of a
       model: "gpt-5.6-sol",
       providerConnection: {
         provider: "openai",
-        protocol: "openai",
+        protocol: "openai-responses",
         baseUrl: "https://switchboard.example/v1",
         authentication: "api-key" as const,
         apiKeyEnvironment: "SWITCHBOARD_API_KEY",

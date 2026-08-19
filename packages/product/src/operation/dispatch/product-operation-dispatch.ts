@@ -15,7 +15,7 @@ import { makeProductOperationService } from "./product-operation-service"
 import type { ProductLayerOptions } from "./product-operation-options"
 import type { InteractiveEvent } from "../interactive/session-event"
 
-const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const unavailable = (input: Input, message = `${input._tag} is specified but not implemented yet`) =>
   OperationUnavailable.make({ operation: input._tag, message })
 const writeThread = (thread: Thread.Thread) => Console.log(encodeJson(thread))

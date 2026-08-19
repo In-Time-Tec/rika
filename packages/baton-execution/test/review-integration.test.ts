@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { layer } from "../src/baton-execution"
 
-const fanOutJoin = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
+const fanOutJoin = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 const projectionChanges = (events: ReadonlyArray<ExecutionGateway.ModelPreviewEvent | Change>): ReadonlyArray<Change> =>
   events.filter((event): event is Change => event._tag !== "ModelPreview" && event._tag !== "ModelPreviewCleared")

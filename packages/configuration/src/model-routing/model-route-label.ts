@@ -10,13 +10,18 @@ export interface ModeRouteLabel {
 }
 
 const routeLabel = (settings: ConfigurationSettings, mode: ModeId, role: ModelRoute.Role): ModeRouteLabel => {
-  const configured = settings.modes[mode][role]
+  const configured = (Object.hasOwn(settings.modes, mode) ? settings.modes[mode] : undefined)?.[role]
+  if (configured === undefined) return { name: mode, effort: "", fast: false }
   try {
     const route = resolveModelRoute(settings, mode, role)
     return { name: route.displayName, effort: route.effort, fast: route.fast }
   } catch {
     return {
-      name: settings.models[configured.alias]?.displayName ?? configured.alias,
+      name:
+        "alias" in configured
+          ? ((Object.hasOwn(settings.models, configured.alias) ? settings.models[configured.alias] : undefined)
+              ?.displayName ?? configured.alias)
+          : configured.model,
       effort: configured.effort,
       fast: configured.fast === true,
     }

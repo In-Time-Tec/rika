@@ -16,10 +16,7 @@ export interface Activated {
   readonly generation: PluginRegistry.Generation
 }
 
-export class NoGeneration extends Schema.TaggedErrorClass<NoGeneration>()(
-  "@rika/extensions/NoExtensionGeneration",
-  {},
-) {}
+export class NoGeneration extends Schema.TaggedError<NoGeneration>()("@rika/extensions/NoExtensionGeneration", {}) {}
 
 export interface ExecutionExtensionInterface {
   readonly future: (mcpFingerprint: string, resolvedContextDigest: string) => Effect.Effect<Activated, NoGeneration>

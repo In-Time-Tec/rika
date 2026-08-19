@@ -10,7 +10,7 @@ import { Config, Effect, FileSystem, Layer, Path, Schema, pipe } from "effect"
 import type { ConfigError as EffectConfigError } from "effect/Config"
 import type * as PlatformError from "effect/PlatformError"
 
-class SeedConfigurationError extends Schema.TaggedErrorClass<SeedConfigurationError>()("SeedConfigurationError", {
+class SeedConfigurationError extends Schema.TaggedError<SeedConfigurationError>()("SeedConfigurationError", {
   message: Schema.String,
 }) {}
 

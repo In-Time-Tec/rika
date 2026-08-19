@@ -49,7 +49,7 @@ export const nearestExistingAncestor = (
   })
 
 const parseConfigText = (filename: string, text: string) =>
-  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(text).pipe(
+  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
     Effect.mapError((error) =>
       SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({
         path: filename,

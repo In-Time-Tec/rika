@@ -1,7 +1,7 @@
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { Goal } from "@rika/product/goal-record"
 
-export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("GoalRepositoryError", {
+export class RepositoryError extends Schema.TaggedError<RepositoryError>()("GoalRepositoryError", {
   message: Schema.String,
 }) {}
 

@@ -28,7 +28,7 @@ const roots = Effect.gen(function* () {
 const recordedSpecifiers = Effect.fn("Upstream.recordedSpecifiers")(function* (project: string) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const manifest = (yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(
+  const manifest = (yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
     yield* fileSystem.readFileString(path.join(project, "package.json")),
   )) as { readonly overrides?: Record<string, string> }
   return manifest.overrides ?? {}
@@ -147,7 +147,7 @@ const link = Effect.gen(function* () {
     specifiers[name] = `file:${tarballDirectory}/${named}`
   }
   const manifestPath = path.join(project, "package.json")
-  const manifest = (yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(
+  const manifest = (yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
     yield* fileSystem.readFileString(manifestPath),
   )) as {
     readonly overrides?: Record<string, string>
@@ -160,7 +160,7 @@ const link = Effect.gen(function* () {
   }
   yield* fileSystem.writeFileString(
     manifestPath,
-    `${yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(pinned)}\n`,
+    `${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(pinned)}\n`,
   )
   yield* run("bun", ["install"], project)
   yield* run("bun", ["run", "format", "--", "package.json"], project)

@@ -214,10 +214,9 @@ const program = Effect.gen(function* () {
                 if (input._tag === "Run" && input.prompt[0] === "oversized-output")
                   return Console.log("x".repeat(1_100_000))
                 if (!delayedWork || input._tag !== "Run")
-                  return Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)({ hostPid: process.pid }).pipe(
-                    Effect.flatMap(Console.log),
-                    Effect.orDie,
-                  )
+                  return Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))({
+                    hostPid: process.pid,
+                  }).pipe(Effect.flatMap(Console.log), Effect.orDie)
                 const delegated = input.prompt[0] === "active-root-with-child"
                 if (delegated)
                   return Effect.sync(() => {
@@ -466,7 +465,7 @@ const program = Effect.gen(function* () {
                         const admissionMaximum = yield* Ref.get(interactiveAdmissionMaximum)
                         const admissions = yield* Ref.get(interactiveAdmissions)
                         const executionMaximum = yield* Ref.get(interactiveMaximum)
-                        const encoded = yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)({
+                        const encoded = yield* Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))({
                           admissionMaximum,
                           admissions,
                           executionMaximum,
@@ -492,6 +491,8 @@ const program = Effect.gen(function* () {
                 activeWork = 0
               }).pipe(Effect.andThen(append("quit-commands.log", `${process.pid}\n`))),
               newThread: Effect.void,
+              archiveThread: Effect.void,
+              archiveAndNewThread: Effect.void,
               selectThread: () => Effect.void,
               readQueue: () => Effect.void,
               previewThread: () => Effect.void,

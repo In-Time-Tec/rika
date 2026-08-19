@@ -2,7 +2,7 @@ import stringWidth from "string-width"
 import { StyledText, dim, fg, bold, type TextChunk } from "@opentui/core"
 import type { Model } from "../../state/model/terminal-state"
 import { boundedThreadSidebarWidth, contentColumnWidth, isNarrow } from "../../state/model/terminal-layout-state"
-import { colors } from "../../presentation/terminal/terminal-theme"
+import { colors, modeColor } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { shortcutsContent } from "./opentui-composer-region"
 import { formatActivity } from "../../state/model/terminal-activity-state"
@@ -140,7 +140,7 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     const hintChunks: Array<TextChunk> = []
     for (const [index, segment] of hintSegments.entries()) {
       hintChunks.push(dim(fg(toOpenColor(colors.text))(index === 0 ? " " : " ── ")))
-      hintChunks.push(fg(colors[model.mode])(segment.accent))
+      hintChunks.push(fg(modeColor(model.mode))(segment.accent))
       if (segment.suffix.length > 0) hintChunks.push(dim(fg(toOpenColor(colors.text))(segment.suffix)))
     }
     if (hintSegments.length > 0) hintChunks.push(dim(fg(toOpenColor(colors.text))(" ")))
@@ -189,8 +189,12 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       contentColumnWidth(previousModel) !== contentColumnWidth(model)
     if (goalChanged) this.renderGoalLabel(model)
     this.workspaceLabel.right = sidebarWidth + 2
-    this.quitConfirmationBox.bottom = renderedInputHeight + 1
-    this.quitConfirmationBox.width = Math.max(1, Math.min(24, model.width - 4))
+    this.ctrlCMenuBox.bottom = renderedInputHeight + 1
+    const ctrlCMenuWidth = Math.max(1, Math.min(33, model.width - 4))
+    this.ctrlCMenuBox.width = ctrlCMenuWidth
+    this.ctrlCMenuTitle.left = model.width - ctrlCMenuWidth - 1
+    this.ctrlCMenuTitle.top = Math.max(0, model.height - renderedInputHeight - 7)
+    this.ctrlCMenuTitle.visible = this.ctrlCMenuBox.visible && model.width >= 19
     const workspaceChanged =
       previousModel === undefined ||
       previousModel.workspace !== model.workspace ||
@@ -236,7 +240,7 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
         ? ` Changed files (${readyOr(model.changedFiles, []).length}) `
         : ` Files (${readyOr(model.filePicker.items, []).length}) `
       this.changedFilesBox.titleAlignment = "left"
-      this.changedFilesBox.titleColor = toOpenColor(colors[model.mode])
+      this.changedFilesBox.titleColor = toOpenColor(modeColor(model.mode))
       this.changedFilesText.fg = toOpenColor(colors.text)
       this.refreshSidebarRows(model)
       if (

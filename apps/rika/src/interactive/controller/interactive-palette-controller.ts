@@ -17,7 +17,7 @@ export const writeSubagentLimit = Effect.fn("InteractivePalette.writeSubagentLim
     Effect.flatMap((exists) =>
       exists
         ? fileSystem.readFileString(filename).pipe(
-            Effect.flatMap(Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)),
+            Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))),
             Effect.mapError((cause) =>
               SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({
                 path: filename,
@@ -42,6 +42,6 @@ export const writeSubagentLimit = Effect.fn("InteractivePalette.writeSubagentLim
   const next = { ...current, subagents: { ...subagents, [limit]: value } }
   SettingsDecoder.Decoder.decodeSettingsInput(filename, next)
   yield* fileSystem.makeDirectory(path.dirname(filename), { recursive: true })
-  const encoded = yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(next)
+  const encoded = yield* Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(next)
   yield* fileSystem.writeFileString(filename, `${encoded}\n`)
 })

@@ -21,15 +21,28 @@ const boundsOf = (schema: unknown): string | undefined => {
   let maximum: number | undefined
   let length: number | undefined
   for (const check of ast.checks ?? []) {
-    const meta = (check as { readonly annotations?: { readonly meta?: Record<string, unknown> } }).annotations?.meta
-    if (meta === undefined) continue
-    const tag = meta._tag
-    if (tag === "isGreaterThan" && typeof meta.exclusiveMinimum === "number") minimum = meta.exclusiveMinimum + 1
-    if (tag === "isGreaterThanOrEqualTo" && typeof meta.minimum === "number") minimum = meta.minimum
-    if (tag === "isLessThan" && typeof meta.exclusiveMaximum === "number") maximum = meta.exclusiveMaximum - 1
-    if (tag === "isLessThanOrEqualTo" && typeof meta.maximum === "number") maximum = meta.maximum
-    if (tag === "isLengthBetween" && meta.minimum === meta.maximum && typeof meta.minimum === "number")
-      length = meta.minimum
+    const representation = (
+      check as {
+        readonly annotations?: {
+          readonly representation?: { readonly id?: string; readonly payload?: Record<string, unknown> | null }
+        }
+      }
+    ).annotations?.representation
+    const payload = representation?.payload
+    if (payload === undefined || payload === null) continue
+    const tag = representation?.id
+    if (tag === "effect/schema/isGreaterThan" && typeof payload.exclusiveMinimum === "number")
+      minimum = payload.exclusiveMinimum + 1
+    if (tag === "effect/schema/isGreaterThanOrEqualTo" && typeof payload.minimum === "number") minimum = payload.minimum
+    if (tag === "effect/schema/isLessThan" && typeof payload.exclusiveMaximum === "number")
+      maximum = payload.exclusiveMaximum - 1
+    if (tag === "effect/schema/isLessThanOrEqualTo" && typeof payload.maximum === "number") maximum = payload.maximum
+    if (
+      tag === "effect/schema/isLengthBetween" &&
+      payload.minimum === payload.maximum &&
+      typeof payload.minimum === "number"
+    )
+      length = payload.minimum
   }
   if (ast._tag === "Arrays")
     return length === undefined

@@ -169,7 +169,9 @@ it.effect("sql turns create, get, and list current turn shapes", () =>
       expect(listed.map((turn) => turn.id)).toEqual([Turn.TurnId.make("turn-a"), Turn.TurnId.make("turn-b")])
       const parameters = sql.statements[0]?.parameters ?? []
       expect(parameters.slice(0, 4)).toEqual(["turn-a", "thread-a", "hello", null])
-      const executionRoute = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(String(parameters[4]))
+      const executionRoute = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
+        String(parameters[4]),
+      )
       expect(executionRoute).toEqual(ExecutionRouteSnapshot.testExecutionRoute())
       expect(parameters.slice(5)).toEqual(['{"_tag":"Human"}', '{"_tag":"Original"}', "thread-a", 1, 1])
       expect(sql.statements.at(-1)).toEqual({

@@ -50,7 +50,7 @@ const ServerMessage = Schema.Union([
 type ClientMessage = typeof ClientMessage.Type
 type ServerMessage = typeof ServerMessage.Type
 
-class ServerServiceError extends Schema.TaggedErrorClass<ServerServiceError>()("ServerServiceError", {
+class ServerServiceError extends Schema.TaggedError<ServerServiceError>()("ServerServiceError", {
   reason: Schema.Literals([
     "authentication-failed",
     "identity-mismatch",

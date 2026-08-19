@@ -1,4 +1,4 @@
-import { Schema, SchemaGetter } from "effect"
+import { Schema } from "effect"
 import { ModelRegistrationIdentity } from "./model-registration-identity"
 import { ProviderConnectionSnapshot } from "./provider-connection-snapshot"
 import { defaultCompactionSummaryPrompt } from "./execution-compaction-prompt"
@@ -27,7 +27,7 @@ export type ExecutionRouteModelCandidateSnapshot = typeof ExecutionRouteModelCan
 
 export const ExecutionRouteModelSnapshot = Schema.Struct({
   role: ModelRouteRole,
-  alias: Schema.String,
+  selection: Schema.String,
   registrationIdentity: ModelRegistrationIdentity,
   effort: Schema.String,
   fast: Schema.Boolean,
@@ -40,29 +40,8 @@ export const ExecutionRouteModelSnapshot = Schema.Struct({
 })
 export type ExecutionRouteModelSnapshot = typeof ExecutionRouteModelSnapshot.Type
 
-const ExecutionRouteSnapshotV1 = Schema.Struct({
-  version: Schema.Literal(1),
-  mode: Schema.String,
-  tokenBudget: Schema.optionalKey(Schema.Finite),
-  compaction: Schema.Struct({
-    strategy: Schema.Literal("default"),
-    summaryPrompt: Schema.String,
-  }),
-  title: ExecutionRouteModelSnapshot,
-  compactionSummary: ExecutionRouteModelSnapshot,
-  main: ExecutionRouteModelSnapshot,
-  oracle: ExecutionRouteModelSnapshot,
-  agents: Schema.Struct({
-    librarian: ExecutionRouteModelSnapshot,
-    painter: ExecutionRouteModelSnapshot,
-    readThread: ExecutionRouteModelSnapshot,
-    review: ExecutionRouteModelSnapshot,
-    surgeon: ExecutionRouteModelSnapshot,
-    task: ExecutionRouteModelSnapshot,
-  }),
-})
-const ExecutionRouteSnapshotV2 = Schema.Struct({
-  version: Schema.Literal(2),
+export const ExecutionRouteSnapshot = Schema.Struct({
+  version: Schema.Literal(3),
   mode: Schema.String,
   tokenBudget: Schema.optionalKey(Schema.Finite),
   subagents: Schema.Struct({
@@ -86,16 +65,6 @@ const ExecutionRouteSnapshotV2 = Schema.Struct({
     task: ExecutionRouteModelSnapshot,
   }),
 })
-export const ExecutionRouteSnapshot = Schema.Union([ExecutionRouteSnapshotV2, ExecutionRouteSnapshotV1]).pipe(
-  Schema.decodeTo(Schema.toType(ExecutionRouteSnapshotV2), {
-    decode: SchemaGetter.transform((snapshot) =>
-      snapshot.version === 1
-        ? { ...snapshot, version: 2 as const, subagents: { maxDepth: 1, maxSubagents: 4 } }
-        : snapshot,
-    ),
-    encode: SchemaGetter.transform((snapshot) => snapshot),
-  }),
-)
 export type ExecutionRouteSnapshot = typeof ExecutionRouteSnapshot.Type
 
 export const testExecutionRoute = (mode = "test"): ExecutionRouteSnapshot => {
@@ -110,7 +79,7 @@ export const testExecutionRoute = (mode = "test"): ExecutionRouteSnapshot => {
     registrationIdentity: "test" as ExecutionRouteModelCandidateSnapshot["registrationIdentity"],
   }
   const route = {
-    alias: "test",
+    selection: "test",
     registrationIdentity: "test-route" as ExecutionRouteModelSnapshot["registrationIdentity"],
     effort: "medium",
     fast: false,
@@ -118,7 +87,7 @@ export const testExecutionRoute = (mode = "test"): ExecutionRouteSnapshot => {
     compaction: { contextWindow: 372_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
   }
   return {
-    version: 2,
+    version: 3,
     mode,
     subagents: { maxDepth: 1, maxSubagents: 4 },
     compaction: { strategy: "default", summaryPrompt: defaultCompactionSummaryPrompt },
@@ -160,7 +129,7 @@ const validateConnection = (value: unknown): void => {
   if (
     connection.authentication === "account" &&
     (connection.provider !== "openai" ||
-      connection.protocol !== "openai" ||
+      connection.protocol !== "openai-responses" ||
       typeof connection.credentialIdentity !== "string" ||
       connection.credentialIdentity.length === 0 ||
       connection.apiKeyEnvironment !== undefined)
@@ -173,7 +142,7 @@ const validateModel = (value: unknown, expectedRole: ModelRouteRole): void => {
   const model = requireRecord(value, "Malformed execution route model")
   requireKeys(
     model,
-    ["role", "alias", "registrationIdentity", "effort", "fast", "candidates", "compaction"],
+    ["role", "selection", "registrationIdentity", "effort", "fast", "candidates", "compaction"],
     "Unsupported execution route model field",
   )
   if (model.role !== expectedRole) throw new Error("Malformed execution route role")
@@ -215,7 +184,7 @@ export const toExecutionRouteSnapshot = (routeValue: unknown): ExecutionRouteSna
     "Unsupported execution route field",
   )
   if (route.version === undefined) throw new Error("Malformed execution route version")
-  if (route.version !== 2) throw new Error("Unsupported execution route version")
+  if (route.version !== 3) throw new Error("Unsupported execution route version")
   validateModel(route.main, "main")
   validateModel(route.oracle, "oracle")
   validateModel(route.title, "title")
@@ -230,5 +199,5 @@ export const toExecutionRouteSnapshot = (routeValue: unknown): ExecutionRouteSna
   )
   for (const role of ["librarian", "painter", "readThread", "review", "surgeon", "task"] as const)
     validateModel(agents[role], role)
-  return Schema.decodeUnknownSync(ExecutionRouteSnapshotV2, { onExcessProperty: "error" })(route)
+  return Schema.decodeUnknownSync(ExecutionRouteSnapshot, { onExcessProperty: "error" })(route)
 }

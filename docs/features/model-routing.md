@@ -1,28 +1,46 @@
 # Model routing
 
-Rika maps model aliases to ordered provider candidates for the main and Oracle routes. A mode pins both routes: Task and Surgeon children use main, while Oracle, Librarian, Painter, and ReadThread children use Oracle. Child tools never choose a model or reasoning effort.
+Rika maps each configured mode name to a main route, an Oracle route, and optional per-agent routes. A direct route names `provider` and `model`; it does not need a model alias. `effort` defaults to the inherited route's effort or `medium`, and `fast` is optional. A new mode requires `main`; an omitted `oracle` inherits `main`. Task and Surgeon inherit main, while Librarian, Painter, ReadThread, and Review inherit Oracle. Any inherited agent route can be replaced under the mode's `agents` map.
 
-Each accepted Turn pins the chosen models, authentication kind, non-secret credential identity, and provider settings. An OpenAI account change therefore affects only newly admitted work; replay of older work refuses a different account rather than silently changing authority. Missing aliases, unavailable variants, corrupt stored credentials, or routes that cannot be registered fail before execution starts; later configuration changes apply only to work not yet admitted.
+`modes` may contain any non-empty names. Once a global or Workspace file declares `modes`, those user-defined maps form the complete effective mode set instead of extending the built-in `low`, `medium`, `high`, and `ultra` set. Workspace entries merge over global entries by mode, role, and agent. `defaultMode` must name a mode in that final set.
 
-Transient provider failures show the retry reason and schedule. A terminal provider failure keeps the technical cause in expandable details and shows a category-specific title and recovery action. Rika never displays credential values.
+`modelRoutes.title` and `modelRoutes.compaction` independently select the thread-title and compaction-summary models. They accept the same direct or alias route shape. Each accepted Turn pins every resolved model, ordered candidate list, options, limits, authentication kind, non-secret credential identity, and provider connection. Later settings or account changes affect only newly admitted work.
 
-A `modelAliases` entry describes its own model. It names a provider, ordered non-empty candidates, and either a `preset` or its own `efforts`, never both. Presets are `openai` and `claude`; each supplies the request-option family and default limits for that family, not a product identity. An alias may set `limits` to replace the preset's block, and `displayName` to control how it is shown; `displayName` falls back to the alias name. Declared `efforts` must use request options the provider's protocol accepts, and require `limits`.
+A `modelAliases` entry is only needed for a reusable bundle: ordered fallback candidates, custom limits, display metadata, or effort-specific provider options. It names a provider, candidates, and either the `openai` or `claude` preset or its own `efforts`. Custom efforts require custom limits. A route selects a bundle with `{ "alias": "name" }`; an alias is never required merely to assign one model to a mode or agent.
 
-`modelRoutes.modes` sets the main and Oracle route for a mode. A role accepts an alias name, or an object with `alias` and an optional `effort` and `fast`; omitted values keep the mode's built-in policy. `modelRoutes.title` routes thread-title generation the same way, `modelRoutes.compaction` routes compaction summaries, and `modelRoutes.agents` routes an individual specialist by agent id. Each accepted Turn pins these routes before execution.
+Missing providers or aliases, unavailable alias variants, corrupt credentials, and unregistrable routes fail before execution. Transient provider failures show their retry reason; terminal failures preserve technical details without displaying credential values.
 
 ```json
 {
+  "defaultMode": "deep-review",
+  "modes": {
+    "quick": {
+      "main": { "provider": "openai", "model": "gpt-5.6-luna", "effort": "high" }
+    },
+    "deep-review": {
+      "main": { "provider": "openai", "model": "gpt-5.6-sol", "effort": "xhigh" },
+      "oracle": { "provider": "anthropic", "model": "claude-opus-4-1", "effort": "high" },
+      "agents": {
+        "task": {
+          "provider": "bedrock",
+          "model": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+          "effort": "high"
+        },
+        "librarian": { "provider": "openrouter", "model": "openai/gpt-5.4", "effort": "medium" }
+      }
+    }
+  },
   "modelAliases": {
-    "gate-sonnet": {
+    "opus-fallbacks": {
       "preset": "claude",
       "provider": "anthropic",
-      "candidates": ["claude-sonnet-5"],
-      "displayName": "Sonnet 5"
+      "candidates": ["claude-opus-4-1", "claude-opus-4"],
+      "displayName": "Opus fallbacks"
     }
   },
   "modelRoutes": {
-    "modes": { "high": { "main": { "alias": "gate-sonnet", "effort": "high" } } },
-    "title": "gate-sonnet"
+    "title": { "provider": "openai", "model": "gpt-5.6-luna", "effort": "low" },
+    "compaction": { "alias": "opus-fallbacks", "effort": "high" }
   }
 }
 ```

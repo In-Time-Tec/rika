@@ -3,7 +3,7 @@ export { Service }
 import { Effect, Layer, Ref, Schema } from "effect"
 import { Thread, ThreadId, ThreadLineage } from "@rika/product/thread-record"
 
-export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadRepositoryError", {
+export class RepositoryError extends Schema.TaggedError<RepositoryError>()("ThreadRepositoryError", {
   message: Schema.String,
 }) {}
 
@@ -28,6 +28,7 @@ export interface ListInput {
 
 export interface Interface {
   readonly create: (input: CreateInput) => Effect.Effect<Thread, RepositoryError>
+  readonly archiveAndCreate: (currentId: ThreadId, input: CreateInput) => Effect.Effect<Thread, RepositoryError>
   readonly get: (id: ThreadId) => Effect.Effect<Thread | undefined, RepositoryError>
   readonly list: (input?: ListInput) => Effect.Effect<ReadonlyArray<Thread>, RepositoryError>
   readonly listAll: Effect.Effect<ReadonlyArray<Thread>, RepositoryError>
@@ -105,6 +106,31 @@ export const makeMemory = (initial: ReadonlyArray<Thread> = []) =>
         }
         yield* Ref.update(state, (values) => new Map(values).set(thread.id, thread))
         return clone(thread)
+      }),
+      archiveAndCreate: Effect.fn("ThreadRepository.archiveAndCreate")(function* (currentId, input) {
+        const threads = yield* Ref.get(state)
+        const current = yield* requireThread(currentId)
+        if (threads.has(input.id)) {
+          return yield* RepositoryError.make({ message: `Thread ${input.id} exists` })
+        }
+        const created: Thread = {
+          id: input.id,
+          workspace: input.workspace,
+          title: input.title,
+          labels: [],
+          pinned: false,
+          archived: false,
+          lineage: input.lineage ?? { _tag: "Original" },
+          createdAt: input.now,
+          updatedAt: input.now,
+        }
+        yield* Ref.set(
+          state,
+          new Map(threads)
+            .set(currentId, { ...current, archived: true, updatedAt: input.now })
+            .set(created.id, created),
+        )
+        return clone(created)
       }),
       get: Effect.fn("ThreadRepository.get")(function* (id) {
         const thread = (yield* Ref.get(state)).get(id)

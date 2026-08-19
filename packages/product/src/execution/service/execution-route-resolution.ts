@@ -52,7 +52,7 @@ const accountFingerprint = (
   authentication: RouteAuthentication | undefined,
 ): string | undefined =>
   route.providerId === "openai" &&
-  route.providerConnection.protocol === "openai" &&
+  route.providerConnection.protocol === "openai-responses" &&
   normalizedUrl(route.providerConnection.baseUrl) === normalizedUrl(Defaults.providerDefaults.openai.baseUrl)
     ? authentication?.openAiAccountFingerprint
     : undefined
@@ -63,7 +63,7 @@ const connectionSnapshot = (
 ): ProviderConnectionSnapshot => {
   const connection = route.providerConnection
   const fingerprint = accountFingerprint(route, authentication)
-  if (fingerprint !== undefined && connection.protocol === "openai") {
+  if (fingerprint !== undefined && connection.protocol === "openai-responses") {
     return {
       provider: route.providerId,
       protocol: connection.protocol,
@@ -91,13 +91,15 @@ const providerOptions = (
   authentication: ProviderConnectionSnapshot["authentication"],
 ): Readonly<Record<string, unknown>> => {
   switch (route.providerConnection.protocol) {
-    case "openai": {
+    case "openai-responses": {
       if (authentication === "account") {
         const { max_output_tokens: _, ...options } = route.options
         return { ...options, store: false }
       }
       return { ...route.options, max_output_tokens: route.maxOutputTokens }
     }
+    case "openai-chat-completions":
+      return { ...route.options, max_tokens: route.maxOutputTokens }
     case "anthropic":
       return { ...route.options, max_tokens: route.maxOutputTokens }
     case "openrouter":
@@ -117,7 +119,7 @@ const registrationIdentity = (
     `rika:model:v1:${createHash("sha256")
       .update(
         canonical({
-          alias: route.alias,
+          selection: route.selection,
           candidates: route.candidates,
           compaction: route.compaction,
           effort: route.effort,
@@ -148,7 +150,7 @@ const snapshot = (
   ) as ExecutionRouteModelSnapshot["candidates"]
   return {
     role,
-    alias: route.alias,
+    selection: route.selection,
     registrationIdentity: registrationIdentity(route, providerConnection, options),
     effort: route.effort,
     fast: route.fast,
@@ -158,14 +160,17 @@ const snapshot = (
 }
 
 const tunedModeRoute = (settings: ConfigurationSettings, mode: ModeId, role: ModelRoute.Role, tuning?: RouteTuning) => {
-  const configured = settings.modes[mode][role]
+  const modeConfig = settings.modes[mode]
+  const configured = modeConfig?.[role]
+  if (configured === undefined || modeConfig === undefined)
+    return ModelRouteResolution.resolveModelRoute(settings, mode, role)
   return ModelRouteResolution.resolveModelRoute(
     {
       ...settings,
       modes: {
         ...settings.modes,
         [mode]: {
-          ...settings.modes[mode],
+          ...modeConfig,
           [role]: { ...configured, fast: tuning?.fastMode ?? configured.fast ?? false },
         },
       },
@@ -204,7 +209,7 @@ export const resolve: {
       ]),
     ) as NonNullable<ExecutionRouteSnapshot["agents"]>
     return {
-      version: 2,
+      version: 3,
       mode,
       ...(tuning?.tokenBudget === undefined ? {} : { tokenBudget: tuning.tokenBudget }),
       subagents: settings.subagents,

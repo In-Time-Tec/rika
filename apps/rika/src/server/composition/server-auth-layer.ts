@@ -28,7 +28,7 @@ const provideLayerScoped =
       ),
     )
 
-export class OperationProductError extends Schema.TaggedErrorClass<OperationProductError>()("OperationError", {
+export class OperationProductError extends Schema.TaggedError<OperationProductError>()("OperationError", {
   message: Schema.String,
 }) {}
 

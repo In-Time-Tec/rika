@@ -5,7 +5,15 @@ import type { ModelRoute } from "../model-routing/model-route"
 import type { ConfigurationSettings } from "./configuration-settings"
 import { settingsDefaults } from "./configuration-defaults"
 import { ConfigurationSettingsFileError } from "./configuration-settings-decoder"
-import type { ConfigurationSettingsInput, ModelAliasInput, RoleRouteInput } from "./configuration-settings-input"
+import type {
+  ConfigurationSettingsInput,
+  ModeInput,
+  ModelAliasInput,
+  RoleRouteInput,
+} from "./configuration-settings-input"
+
+const own = <A>(record: Readonly<Record<string, A>>, key: string): A | undefined =>
+  Object.hasOwn(record, key) ? record[key] : undefined
 
 const aliasFromInput = (name: string, input: ModelAliasInput): ModelRoute.ModelAlias => {
   const presetId = input.preset
@@ -24,14 +32,16 @@ const aliasFromInput = (name: string, input: ModelAliasInput): ModelRoute.ModelA
 }
 
 const assertPainterSupportsMedia = (settings: ConfigurationSettings) => {
-  const painter = settings.agents.painter
-  if (painter === undefined) return
-  const alias = settings.models[painter.alias]
-  if (alias !== undefined && !alias.supportsMedia)
-    throw ConfigurationSettingsFileError.make({
-      path: "modelRoutes.agents.painter",
-      message: `Model alias ${painter.alias} does not support media, which the Painter agent requires. Set supportsMedia on the alias if the model accepts images.`,
-    })
+  for (const [mode, modeConfig] of Object.entries(settings.modes)) {
+    const painter = modeConfig.agents.painter
+    if (painter === undefined || !("alias" in painter)) continue
+    const alias = own(settings.models, painter.alias)
+    if (alias !== undefined && !alias.supportsMedia)
+      throw ConfigurationSettingsFileError.make({
+        path: `modes.${mode}.agents.painter`,
+        message: `Model alias ${painter.alias} does not support media, which the Painter agent requires. Set supportsMedia on the alias if the model accepts images.`,
+      })
+  }
 }
 
 const isBedrockOverride = (
@@ -40,14 +50,75 @@ const isBedrockOverride = (
   value !== undefined &&
   ("authMode" in value || "region" in value || "profile" in value || "endpoint" in value || "authRefresh" in value)
 
-const roleRoute = (configured: ModelRoute.RoleRoute, override: string | RoleRouteInput | undefined) => {
-  if (override === undefined) return configured
-  if (typeof override === "string") return { ...configured, alias: override }
+const roleRoute = (
+  configured: ModelRoute.RoleRoute | undefined,
+  override: RoleRouteInput | undefined,
+  path: string,
+): ModelRoute.RoleRoute => {
+  if (override === undefined) {
+    if (configured !== undefined) return configured
+    throw ConfigurationSettingsFileError.make({ path, message: "A route is required." })
+  }
+  if ("alias" in override && override.alias !== undefined) {
+    const fast = override.fast ?? configured?.fast
+    return {
+      alias: override.alias,
+      effort: override.effort ?? configured?.effort ?? "medium",
+      ...(fast === undefined ? {} : { fast }),
+    }
+  }
+  const fast = override.fast ?? configured?.fast
   return {
-    ...configured,
-    alias: override.alias,
-    ...(override.effort === undefined ? {} : { effort: override.effort }),
-    ...(override.fast === undefined ? {} : { fast: override.fast }),
+    provider: override.provider,
+    model: override.model,
+    effort: override.effort ?? configured?.effort ?? "medium",
+    ...(fast === undefined ? {} : { fast }),
+  }
+}
+
+const modes = (
+  global: ConfigurationSettingsInput,
+  workspace: ConfigurationSettingsInput,
+): ConfigurationSettings["modes"] => {
+  if (global.modes === undefined && workspace.modes === undefined) return settingsDefaults.modes
+  const merged = Object.create(null) as Record<string, ModelRoute.ModeConfig>
+  const merge = (input: Readonly<Record<string, ModeInput>> | undefined) => {
+    for (const [name, mode] of Object.entries(input ?? {})) {
+      const current = merged[name]
+      const main = roleRoute(current?.main, mode.main, `modes.${name}.main`)
+      const oracle = roleRoute(current?.oracle ?? main, mode.oracle, `modes.${name}.oracle`)
+      const agents = { ...current?.agents }
+      for (const [agent, route] of Object.entries(mode.agents ?? {})) {
+        agents[agent as ModelRoute.AgentId] = roleRoute(
+          agents[agent as ModelRoute.AgentId] ?? (agent === "task" || agent === "surgeon" ? main : oracle),
+          route,
+          `modes.${name}.agents.${agent}`,
+        )
+      }
+      merged[name] = {
+        main,
+        oracle,
+        agents,
+      }
+    }
+  }
+  merge(global.modes)
+  merge(workspace.modes)
+  return merged
+}
+
+const assertRoutesReferenceKnownModels = (settings: ConfigurationSettings) => {
+  const routes: Array<readonly [string, ModelRoute.RoleRoute]> = Object.entries(settings.modes).flatMap(
+    ([mode, config]) => [
+      [`modes.${mode}.main`, config.main] as const,
+      [`modes.${mode}.oracle`, config.oracle] as const,
+      ...Object.entries(config.agents).map(([agent, route]) => [`modes.${mode}.agents.${agent}`, route] as const),
+    ],
+  )
+  routes.push(["modelRoutes.title", settings.threadTitle], ["modelRoutes.compaction", settings.compaction.summaryModel])
+  for (const [path, route] of routes) {
+    if (!("alias" in route) || own(settings.models, route.alias) !== undefined) continue
+    throw ConfigurationSettingsFileError.make({ path, message: `Unknown model alias ${JSON.stringify(route.alias)}.` })
   }
 }
 
@@ -87,9 +158,12 @@ export const mergeConfigurationSettings = ({
       httpOverride?.streamingOnly ?? builtIn.streamingOnly ?? (isStreamingOnlyBaseUrl(baseUrl) ? true : undefined)
     const promptCaching = httpOverride?.promptCaching ?? builtIn.promptCaching
     const credentialIdentity = httpOverride?.credentialIdentity ?? builtIn.credentialIdentity
-    if (override === undefined) return streamingOnly === undefined ? builtIn : { ...builtIn, streamingOnly }
+    let protocol: ModelRoute.HttpProtocol = builtIn.protocol
+    if (id === "openai" && httpOverride?.api !== undefined)
+      protocol = httpOverride.api === "responses" ? "openai-responses" : "openai-chat-completions"
+    if (httpOverride === undefined) return streamingOnly === undefined ? builtIn : { ...builtIn, streamingOnly }
     return {
-      protocol: builtIn.protocol,
+      protocol,
       baseUrl,
       ...(httpOverride?.apiKeyEnv === undefined ? {} : { apiKeyEnv: httpOverride.apiKeyEnv }),
       ...(credentialIdentity === undefined ? {} : { credentialIdentity }),
@@ -97,6 +171,22 @@ export const mergeConfigurationSettings = ({
       ...(promptCaching === undefined ? {} : { promptCaching }),
     }
   }
+  const models: ConfigurationSettings["models"] =
+    global.modelAliases === undefined && workspace.modelAliases === undefined
+      ? settingsDefaults.models
+      : Object.fromEntries(
+          Object.entries({
+            ...settingsDefaults.models,
+            ...Object.fromEntries(
+              Object.entries({ ...global.modelAliases, ...workspace.modelAliases }).map(([name, input]) => [
+                name,
+                aliasFromInput(name, input),
+              ]),
+            ),
+          }),
+        )
+  const configuredModes = modes(global, workspace)
+  const defaultMode = workspace.defaultMode ?? global.defaultMode ?? settingsDefaults.defaultMode
   const merged: ConfigurationSettings = {
     providers: {
       openai: provider("openai"),
@@ -104,45 +194,19 @@ export const mergeConfigurationSettings = ({
       bedrock: provider("bedrock"),
       openrouter: provider("openrouter"),
     },
-    models:
-      global.modelAliases === undefined && workspace.modelAliases === undefined
-        ? settingsDefaults.models
-        : Object.fromEntries(
-            Object.entries({ ...global.modelAliases, ...workspace.modelAliases }).reduce(
-              (all, [name, input]) => {
-                all.push([name, aliasFromInput(name, input)])
-                return all
-              },
-              Object.entries(settingsDefaults.models) as Array<[string, ModelRoute.ModelAlias]>,
-            ),
-          ),
-    modes:
-      global.modelRoutes?.modes === undefined && workspace.modelRoutes?.modes === undefined
-        ? settingsDefaults.modes
-        : (Object.fromEntries(
-            Object.entries(settingsDefaults.modes).map(([mode, configured]) => {
-              const globalMode = global.modelRoutes?.modes?.[mode as keyof typeof settingsDefaults.modes]
-              const workspaceMode = workspace.modelRoutes?.modes?.[mode as keyof typeof settingsDefaults.modes]
-              return [
-                mode,
-                {
-                  main: roleRoute(configured.main, workspaceMode?.main ?? globalMode?.main),
-                  oracle: roleRoute(configured.oracle, workspaceMode?.oracle ?? globalMode?.oracle),
-                },
-              ]
-            }),
-          ) as ConfigurationSettings["modes"]),
-    threadTitle: roleRoute(settingsDefaults.threadTitle, workspace.modelRoutes?.title ?? global.modelRoutes?.title),
-    agents: Object.fromEntries(
-      Object.entries({ ...global.modelRoutes?.agents, ...workspace.modelRoutes?.agents }).map(([agent, override]) => [
-        agent,
-        typeof override === "string" ? { alias: override } : override,
-      ]),
-    ) as ConfigurationSettings["agents"],
+    models,
+    defaultMode,
+    modes: configuredModes,
+    threadTitle: roleRoute(
+      settingsDefaults.threadTitle,
+      workspace.modelRoutes?.title ?? global.modelRoutes?.title,
+      "modelRoutes.title",
+    ),
     compaction: {
       summaryModel: roleRoute(
         settingsDefaults.compaction.summaryModel,
         workspace.modelRoutes?.compaction ?? global.modelRoutes?.compaction,
+        "modelRoutes.compaction",
       ),
     },
     subagents: { ...settingsDefaults.subagents, ...global.subagents, ...workspace.subagents },
@@ -155,6 +219,12 @@ export const mergeConfigurationSettings = ({
       providers: Object.fromEntries(Object.keys(webSearchProviders).map((id) => [id, { configured: true as const }])),
     },
   }
+  if (own(configuredModes, defaultMode) === undefined)
+    throw ConfigurationSettingsFileError.make({
+      path: "defaultMode",
+      message: `${JSON.stringify(defaultMode)} does not name a configured mode.`,
+    })
+  assertRoutesReferenceKnownModels(merged)
   assertPainterSupportsMedia(merged)
   return merged
 }
