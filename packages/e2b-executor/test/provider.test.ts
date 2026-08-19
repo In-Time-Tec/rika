@@ -88,7 +88,7 @@ describe("Provider", () => {
       list: () => ({ hasNext: false, nextItems: () => Promise.resolve([]) }),
       bootstrap: (input) => {
         bootstrapUrl = input.url
-        bootstrapApiKey = input.apiKey
+        bootstrapApiKey = input.connection.apiKey
         return Promise.resolve()
       },
     }

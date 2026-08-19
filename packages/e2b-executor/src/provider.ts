@@ -72,7 +72,7 @@ export interface Sdk {
   readonly bootstrap: (request: {
     readonly sandboxId: string
     readonly body: string
-    readonly apiKey: string
+    readonly connection: SandboxConnectOpts
     readonly url: string
   }) => Promise<void>
 }
@@ -95,8 +95,8 @@ const liveSdk: Sdk = {
   kill: (sandboxId, options) => Sandbox.kill(sandboxId, options),
   setTimeout: (sandboxId, timeoutMillis, options) => Sandbox.setTimeout(sandboxId, timeoutMillis, options),
   list: (options) => Sandbox.list(options),
-  bootstrap: async ({ sandboxId, body, apiKey, url }) => {
-    const sandbox = await Sandbox.connect(sandboxId, { apiKey })
+  bootstrap: async ({ sandboxId, body, connection, url }) => {
+    const sandbox = await Sandbox.connect(sandboxId, connection)
     if (sandbox.trafficAccessToken === undefined) {
       throw new Error("secure sandbox did not provide a traffic access token")
     }
@@ -161,7 +161,7 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
     return attempt("bootstrap", () =>
       sdk.bootstrap({
         sandboxId: request.sandboxId,
-        apiKey,
+        connection,
         body: JSON.stringify({ credential }),
         url: bootstrapUrl(request.sandboxId, options.domain),
       }),
