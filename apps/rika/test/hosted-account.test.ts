@@ -1,7 +1,7 @@
 import { Cause, Clock, Context, Effect, Exit, Fiber, Layer, Option, Redacted, Ref } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
-import { logoutAll, pollDeviceAuthorization, status } from "../src/hosted/hosted-account"
+import { logout, logoutAll, pollDeviceAuthorization, status } from "../src/hosted/hosted-account"
 import { layer as credentialLayer, type SecretVault } from "../src/hosted/hosted-credential-store"
 import {
   CredentialStore,
@@ -225,5 +225,28 @@ it.effect("keeps local credentials when all-device revocation fails so retry can
     expect(yield* Ref.get(removed)).toBe(0)
     yield* logoutAll().pipe(Effect.provide(context))
     expect(yield* Ref.get(removed)).toBe(1)
+  }),
+)
+
+it.effect("treats logout as idempotent before a profile exists", () =>
+  Effect.gen(function* () {
+    const context = yield* Layer.build(
+      Layer.mergeAll(
+        Layer.succeed(Http, Http.of(unusedHttp)),
+        Layer.succeed(
+          CredentialStore,
+          CredentialStore.of({
+            load: () => Effect.die("unused"),
+            save: () => Effect.die("unused"),
+            remove: () => Effect.die("unused"),
+          }),
+        ),
+        Layer.succeed(ProfileStore, ProfileStore.of({ load: Effect.succeed(Option.none()), save: () => Effect.void })),
+        TestConsole.layer,
+      ),
+    )
+    yield* logout().pipe(Effect.provide(context))
+    yield* logoutAll().pipe(Effect.provide(context))
+    expect(yield* TestConsole.logLines.pipe(Effect.provide(context))).toEqual(["Not logged in", "Not logged in"])
   }),
 )

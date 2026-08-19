@@ -213,9 +213,15 @@ export const status = Effect.fn("HostedAccount.status")(function* (asJson: boole
 })
 
 export const logout = Effect.fn("HostedAccount.logout")(function* () {
+  const profiles = yield* ProfileStore
+  const loaded = yield* profiles.load
+  if (Option.isNone(loaded)) {
+    yield* Console.log("Not logged in")
+    return
+  }
   const credentials = yield* CredentialStore
   const http = yield* Http
-  const profile = yield* selectedProfile()
+  const profile = loaded.value
   const current = yield* credentials.load(profile.origin, profile.deviceId)
   if (Option.isNone(current)) {
     yield* Console.log("Not logged in")
@@ -230,9 +236,15 @@ export const logout = Effect.fn("HostedAccount.logout")(function* () {
 })
 
 export const logoutAll = Effect.fn("HostedAccount.logoutAll")(function* () {
+  const profiles = yield* ProfileStore
+  const loaded = yield* profiles.load
+  if (Option.isNone(loaded)) {
+    yield* Console.log("Not logged in")
+    return
+  }
   const credentials = yield* CredentialStore
   const http = yield* Http
-  const profile = yield* selectedProfile()
+  const profile = loaded.value
   const current = yield* credentials.load(profile.origin, profile.deviceId)
   if (Option.isNone(current)) {
     yield* Console.log("Not logged in")
