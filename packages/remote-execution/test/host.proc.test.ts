@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
+import { Effect } from "effect"
 
 const packageRoot = new URL("..", import.meta.url).pathname
 
@@ -18,24 +19,35 @@ console.log(JSON.stringify({ status: response.status, body, credential }))
 `
 
 describe("executor host process", () => {
-  it("flushes the accepted bootstrap response and closes its one-shot listener", async () => {
-    const child = Bun.spawn(["bun", "-e", bootstrapProof], {
-      cwd: packageRoot,
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    const timeout = setTimeout(() => child.kill(), 5_000)
-    const [exitCode, stdout, stderr] = await Promise.all([
-      child.exited,
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-    ]).finally(() => clearTimeout(timeout))
-    expect(stderr).toBe("")
-    expect(exitCode).toBe(0)
-    expect(JSON.parse(stdout)).toEqual({
-      status: 202,
-      body: "accepted",
-      credential: "one-time-bootstrap",
-    })
-  })
+  it.effect("flushes the accepted bootstrap response and closes its one-shot listener", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() =>
+        Bun.spawn(["bun", "-e", bootstrapProof], {
+          cwd: packageRoot,
+          stdout: "pipe",
+          stderr: "pipe",
+        }),
+      ),
+      (child) =>
+        Effect.promise(() =>
+          Promise.all([
+            child.exited,
+            new Response(child.stdout).text(),
+            new Response(child.stderr).text(),
+          ]),
+        ).pipe(
+          Effect.tap(([exitCode, stdout, stderr]) =>
+            Effect.sync(() => {
+              expect(stderr).toBe("")
+              expect(exitCode).toBe(0)
+              expect(stdout).toBe(
+                '{"status":202,"body":"accepted","credential":"one-time-bootstrap"}\n',
+              )
+            }),
+          ),
+          Effect.timeout("5 seconds"),
+        ),
+      (child) => Effect.sync(() => child.kill()).pipe(Effect.ignore),
+    ),
+  )
 })

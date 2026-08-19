@@ -309,11 +309,16 @@ const receiveBootstrap = Effect.callback<Redacted.Redacted<string>, HostError>((
         if (typeof body.credential !== "string" || body.credential.length === 0)
           return new Response("invalid", { status: 400 })
         consumed = true
-        setTimeout(() => {
-          server.stop(false).then(() =>
-            resume(Effect.succeed(Redacted.make(body.credential as string, { label: "executor-bootstrap" }))),
-          )
-        }, 0)
+        Effect.runFork(
+          Effect.sleep("10 millis").pipe(
+            Effect.andThen(Effect.promise(() => server.stop(false))),
+            Effect.andThen(
+              Effect.sync(() =>
+                resume(Effect.succeed(Redacted.make(body.credential as string, { label: "executor-bootstrap" }))),
+              ),
+            ),
+          ),
+        )
         return new Response("accepted", { status: 202 })
       })
     },
