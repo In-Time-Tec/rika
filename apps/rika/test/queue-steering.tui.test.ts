@@ -344,10 +344,13 @@ test(
               unit.content._tag === "Entry" && unit.content.role === "user" && unit.content.text === request.text,
           ),
         ).toHaveLength(1)
-        const followUpTranscript = yield* app.transcript(followUpTurnId).pipe(Effect.orDie)
-        expect(followUpTranscript?.state.status).toBe("completed")
+        const followUpTranscript = yield* app.waitTranscript(
+          followUpTurnId,
+          (projection) => projection.state.status === "completed",
+          20_000,
+        )
         expect(
-          followUpTranscript?.units.filter(
+          followUpTranscript.units.filter(
             (unit) =>
               unit.content._tag === "Entry" &&
               unit.content.role === "assistant" &&
