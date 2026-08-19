@@ -111,7 +111,7 @@ it.effect("passes the included pricing class to the backend for an OpenAI accoun
               ...route.main.candidates[0]!,
               providerConnection: {
                 provider: "openai",
-                protocol: "openai",
+                protocol: "openai-responses",
                 baseUrl: "https://api.openai.com/v1",
                 authentication: "account",
                 credentialIdentity: "fingerprint",

@@ -45,7 +45,7 @@ rika-dev --version
 
 ## Configuration
 
-Global settings live at `~/.config/rika/settings.json`. A workspace can override them with `.rika/settings.json`. Credentials stay out of JSON: a provider override names the environment variable that supplies its API key.
+Global settings live at `~/.config/rika/settings.json`. A workspace can override them with `.rika/settings.json`. Credentials stay out of JSON: a provider override names the environment variable that supplies its API key. Mode names and routes are configurable, and direct provider/model routes do not require aliases.
 
 ```json
 {
@@ -55,8 +55,15 @@ Global settings live at `~/.config/rika/settings.json`. A workspace can override
   },
   "providers": {
     "openai": {
+      "api": "chat-completions",
       "baseUrl": "http://127.0.0.1:9000/v1",
       "apiKeyEnv": "RIKA_MODEL_API_KEY"
+    }
+  },
+  "defaultMode": "local",
+  "modes": {
+    "local": {
+      "main": { "provider": "openai", "model": "my-local-model", "effort": "medium" }
     }
   }
 }

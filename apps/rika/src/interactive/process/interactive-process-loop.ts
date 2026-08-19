@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
+import type * as BunServices from "@effect/platform-bun/BunServices"
 import * as ProductOperation from "@rika/product/product-operation"
 import * as InteractiveSession from "@rika/product/interactive-session"
 import * as InteractiveFeed from "@rika/product/server-interactive-feed"
 import type * as ServerInteractiveConnection from "@rika/product/server-interactive-connection"
 import * as Turn from "@rika/product/turn-record"
 import { create as createTui } from "@rika/terminal/opentui-surface"
-import { Model, initial, withModeRouteMap } from "@rika/terminal/terminal-state"
+import { Model, initial, withModeConfiguration, type ModeConfiguration } from "@rika/terminal/terminal-state"
 import { update } from "@rika/terminal/terminal-state-reducer"
 import type { ThreadItem } from "@rika/terminal/terminal-state"
-type ModeRoutes = Model["modeRoutes"]
 import { Crypto, Deferred, Effect, Exit, Fiber, FiberHandle, FiberSet, Scope, Stream, SubscriptionRef } from "effect"
 import { terminalTitleSequence } from "./interactive-process"
 import { makeEventRouter } from "./process-events"
@@ -21,7 +21,8 @@ import { provideLayerScoped } from "./process-layer"
 
 export interface InteractiveTuiOptions {
   readonly editor?: string | undefined
-  readonly modeRoutes?: (() => ModeRoutes | undefined) | undefined
+  readonly modeConfiguration?: (() => ModeConfiguration | undefined) | undefined
+  readonly rememberMode?: ((mode: string) => Effect.Effect<void, never, BunServices.BunServices>) | undefined
   readonly makeRenderer?: NonNullable<Parameters<typeof createTui>[0]["makeRenderer"]>
   readonly writeTerminalTitle?: (sequence: string) => void
 }
@@ -47,7 +48,7 @@ export const interactiveTui =
         Effect.provideService(Scope.Scope, appScope),
       )
       const lifecycle = yield* SubscriptionRef.make<TuiLifecycle>({ _tag: "Running" })
-      const resolvedModeRoutes = options.modeRoutes?.()
+      const resolvedModeConfiguration = options.modeConfiguration?.()
       return yield* Effect.callback<void, ProductOperation.OperationUnavailable>((resume) => {
         let renderPending = false
         let initialConnectionStatus: Model["connectionStatus"]
@@ -55,7 +56,7 @@ export const interactiveTui =
         else if (connection.initialStatus === "reconnecting") initialConnectionStatus = "Reconnecting"
         const loop: InteractiveLoop = {
           model: {
-            ...initial(input.workspace ?? process.cwd(), input.mode ?? "medium"),
+            ...initial(input.workspace ?? process.cwd(), input.mode ?? resolvedModeConfiguration?.defaultMode),
             connectionStatus: initialConnectionStatus,
           },
           threadView: undefined,
@@ -84,7 +85,8 @@ export const interactiveTui =
           openingPath: false,
           ctrlCMenuVisible: false,
         }
-        if (resolvedModeRoutes !== undefined) loop.model = withModeRouteMap(loop.model, resolvedModeRoutes)
+        if (resolvedModeConfiguration !== undefined)
+          loop.model = withModeConfiguration(loop.model, resolvedModeConfiguration)
         const writeTerminalTitle = options.writeTerminalTitle ?? ((sequence: string) => process.stdout.write(sequence))
         const refreshTerminalTitle = () => {
           const threadId = loop.model.currentThreadId

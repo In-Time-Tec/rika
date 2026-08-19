@@ -66,7 +66,7 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
   "rika.follow.cursor": eventCursor,
   "rika.follow.reason": oneOf("thread-open", "reattach", "resume", "recovery"),
   "rika.follow.scope": oneOf("execution", "tree"),
-  "rika.model.alias": oneOf(
+  "rika.model.selection": oneOf(
     "main",
     "oracle",
     "title",

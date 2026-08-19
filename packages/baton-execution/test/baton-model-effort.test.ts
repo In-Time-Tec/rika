@@ -3,7 +3,7 @@ import { Anthropic, OpenAi } from "tenetkit/ai"
 import * as Settings from "@rika/configuration/configuration-settings"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
 
-const decoders = { openai: OpenAi.decodeConfig, anthropic: Anthropic.decodeConfig } as const
+const decoders = { "openai-responses": OpenAi.decodeConfig, anthropic: Anthropic.decodeConfig } as const
 
 const efforts = ["low", "medium", "high", "xhigh", "max"] as const
 
@@ -11,7 +11,11 @@ const settingsFor = (alias: string, effort: (typeof efforts)[number]): Settings.
   ...Settings.Defaults.settingsDefaults,
   modes: {
     ...Settings.Defaults.settingsDefaults.modes,
-    medium: { main: { alias, effort }, oracle: { alias, effort } },
+    medium: {
+      main: { alias, effort },
+      oracle: { alias, effort },
+      agents: Settings.Defaults.settingsDefaults.modes.medium!.agents,
+    },
   },
 })
 

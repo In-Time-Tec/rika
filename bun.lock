@@ -40,7 +40,7 @@
     },
     "apps/rika": {
       "name": "@rika/cli",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "bin": {
         "rika": "./dist/client-main.js",
       },
@@ -264,7 +264,7 @@
     "prettier": "3.6.2",
     "prismjs": "1.30.0",
     "string-width": "7.2.0",
-    "tenetkit": "0.30.0",
+    "tenetkit": "0.31.0",
     "turbo": "2.8.13",
     "typescript": "7.0.2",
     "vitest": "4.1.11",
@@ -1194,7 +1194,7 @@
 
     "supports-color": ["supports-color@7.2.0", "", { "dependencies": { "has-flag": "^4.0.0" } }, "sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw=="],
 
-    "tenetkit": ["tenetkit@0.30.0", "", { "dependencies": { "@a2a-js/sdk": "1.0.1", "@ag-ui/core": "0.0.57", "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@effect/ai-anthropic": "4.0.0-rc.109", "@effect/ai-openai": "4.0.0-rc.109", "@effect/ai-openai-compat": "4.0.0-rc.109", "@effect/ai-openrouter": "4.0.0-rc.109", "@effect/sql-sqlite-bun": "4.0.0-rc.109", "@modelcontextprotocol/sdk": "1.29.0", "@smithy/types": "4.3.1" }, "peerDependencies": { "effect": "4.0.0-rc.109", "foldkit": ">=0.148.0 <1" }, "optionalPeers": ["foldkit"] }, "sha512-/DYagWUOegayOFPZiAoH9pEikAbBgGmXNYzk2kU9JEvRuLFhZ7H83sn0OEfEjPFUAAF/nPQuVGyU+3SZbeMcmw=="],
+    "tenetkit": ["tenetkit@0.31.0", "", { "dependencies": { "@a2a-js/sdk": "1.0.1", "@ag-ui/core": "0.0.57", "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@effect/ai-anthropic": "4.0.0-rc.109", "@effect/ai-openai": "4.0.0-rc.109", "@effect/ai-openai-compat": "4.0.0-rc.109", "@effect/ai-openrouter": "4.0.0-rc.109", "@effect/sql-sqlite-bun": "4.0.0-rc.109", "@modelcontextprotocol/sdk": "1.29.0", "@smithy/types": "4.3.1" }, "peerDependencies": { "effect": "4.0.0-rc.109", "foldkit": ">=0.148.0 <1" }, "optionalPeers": ["foldkit"] }, "sha512-umtDJjdZxwoz6Uf3NQ3Z7J0lBd/qxSyNovTnSuovf+bzQYY3CKgAPFGj6rWYqIEly6VCHNh3Reb8yXI8BgPy0A=="],
 
     "tinybench": ["tinybench@2.9.0", "", {}, "sha512-0+DUvqWMValLmha6lr4kD8iAMK1HzV0/aKnCtWb9v9641TnP/MFb7Pc2bxoxQjTXAErryXVgUOfv2YqNllqGeg=="],
 

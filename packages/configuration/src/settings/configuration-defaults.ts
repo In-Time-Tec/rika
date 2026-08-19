@@ -1,10 +1,10 @@
 import type { ConfigurationSettings } from "./configuration-settings"
-import { defaults as modelDefaults } from "../model-routing/model-preset"
+import { builtInAliases } from "../model-routing/model-preset"
 import { globalDirectory, workspaceDirectory } from "../path-resolution/configuration-paths"
 
 export const providerDefaults = {
   openai: {
-    protocol: "openai",
+    protocol: "openai-responses",
     baseUrl: "https://api.openai.com/v1",
     apiKeyEnv: "OPENAI_API_KEY",
   },
@@ -33,15 +33,31 @@ export const defaultCompaction = {
 
 export const settingsDefaults: ConfigurationSettings = {
   providers: providerDefaults,
-  models: modelDefaults,
+  models: builtInAliases,
+  defaultMode: "medium",
   modes: {
-    low: { main: { alias: "luna", effort: "xhigh" }, oracle: { alias: "terra", effort: "xhigh" } },
-    medium: { main: { alias: "terra", effort: "xhigh" }, oracle: { alias: "sol", effort: "medium" } },
-    high: { main: { alias: "sol", effort: "medium" }, oracle: { alias: "sol", effort: "high" } },
-    ultra: { main: { alias: "sol", effort: "xhigh" }, oracle: { alias: "sol", effort: "max" } },
+    low: {
+      main: { alias: "luna", effort: "xhigh" },
+      oracle: { alias: "terra", effort: "xhigh" },
+      agents: {},
+    },
+    medium: {
+      main: { alias: "terra", effort: "xhigh" },
+      oracle: { alias: "sol", effort: "medium" },
+      agents: {},
+    },
+    high: {
+      main: { alias: "sol", effort: "medium" },
+      oracle: { alias: "sol", effort: "high" },
+      agents: {},
+    },
+    ultra: {
+      main: { alias: "sol", effort: "xhigh" },
+      oracle: { alias: "sol", effort: "max" },
+      agents: {},
+    },
   },
   threadTitle: { alias: "luna", effort: "low" },
-  agents: {},
   compaction: { summaryModel: { alias: "sol", effort: "xhigh" } },
   subagents: { maxDepth: 1, maxSubagents: 4 },
   keymap: { mode: "ctrl+s", palette: "ctrl+p", submit: "enter", newline: "shift+enter", interrupt: "escape" },

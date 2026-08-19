@@ -1,21 +1,15 @@
 import { describe, expect, it } from "vitest"
+import { Schema } from "effect"
 import * as SettingsDefaults from "../settings/configuration-defaults"
-import { ModeId, RouteModeId, modeIds, routeModeIds } from "./behavior-mode"
-
-const members = (schema: { readonly ast: { readonly types?: ReadonlyArray<{ readonly literal?: unknown }> } }) =>
-  (schema.ast.types ?? []).map((type) => type.literal)
+import { ModeId } from "./behavior-mode"
 
 describe("modes", () => {
-  it("keeps the schema and the array in step", () => {
-    expect(members(ModeId as never)).toEqual([...modeIds])
-    expect(members(RouteModeId as never)).toEqual([...routeModeIds])
+  it("accepts custom non-empty mode names", () => {
+    expect(Schema.decodeUnknownSync(ModeId)("deep-review")).toBe("deep-review")
+    expect(() => Schema.decodeUnknownSync(ModeId)("")).toThrow()
   })
 
-  it("adds only the test route mode", () => {
-    expect(routeModeIds.filter((mode) => !(modeIds as ReadonlyArray<string>).includes(mode))).toEqual(["test"])
-  })
-
-  it("ships a default route for every mode", () => {
-    expect(Object.keys(SettingsDefaults.defaults.modes).toSorted()).toEqual([...modeIds].toSorted())
+  it("ships a valid configurable default mode", () => {
+    expect(SettingsDefaults.defaults.modes[SettingsDefaults.defaults.defaultMode]).toBeDefined()
   })
 })

@@ -106,4 +106,10 @@ export const colors: TerminalThemeColors = {
   selectionFg: new TerminalColor(0, 0, 0, 255, "indexed", 0),
   selectionHint: new TerminalColor(0, 0, 128, 255, "indexed", 4),
 }
+const customModeColors = ["#ffd700", "#3dffa6", "#3dd4ff", "#d8b3ff", "#ff8fb1", "#ffb86c"] as const
+export const modeColor = (mode: string): string => {
+  if (mode === "low" || mode === "medium" || mode === "high" || mode === "ultra") return colors[mode]
+  const hash = [...mode].reduce((value, character) => (value * 31 + character.codePointAt(0)!) >>> 0, 0)
+  return customModeColors[hash % customModeColors.length]!
+}
 export const spacing = { transcript: 1, inputHorizontal: 1, inputHeight: 5, overlayTop: 4, overlayHeight: 10 } as const

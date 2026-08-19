@@ -1,4 +1,5 @@
 import { create as createTui } from "@rika/terminal/opentui-surface"
+import type * as BunServices from "@effect/platform-bun/BunServices"
 import { expandPastedText, execute, promptParts, type Action } from "@rika/terminal/terminal-session"
 import { canSubmit, selectedThreadMetadata, update } from "@rika/terminal/terminal-state-reducer"
 import * as ProductOperation from "@rika/product/product-operation"
@@ -10,6 +11,7 @@ import { pasteClipboardPng, pastedImagePath, persistPastedImage } from "./proces
 
 type InputContext = Omit<InteractiveInputContext, "options" | "resume"> & {
   readonly startSelection: (select: () => Effect.Effect<void, ProductOperation.OperationUnavailable>) => void
+  readonly rememberMode?: (mode: string) => Effect.Effect<void, never, BunServices.BunServices>
 }
 
 export const createInputHandlers = (context: InputContext): Partial<Parameters<typeof createTui>[0]> => {
@@ -30,10 +32,15 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
     loadChangedFiles,
     adapter,
     startSelection,
+    rememberMode,
   } = context
   const showCtrlCMenu = (visible: boolean) => {
     loop.ctrlCMenuVisible = visible
     loop.renderer?.surface.showCtrlCMenu(visible)
+  }
+  const rememberCommittedMode = (previous: string | undefined) => {
+    const committed = loop.model.rememberedMode
+    if (committed !== undefined && committed !== previous && rememberMode !== undefined) run(rememberMode(committed))
   }
   return {
     workingFrame: (frame) => {
@@ -117,7 +124,9 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       render()
     },
     modeCommit: (selected) => {
+      const previous = loop.model.rememberedMode
       loop.model = update(loop.model, { _tag: "ModeCommitted", selected })
+      rememberCommittedMode(previous)
       render()
     },
     modeHover: (selected) => {
@@ -196,11 +205,13 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
           loop.model.queueSelection !== undefined)
           ? nextSteeringRequestId()
           : undefined
+      const previousRememberedMode = loop.model.rememberedMode
       loop.model = update(loop.model, {
         _tag: "KeyPressed",
         key,
         ...(steeringRequestId === undefined ? {} : { steeringRequestId }),
       })
+      rememberCommittedMode(previousRememberedMode)
       if (submitting)
         loop.model = update(loop.model, {
           _tag: "Submitted",

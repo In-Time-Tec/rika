@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 
@@ -16,6 +16,47 @@ export const schemaFingerprint = (objects: ReadonlyArray<SchemaObject>): string 
       .map(({ type, name, table_name, sql }) => [type, name, table_name, sql])
       .toSorted((left, right) => String(left[1]).localeCompare(String(right[1]))),
   )
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const UnknownJson = Schema.fromJsonString(Schema.Unknown)
+const decodeJson = Schema.decodeUnknownSync(UnknownJson)
+const encodeJson = Schema.encodeSync(UnknownJson)
+
+const migrateExecutionRouteModel = (value: unknown): void => {
+  if (!isRecord(value)) return
+  if (Object.hasOwn(value, "alias")) {
+    value.selection = value.alias
+    delete value.alias
+  }
+  if (!Array.isArray(value.candidates)) return
+  for (const candidate of value.candidates) {
+    if (!isRecord(candidate) || !isRecord(candidate.providerConnection)) continue
+    if (candidate.providerConnection.protocol === "openai") candidate.providerConnection.protocol = "openai-responses"
+  }
+}
+
+const migrateExecutionRoute = (value: unknown): boolean => {
+  if (!isRecord(value) || (value.version !== 1 && value.version !== 2)) return false
+  value.version = 3
+  if (!Object.hasOwn(value, "subagents")) value.subagents = { maxDepth: 1, maxSubagents: 4 }
+  for (const key of ["main", "oracle", "title", "compactionSummary"]) migrateExecutionRouteModel(value[key])
+  if (isRecord(value.agents))
+    for (const key of ["librarian", "painter", "readThread", "review", "surgeon", "task"])
+      migrateExecutionRouteModel(value.agents[key])
+  return true
+}
+
+const migrateExecutionRouteJson = (serialized: string, path: ReadonlyArray<string>): string | undefined => {
+  const document = decodeJson(serialized)
+  let value = document
+  for (const key of path) {
+    if (!isRecord(value)) return undefined
+    value = value[key]
+  }
+  return migrateExecutionRoute(value) ? encodeJson(document) : undefined
+}
 
 export const create = Effect.gen(function* () {
   const sql = yield* SqlClient
@@ -345,6 +386,11 @@ export const create = Effect.gen(function* () {
         ) ELSE last_activity_at END
       WHERE thread_id = OLD.thread_id;
     END`
+  yield* sql`CREATE TABLE rika_execution_route_contract (
+    id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+    version INTEGER NOT NULL CHECK (version = 3)
+  )`
+  yield* sql`INSERT INTO rika_execution_route_contract (id, version) VALUES (1, 3)`
   yield* sql`CREATE TABLE rika_schema_identity (
     id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
     fingerprint TEXT NOT NULL
@@ -398,6 +444,7 @@ export const schemaObjects: ReadonlyArray<string> = [
   "trigger:rika_thread_picker_summary_activity_insert",
   "trigger:rika_thread_picker_summary_activity_update",
   "trigger:rika_thread_picker_summary_activity_delete",
+  "table:rika_execution_route_contract",
   "table:rika_schema_identity",
 ]
 
@@ -410,6 +457,48 @@ export const additions: ReadonlyArray<{
   readonly since: string
   readonly apply: (sql: SqlClient) => Effect.Effect<unknown, SqlError>
 }> = [
+  {
+    name: "table:rika_execution_route_contract",
+    since: "0.5.48",
+    apply: (sql) =>
+      Effect.gen(function* () {
+        yield* sql`CREATE TABLE rika_execution_route_contract (
+          id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+          version INTEGER NOT NULL CHECK (version = 3)
+        )`
+        yield* sql`INSERT INTO rika_execution_route_contract (id, version) VALUES (1, 3)`
+        const turns = yield* sql`SELECT id, execution_route_json FROM rika_turns
+          WHERE execution_route_json IS NOT NULL AND json_extract(execution_route_json, '$.version') IN (1, 2)`
+        for (const raw of turns) {
+          const row = raw as Record<string, unknown>
+          const migrated = migrateExecutionRouteJson(String(row.execution_route_json), [])
+          if (migrated !== undefined)
+            yield* sql`UPDATE rika_turns SET execution_route_json = ${migrated} WHERE id = ${String(row.id)}`
+        }
+        const admissions = yield* sql`SELECT turn_id, start_input_json FROM rika_turn_admission_outbox
+          WHERE json_extract(start_input_json, '$.executionRoute.version') IN (1, 2)`
+        for (const raw of admissions) {
+          const row = raw as Record<string, unknown>
+          const migrated = migrateExecutionRouteJson(String(row.start_input_json), ["executionRoute"])
+          if (migrated !== undefined)
+            yield* sql`UPDATE rika_turn_admission_outbox SET start_input_json = ${migrated}
+              WHERE turn_id = ${String(row.turn_id)}`
+        }
+        const steeringTable = yield* sql`SELECT name FROM sqlite_schema
+          WHERE type = 'table' AND name = 'rika_turn_steering_outbox'`
+        if (steeringTable.length > 0) {
+          const steeringAdmissions = yield* sql`SELECT request_id, admission_json FROM rika_turn_steering_outbox
+            WHERE json_extract(admission_json, '$.source.executionRoute.version') IN (1, 2)`
+          for (const raw of steeringAdmissions) {
+            const row = raw as Record<string, unknown>
+            const migrated = migrateExecutionRouteJson(String(row.admission_json), ["source", "executionRoute"])
+            if (migrated !== undefined)
+              yield* sql`UPDATE rika_turn_steering_outbox SET admission_json = ${migrated}
+                WHERE request_id = ${String(row.request_id)}`
+          }
+        }
+      }),
+  },
   {
     name: "table:rika_turn_steering_outbox",
     since: "0.5.10",

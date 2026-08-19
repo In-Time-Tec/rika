@@ -179,11 +179,7 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
     yield* drainRunQueue()
     const turnId = yield* dependencies.makeTurnId
     const prompt = input.prompt.join(" ")
-    const resolvedExecutionRoute = yield* dependencies.resolveExecutionRoute(
-      input.mode ?? "medium",
-      undefined,
-      thread.workspace,
-    )
+    const resolvedExecutionRoute = yield* dependencies.resolveExecutionRoute(input.mode, undefined, thread.workspace)
     const observed = yield* dependencies.createObservedSubmission(turns, {
       id: turnId,
       threadId: thread.id,

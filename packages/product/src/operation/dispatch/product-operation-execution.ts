@@ -71,7 +71,7 @@ export interface ProductOperationExecution {
     import("@rika/product/thread-summary-repository").Service
   >
   readonly resolveExecutionRoute: (
-    mode: ModeId,
+    mode?: ModeId,
     tuning?: { readonly fastMode?: boolean },
     workspace?: string,
   ) => Effect.Effect<ExecutionRouteSnapshot, OperationError, import("@rika/product/execution-gateway").Service>

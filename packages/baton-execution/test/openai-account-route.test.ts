@@ -43,7 +43,7 @@ it("pins native OpenAI account authentication and account-compatible request opt
   const account = accountRoute()
   expect(account.main.candidates[0]?.providerConnection).toEqual({
     provider: "openai",
-    protocol: "openai",
+    protocol: "openai-responses",
     baseUrl: "https://api.openai.com/v1",
     authentication: "account",
     credentialIdentity: credential.fingerprint,
@@ -63,7 +63,7 @@ it("pins native OpenAI account authentication and account-compatible request opt
     providers: {
       ...Settings.Defaults.settingsDefaults.providers,
       openai: {
-        protocol: "openai" as const,
+        protocol: "openai-responses" as const,
         baseUrl: "https://openai-compatible.example/v1",
         apiKeyEnv: "OPENAI_API_KEY",
       },

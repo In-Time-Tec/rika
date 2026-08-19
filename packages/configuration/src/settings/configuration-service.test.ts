@@ -43,7 +43,7 @@ describe("ConfigService", () => {
     Effect.gen(function* () {
       const config = yield* ConfigurationService.effectiveConfiguration()
       expect(config.settings.providers.openai).toEqual({
-        protocol: "openai",
+        protocol: "openai-responses",
         baseUrl: "https://workspace.models.test/v1",
       })
       expect(config.settings.providers.anthropic).toEqual(ConfigContract.defaults.providers.anthropic)
@@ -84,7 +84,7 @@ describe("ConfigService", () => {
       const config = yield* ConfigurationService.effectiveConfiguration()
       expect(config.settings.providers).toEqual({
         openai: {
-          protocol: "openai",
+          protocol: "openai-responses",
           baseUrl: ConfigContract.defaults.providers.openai.baseUrl,
           apiKeyEnv: "WORKSPACE_OPENAI_KEY",
         },
@@ -126,6 +126,10 @@ describe("ConfigService", () => {
       expect(config.settings.modes.medium).toEqual({
         main: { alias: "bedrock-terra", effort: "xhigh" },
         oracle: { alias: "bedrock-terra", effort: "medium" },
+        agents: {
+          task: { alias: "bedrock-fable", effort: "xhigh" },
+          readThread: { alias: "bedrock-terra", effort: "medium" },
+        },
       })
       expect(config.settings.compaction).toEqual({
         summaryModel: { alias: "bedrock-fable", effort: ConfigContract.defaults.compaction.summaryModel.effort },
@@ -148,11 +152,13 @@ describe("ConfigService", () => {
                 candidates: ["fable-model"],
               },
             },
-            modelRoutes: {
-              modes: { medium: { main: "bedrock-terra" } },
-              agents: { task: "bedrock-fable" },
-              compaction: "bedrock-fable",
+            modes: {
+              medium: {
+                main: { alias: "bedrock-terra", effort: "xhigh" },
+                agents: { task: { alias: "bedrock-fable" } },
+              },
             },
+            modelRoutes: { compaction: { alias: "bedrock-fable" } },
           },
           workspace: {
             modelAliases: {
@@ -163,9 +169,11 @@ describe("ConfigService", () => {
                 candidates: ["workspace-model"],
               },
             },
-            modelRoutes: {
-              modes: { medium: { oracle: "bedrock-terra" } },
-              agents: { readThread: "bedrock-terra" },
+            modes: {
+              medium: {
+                oracle: { alias: "bedrock-terra", effort: "medium" },
+                agents: { readThread: { alias: "bedrock-terra" } },
+              },
             },
           },
         }),
@@ -203,7 +211,7 @@ describe("ConfigService", () => {
     Effect.gen(function* () {
       const config = yield* ConfigurationService.effectiveConfiguration()
       expect(config.settings.providers.openai).toEqual({
-        protocol: "openai",
+        protocol: "openai-responses",
         baseUrl: "https://workspace.models.test/v1",
       })
       expect(config.environment.providerCredentials).toEqual({})
@@ -455,7 +463,8 @@ describe("ConfigService", () => {
                 displayName: "Sonnet 5",
               },
             },
-            modelRoutes: { modes: { high: { main: { alias: "gate-sonnet", effort: "max" } } } },
+            defaultMode: "high",
+            modes: { high: { main: { alias: "gate-sonnet", effort: "max" } } },
           },
         }),
       ),
@@ -490,17 +499,21 @@ describe("ConfigService", () => {
   it.effect("lets a mode route set its own reasoning effort", () =>
     Effect.gen(function* () {
       const config = yield* ConfigurationService.effectiveConfiguration()
-      expect(config.settings.modes.high).toEqual({
-        main: { alias: "sol", effort: "high" },
-        oracle: { alias: "opus", effort: "max" },
+      expect(config.settings.modes.high).toMatchObject({
+        main: { provider: "openai", model: "gpt-custom", effort: "high" },
+        oracle: { provider: "anthropic", model: "claude-opus-custom", effort: "max" },
       })
       expect(ConfigContract.resolveModelRoute(config.settings, "high", "oracle").effort).toBe("max")
     }).pipe(
       provideLayer(
         ConfigurationService.memoryConfigurationLayer({
           global: {
-            modelRoutes: {
-              modes: { high: { main: { alias: "sol", effort: "high" }, oracle: { alias: "opus", effort: "max" } } },
+            defaultMode: "high",
+            modes: {
+              high: {
+                main: { provider: "openai", model: "gpt-custom", effort: "high" },
+                oracle: { provider: "anthropic", model: "claude-opus-custom", effort: "max" },
+              },
             },
           },
         }),

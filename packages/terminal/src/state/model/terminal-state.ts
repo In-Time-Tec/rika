@@ -1,5 +1,6 @@
 import { Function, Schema } from "effect"
 import { ModeId } from "@rika/configuration/behavior-mode"
+import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import { idle as loadableIdle, loadableSchemas } from "./terminal-loadable-state"
 import { Activity } from "./terminal-activity-state"
 import { UsageDisplay, UsageTime } from "./terminal-usage-state"
@@ -91,6 +92,7 @@ export const Model = Schema.Struct({
   workspace: Schema.String,
   branch: Schema.optional(Schema.String),
   mode: Mode,
+  rememberedMode: Schema.optional(Mode),
   modeRoutes: modeRouteMapSchema,
   entries: Schema.Array(Entry),
   blocks: Schema.Array(Schema.Unknown),
@@ -212,81 +214,83 @@ export const Model = Schema.Struct({
   threadPreview: ThreadPreviewSchema,
 })
 export type Model = typeof Model.Type
-const initialImpl: {
-  (workspace: string, mode?: Mode): Model
-  (mode?: Mode): (workspace: string) => Model
+const initialImpl = (workspace: string, mode: Mode): Model => ({
+  workspace,
+  mode,
+  modeRoutes: defaultModeRouteMap,
+  rememberedMode: undefined,
+  entries: [],
+  blocks: [],
+  items: [],
+  input: "",
+  cursor: 0,
+  pastedText: [],
+  history: [],
+  historyComposers: [],
+  historySearch: "",
+  submittedDrafts: [],
+  pendingSteering: [],
+  steeringRequests: [],
+  cancelPending: false,
+  busy: false,
+  connectionStatus: undefined,
+  contextUsage: { _tag: "Loading" },
+  goal: undefined,
+  contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
+  animationTick: 0,
+  retryCountdown: 0,
+  compactionShimmer: undefined,
+  contextDetailsOpen: false,
+  usageDisplay: "cost",
+  paletteOpen: false,
+  palette: { open: false, query: "", selected: 0 },
+  modePicker: { open: false, selected: 0 },
+  modeCommit: undefined,
+  filePicker: { open: false, query: "", selected: 0, items: loadableIdle },
+  threadSwitcher: { open: false, query: "", selected: 0, kind: "switch" },
+  shortcutsOpen: false,
+  shortcutsTrigger: undefined,
+  composerHeight: 5,
+  width: 80,
+  height: 24,
+  scrollOffset: 0,
+  scrollFollow: true,
+  threads: [],
+  workspaceFilesOpen: false,
+  threadSidebar: { open: false, focused: false, selected: 0, scrollTop: 0 },
+  queueSelection: undefined,
+  queue: [],
+  expandedRowKeys: [],
+  seenEventIds: [],
+  childExecutionOutcomes: {},
+  activeTurnId: undefined,
+  fastMode: false,
+  changedFilesOpen: false,
+  changedFiles: loadableIdle,
+  sidebarWidth: 52,
+  threadLoading: false,
+  refoldingThreadIds: [],
+  threadPreview: { _tag: "Idle" },
+})
+export interface ModeConfiguration {
+  readonly routes: ModeRouteMap
+  readonly defaultMode: Mode
+  readonly rememberedMode?: Mode
+}
+export const withModeConfiguration: {
+  (configuration: ModeConfiguration): (model: Model) => Model
+  (model: Model, configuration: ModeConfiguration): Model
 } = Function.dual(
-  (args) => args.length > 1 || !Mode.literals.includes(args[0]),
-  (workspace: string, mode: Mode = "medium"): Model => ({
-    workspace,
-    mode,
-    modeRoutes: defaultModeRouteMap,
-    entries: [],
-    blocks: [],
-    items: [],
-    input: "",
-    cursor: 0,
-    pastedText: [],
-    history: [],
-    historyComposers: [],
-    historySearch: "",
-    submittedDrafts: [],
-    pendingSteering: [],
-    steeringRequests: [],
-    cancelPending: false,
-    busy: false,
-    connectionStatus: undefined,
-    contextUsage: { _tag: "Loading" },
-    goal: undefined,
-    contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
-    animationTick: 0,
-    retryCountdown: 0,
-    compactionShimmer: undefined,
-    contextDetailsOpen: false,
-    usageDisplay: "cost",
-    paletteOpen: false,
-    palette: { open: false, query: "", selected: 0 },
-    modePicker: { open: false, selected: 0 },
-    modeCommit: undefined,
-    filePicker: { open: false, query: "", selected: 0, items: loadableIdle },
-    threadSwitcher: { open: false, query: "", selected: 0, kind: "switch" },
-    shortcutsOpen: false,
-    shortcutsTrigger: undefined,
-    composerHeight: 5,
-    width: 80,
-    height: 24,
-    scrollOffset: 0,
-    scrollFollow: true,
-    threads: [],
-    workspaceFilesOpen: false,
-    threadSidebar: { open: false, focused: false, selected: 0, scrollTop: 0 },
-    queueSelection: undefined,
-    queue: [],
-    expandedRowKeys: [],
-    seenEventIds: [],
-    childExecutionOutcomes: {},
-    activeTurnId: undefined,
-    fastMode: false,
-    changedFilesOpen: false,
-    changedFiles: loadableIdle,
-    sidebarWidth: 52,
-    threadLoading: false,
-    refoldingThreadIds: [],
-    threadPreview: { _tag: "Idle" },
+  2,
+  (model: Model, configuration: ModeConfiguration): Model => ({
+    ...model,
+    modeRoutes: configuration.routes,
+    rememberedMode:
+      configuration.rememberedMode !== undefined && Object.hasOwn(configuration.routes, configuration.rememberedMode)
+        ? configuration.rememberedMode
+        : undefined,
   }),
 )
-export const withModeRouteMap: {
-  (routes: ModeRouteMap): (model: Model) => Model
-  (model: Model, routes: ModeRouteMap): Model
-} = Function.dual(2, (model: Model, routes: ModeRouteMap): Model => ({ ...model, modeRoutes: routes }))
-const initialPublicImpl = (workspace: string, mode: Mode = "medium"): Model => initialImpl(workspace, mode)
-
-export const initial: {
-  (
-    arg0: Parameters<typeof initialPublicImpl>[0],
-    arg1?: Parameters<typeof initialPublicImpl>[1],
-  ): ReturnType<typeof initialPublicImpl>
-  (
-    arg1?: Parameters<typeof initialPublicImpl>[1],
-  ): (arg0: Parameters<typeof initialPublicImpl>[0]) => ReturnType<typeof initialPublicImpl>
-} = Function.dual((args) => args.length >= 1 && typeof args[0] === "string", initialPublicImpl)
+export const initial = (
+  ...[workspace, mode = SettingsDefaults.Defaults.defaults.defaultMode]: readonly [workspace: string, mode?: Mode]
+): Model => initialImpl(workspace, mode)

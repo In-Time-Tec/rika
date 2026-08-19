@@ -1,5 +1,6 @@
 import { Function, Schema } from "effect"
 import type { ModeId } from "./behavior-mode"
+import { presets } from "./model-preset"
 import type { ModelRoute } from "./model-route"
 import type { ConfigurationSettings } from "../settings/configuration-settings"
 
@@ -9,7 +10,7 @@ export class ModelRouteError extends Schema.TaggedError<ModelRouteError>()("Mode
 }) {}
 
 export interface ResolvedModelRoute {
-  readonly alias: string
+  readonly selection: string
   readonly displayName: string
   readonly effort: ModelRoute.Effort
   readonly fast: boolean
@@ -26,53 +27,65 @@ export interface ResolvedModelRoute {
   readonly options: Readonly<Record<string, unknown>>
 }
 
+const own = <A>(record: Readonly<Record<string, A>>, key: string): A | undefined =>
+  Object.hasOwn(record, key) ? record[key] : undefined
+
 const resolveRoute = (
   settings: ConfigurationSettings,
   route: ModelRoute.RoleRoute,
   owner: string,
 ): ResolvedModelRoute => {
-  const alias = settings.models[route.alias]
-  if (alias === undefined)
-    throw ModelRouteError.make({
-      mode: owner,
-      message: `${owner} references missing model alias ${route.alias}`,
-    })
-  const providerConnection = settings.providers[alias.provider]
+  const aliasName = "alias" in route ? route.alias : undefined
+  const alias = aliasName === undefined ? undefined : own(settings.models, aliasName)
+  if (aliasName !== undefined && alias === undefined)
+    throw ModelRouteError.make({ mode: owner, message: `${owner} references missing model alias ${aliasName}` })
+  const providerId = alias?.provider ?? ("provider" in route ? route.provider : undefined)
+  if (providerId === undefined) throw ModelRouteError.make({ mode: owner, message: `${owner} has no provider` })
+  const providerConnection = settings.providers[providerId]
   if (providerConnection === undefined)
     throw ModelRouteError.make({
       mode: owner,
-      message: `${owner} model alias ${route.alias} references missing provider ${alias.provider}`,
+      message: `${owner} references missing provider ${providerId}`,
     })
-  const model = alias.candidates[0]
+  const preset =
+    providerConnection.protocol === "anthropic" || providerConnection.protocol === "amazon-bedrock"
+      ? presets.claude
+      : presets.openai
+  const candidates = alias?.candidates ?? ("model" in route ? [route.model] : [])
+  const model = candidates[0]
   if (model === undefined)
     throw ModelRouteError.make({
       mode: owner,
-      message: `${owner} model alias ${route.alias} has no provider candidates`,
+      message: `${owner} has no provider candidates`,
     })
-  const variants = alias.variants[route.effort]
+  const variants = alias?.variants[route.effort] ?? {
+    normal: { options: {} },
+    ...(providerConnection.protocol === "openai-responses" ? { fast: { options: { service_tier: "priority" } } } : {}),
+  }
   const variant = route.fast === true ? (variants?.fast ?? variants?.normal) : variants?.normal
   if (variant === undefined)
     throw ModelRouteError.make({
       mode: owner,
-      message: `${owner} requests unavailable ${route.alias}/${route.effort} variant`,
+      message: `${owner} requests unavailable ${route.effort} variant`,
     })
+  const limits = alias?.limits ?? preset.limits
+  const contextWindow =
+    ("contextWindow" in limits ? limits.contextWindow : undefined) ?? limits.maxInputTokens + limits.maxOutputTokens
   return {
-    alias: route.alias,
-    displayName: alias.displayName,
+    selection: aliasName ?? model,
+    displayName: alias?.displayName ?? model,
     effort: route.effort,
     fast: route.fast === true && variants?.fast !== undefined,
-    providerId: alias.provider,
+    providerId,
     providerConnection,
-    candidates: alias.candidates,
+    candidates,
     model,
     compaction: {
-      contextWindow: alias.limits.contextWindow ?? alias.limits.maxInputTokens + alias.limits.maxOutputTokens,
-      reserveTokens:
-        (alias.limits.contextWindow ?? alias.limits.maxInputTokens + alias.limits.maxOutputTokens) -
-        alias.limits.maxInputTokens,
-      keepRecentTokens: alias.limits.keepRecentTokens,
+      contextWindow,
+      reserveTokens: contextWindow - limits.maxInputTokens,
+      keepRecentTokens: limits.keepRecentTokens,
     },
-    maxOutputTokens: alias.limits.maxOutputTokens,
+    maxOutputTokens: limits.maxOutputTokens,
     options: variant.options,
   }
 }
@@ -82,8 +95,12 @@ export const resolveModelRoute: {
   (settings: ConfigurationSettings, mode: ModeId, role?: ModelRoute.Role): ResolvedModelRoute
 } = Function.dual(
   (args) => typeof args[0] === "object",
-  (settings: ConfigurationSettings, mode: ModeId, role: ModelRoute.Role = "main") =>
-    resolveRoute(settings, settings.modes[mode][role], `Mode ${mode} ${role}`),
+  (settings: ConfigurationSettings, mode: ModeId, role: ModelRoute.Role = "main") => {
+    const configured = own(settings.modes, mode)
+    if (configured === undefined)
+      throw ModelRouteError.make({ mode, message: `Mode ${JSON.stringify(mode)} is not configured` })
+    return resolveRoute(settings, configured[role], `Mode ${mode} ${role}`)
+  },
 )
 
 export const agentIds = ["librarian", "painter", "readThread", "review", "surgeon", "task"] as const
@@ -94,16 +111,13 @@ const resolveAgentRouteImpl = (
   agent: ModelRoute.AgentId,
   tuning?: { readonly fastMode?: boolean },
 ): ResolvedModelRoute => {
+  const modeConfig = own(settings.modes, mode)
+  if (modeConfig === undefined)
+    throw ModelRouteError.make({ mode, message: `Mode ${JSON.stringify(mode)} is not configured` })
   const role = agent === "task" || agent === "surgeon" ? "main" : "oracle"
-  const inherited = settings.modes[mode][role]
-  const configured = settings.agents[agent]
-  const fast = tuning?.fastMode ?? configured?.fast ?? inherited.fast ?? false
-  if (configured === undefined) return resolveRoute(settings, { ...inherited, fast }, `Agent ${agent}`)
-  return resolveRoute(
-    settings,
-    { alias: configured.alias, effort: configured.effort ?? inherited.effort, fast },
-    `Agent ${agent}`,
-  )
+  const route = modeConfig.agents[agent] ?? modeConfig[role]
+  const fast = tuning?.fastMode ?? route.fast ?? false
+  return resolveRoute(settings, { ...route, fast }, `Mode ${mode} agent ${agent}`)
 }
 
 export const resolveAgentRoute: {

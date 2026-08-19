@@ -83,7 +83,7 @@ it.effect("renders and targets every compact mode notch on a real 24x12 surface"
         }
       }
     ).palette
-    for (const label of modeSelectorLabels(20)) {
+    for (const label of modeSelectorLabels(20, ["low", "medium", "high", "ultra"])) {
       setup.mockMouse.click(palette.screenX + label.start, palette.screenY + 1)
       setup.mockMouse.click(palette.screenX + label.end - 1, palette.screenY + 1)
     }
@@ -130,7 +130,10 @@ it.effect("renders responsive context tracks and per-cell mode commit wipe color
         }
       }
     ).palette
-    setup.mockMouse.click(palette.screenX + modeSelectorLabels(28)[2]!.start, palette.screenY + 1)
+    setup.mockMouse.click(
+      palette.screenX + modeSelectorLabels(28, ["low", "medium", "high", "ultra"])[2]!.start,
+      palette.screenY + 1,
+    )
     yield* Effect.tryPromise(() => setup.renderOnce())
     expect(committed).toEqual([2])
     setup.resize(80, 24)

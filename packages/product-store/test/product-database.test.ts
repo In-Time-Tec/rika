@@ -1,10 +1,57 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient"
+import { StartTurn } from "@rika/product/execution-gateway"
+import { ExecutionRouteSnapshot, testExecutionRoute } from "@rika/product/execution-route-snapshot"
+import { SteeringAdmission } from "@rika/product/turn-repository-steering"
 import { expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer } from "effect"
+import { Effect, FileSystem, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { layer } from "../src/database/product-database-layer"
 import { schemaFingerprint } from "../src/database/product-schema"
+
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+const ExecutionRouteJson = Schema.fromJsonString(ExecutionRouteSnapshot)
+const StartTurnJson = Schema.fromJsonString(StartTurn)
+const SteeringAdmissionJson = Schema.fromJsonString(SteeringAdmission)
+
+const legacyExecutionRoute = (version: 1 | 2) => {
+  type MutableModel = Record<string, unknown> & {
+    selection?: unknown
+    alias?: unknown
+    candidates: Array<{ providerConnection: Record<string, unknown> }>
+  }
+  const route = structuredClone(testExecutionRoute()) as unknown as {
+    version: number
+    subagents?: unknown
+    main: MutableModel
+    oracle: MutableModel
+    title: MutableModel
+    compactionSummary: MutableModel
+    agents: Record<string, MutableModel>
+  }
+  route.version = version
+  if (version === 1) delete route.subagents
+  for (const model of [
+    route.main,
+    route.oracle,
+    route.title,
+    route.compactionSummary,
+    ...Object.values(route.agents),
+  ]) {
+    model.alias = model.selection
+    delete model.selection
+    for (const candidate of model.candidates) {
+      candidate.providerConnection = {
+        provider: "openai",
+        protocol: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        authentication: "api-key",
+        apiKeyEnvironment: "OPENAI_API_KEY",
+      }
+    }
+  }
+  return route
+}
 
 it.layer(BunServices.layer)("product database", (test) => {
   test.effect("builds the one current schema in a fresh database", () =>
@@ -163,6 +210,116 @@ it.layer(BunServices.layer)("product database", (test) => {
     ),
   )
 
+  test.effect("migrates persisted v1 and v2 execution routes once at the schema boundary", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-product-route-upgrade-" })
+        const filename = `${directory}/rika.db`
+        yield* Effect.scoped(Layer.build(layer(filename)))
+        const client = yield* Layer.build(SqliteClient.layer({ filename }))
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient
+          yield* sql`DROP TABLE rika_execution_route_contract`
+          const objects = yield* sql`SELECT type, name, tbl_name AS table_name, sql
+            FROM sqlite_schema
+            WHERE type IN ('table', 'index', 'trigger', 'view') AND name NOT LIKE 'sqlite_%'
+            ORDER BY type ASC, name ASC`
+          yield* sql`UPDATE rika_schema_identity SET fingerprint = ${schemaFingerprint(objects as never)} WHERE id = 1`
+          yield* sql`INSERT INTO rika_workspaces (path, created_at) VALUES ('/preserved', 1)`
+          yield* sql`INSERT INTO rika_threads (id, workspace, title, labels_json, created_at, updated_at)
+            VALUES ('t1', '/preserved', 'Keep', '[]', 1, 1)`
+          yield* sql`INSERT INTO rika_turns (id, thread_id, turn_kind, status, prompt, created_at, updated_at, execution_route_json)
+            VALUES ('v1', 't1', 'AgentExecution', 'completed', 'v1', 1, 1, ${encodeJson(legacyExecutionRoute(1))})`
+          yield* sql`INSERT INTO rika_turns (id, thread_id, turn_kind, status, prompt, created_at, updated_at, execution_route_json)
+            VALUES ('v2', 't1', 'AgentExecution', 'completed', 'v2', 2, 2, ${encodeJson(legacyExecutionRoute(2))})`
+          yield* sql`INSERT INTO rika_turn_admission_outbox (turn_id, start_input_json, prepared_at)
+            VALUES ('v1', ${encodeJson({
+              threadId: "t1",
+              turnId: "v1",
+              workspace: "/preserved",
+              prompt: "v1",
+              executionRoute: legacyExecutionRoute(1),
+            })}, 3)`
+          yield* sql`INSERT INTO rika_turn_steering_outbox
+            (request_id, target_turn_id, source_turn_id, thread_id, admission_json, status, prepared_at)
+            VALUES ('steer-v2', 'v2', 'v1', 't1', ${encodeJson({
+              target: { runId: "run-v2", turnId: "v2", threadId: "t1" },
+              input: { text: "steer", idempotencyKey: "steer-v2" },
+              source: {
+                _tag: "AgentExecution",
+                id: "v1",
+                threadId: "t1",
+                prompt: "v1",
+                status: "completed",
+                executionRoute: legacyExecutionRoute(2),
+                author: { _tag: "Human" },
+                lineage: { _tag: "Original" },
+                createdAt: 1,
+                updatedAt: 1,
+              },
+              preparedAt: 4,
+              outcome: { _tag: "Pending" },
+            })}, 'pending', 4)`
+        }).pipe(Effect.provide(client))
+
+        const reopened = yield* Layer.build(layer(filename))
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient
+          const marker = yield* sql`SELECT version FROM rika_execution_route_contract WHERE id = 1`
+          const rows = yield* sql`SELECT id, execution_route_json FROM rika_turns ORDER BY id`
+          const admissionRows = yield* sql`SELECT start_input_json FROM rika_turn_admission_outbox`
+          const steeringRows = yield* sql`SELECT admission_json FROM rika_turn_steering_outbox`
+          const routes = yield* Effect.forEach(rows, (row) =>
+            Schema.decodeUnknownEffect(ExecutionRouteJson)(String(row.execution_route_json)),
+          )
+          const admission = yield* Schema.decodeUnknownEffect(StartTurnJson)(String(admissionRows[0]?.start_input_json))
+          const steeringAdmission = yield* Schema.decodeUnknownEffect(SteeringAdmissionJson)(
+            String(steeringRows[0]?.admission_json),
+          )
+          expect(marker).toEqual([{ version: 3 }])
+          expect(routes.map((route) => route.version)).toEqual([3, 3])
+          expect(routes.map((route) => route.main.selection)).toEqual(["test", "test"])
+          expect(routes.map((route) => route.main.candidates[0]?.providerConnection.protocol)).toEqual([
+            "openai-responses",
+            "openai-responses",
+          ])
+          for (const route of routes) {
+            const models = [
+              route.main,
+              route.oracle,
+              route.title,
+              route.compactionSummary,
+              ...Object.values(route.agents),
+            ]
+            expect(
+              models
+                .flatMap((model) => model.candidates)
+                .every(({ providerConnection }) => providerConnection.protocol === "openai-responses"),
+            ).toBe(true)
+          }
+          expect(routes.map((route) => route.subagents)).toEqual([
+            { maxDepth: 1, maxSubagents: 4 },
+            { maxDepth: 1, maxSubagents: 4 },
+          ])
+          expect(admission.executionRoute).toMatchObject({
+            version: 3,
+            subagents: { maxDepth: 1, maxSubagents: 4 },
+            main: { selection: "test", candidates: [{ providerConnection: { protocol: "openai-responses" } }] },
+          })
+          expect(steeringAdmission.source?.executionRoute).toMatchObject({
+            version: 3,
+            subagents: { maxDepth: 1, maxSubagents: 4 },
+            main: { selection: "test", candidates: [{ providerConnection: { protocol: "openai-responses" } }] },
+          })
+          for (const row of rows) expect(String(row.execution_route_json)).not.toContain('"alias"')
+          expect(String(admissionRows[0]?.start_input_json)).not.toContain('"alias"')
+          expect(String(steeringRows[0]?.admission_json)).not.toContain('"alias"')
+        }).pipe(Effect.provide(reopened))
+      }),
+    ),
+  )
+
   test.effect("brings a database made before durable steering admission up to the current schema", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -174,6 +331,7 @@ it.layer(BunServices.layer)("product database", (test) => {
         const built = yield* Layer.build(layer(filename))
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
+          yield* sql`DROP TABLE rika_execution_route_contract`
           yield* sql`DROP TABLE rika_turn_steering_outbox`
           yield* sql`DROP TRIGGER rika_tombstoned_thread_turn_insert`
           yield* sql`DROP TABLE rika_thread_deletion_outbox`
@@ -206,6 +364,7 @@ it.layer(BunServices.layer)("product database", (test) => {
         const client = yield* Layer.build(SqliteClient.layer({ filename }))
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
+          yield* sql`DROP TABLE rika_execution_route_contract`
           yield* sql`DROP TABLE rika_turn_steering_outbox`
           const objects = yield* sql`SELECT type, name, tbl_name AS table_name, sql
             FROM sqlite_schema
@@ -234,6 +393,7 @@ it.layer(BunServices.layer)("product database", (test) => {
         const driftedClient = yield* Layer.build(SqliteClient.layer({ filename: drifted }))
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
+          yield* sql`DROP TABLE rika_execution_route_contract`
           yield* sql`DROP TABLE rika_turn_steering_outbox`
           const objects = yield* sql`SELECT type, name, tbl_name AS table_name, sql
             FROM sqlite_schema

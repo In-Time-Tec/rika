@@ -108,7 +108,7 @@ export interface InteractiveSessionInput {
   readonly rootTurnOwner: RootTurnOwnerInterface
   readonly turnMutationAdmission: Semaphore.Semaphore
   readonly resolveExecutionRoute: (
-    mode: ModeId,
+    mode?: ModeId,
     tuning?: { readonly fastMode?: boolean },
     workspace?: string,
   ) => Effect.Effect<ExecutionRouteSnapshot, OperationError, import("@rika/product/execution-gateway").Service>
