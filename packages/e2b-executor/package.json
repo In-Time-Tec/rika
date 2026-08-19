@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/e2b-executor",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./assignment-store": "./src/assignment-store.ts",
+    "./checkpoint": "./src/checkpoint.ts",
+    "./checkout": "./src/checkout.ts",
+    "./contract": "./src/contract.ts",
+    "./controller": "./src/controller.ts",
+    "./e2b-provider": "./src/e2b-provider.ts",
+    "./provider": "./src/provider.ts"
+  },
+  "dependencies": {
+    "@rika/remote-execution": "workspace:*",
+    "e2b": "2.41.0",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "rika": {
+    "kind": "adapter",
+    "domain": "remote-execution"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/e2b-executor/src packages/e2b-executor/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  }
+}
