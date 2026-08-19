@@ -53,7 +53,7 @@ test(
         const app = yield* TuiApp.tuiApp({
           height: 36,
           inspectTranscript: true,
-          script: [model.text("ACTIVE_COMPLETE", 25_000), model.text("FOLLOW_UP_COMPLETE")],
+          script: [model.text("ACTIVE_COMPLETE", 4_000), model.text("FOLLOW_UP_COMPLETE")],
         })
 
         yield* Effect.promise(() => app.type("Begin steerable work"))
@@ -61,7 +61,7 @@ test(
         yield* app.waitModelRequests(1)
 
         const oversized = `OVERSIZE${"z".repeat(ExecutionGateway.SteeringTextMaxCharacters)}`
-        yield* Effect.promise(() => app.type(oversized))
+        yield* Effect.promise(() => app.paste(oversized))
         app.pressEnter()
         yield* waitQueue(app, threadId, (queue) => queue.turns.some((turn) => turn.prompt.startsWith("OVERSIZE")))
 
@@ -81,7 +81,8 @@ test(
             }
           })
         expect(yield* waitSteered(60_000)).toBeGreaterThan(0)
-        app.pressKey("c", { ctrl: true })
+        yield* app.waitFrame("ACTIVE_COMPLETE", 15_000)
+        yield* app.settled
         yield* app.quit
       }),
     ),
