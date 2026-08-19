@@ -76,6 +76,7 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
           loadChangedFiles,
           adapter,
           startSelection,
+          ...(options.rememberMode === undefined ? {} : { rememberMode: options.rememberMode }),
         }) as Parameters<typeof createTui>[0]),
       }),
       () => loop.closed,

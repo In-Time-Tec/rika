@@ -1,8 +1,21 @@
 # Provider connection configuration
 
-Settings may override the built-in `openai` and `anthropic` HTTP connections with `baseUrl` and `apiKeyEnv`, and the built-in `bedrock` connection with non-secret AWS identity fields. A workspace provider entry replaces the matching global provider entry as a unit; omitted values fall back to the built-in connection, not fields from the global override.
+The first-class model providers are `openai`, `anthropic`, `openrouter`, and `bedrock`. HTTP providers accept a non-secret `baseUrl` and `apiKeyEnv`. A Workspace HTTP provider entry replaces the matching global entry as a unit, with omitted fields falling back to that provider's built-in connection. Bedrock's non-secret identity fields merge by scope so a Workspace can replace only its region, profile, endpoint, auth mode, or refresh command.
 
-`baseUrl` must be an absolute HTTP or HTTPS URL without embedded credentials, and `apiKeyEnv` must name an uppercase environment variable. Literal keys, tokens, protocols, and custom providers are rejected; API-key credentials are read from the named environment variable and configuration output reports only whether they are present.
+OpenAI additionally accepts `api: "responses"` or `api: "chat-completions"`. Responses is the default and uses Baton's OpenAI Responses adapter. Chat Completions uses Baton's OpenAI Chat Completions adapter and appends the compatible Chat Completions route beneath the configured base URL. Either API accepts an arbitrary compatible base URL. `baseUrl` must be an absolute HTTP or HTTPS URL without query parameters, fragments, or embedded credentials, and `apiKeyEnv` must name an uppercase environment variable. Literal keys, tokens, protocol strings, and custom provider IDs are rejected.
+
+```json
+{
+  "providers": {
+    "openai": {
+      "api": "chat-completions",
+      "baseUrl": "https://models.example/openai/v1",
+      "apiKeyEnv": "MODELS_API_KEY"
+    },
+    "openrouter": { "apiKeyEnv": "OPENROUTER_API_KEY" }
+  }
+}
+```
 
 `rika auth login openai` stores an OpenAI account session under the active Profile. A newly admitted route that uses the built-in OpenAI connection selects that account session and pins its non-secret fingerprint; if no account is stored, the route falls back to `OPENAI_API_KEY`. Baton sends account-backed requests to the Codex subscription endpoint and refreshes rejected credentials without persisting tokens in execution state. A customized OpenAI `baseUrl` always remains an API-key connection and never reads the stored account.
 
@@ -17,20 +30,22 @@ Bedrock uses Baton's AWS default credential chain, including environment, shared
       "authRefresh": { "command": "aws", "args": ["sso", "login", "--profile", "engineering"] }
     }
   },
-  "modelAliases": {
-    "bedrock-fable": {
-      "base": "fable",
-      "provider": "bedrock",
-      "candidates": ["us.anthropic.claude-sonnet-4-20250514-v1:0"]
-    },
-    "bedrock-opus": {
-      "base": "opus",
-      "provider": "bedrock",
-      "candidates": ["us.anthropic.claude-opus-4-1-20250805-v1:0"]
+  "defaultMode": "aws-opus",
+  "modes": {
+    "aws-opus": {
+      "main": {
+        "provider": "bedrock",
+        "model": "us.anthropic.claude-opus-4-1-20250805-v1:0",
+        "effort": "high"
+      },
+      "agents": {
+        "task": {
+          "provider": "bedrock",
+          "model": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+          "effort": "medium"
+        }
+      }
     }
-  },
-  "modelRoutes": {
-    "modes": { "high": { "main": "bedrock-opus", "oracle": "bedrock-opus" } }
   }
 }
 ```

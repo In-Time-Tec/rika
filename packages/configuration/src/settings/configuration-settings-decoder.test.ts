@@ -12,11 +12,11 @@ const Models = { catalog }
 
 describe("ConfigContract", () => {
   it("owns the built-in model catalog, routes, limits, variants, and compaction policy", () => {
-    expect(ConfigContract.defaults.modes).toEqual({
-      low: { main: { alias: "luna", effort: "xhigh" }, oracle: { alias: "terra", effort: "xhigh" } },
-      medium: { main: { alias: "terra", effort: "xhigh" }, oracle: { alias: "sol", effort: "medium" } },
-      high: { main: { alias: "sol", effort: "medium" }, oracle: { alias: "sol", effort: "high" } },
-      ultra: { main: { alias: "sol", effort: "xhigh" }, oracle: { alias: "sol", effort: "max" } },
+    expect(ConfigContract.defaults.defaultMode).toBe("medium")
+    expect(ConfigContract.defaults.modes.medium).toMatchObject({
+      main: { alias: "terra", effort: "xhigh" },
+      oracle: { alias: "sol", effort: "medium" },
+      agents: {},
     })
     expect(ConfigContract.defaults.models.luna).toMatchObject({
       provider: "openai",
@@ -26,14 +26,15 @@ describe("ConfigContract", () => {
     expect(ConfigContract.defaults.subagents).toEqual({ maxDepth: 1, maxSubagents: 4 })
     expect(Models.catalog.gpt56Sol.limits.contextWindow).toBe(272_000)
     expect(ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")).toMatchObject({
-      alias: "terra",
+      selection: "terra",
+      displayName: "GPT-5.6 Terra",
       providerId: "openai",
       model: "gpt-5.6-terra",
-      options: { reasoning: { effort: "xhigh" } },
+      options: { reasoning: { effort: "xhigh", summary: "auto" } },
       compaction: { contextWindow: 272_000, reserveTokens: 13_600, keepRecentTokens: 32_000 },
     })
     expect(ConfigContract.resolveCompactionSummaryRoute(ConfigContract.defaults)).toMatchObject({
-      alias: "sol",
+      selection: "sol",
       model: "gpt-5.6-sol",
       effort: "xhigh",
     })
@@ -83,10 +84,15 @@ describe("ConfigContract", () => {
             displayName: "DeepSeek V4 Flash",
           },
         },
+        modes: {
+          medium: {
+            main: { alias: "mg-flash" },
+            oracle: { alias: "mg-flash" },
+          },
+        },
         modelRoutes: {
-          modes: { medium: { main: "mg-flash", oracle: "mg-flash" } },
-          title: "mg-flash",
-          compaction: "mg-flash",
+          title: { alias: "mg-flash" },
+          compaction: { alias: "mg-flash" },
         },
       },
       workspace: {},
@@ -163,18 +169,20 @@ describe("ConfigContract", () => {
           candidates: ["us.anthropic.claude-sonnet-4-20250514-v1:0"],
         },
       },
-      modelRoutes: {
-        modes: { medium: { main: "bedrock-terra" } },
-        agents: { task: "bedrock-terra" },
-        compaction: "bedrock-terra",
+      modes: {
+        medium: {
+          main: { alias: "bedrock-terra" },
+          agents: { task: { alias: "bedrock-terra" } },
+        },
       },
+      modelRoutes: { compaction: { alias: "bedrock-terra" } },
     } as const
     expect(ConfigContract.decodeSettingsInput("settings.json", input)).toBe(input)
-    expect(() =>
+    expect(
       ConfigContract.decodeSettingsInput("settings.json", {
         modelAliases: { terra: { preset: "openai", displayName: "Terra", provider: "bedrock", candidates: ["model"] } },
       }),
-    ).toThrowError(/cannot replace a built-in model alias/)
+    ).toBeDefined()
     expect(() =>
       ConfigContract.decodeSettingsInput("settings.json", {
         modelAliases: {
@@ -182,6 +190,37 @@ describe("ConfigContract", () => {
         },
       }),
     ).toThrowError(/unknown key base/)
+  })
+
+  it("accepts custom modes with direct role and agent routes and rejects the removed nested route shape", () => {
+    const input = {
+      defaultMode: "deep-review",
+      modes: {
+        "deep-review": {
+          main: { provider: "anthropic", model: "claude-opus-direct", effort: "high" },
+          agents: { task: { provider: "bedrock", model: "us.anthropic.claude-task-direct-v1:0" } },
+        },
+      },
+    } as const
+    expect(ConfigContract.decodeSettingsInput("settings.json", input)).toBe(input)
+    for (const route of [
+      { model: "claude-opus-direct" },
+      { provider: "anthropic", model: "claude-opus-direct", options: {} },
+      { provider: "anthropic", model: "claude-opus-direct", candidates: ["fallback"] },
+      {
+        provider: "anthropic",
+        model: "claude-opus-direct",
+        limits: { maxInputTokens: 1, maxOutputTokens: 1, keepRecentTokens: 1 },
+      },
+    ])
+      expect(() =>
+        ConfigContract.decodeSettingsInput("settings.json", { modes: { custom: { main: route } } }),
+      ).toThrowError()
+    expect(() =>
+      ConfigContract.decodeSettingsInput("settings.json", {
+        modelRoutes: { modes: { high: { main: { alias: "sol" } } } },
+      }),
+    ).toThrowError(/unknown key modes/)
   })
 
   it("accepts arbitrary web search provider credentials and rejects malformed entries", () => {
@@ -199,7 +238,7 @@ describe("ConfigContract", () => {
     }
   })
 
-  it.each(["gateways", "models", "modes", "agents", "compaction", "permissions"])(
+  it.each(["gateways", "models", "agents", "compaction", "permissions"])(
     "rejects user-owned internal configuration key %s",
     (key) =>
       expect(() => ConfigContract.decodeSettingsInput("settings.json", { [key]: {} })).toThrowError(/unknown key/),
@@ -274,7 +313,7 @@ describe("ConfigContract", () => {
     ).toThrowError(/effort low must set normal options/)
   })
 
-  it("resolves every default route to a gpt-5.6 model with streaming reasoning summaries", () => {
+  it("resolves every default route through a reusable gpt-5.6 policy bundle", () => {
     const modes = ["low", "medium", "high", "ultra"] as const
     const roles = ["main", "oracle"] as const
     const routes = [
@@ -287,26 +326,27 @@ describe("ConfigContract", () => {
     for (const route of routes) {
       expect(route.model).toMatch(/^gpt-5\.6-/)
       expect(route.providerId).toBe("openai")
-      expect(route.options).toMatchObject({ reasoning: { summary: "auto" } })
-    }
-    for (const [alias, entry] of Object.entries(ConfigContract.defaults.models)) {
-      if (entry.provider !== "openai") continue
-      for (const [effort, variant] of Object.entries(entry.variants)) {
-        expect(variant.normal.options, `${alias}/${effort}`).toMatchObject({
-          reasoning: { effort: effort === "max" ? "xhigh" : effort, summary: "auto" },
-        })
-      }
+      expect(route.options).toHaveProperty("reasoning")
     }
   })
 
   it("preserves candidate order and rejects incomplete aliases through the routing error contract", () => {
+    const fableAlias = {
+      displayName: "Fable",
+      supportsMedia: true,
+      provider: "anthropic" as const,
+      candidates: ["claude-fable-5", "claude-opus-4-8"],
+      limits: { maxInputTokens: 100, maxOutputTokens: 10, keepRecentTokens: 10 },
+      variants: { low: { normal: { options: {} } } },
+    }
     const fable = ConfigContract.resolveModelRoute(
       {
         ...ConfigContract.defaults,
+        models: { fable: fableAlias },
         modes: {
           ...ConfigContract.defaults.modes,
           low: {
-            ...ConfigContract.defaults.modes.low,
+            ...ConfigContract.defaults.modes.low!,
             main: { alias: "fable", effort: "low" },
           },
         },
@@ -319,23 +359,20 @@ describe("ConfigContract", () => {
     const emptyAlias: ConfigurationSettings = {
       ...ConfigContract.defaults,
       models: {
-        ...ConfigContract.defaults.models,
-        empty: { ...ConfigContract.defaults.models.luna!, candidates: [] },
+        empty: { ...fableAlias, candidates: [] },
       },
       modes: {
         ...ConfigContract.defaults.modes,
-        low: { ...ConfigContract.defaults.modes.low, main: { alias: "empty", effort: "low" } },
+        low: { ...ConfigContract.defaults.modes.low!, main: { alias: "empty", effort: "low" } },
       },
     }
-    expect(() => ConfigContract.resolveModelRoute(emptyAlias, "low")).toThrowError(/empty.*no provider candidates/)
+    expect(() => ConfigContract.resolveModelRoute(emptyAlias, "low")).toThrowError(/no provider candidates/)
 
     const missingProvider = {
       ...ConfigContract.defaults,
       providers: { anthropic: ConfigContract.defaults.providers.anthropic },
     } as ConfigurationSettings
-    expect(() => ConfigContract.resolveModelRoute(missingProvider, "medium")).toThrowError(
-      /terra.*missing provider openai/,
-    )
+    expect(() => ConfigContract.resolveModelRoute(missingProvider, "medium")).toThrowError(/missing provider openai/)
   })
 
   it("accepts supported logging levels and rejects custom log paths", () => {

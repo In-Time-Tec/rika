@@ -42,7 +42,7 @@ const DoctorReport = Schema.fromJsonString(
     }),
     credentials: Schema.Struct({ webSearch: Schema.Record(Schema.String, PresenceStatus) }),
     model: Schema.Struct({
-      route: Schema.Struct({ alias: Schema.String, providerId: Schema.String, model: Schema.String }),
+      route: Schema.Struct({ selection: Schema.String, providerId: Schema.String, model: Schema.String }),
       apiKey: CredentialStatus,
     }),
   }),
@@ -321,7 +321,7 @@ it.effect(
         ])
         expect(report.credentials.webSearch).toEqual({ parallel: "present" })
         expect(report.model).toMatchObject({
-          route: { alias: "terra", providerId: "openai", model: "gpt-5.6-terra" },
+          route: { selection: "terra", providerId: "openai", model: "gpt-5.6-terra" },
           apiKey: "present",
         })
         const output = [...result.lines, ...result.errors].join("\n")

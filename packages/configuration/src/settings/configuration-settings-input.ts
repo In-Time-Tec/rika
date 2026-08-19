@@ -1,4 +1,3 @@
-import type { ModeId } from "../model-routing/behavior-mode"
 import type { ModelRoute } from "../model-routing/model-route"
 import type { ConfigurationSettings } from "./configuration-settings"
 
@@ -19,19 +18,33 @@ export interface ModelAliasInput {
   >
 }
 
-export interface RoleRouteInput {
+export interface AliasRouteInput {
   readonly alias: string
   readonly effort?: ModelRoute.Effort
   readonly fast?: boolean
+  readonly model?: never
+  readonly provider?: never
+}
+
+export interface DirectModelRouteInput {
+  readonly model: string
+  readonly provider: ModelRoute.ProviderId
+  readonly effort?: ModelRoute.Effort
+  readonly fast?: boolean
+  readonly alias?: never
+}
+
+export type RoleRouteInput = AliasRouteInput | DirectModelRouteInput
+
+export interface ModeInput {
+  readonly main?: RoleRouteInput
+  readonly oracle?: RoleRouteInput
+  readonly agents?: Partial<Readonly<Record<ModelRoute.AgentId, RoleRouteInput>>>
 }
 
 export interface ModelRoutesInput {
-  readonly modes?: Partial<
-    Readonly<Record<ModeId, Partial<Readonly<Record<ModelRoute.Role, string | RoleRouteInput>>>>>
-  >
-  readonly title?: string | RoleRouteInput
-  readonly agents?: Partial<Readonly<Record<ModelRoute.AgentId, string | RoleRouteInput>>>
-  readonly compaction?: string | RoleRouteInput
+  readonly title?: RoleRouteInput
+  readonly compaction?: RoleRouteInput
 }
 
 export interface McpCommandDefinition {
@@ -55,6 +68,8 @@ export type McpDefinition = McpCommandDefinition | McpRemoteDefinition
 export interface ConfigurationSettingsInput {
   readonly providers?: Partial<Readonly<Record<ModelRoute.ProviderId, ModelRoute.ProviderOverride>>>
   readonly modelAliases?: Readonly<Record<string, ModelAliasInput>>
+  readonly defaultMode?: string
+  readonly modes?: Readonly<Record<string, ModeInput>>
   readonly modelRoutes?: ModelRoutesInput
   readonly subagents?: Partial<ConfigurationSettings["subagents"]>
   readonly keymap?: Readonly<Record<string, string>>

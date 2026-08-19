@@ -23,7 +23,7 @@ it.effect("selects the stored OpenAI account for each newly admitted native rout
     )
     expect(route.main.candidates[0]?.providerConnection).toEqual({
       provider: "openai",
-      protocol: "openai",
+      protocol: "openai-responses",
       baseUrl: "https://api.openai.com/v1",
       authentication: "account",
       credentialIdentity: "stored-account-fingerprint",
@@ -89,7 +89,7 @@ it.effect("uses fast only for routes that provide a fast variant", () =>
       modes: {
         ...Settings.Defaults.settingsDefaults.modes,
         medium: {
-          ...Settings.Defaults.settingsDefaults.modes.medium,
+          ...Settings.Defaults.settingsDefaults.modes.medium!,
           oracle: { alias: "fable", effort: "medium" },
         },
       },
@@ -111,7 +111,7 @@ it.effect("does not read account credentials for a customized OpenAI endpoint", 
       providers: {
         ...Settings.Defaults.settingsDefaults.providers,
         openai: {
-          protocol: "openai",
+          protocol: "openai-responses",
           baseUrl: "https://openai-compatible.example/v1",
           apiKeyEnv: "OPENAI_API_KEY",
         },
@@ -128,6 +128,86 @@ it.effect("does not read account credentials for a customized OpenAI endpoint", 
     expect(route.main.candidates[0]?.providerConnection).toMatchObject({
       baseUrl: "https://openai-compatible.example/v1",
       authentication: "api-key",
+    })
+  }),
+)
+
+it.effect("pins a customized OpenAI Chat Completions connection and direct model", () =>
+  Effect.gen(function* () {
+    const settings: Settings.ConfigurationSettings = {
+      ...Settings.Defaults.settingsDefaults,
+      providers: {
+        ...Settings.Defaults.settingsDefaults.providers,
+        openai: {
+          protocol: "openai-chat-completions",
+          baseUrl: "https://chat-compatible.example/openai/v1",
+          apiKeyEnv: "CHAT_COMPATIBLE_API_KEY",
+        },
+      },
+      modes: {
+        ...Settings.Defaults.settingsDefaults.modes,
+        medium: {
+          ...Settings.Defaults.settingsDefaults.modes.medium!,
+          main: { provider: "openai", model: "custom-chat-model", effort: "medium" },
+        },
+      },
+    }
+    const route = yield* routeFor(settings, Effect.succeed({ _tag: "Unauthenticated" }))
+    expect(route.main).toMatchObject({
+      selection: "custom-chat-model",
+      candidates: [
+        {
+          model: "custom-chat-model",
+          providerConnection: {
+            provider: "openai",
+            protocol: "openai-chat-completions",
+            baseUrl: "https://chat-compatible.example/openai/v1",
+            apiKeyEnvironment: "CHAT_COMPATIBLE_API_KEY",
+          },
+          providerOptions: { max_tokens: 128_000 },
+        },
+      ],
+    })
+  }),
+)
+
+it.effect("uses the configured default mode unless an explicit custom mode is selected", () =>
+  Effect.gen(function* () {
+    const settings: Settings.ConfigurationSettings = {
+      ...Settings.Defaults.settingsDefaults,
+      defaultMode: "deep-review",
+      modes: {
+        quick: {
+          main: { provider: "anthropic", model: "claude-quick", effort: "low" },
+          oracle: { provider: "anthropic", model: "claude-quick", effort: "low" },
+          agents: { task: { provider: "bedrock", model: "us.anthropic.claude-task-v1:0", effort: "high" } },
+        },
+        "deep-review": {
+          main: { provider: "bedrock", model: "us.anthropic.claude-deep-v1:0", effort: "max" },
+          oracle: { provider: "bedrock", model: "us.anthropic.claude-deep-v1:0", effort: "max" },
+          agents: {},
+        },
+      },
+    }
+    const resolve = workspaceExecutionRoute({
+      testModel: undefined,
+      effectiveConfigForWorkspace: () => Effect.succeed({ settings }),
+      openAiAccountStatus: Effect.succeed({ _tag: "Unauthenticated" }),
+    })
+    const defaulted = yield* resolve(undefined, undefined, "/workspace")
+    const explicit = yield* resolve("quick", undefined, "/workspace")
+    expect(defaulted.mode).toBe("deep-review")
+    expect(defaulted.main.candidates[0]).toMatchObject({ model: "us.anthropic.claude-deep-v1:0" })
+    expect(explicit.mode).toBe("quick")
+    expect(explicit.main.candidates[0]).toMatchObject({ model: "claude-quick" })
+    expect(explicit.agents.task).toMatchObject({
+      selection: "us.anthropic.claude-task-v1:0",
+      candidates: [
+        {
+          model: "us.anthropic.claude-task-v1:0",
+          providerConnection: { provider: "bedrock", protocol: "amazon-bedrock" },
+        },
+      ],
     })
   }),
 )

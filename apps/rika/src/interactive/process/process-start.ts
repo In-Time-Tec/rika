@@ -4,9 +4,8 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
-import { create as createTui, probeNativeAsset } from "@rika/terminal/opentui-surface"
-import type { Model } from "@rika/terminal/terminal-state"
-type ModeRoutes = Model["modeRoutes"]
+import { probeNativeAsset } from "@rika/terminal/opentui-surface"
+import type { ModeConfiguration } from "@rika/terminal/terminal-state"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Config, Console, Context, Effect, Layer, Option, Path } from "effect"
 import { Command } from "effect/unstable/cli"
@@ -16,6 +15,7 @@ import { layer as serverLayer } from "../../transport/client/server-client-trans
 import { globalPaths, workspacePaths } from "@rika/configuration/configuration-paths"
 import { provideLayerScoped } from "./process-layer"
 import { makeDispatcherLayer } from "./process-startup-dispatcher"
+import { saveModePreference } from "./mode-preference"
 
 const main = Command.run(command, { version }).pipe(
   Effect.catchTags({
@@ -31,13 +31,6 @@ const startupPathService = Effect.runSync(Effect.scoped(Layer.build(Path.layer))
 )
 const dirname = startupPathService.dirname
 const join = startupPathService.join
-
-export interface InteractiveTuiOptions {
-  readonly editor?: string | undefined
-  readonly modeRoutes?: (() => ModeRoutes | undefined) | undefined
-  readonly makeRenderer?: NonNullable<Parameters<typeof createTui>[0]["makeRenderer"]>
-  readonly writeTerminalTitle?: (sequence: string) => void
-}
 
 export const start = () => {
   const nativeProbe = Effect.runSync(Config.option(Config.string("RIKA_INTERNAL_OPENTUI_NATIVE_PROBE")))
@@ -81,8 +74,12 @@ export const start = () => {
   const serverRuntime = import.meta.path.startsWith("/$bunfs/")
     ? { executable: join(dirname(process.execPath), ".rika-server"), arguments: [] }
     : { executable: process.execPath, arguments: [join(import.meta.dir, "..", "..", "server-main.ts")] }
-  let clientModeRoutes: ModeRoutes | undefined
-  const clientOwnedInteractiveFunction = interactiveTui({ editor, modeRoutes: () => clientModeRoutes })
+  let clientModeConfiguration: ModeConfiguration | undefined
+  const clientOwnedInteractiveFunction = interactiveTui({
+    editor,
+    modeConfiguration: () => clientModeConfiguration,
+    rememberMode: (mode) => saveModePreference(paths.dataRoot, mode).pipe(Effect.ignore),
+  })
 
   const dispatcherLayer = makeDispatcherLayer({
     database,
@@ -92,8 +89,8 @@ export const start = () => {
     environment,
     version,
     clientOwnedInteractiveFunction,
-    setClientModeRoutes: (routes) => {
-      clientModeRoutes = routes
+    setClientModeConfiguration: (configuration) => {
+      clientModeConfiguration = configuration
     },
   })
   const clientProgram = main.pipe(

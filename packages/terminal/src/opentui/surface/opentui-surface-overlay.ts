@@ -1,14 +1,13 @@
 import stringWidth from "string-width"
 import { StyledText, dim, fg } from "@opentui/core"
 import type { Model } from "../../state/model/terminal-state"
-import { colors } from "../../presentation/terminal/terminal-theme"
+import { colors, modeColor } from "../../presentation/terminal/terminal-theme"
 import { filter } from "../../presentation/terminal/command-palette"
 import { contextDetails } from "../../presentation/terminal/terminal-context-details"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { fitOverlayHints, overlayHintWidth } from "../../presentation/terminal/terminal-overlay-hints"
 import { filteredFiles } from "../../state/model/terminal-thread-navigation"
 import { paletteContent, modePickerContent } from "./opentui-composer-region"
-import { modeIds } from "@rika/configuration/behavior-mode"
 import {
   modeSelectorIndexAtColumn,
   modeSelectorLabels,
@@ -115,10 +114,11 @@ export abstract class SurfaceOverlay extends SurfacePointer {
       this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
       this.paletteBox.top = Math.max(0, composerTop - boxHeight)
       this.paletteBox.title = " Mode "
-      const selectedMode = modeIds[model.modePicker.selected] ?? model.mode
-      this.paletteBox.titleColor = toOpenColor(colors[selectedMode])
+      const modes = Object.keys(model.modeRoutes)
+      const selectedMode = modes[model.modePicker.selected] ?? model.mode
+      this.paletteBox.titleColor = toOpenColor(modeColor(selectedMode))
       this.paletteBox.titleAlignment = "left"
-      this.renderOverlayHints([" ↔ turn ", " esc "], colors[selectedMode], {
+      this.renderOverlayHints([" ↔ turn ", " esc "], modeColor(selectedMode), {
         left: this.paletteBox.left,
         top: this.paletteBox.top,
         width: boxWidth,
@@ -143,7 +143,7 @@ export abstract class SurfaceOverlay extends SurfacePointer {
         const compact = modeContentWidth < 40 || model.height <= 12
         const labelRow = this.palette.screenY + (compact ? 1 : 2)
         if (event.y !== labelRow) return undefined
-        return modeSelectorIndexAtColumn(modeSelectorLabels(modeContentWidth), event.x - this.palette.screenX)
+        return modeSelectorIndexAtColumn(modeSelectorLabels(modeContentWidth, modes), event.x - this.palette.screenX)
       }
       this.palette.onMouseMove = (event) => {
         const selected = hitMode(event)
@@ -163,9 +163,9 @@ export abstract class SurfaceOverlay extends SurfacePointer {
       this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
       this.paletteBox.top = Math.max(0, composerTop - boxHeight)
       this.paletteBox.title = " Context & Usage "
-      this.paletteBox.titleColor = toOpenColor(colors[model.mode])
+      this.paletteBox.titleColor = toOpenColor(modeColor(model.mode))
       this.paletteBox.titleAlignment = "left"
-      this.renderOverlayHints([" Ctrl+Y toggle ", " esc "], colors[model.mode], {
+      this.renderOverlayHints([" Ctrl+Y toggle ", " esc "], modeColor(model.mode), {
         left: this.paletteBox.left,
         top: this.paletteBox.top,
         width: boxWidth,
@@ -226,7 +226,7 @@ export abstract class SurfaceOverlay extends SurfacePointer {
       this.paletteBox.top = Math.max(0, composerTop - overlayHeight)
       this.paletteBox.title = model.threadSwitcher.kind === "mention" ? " Mention Thread " : " Switch Thread "
       this.paletteBox.titleAlignment = "left"
-      this.renderOverlayHints([" Opt+W/Ctrl+T all workspaces ", " Esc close "], colors[model.mode], {
+      this.renderOverlayHints([" Opt+W/Ctrl+T all workspaces ", " Esc close "], modeColor(model.mode), {
         left: this.paletteBox.left,
         top: this.paletteBox.top,
         width: overlayWidth,

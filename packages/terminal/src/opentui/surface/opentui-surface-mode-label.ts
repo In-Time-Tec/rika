@@ -2,7 +2,7 @@ import * as ContextMeter from "../../state/model/terminal-context-meter"
 import { StyledText, fg, bold, type TextChunk } from "@opentui/core"
 import type { Model } from "../../state/model/terminal-state"
 import { contentColumnWidth } from "../../state/model/terminal-layout-state"
-import { colors } from "../../presentation/terminal/terminal-theme"
+import { colors, modeColor } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { activeTimeAt, activeTimeIcon, formatActiveTime } from "../../state/model/terminal-activity-time"
 import { formatTokens } from "../../presentation/terminal/terminal-format"
@@ -40,10 +40,10 @@ export abstract class SurfaceModeLabel extends SurfaceChrome {
       if (!contextVisible) {
         const usageText = compactUsageText()
         if (usageText.length === 0) return []
-        const usage = fg(model.currentThreadId === undefined ? border : colors[model.mode])(` ${usageText} `)
+        const usage = fg(model.currentThreadId === undefined ? border : modeColor(model.mode))(` ${usageText} `)
         return [this.hoverController.usageHovered ? bold(usage) : usage]
       }
-      const chunks: Array<TextChunk> = [fg(colors[model.mode])(contextPrefix)]
+      const chunks: Array<TextChunk> = [fg(modeColor(model.mode))(contextPrefix)]
       const context = model.contextUsage
       if (context?._tag === "Available") {
         const value = ContextMeter.meter(context, { cells: contextCells })
@@ -62,21 +62,21 @@ export abstract class SurfaceModeLabel extends SurfaceChrome {
             : value.glyphs
         const filled = value.glyphs.filter((glyph) => glyph === meterGlyphs.fill).length
         for (const [index, glyph] of glyphs.entries()) {
-          let glyphColor = colors[model.mode]
+          let glyphColor = modeColor(model.mode)
           if (model.modeCommit !== undefined && index < filled)
             glyphColor =
               index < Math.min(filled, model.modeCommit.tick)
-                ? colors[model.modeCommit.to]
-                : colors[model.modeCommit.from]
+                ? modeColor(model.modeCommit.to)
+                : modeColor(model.modeCommit.from)
           chunks.push(fg(glyphColor)(glyph))
         }
-        chunks.push(bold(fg(colors[model.mode])(` ${value.percent}% `)))
+        chunks.push(bold(fg(modeColor(model.mode))(` ${value.percent}% `)))
         return chunks
       }
       const glyphs = model.busy
         ? ContextMeter.loadingMeter(model.animationTick, { cells: contextCells })
         : Array.from({ length: contextCells }, () => meterGlyphs.track)
-      for (const glyph of glyphs) chunks.push(fg(colors[model.mode])(glyph))
+      for (const glyph of glyphs) chunks.push(fg(modeColor(model.mode))(glyph))
       chunks.push(fg(border)(" "))
       return chunks
     }
@@ -97,7 +97,7 @@ export abstract class SurfaceModeLabel extends SurfaceChrome {
           if (typed < commit.to.length) cursor = "▮"
         }
       }
-      const modeText = fg(colors[model.mode])(`${modeLabel}${cursor}`)
+      const modeText = fg(modeColor(model.mode))(`${modeLabel}${cursor}`)
       chunks.push(this.hoverController.modeHovered ? bold(modeText) : modeText)
       chunks.push(fg(border)(" "))
       return chunks

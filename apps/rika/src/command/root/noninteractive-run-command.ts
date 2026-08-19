@@ -1,10 +1,10 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Effect, Option, Schema, Stdio, Stream } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
-import { modeIds, type ModeId } from "@rika/configuration/behavior-mode"
+import type { ModeId } from "@rika/configuration/behavior-mode"
 import { dispatch } from "./cli-operation-dispatch"
 
-const mode = Flag.choice("mode", modeIds).pipe(Flag.withAlias("m"), Flag.optional)
+const mode = Flag.string("mode").pipe(Flag.withAlias("m"), Flag.optional)
 const workspace = Flag.directory("workspace").pipe(Flag.optional)
 const thread = Flag.string("thread").pipe(Flag.optional)
 const ephemeral = Flag.boolean("ephemeral")

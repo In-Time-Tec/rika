@@ -37,7 +37,7 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
   const configService = yield* ConfigurationService.ConfigurationService
   const adapter = yield* Adapter
   const config = yield* configService.effective
-  const route = ModelRouteResolution.resolveModelRoute(config.settings, "medium")
+  const route = ModelRouteResolution.resolveModelRoute(config.settings, config.settings.defaultMode)
   const providers = Object.fromEntries(
     Object.entries(config.settings.providers).map(([id, provider]) => [
       id,
@@ -49,7 +49,11 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
             authMode: provider.authMode,
             authRefresh: provider.authRefresh === undefined ? "not-configured" : "configured",
           }
-        : { baseUrl: provider.baseUrl, ...(provider.apiKeyEnv === undefined ? {} : { apiKeyEnv: provider.apiKeyEnv }) },
+        : {
+            protocol: provider.protocol,
+            baseUrl: provider.baseUrl,
+            ...(provider.apiKeyEnv === undefined ? {} : { apiKeyEnv: provider.apiKeyEnv }),
+          },
     ]),
   )
   const apiKeyStatus = (apiKeyEnv: string | undefined) => {
@@ -84,6 +88,8 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
       yield* json({
         settings: {
           providers,
+          defaultMode: config.settings.defaultMode,
+          modes: config.settings.modes,
           keymap: config.settings.keymap,
           extensionRoots: config.settings.extensionRoots,
           mcp,
@@ -95,7 +101,7 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
           providerApiKeys,
         },
         model: {
-          route: { alias: route.alias, providerId: route.providerId, model: route.model },
+          route: { selection: route.selection, providerId: route.providerId, model: route.model },
           apiKey: apiKeyStatus(route.providerConnection.apiKeyEnv),
         },
         diagnostics: config.diagnostics,
@@ -122,7 +128,7 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
     },
     credentials: { webSearch: webSearchCredentials },
     model: {
-      route: { alias: route.alias, providerId: route.providerId, model: route.model },
+      route: { selection: route.selection, providerId: route.providerId, model: route.model },
       apiKey: apiKeyStatus(route.providerConnection.apiKeyEnv),
     },
   })

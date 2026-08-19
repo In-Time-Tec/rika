@@ -5,7 +5,7 @@ import {
   fileSidebarLayoutWidth,
   threadSidebarLayoutWidth,
 } from "../../state/model/terminal-layout-state"
-import { spacing, colors } from "../../presentation/terminal/terminal-theme"
+import { spacing, modeColor } from "../../presentation/terminal/terminal-theme"
 import { cutoutBackground } from "./opentui-surface-renderables"
 import { welcomeContent } from "./opentui-surface-content"
 import { welcomeVisible } from "./opentui-welcome-state"
@@ -41,7 +41,7 @@ export abstract class SurfaceTranscriptMount extends SurfaceModeLabel {
     const contentLeft = threadSidebarLayoutWidth(model)
     const threadSidebarVisible = contentLeft > 0
     const contentWidth = contentColumnWidth(model)
-    const modeColor = colors[model.mode]
+    const activeModeColor = modeColor(model.mode)
     if (welcomeVisible(model)) {
       const welcomeWidth = this.welcomeWidthFor(model)
       const welcomePhase = this.options.animate === false ? model.animationTick : this.welcomeController.phase
@@ -51,7 +51,7 @@ export abstract class SurfaceTranscriptMount extends SurfaceModeLabel {
       if (existingWelcome === undefined) {
         const child = new TextRenderable(this.renderer, {
           content: welcomeContent(welcomeWidth, model.height, welcomePhase, model.mode, impulses),
-          fg: modeColor,
+          fg: activeModeColor,
           wrapMode: "word",
           selectable: true,
         })
@@ -61,7 +61,7 @@ export abstract class SurfaceTranscriptMount extends SurfaceModeLabel {
         this.welcomeController.key = welcomeKey
       } else if (this.welcomeController.key !== welcomeKey) {
         this.welcomeController.key = welcomeKey
-        existingWelcome.fg = modeColor
+        existingWelcome.fg = activeModeColor
         existingWelcome.content = welcomeContent(welcomeWidth, model.height, welcomePhase, model.mode, impulses)
       }
     } else {

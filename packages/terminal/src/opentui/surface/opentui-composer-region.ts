@@ -2,8 +2,7 @@ import { Function } from "effect"
 import { bold, bg, dim, fg, StyledText, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
 import type { Model } from "../../state/model/terminal-state"
-import { modeIds } from "@rika/configuration/behavior-mode"
-import { colors } from "../../presentation/terminal/terminal-theme"
+import { colors, modeColor } from "../../presentation/terminal/terminal-theme"
 import { displayInput } from "../../state/model/terminal-composer-state"
 import { truncateToWidth } from "../../presentation/terminal/terminal-format"
 import type { Command } from "../../presentation/terminal/command-palette"
@@ -160,7 +159,7 @@ const paletteContentImpl = (
 
 const routeLabel = (route: ModeRouteLabel | undefined): string =>
   route === undefined ? "" : `${route.name} ${route.effort}${route.fast ? " fast" : ""}`
-const modeDescription = {
+const modeDescription: Readonly<Record<string, string>> = {
   low: "Fast, low-cost mode for small, well-defined tasks",
   medium: "Balanced default for everyday work",
   high: "Deep reasoning for hard tasks",
@@ -182,14 +181,15 @@ export const paletteContent: {
 } = Function.dual(4, paletteContentImpl)
 
 const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => {
-  const selected = modeIds[model.modePicker.selected] ?? model.mode
+  const modes = Object.keys(model.modeRoutes)
+  const selected = modes[model.modePicker.selected] ?? model.mode
   const compact = innerWidth < 40 || model.height <= 12
   const chunks: Array<TextChunk> = []
   const line = (value = "", style: (text: string) => TextChunk = fg(colors.text)) => {
     if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
     chunks.push(style(truncateToWidth(value, innerWidth)))
   }
-  const labels = modeSelectorLabels(innerWidth)
+  const labels = modeSelectorLabels(innerWidth, modes)
   const targetPosition = model.modePicker.selected
   const fromPosition = model.modePicker.fromPosition ?? model.modePicker.from ?? targetPosition
   const progress = Math.min(1, ((model.modePicker.turnTick ?? 4) + 1) / 4)
@@ -206,19 +206,19 @@ const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => 
     if (edge >= 0 && edge < dial.length) dial[edge] = "╾"
   }
   if (!compact) line("")
-  line(dial.join(""), (value) => fg(colors[selected])(value))
+  line(dial.join(""), (value) => fg(modeColor(selected))(value))
   const labelChunks: Array<TextChunk> = []
   let column = 0
   for (const label of labels) {
     labelChunks.push(fg(colors.text)(" ".repeat(Math.max(0, label.start - column))))
     labelChunks.push(
-      label.mode === selected ? bold(fg(colors[selected])(label.text)) : dim(fg(colors.text)(label.text)),
+      label.mode === selected ? bold(fg(modeColor(selected))(label.text)) : dim(fg(colors.text)(label.text)),
     )
     column = label.end
   }
   chunks.push(fg(colors.text)("\n"), ...labelChunks)
   if (compact) {
-    line(modeDescription[selected], (value) => fg(colors.muted)(value))
+    line(modeDescription[selected] ?? `${selected} mode`, (value) => fg(colors.muted)(value))
     return new StyledText(chunks)
   }
   line("")
@@ -230,7 +230,7 @@ const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => 
   line("")
   line(" ".repeat(innerWidth))
   line("")
-  line(modeDescription[selected])
+  line(modeDescription[selected] ?? `${selected} mode`)
   line("")
   return new StyledText(chunks)
 }

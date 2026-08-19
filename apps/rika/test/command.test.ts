@@ -342,7 +342,6 @@ it.effect("rejects invalid thread relationships", () =>
     yield* failsWithoutDispatch(["threads", "continue", "a", "b"])
     yield* failsWithoutDispatch(["threads", "search"])
     yield* failsWithoutDispatch(["threads", "label", "a"])
-    yield* failsWithoutDispatch(["tools", "list", "--mode", "impossible"])
     yield* failsWithoutDispatch(["threads", "rename"])
     yield* failsWithoutDispatch(["threads", "pin"])
     yield* failsWithoutDispatch(["threads", "archive"])
@@ -370,6 +369,7 @@ it.effect("dispatches catalog, extension, and maintenance operations", () =>
       [["auth", "logout", "openai"], { _tag: "Auth", action: "logout", provider: "openai" }],
       [["tools", "list"], { _tag: "ToolCatalog", action: "list" }],
       [["tools", "list", "--mode", "ultra"], { _tag: "ToolCatalog", action: "list", mode: "ultra" }],
+      [["tools", "list", "--mode", "deep-review"], { _tag: "ToolCatalog", action: "list", mode: "deep-review" }],
       [["tools", "show", "read"], { _tag: "ToolCatalog", action: "show", name: "read" }],
       [["skills", "list"], { _tag: "Skill", action: "list" }],
       [["skills", "inspect", "x"], { _tag: "Skill", action: "inspect", name: "x" }],

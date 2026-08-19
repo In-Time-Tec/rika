@@ -1,7 +1,6 @@
 import type { Redacted } from "effect"
-import type { ModeId } from "../model-routing/behavior-mode"
 import type { ModelRoute } from "../model-routing/model-route"
-import type { McpDefinition, RoleRouteInput } from "./configuration-settings-input"
+import type { McpDefinition } from "./configuration-settings-input"
 import * as Defaults from "./configuration-defaults"
 import * as Decoder from "./configuration-settings-decoder"
 import * as Input from "./configuration-settings-input"
@@ -10,9 +9,9 @@ import * as ModelRouting from "../model-routing/model-route-resolution"
 export interface ConfigurationSettings {
   readonly providers: Readonly<Record<ModelRoute.ProviderId, ModelRoute.ProviderConnection>>
   readonly models: Readonly<Record<string, ModelRoute.ModelAlias>>
-  readonly modes: Readonly<Record<ModeId, ModelRoute.ModeConfig>>
+  readonly defaultMode: string
+  readonly modes: Readonly<Record<string, ModelRoute.ModeConfig>>
   readonly threadTitle: ModelRoute.RoleRoute
-  readonly agents: Partial<Readonly<Record<ModelRoute.AgentId, RoleRouteInput>>>
   readonly compaction: { readonly summaryModel: ModelRoute.RoleRoute }
   readonly subagents: { readonly maxDepth: number; readonly maxSubagents: number }
   readonly keymap: Readonly<Record<string, string>>

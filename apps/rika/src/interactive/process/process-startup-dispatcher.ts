@@ -12,6 +12,7 @@ import * as Logging from "../../diagnostics/diagnostic-file-logging"
 import { spawn as spawnServer } from "../../server/process/server-process-spawn"
 import { provideLayerScoped } from "./process-layer"
 import { loadSettingsFile, failureKind, withClientWorkspace } from "./process-configuration"
+import { loadModePreference } from "./mode-preference"
 
 type DispatcherContext = {
   readonly database: string
@@ -21,7 +22,7 @@ type DispatcherContext = {
   readonly environment: any
   readonly version: string
   readonly clientOwnedInteractiveFunction: any
-  readonly setClientModeRoutes: (routes: any) => void
+  readonly setClientModeConfiguration: (configuration: any) => void
 }
 
 export const makeDispatcherLayer = (context: DispatcherContext) => {
@@ -33,7 +34,7 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
     environment,
     version,
     clientOwnedInteractiveFunction,
-    setClientModeRoutes,
+    setClientModeConfiguration,
   } = context
   const observedProgram = <A, E>(role: Logging.ProcessRole, dataRoot: string, program: Effect.Effect<A, E>) =>
     Clock.currentTimeMillis.pipe(
@@ -51,7 +52,13 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                   }),
                 ),
               )
-              setClientModeRoutes(ModelRouteLabel.modeRouteLabels(effectiveConfig.settings))
+              const modeNames = Object.keys(effectiveConfig.settings.modes)
+              const rememberedMode = yield* loadModePreference(dataRoot, modeNames)
+              setClientModeConfiguration({
+                routes: ModelRouteLabel.modeRouteLabels(effectiveConfig.settings),
+                defaultMode: effectiveConfig.settings.defaultMode,
+                ...(rememberedMode === undefined ? {} : { rememberedMode }),
+              })
               return yield* program.pipe(
                 Effect.provideService(
                   References.MinimumLogLevel,

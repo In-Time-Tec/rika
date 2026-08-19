@@ -46,7 +46,7 @@ export type PresetId = (typeof presetIds)[number]
 
 export const presets = {
   openai: {
-    protocols: ["openai", "openrouter"] as ReadonlyArray<string>,
+    protocols: ["openai-responses", "openai-chat-completions", "openrouter"] as ReadonlyArray<string>,
     optionKeys: ["reasoning", "service_tier"] as ReadonlyArray<string>,
     efforts: supportedEfforts as ReadonlyArray<ModelRoute.Effort>,
     limits: { contextWindow: 272_000, maxInputTokens: 258_400, maxOutputTokens: 128_000, keepRecentTokens: 32_000 },
@@ -86,7 +86,7 @@ const claude = (model: CatalogModel, candidates: ReadonlyArray<string>): ModelRo
   variants: claudeVariants(model.efforts),
 })
 
-export const defaults = {
+export const builtInAliases = {
   luna: gpt(catalog.gpt56Luna),
   terra: gpt(catalog.gpt56Terra),
   sol: gpt(catalog.gpt56Sol),
