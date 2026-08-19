@@ -33,7 +33,7 @@ export interface Input {
   }>
 }
 
-export class ConfigError extends Schema.TaggedErrorClass<ConfigError>()("@rika/extensions/McpConfigError", {
+export class ConfigError extends Schema.TaggedError<ConfigError>()("@rika/extensions/McpConfigError", {
   source: Schema.String,
   message: Schema.String,
 }) {}
@@ -45,7 +45,7 @@ const record = (value: unknown): Readonly<Record<string, string>> | undefined =>
 }
 
 const parse = (content: string, source: Source, digest: string): Effect.Effect<ReadonlyArray<Server>, ConfigError> =>
-  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(content).pipe(
+  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(content).pipe(
     Effect.mapError((cause) => ConfigError.make({ source, message: String(cause) })),
     Effect.flatMap((document) =>
       Effect.try({

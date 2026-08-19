@@ -33,7 +33,7 @@ const workspaceGlobError = (workspace: string, method: string, cause: unknown) =
     cause,
   })
 
-class WorkspaceFileError extends Schema.TaggedErrorClass<WorkspaceFileError>()("WorkspaceFileError", {
+class WorkspaceFileError extends Schema.TaggedError<WorkspaceFileError>()("WorkspaceFileError", {
   path: Schema.String,
   message: Schema.String,
 }) {}

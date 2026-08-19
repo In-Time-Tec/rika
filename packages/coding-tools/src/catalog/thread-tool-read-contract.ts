@@ -6,7 +6,7 @@ const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
 const PreviewLimit = PositiveInt.check(Schema.isLessThanOrEqualTo(20))
 export const Result = Schema.Struct({ text: Schema.String, truncated: Schema.Boolean })
 export type Result = typeof Result.Type
-export class ToolError extends Schema.TaggedErrorClass<ToolError>()("ThreadToolError", {
+export class ToolError extends Schema.TaggedError<ToolError>()("ThreadToolError", {
   tool: Schema.String,
   message: Schema.String,
 }) {}

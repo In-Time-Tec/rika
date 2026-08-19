@@ -11,12 +11,12 @@ export const decodeServer: {
   (): (input: unknown) => ServerService.ServerMessage
   (input: unknown): ServerService.ServerMessage
 } = Function.dual((args) => args.length >= 1, decodeServerImpl)
-const jsonImpl = Schema.encodeSync(Schema.UnknownFromJsonString)
+const jsonImpl = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 export const json: {
   (): (input: unknown) => string
   (input: unknown): string
 } = Function.dual((args) => args.length >= 1, jsonImpl)
-const parseImpl = Schema.decodeSync(Schema.UnknownFromJsonString)
+const parseImpl = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))
 export const parse: {
   (): (input: string) => unknown
   (input: string): unknown

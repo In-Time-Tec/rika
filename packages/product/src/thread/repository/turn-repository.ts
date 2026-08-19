@@ -7,17 +7,17 @@ import type { PageOptions, PageResult } from "./turn-repository-pagination"
 import type { QueuedSteeringAdmissionPreparation, SteeringAdmission } from "./turn-repository-steering"
 import type { QueueClaim, QueueClaimFinish, QueueItemChange, QueueSnapshot, Submission } from "./turn-repository-queue"
 
-export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("TurnRepositoryError", {
+export class RepositoryError extends Schema.TaggedError<RepositoryError>()("TurnRepositoryError", {
   message: Schema.String,
 }) {}
 
-export class QueueFull extends Schema.TaggedErrorClass<QueueFull>()("TurnQueueFull", {
+export class QueueFull extends Schema.TaggedError<QueueFull>()("TurnQueueFull", {
   threadId: ThreadId,
   capacity: Schema.Int,
   count: Schema.Int,
 }) {}
 
-export class QueuedTurnUnavailable extends Schema.TaggedErrorClass<QueuedTurnUnavailable>()("QueuedTurnUnavailable", {
+export class QueuedTurnUnavailable extends Schema.TaggedError<QueuedTurnUnavailable>()("QueuedTurnUnavailable", {
   turnId: TurnId,
   message: Schema.String,
 }) {}

@@ -4,7 +4,7 @@ import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { additions, create, schemaFingerprint } from "./product-schema"
 import { currentObjects, inspectDatabase, validateKnown } from "./product-database-inspection"
 
-export class ProductDatabaseError extends Schema.TaggedErrorClass<ProductDatabaseError>()("ProductDatabaseError", {
+export class ProductDatabaseError extends Schema.TaggedError<ProductDatabaseError>()("ProductDatabaseError", {
   message: Schema.String,
 }) {}
 

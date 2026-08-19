@@ -8,7 +8,7 @@ import { provide } from "./test-layer"
 const response = (request: HttpClientRequest.HttpClientRequest, body: unknown, status = 200) =>
   HttpClientResponse.fromWeb(
     request,
-    new Response(Schema.encodeSync(Schema.UnknownFromJsonString)(body), {
+    new Response(Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(body), {
       status,
       headers: { "content-type": "application/json" },
     }),
@@ -47,7 +47,7 @@ const apiResponse = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
-const decodeRequestBody = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
+const decodeRequestBody = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 const run = (
   input: ReadWebPageContract.Input,
@@ -74,7 +74,7 @@ describe("ReadWebPage", () => {
       expect(captured?.headers["x-api-key"]).toBe("secret")
       if (captured?.body._tag !== "Uint8Array") return yield* Effect.die("Expected JSON request")
       expect(
-        yield* Schema.decodeEffect(Schema.UnknownFromJsonString)(new TextDecoder().decode(captured.body.body)),
+        yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(new TextDecoder().decode(captured.body.body)),
       ).toEqual({
         urls: ["https://example.com/docs"],
         objective: "Find API details",

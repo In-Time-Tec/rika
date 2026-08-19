@@ -26,15 +26,15 @@ export class Factory extends Context.Service<
   Factory,
   { readonly forWorkspace: (workspace: string) => Effect.Effect<Interface> }
 >()("@rika/product/thread/query/thread-query-service/Factory") {}
-export class QueryError extends Schema.TaggedErrorClass<QueryError>()("ThreadQueryError", { message: Schema.String }) {}
-export class ThreadNotFoundError extends Schema.TaggedErrorClass<ThreadNotFoundError>()("ThreadNotFoundError", {
+export class QueryError extends Schema.TaggedError<QueryError>()("ThreadQueryError", { message: Schema.String }) {}
+export class ThreadNotFoundError extends Schema.TaggedError<ThreadNotFoundError>()("ThreadNotFoundError", {
   threadId: Schema.String,
 }) {}
-export class ArchivedThreadError extends Schema.TaggedErrorClass<ArchivedThreadError>()("ArchivedThreadError", {
+export class ArchivedThreadError extends Schema.TaggedError<ArchivedThreadError>()("ArchivedThreadError", {
   threadId: Schema.String,
 }) {}
 
-const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const iso = (timestamp: number) => DateTime.formatIso(DateTime.makeUnsafe(timestamp))
 
 const bounded = (name: string, value: number | undefined, fallback: number, maximum: number) =>

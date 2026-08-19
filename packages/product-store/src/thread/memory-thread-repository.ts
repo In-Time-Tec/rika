@@ -3,7 +3,7 @@ export { Service }
 import { Effect, Layer, Ref, Schema } from "effect"
 import { Thread, ThreadId, ThreadLineage } from "@rika/product/thread-record"
 
-export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadRepositoryError", {
+export class RepositoryError extends Schema.TaggedError<RepositoryError>()("ThreadRepositoryError", {
   message: Schema.String,
 }) {}
 

@@ -123,7 +123,7 @@ describe("OpenAI credential state", () => {
       const error = yield* Effect.flip((yield* Service).refreshRejected(original.generation))
       expect(error.kind).toBe("account-mismatch")
       expect(Option.getOrThrow(store.value())).toEqual(original)
-      expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(error)).not.toContain("other-account")
+      expect(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(error)).not.toContain("other-account")
     }).pipe(provideLayer(dependencies(store.layer, http)))
   })
 
@@ -139,7 +139,7 @@ describe("OpenAI credential state", () => {
     return Effect.gen(function* () {
       const error = yield* Effect.flip((yield* Service).refreshRejected(first.generation))
       expect(error.kind).toBe("account-mismatch")
-      expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(error)).not.toContain("other-account")
+      expect(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(error)).not.toContain("other-account")
     }).pipe(provideLayer(dependencies(store.layer, unusedHttp)))
   })
 })

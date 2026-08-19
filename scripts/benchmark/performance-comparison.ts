@@ -142,8 +142,8 @@ export const comparePerformanceRuns: {
   (baseline: ReadonlyArray<PerformanceEvidence>, candidate: ReadonlyArray<PerformanceEvidence>): ComparisonResult
 } = Function.dual(2, comparePerformanceRunsImpl)
 
-const EvidenceJson = Schema.UnknownFromJsonString
-class EvidenceReadError extends Schema.TaggedErrorClass<EvidenceReadError>()("EvidenceReadError", {
+const EvidenceJson = Schema.fromJsonString(Schema.Unknown)
+class EvidenceReadError extends Schema.TaggedError<EvidenceReadError>()("EvidenceReadError", {
   path: Schema.String,
   message: Schema.String,
 }) {}

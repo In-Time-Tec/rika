@@ -17,7 +17,7 @@ import {
   Schema,
   Scope,
 } from "effect"
-export class McpOAuthError extends Schema.TaggedErrorClass<McpOAuthError>()("@rika/extensions/McpOAuthError", {
+export class McpOAuthError extends Schema.TaggedError<McpOAuthError>()("@rika/extensions/McpOAuthError", {
   server: Schema.String,
   operation: Schema.String,
   message: Schema.String,
@@ -129,7 +129,7 @@ export const layer: Layer.Layer<McpOAuthService, never, Crypto.Crypto | Host | O
   }),
 )
 
-class McpOAuthHostError extends Schema.TaggedErrorClass<McpOAuthHostError>()("@rika/extensions/McpOAuthHostError", {
+class McpOAuthHostError extends Schema.TaggedError<McpOAuthHostError>()("@rika/extensions/McpOAuthHostError", {
   server: Schema.String,
   operation: Schema.String,
   message: Schema.String,

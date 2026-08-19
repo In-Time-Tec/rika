@@ -226,7 +226,7 @@ const program = Effect.gen(function* () {
         path.join(artifacts, "SHA256SUMS"),
         releaseArtifacts.map((item) => `${item.sha256}  ${item.archive}`).join("\n") + "\n",
       )
-      const encodedEvidence = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(evidence)
+      const encodedEvidence = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(evidence)
       yield* fileSystem.writeFileString(path.join(artifacts, "release-evidence.json"), encodedEvidence + "\n")
     }),
   )

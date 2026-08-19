@@ -46,6 +46,7 @@ const handoff = (id: string): Session.Entry => ({
           name: "typescript",
           isFailure: false,
           result: { answer: "handoff result" },
+          providerExecuted: false,
         }),
       ],
     }),

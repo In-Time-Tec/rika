@@ -18,7 +18,7 @@ const withConfig = <A, E>(build: (configPath: string) => Effect.Effect<A, E, Fil
     ),
   )
 
-const encode = Schema.encodeSync(Schema.UnknownFromJsonString)
+const encode = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const write = (configPath: string, value: unknown) =>
   Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.writeFileString(configPath, encode(value)))

@@ -6,7 +6,7 @@ import type { ModelRoute } from "../model-routing/model-route"
 import { providerDefaults } from "./configuration-defaults"
 import type { ConfigurationSettingsInput } from "./configuration-settings-input"
 
-export class ConfigurationSettingsFileError extends Schema.TaggedErrorClass<ConfigurationSettingsFileError>()(
+export class ConfigurationSettingsFileError extends Schema.TaggedError<ConfigurationSettingsFileError>()(
   "ConfigurationSettingsFileError",
   { path: Schema.String, message: Schema.String },
 ) {}

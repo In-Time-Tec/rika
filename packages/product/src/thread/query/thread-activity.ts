@@ -10,7 +10,7 @@ const record = (value: unknown): Readonly<Record<string, unknown>> =>
 
 const resultDiff = (output: string | undefined): string | undefined => {
   if (output === undefined) return undefined
-  const decoded = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(output)
+  const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(output)
   const diff = Option.isSome(decoded) ? record(decoded.value).diff : undefined
   return typeof diff === "string" && diff.length > 0 ? diff : undefined
 }

@@ -12,7 +12,7 @@ export const loadSettingsFile = Effect.fn("Main.loadSettingsFile")(function* (fi
         SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({ path: filename, message: String(error) }),
       ),
     )
-  const value = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(text).pipe(
+  const value = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
     Effect.mapError((error) =>
       SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({
         path: filename,

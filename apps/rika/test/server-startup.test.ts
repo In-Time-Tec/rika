@@ -72,7 +72,7 @@ test("reclaims a lease whose owning process is gone", () =>
         const lease = `${root}/server.startup`
         yield* fs.writeFileString(
           lease,
-          yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)({
+          yield* Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))({
             identity: "identity",
             nonce: "stale",
             ownerPid: 99_999_999,
@@ -134,7 +134,7 @@ test("keeps an adopted owner lease until the owner releases it", () =>
         if (owner._tag !== "Owner") return
         yield* owner.adopt(process.pid)
         expect(
-          yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(yield* fs.readFileString(lease)),
+          yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(yield* fs.readFileString(lease)),
         ).toMatchObject({
           identity: "identity",
           processPid: process.pid,
@@ -155,7 +155,7 @@ test("fails closed instead of replacing an expired lease owned by a live process
         const lease = `${root}/server.startup`
         yield* fs.writeFileString(
           lease,
-          yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)({
+          yield* Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))({
             identity: "identity",
             nonce: "live-expired",
             ownerPid: process.pid,

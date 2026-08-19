@@ -14,7 +14,7 @@ export interface Options {
   readonly generationsPath: string
 }
 
-export class Error extends Schema.TaggedErrorClass<Error>()("@rika/product/ExtensionOperationError", {
+export class Error extends Schema.TaggedError<Error>()("@rika/product/ExtensionOperationError", {
   message: Schema.String,
 }) {}
 
@@ -32,7 +32,7 @@ export const layer = (options: Options) => {
   return Layer.succeed(Service, Service.of({ options, admission }))
 }
 
-const Json = Schema.UnknownFromJsonString
+const Json = Schema.fromJsonString(Schema.Unknown)
 const JsonObject = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
 const ExtensionRecords = Schema.Record(
   Schema.String,

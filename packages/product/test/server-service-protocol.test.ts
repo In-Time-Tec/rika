@@ -266,13 +266,15 @@ describe("Rika Server protocol", () => {
       },
     })
     const encoded = Schema.encodeSync(ServerService.ServerMessage)(message)
-    const wire = Schema.encodeSync(Schema.UnknownFromJsonString)(encoded)
+    const wire = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(encoded)
     expect(wire).not.toContain("oldestCursor")
     expect(wire).toContain("costNanoUsd")
     expect(wire).toContain("failedProviderTotal")
     expect(wire).not.toMatch(/runId|modelCallId|modelAttemptId/)
     expect(
-      Schema.decodeUnknownSync(ServerService.ServerMessage)(Schema.decodeSync(Schema.UnknownFromJsonString)(wire)),
+      Schema.decodeUnknownSync(ServerService.ServerMessage)(
+        Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))(wire),
+      ),
     ).toEqual(message)
   })
 

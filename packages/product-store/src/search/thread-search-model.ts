@@ -67,7 +67,7 @@ export namespace SearchModel {
     readonly units: ReadonlyArray<TranscriptUnit.Unit>
   }
 
-  export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadSearchRepositoryError", {
+  export class RepositoryError extends Schema.TaggedError<RepositoryError>()("ThreadSearchRepositoryError", {
     message: Schema.String,
   }) {}
 

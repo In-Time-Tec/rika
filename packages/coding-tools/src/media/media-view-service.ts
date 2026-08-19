@@ -4,7 +4,7 @@ import { MediaMissingError, MediaOversizedError, UnsupportedMediaError } from ".
 import { maxOutputBytes } from "../runtime/coding-tool-result"
 import { RuntimeFilesystem } from "../runtime/coding-tool-runtime-filesystem"
 
-export class MediaAnalysisError extends Schema.TaggedErrorClass<MediaAnalysisError>()("MediaAnalysisError", {
+export class MediaAnalysisError extends Schema.TaggedError<MediaAnalysisError>()("MediaAnalysisError", {
   message: Schema.String,
 }) {}
 
@@ -95,7 +95,7 @@ export const layer = (workspace: string) =>
             ...dimensions(bytes, media.mimeType),
           }
           if (media.kind === "image") {
-            const text = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(artifact).pipe(Effect.orDie)
+            const text = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(artifact).pipe(Effect.orDie)
             return { text, artifact, truncated: false }
           }
           const analysis = yield* analyzer.analyze({ ...artifact, bytes })

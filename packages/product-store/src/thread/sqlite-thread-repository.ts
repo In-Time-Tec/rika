@@ -4,7 +4,7 @@ import { Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Thread, ThreadId, ThreadLineage } from "@rika/product/thread-record"
 
-export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadRepositoryError", {
+export class RepositoryError extends Schema.TaggedError<RepositoryError>()("ThreadRepositoryError", {
   message: Schema.String,
 }) {}
 

@@ -8,7 +8,7 @@ import { make } from "../../src/transport/client/server-client-startup"
 import * as ServerProcessStartup from "../../src/server/process/server-process-launch"
 import { runServerClientCommands } from "./server-client-commands"
 
-const JsonLine = Schema.UnknownFromJsonString
+const JsonLine = Schema.fromJsonString(Schema.Unknown)
 const HostStatus = Schema.fromJsonString(Schema.Struct({ hostPid: Schema.Finite }))
 
 const program = Effect.gen(function* () {

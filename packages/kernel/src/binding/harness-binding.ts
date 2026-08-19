@@ -15,7 +15,7 @@ import { nested, NestedOperationFailed, operation, type Requirements } from "./n
 
 export const name = "harness"
 
-export class HarnessRejected extends Schema.TaggedErrorClass<HarnessRejected>()("HarnessRejected", {
+export class HarnessRejected extends Schema.TaggedError<HarnessRejected>()("HarnessRejected", {
   reason: Schema.String,
   message: Schema.String,
   target: Schema.optionalKey(Schema.String),

@@ -13,8 +13,8 @@ import type { Sample } from "./semantic-output/contract"
 import { makeWorkerCommand, type WorkerOptions } from "./semantic-output/worker-cli"
 import { fragments } from "./semantic-output/workload"
 
-const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
-const decodeJson = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 const execute = (options: WorkerOptions) =>
   Effect.gen(function* () {

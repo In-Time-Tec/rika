@@ -4,7 +4,7 @@ const Persisted = Schema.Struct({ value: Schema.Unknown, mediaType: Schema.optio
 const encodeStored = Schema.encodeEffect(Schema.fromJsonString(Persisted))
 const decodeStored = Schema.decodeUnknownEffect(Schema.fromJsonString(Persisted))
 
-export class ArtifactUnavailable extends Schema.TaggedErrorClass<ArtifactUnavailable>()("ArtifactUnavailable", {
+export class ArtifactUnavailable extends Schema.TaggedError<ArtifactUnavailable>()("ArtifactUnavailable", {
   id: Schema.String,
   reason: Schema.Literals(["missing", "corrupt", "too-large", "io"]),
   message: Schema.String,

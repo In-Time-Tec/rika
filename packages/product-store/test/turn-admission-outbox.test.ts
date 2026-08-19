@@ -32,7 +32,7 @@ const withStore = <A, E>(
   )
 
 const count = (rows: ReadonlyArray<unknown>) => Number((rows[0] as { readonly count: unknown }).count)
-const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 it.layer(BunServices.layer)("SQLite turn admission outbox", (test) => {
   test.effect("decodes the previous durable route version in turns and prepared admissions", () =>

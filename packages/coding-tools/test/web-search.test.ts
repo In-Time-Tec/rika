@@ -21,7 +21,7 @@ const makeProvider = (
 const response = (httpRequest: HttpClientRequest.HttpClientRequest, body: unknown, status = 200, headers = {}) =>
   HttpClientResponse.fromWeb(
     httpRequest,
-    new Response(Schema.encodeSync(Schema.UnknownFromJsonString)(body), {
+    new Response(Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(body), {
       status,
       headers: { "content-type": "application/json", ...headers },
     }),
@@ -37,7 +37,7 @@ const clientLayer = (
 
 const body = (httpRequest: HttpClientRequest.HttpClientRequest) => {
   if (httpRequest.body._tag !== "Uint8Array") throw new Error("Expected JSON body")
-  return Schema.decodeSync(Schema.UnknownFromJsonString)(new TextDecoder().decode(httpRequest.body.body))
+  return Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))(new TextDecoder().decode(httpRequest.body.body))
 }
 
 describe("WebSearch registry", () => {

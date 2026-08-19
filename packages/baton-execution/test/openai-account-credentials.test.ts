@@ -65,7 +65,7 @@ it.effect("refuses a different logged-in account before exposing its credentials
       _tag: "tenetkit/ai/OpenAiAccountCredentialError",
       operation: "acquire",
     })
-    const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(failure)
+    const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(failure)
     expect(encoded).not.toContain("access-other")
     expect(encoded).not.toContain("account-other")
   }),
