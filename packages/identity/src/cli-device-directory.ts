@@ -32,6 +32,7 @@ export interface CliDeviceDirectory {
   readonly authenticate: (principal: IdentityPrincipal) => Effect.Effect<string | undefined, CliDeviceDirectoryError>
   readonly list: (principal: IdentityPrincipal) => Effect.Effect<ReadonlyArray<CliDevice>, CliDeviceDirectoryError>
   readonly revoke: (principal: IdentityPrincipal, deviceId: string) => Effect.Effect<boolean, CliDeviceDirectoryError>
+  readonly revokeAll: (principal: IdentityPrincipal) => Effect.Effect<void, CliDeviceDirectoryError>
 }
 
 const failure = (operation: string) => CliDeviceDirectoryError.make({ operation })
@@ -76,7 +77,10 @@ export const makePostgresCliDeviceDirectory = (pool: Pool): CliDeviceDirectory =
       )
       if (rows[0] === undefined) return yield* failure("register CLI device")
     }),
-    discard: (clientId) => query("discard CLI registration", "delete from oauth_client where client_id = $1", [clientId]).pipe(Effect.asVoid),
+    discard: (clientId) =>
+      query("discard CLI registration", "delete from oauth_client where client_id = $1", [clientId]).pipe(
+        Effect.asVoid,
+      ),
     authenticate,
     list: Effect.fn("CliDeviceDirectory.list")(function* (principal) {
       const current = yield* authenticate(principal)
@@ -124,6 +128,28 @@ export const makePostgresCliDeviceDirectory = (pool: Pool): CliDeviceDirectory =
         [principal.userId, deviceId],
       )
       return rows[0]?.revoked ?? false
+    }),
+    revokeAll: Effect.fn("CliDeviceDirectory.revokeAll")(function* (principal) {
+      yield* authenticate(principal)
+      yield* query(
+        "revoke all CLI devices",
+        `with revoked_clients as (
+           update rika_cli_registration
+           set revoked_at = transaction_timestamp()
+           where user_id = $1 and revoked_at is null
+           returning client_id
+         ), revoked_access as (
+           update oauth_access_token token
+           set revoked = transaction_timestamp()
+           from revoked_clients client
+           where token.client_id = client.client_id and token.user_id = $1 and token.revoked is null
+         )
+         update oauth_refresh_token token
+         set revoked = transaction_timestamp()
+         from revoked_clients client
+         where token.client_id = client.client_id and token.user_id = $1 and token.revoked is null`,
+        [principal.userId],
+      )
     }),
   }
 }

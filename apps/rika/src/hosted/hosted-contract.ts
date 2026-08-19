@@ -165,6 +165,7 @@ export interface HttpInterface {
   ) => Effect.Effect<Invitation, HostedError>
   readonly devices: (origin: string, session: Session) => Effect.Effect<ReadonlyArray<CliDevice>, HostedError>
   readonly revokeDevice: (origin: string, deviceId: string, session: Session) => Effect.Effect<void, HostedError>
+  readonly revokeAllDevices: (origin: string, session: Session) => Effect.Effect<void, HostedError>
   readonly createRemoteConnection: (
     origin: string,
     organization: string,

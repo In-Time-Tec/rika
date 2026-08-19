@@ -1,7 +1,7 @@
 import { Cause, Clock, Context, Effect, Exit, Fiber, Layer, Option, Redacted, Ref } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
-import { pollDeviceAuthorization, status } from "../src/hosted/hosted-account"
+import { logoutAll, pollDeviceAuthorization, status } from "../src/hosted/hosted-account"
 import { layer as credentialLayer, type SecretVault } from "../src/hosted/hosted-credential-store"
 import {
   CredentialStore,
@@ -38,6 +38,7 @@ const unusedHttp: HttpInterface = {
   invite: () => Effect.die("unused"),
   devices: () => Effect.die("unused"),
   revokeDevice: () => Effect.die("unused"),
+  revokeAllDevices: () => Effect.die("unused"),
   createRemoteConnection: () => Effect.die("unused"),
   runThread: () => Effect.die("unused"),
 }
@@ -185,4 +186,44 @@ it.effect("uses Bun secrets and fails closed when platform credential storage is
       expect((yield* Effect.flip(unavailableStore.remove(profile.origin, profile.deviceId))).kind).toBe("storage")
     }),
   ),
+)
+
+it.effect("keeps local credentials when all-device revocation fails so retry can complete", () =>
+  Effect.gen(function* () {
+    const attempts = yield* Ref.make(0)
+    const removed = yield* Ref.make(0)
+    const store = CredentialStore.of({
+      load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("old-refresh"), privateJwk: key })),
+      save: () => Effect.void,
+      remove: () => Ref.update(removed, (value) => value + 1).pipe(Effect.as(true)),
+    })
+    const http = Http.of({
+      ...unusedHttp,
+      refresh: () => Effect.succeed({ accessToken: "access", refreshToken: "refresh", expiresIn: 600 }),
+      revokeAllDevices: () =>
+        Ref.getAndUpdate(attempts, (value) => value + 1).pipe(
+          Effect.flatMap((attempt) =>
+            attempt === 0
+              ? Effect.fail(HostedError.make({ kind: "network", message: "temporary outage" }))
+              : Effect.void,
+          ),
+        ),
+    })
+    const context = yield* Layer.build(
+      Layer.mergeAll(
+        Layer.succeed(Http, http),
+        Layer.succeed(CredentialStore, store),
+        Layer.succeed(
+          ProfileStore,
+          ProfileStore.of({ load: Effect.succeed(Option.some(profile)), save: () => Effect.void }),
+        ),
+        TestConsole.layer,
+      ),
+    )
+    const first = yield* Effect.exit(logoutAll().pipe(Effect.provide(context)))
+    expect(first._tag).toBe("Failure")
+    expect(yield* Ref.get(removed)).toBe(0)
+    yield* logoutAll().pipe(Effect.provide(context))
+    expect(yield* Ref.get(removed)).toBe(1)
+  }),
 )

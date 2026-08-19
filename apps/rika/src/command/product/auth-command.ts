@@ -24,7 +24,9 @@ export const authCommand = Command.make("auth").pipe(
     Command.make("status", { json: Flag.boolean("json") }, ({ json }) =>
       dispatch({ _tag: "Auth", action: "status", json }),
     ),
-    Command.make("logout", {}, () => dispatch({ _tag: "Auth", action: "logout" })),
+    Command.make("logout", { all: Flag.boolean("all") }, ({ all }) =>
+      dispatch({ _tag: "Auth", action: "logout", ...(all ? { all: true } : {}) }),
+    ),
     Command.make("devices", {}, () => dispatch({ _tag: "Auth", action: "devices" })),
     Command.make("revoke-device", { device: Argument.string("device").pipe(Argument.optional) }, ({ device }) => {
       const selectedDevice = Option.getOrUndefined(device)

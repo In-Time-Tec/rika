@@ -19,7 +19,7 @@ const operation = (input: Input) => {
   if (input._tag === "Auth") {
     if (input.action === "login") return HostedAccount.login(input)
     if (input.action === "status") return HostedAccount.status(input.json)
-    if (input.action === "logout") return HostedAccount.logout()
+    if (input.action === "logout") return input.all === true ? HostedAccount.logoutAll() : HostedAccount.logout()
     if (input.action === "devices") return HostedAccount.devices()
     return HostedAccount.revokeDevice(input.device)
   }

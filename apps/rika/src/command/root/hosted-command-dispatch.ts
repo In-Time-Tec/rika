@@ -10,7 +10,7 @@ export type Input =
       readonly noOpen: boolean
     }
   | { readonly _tag: "Auth"; readonly action: "status"; readonly json: boolean }
-  | { readonly _tag: "Auth"; readonly action: "logout" }
+  | { readonly _tag: "Auth"; readonly action: "logout"; readonly all?: boolean | undefined }
   | { readonly _tag: "Auth"; readonly action: "devices" }
   | { readonly _tag: "Auth"; readonly action: "revoke-device"; readonly device?: string | undefined }
   | { readonly _tag: "Organization"; readonly action: "list" }

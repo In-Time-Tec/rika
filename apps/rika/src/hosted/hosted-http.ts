@@ -292,6 +292,10 @@ export const layer = Layer.effect(
           "CLI device revocation",
         )
       },
+      revokeAllDevices: (origin, session) => {
+        const url = `${origin}/api/v1/auth/cli/devices/revoke-all`
+        return authenticatedEmpty("POST", url, HttpClientRequest.post(url), session, "All CLI device revocation")
+      },
       createRemoteConnection: (origin, organization, project, session) => {
         const url = `${origin}/api/v1/connections`
         return authenticatedJson(

@@ -53,6 +53,7 @@ const devices: CliDeviceDirectory = {
   authenticate: () => Effect.void.pipe(Effect.as(undefined as string | undefined)),
   list: () => Effect.succeed([]),
   revoke: () => Effect.succeed(false),
+  revokeAll: () => Effect.void,
 }
 
 const product: HostedProductService = {
@@ -275,6 +276,31 @@ describe("control-plane HTTP", () => {
       const result = yield* response("/api/account", dependencies({ userId: "user-1", account }))
       expect(result.status).toBe(200)
       expect(yield* Effect.promise(() => result.json())).toEqual(account)
+    }),
+  )
+
+  it.effect("revokes all CLI devices only for the authenticated principal", () =>
+    Effect.gen(function* () {
+      const principals: Array<IdentityPrincipal> = []
+      const base = dependencies({ userId: "user-1", account })
+      const result = yield* response(
+        "/api/v1/auth/cli/devices/revoke-all",
+        {
+          ...base,
+          identity: {
+            ...base.identity,
+            identify: () => Effect.succeed({ userId: "user-1", clientId: "client-1", dpopJkt: "thumbprint-1" }),
+          },
+          devices: {
+            ...devices,
+            authenticate: () => Effect.succeed("device-1"),
+            revokeAll: (principal) => Effect.sync(() => void principals.push(principal)),
+          },
+        },
+        { method: "POST" },
+      )
+      expect(result.status).toBe(204)
+      expect(principals).toEqual([{ userId: "user-1", clientId: "client-1", dpopJkt: "thumbprint-1" }])
     }),
   )
 

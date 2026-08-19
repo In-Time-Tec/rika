@@ -234,6 +234,7 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
             authenticate: () => Effect.succeed(deviceId),
             list: () => Effect.succeed([]),
             revoke: () => Effect.succeed(false),
+            revokeAll: () => Effect.void,
           } satisfies CliDeviceDirectory,
           product,
           executor,

@@ -52,6 +52,7 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
       authenticate: () => Effect.die("unused"),
       list: () => Effect.die("unused"),
       revoke: () => Effect.die("unused"),
+      revokeAll: () => Effect.die("unused"),
     }
     const executor: ExecutorRuntime = {
       controller: undefined as never,

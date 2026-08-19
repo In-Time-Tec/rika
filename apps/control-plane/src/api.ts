@@ -80,6 +80,10 @@ class PublicGroup extends HttpApiGroup.make("public", { topLevel: true }).add(
 
 class ProductGroup extends HttpApiGroup.make("product", { topLevel: true })
   .add(
+    HttpApiEndpoint.post("revokeAllDevices", "/api/v1/auth/cli/devices/revoke-all", {
+      success: HttpApiSchema.NoContent,
+      error: ServiceUnavailable,
+    }),
     HttpApiEndpoint.get("context", "/api/v1/me/context", {
       success: ContextResponse,
       error: ServiceUnavailable,
@@ -139,6 +143,15 @@ const publicHandlers = (dependencies: HttpDependencies) =>
 const productHandlers = (dependencies: HttpDependencies) =>
   HttpApiBuilder.group(ControlPlaneApi, "product", (handlers) =>
     handlers.handleAll({
+      revokeAllDevices: () =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          yield* dependencies.devices
+            .revokeAll(access.principal)
+            .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "CLI device revocation failed" })))
+        }),
       context: () =>
         Effect.gen(function* () {
           const access = yield* CurrentAccess
@@ -248,6 +261,7 @@ const productHandlers = (dependencies: HttpDependencies) =>
 export const isControlPlaneApiPath = (pathname: string) =>
   pathname === "/healthz" ||
   pathname === "/readyz" ||
+  pathname === "/api/v1/auth/cli/devices/revoke-all" ||
   pathname === "/api/v1/me/context" ||
   pathname === "/api/v1/connections" ||
   /^\/api\/v1\/threads\/[^/]+\/operations$/.test(pathname)

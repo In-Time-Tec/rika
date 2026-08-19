@@ -33,6 +33,7 @@ it.effect("routes hosted execution without calling the local server operation", 
       yield* invoke(["auth", "login", "--server", "https://hosted.example.test/base", "--no-open"])
       yield* invoke(["auth", "status", "--json"])
       yield* invoke(["auth", "logout"])
+      yield* invoke(["auth", "logout", "--all"])
       yield* invoke(["auth", "devices"])
       yield* invoke(["auth", "revoke-device"])
       yield* invoke(["auth", "revoke-device", "device-2"])
@@ -61,6 +62,7 @@ it.effect("routes hosted execution without calling the local server operation", 
         { _tag: "Auth", action: "login", server: "https://hosted.example.test/base", noOpen: true },
         { _tag: "Auth", action: "status", json: true },
         { _tag: "Auth", action: "logout" },
+        { _tag: "Auth", action: "logout", all: true },
         { _tag: "Auth", action: "devices" },
         { _tag: "Auth", action: "revoke-device" },
         { _tag: "Auth", action: "revoke-device", device: "device-2" },
