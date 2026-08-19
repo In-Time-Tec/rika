@@ -43,8 +43,10 @@
       "version": "0.1.0",
       "dependencies": {
         "@effect/platform-bun": "4.0.0-rc.109",
+        "@effect/sql-pg": "4.0.0-rc.109",
         "@rika/execution": "workspace:*",
         "@rika/identity": "workspace:*",
+        "@rika/product": "workspace:*",
         "@rika/product-store": "workspace:*",
         "effect": "4.0.0-rc.109",
       },
@@ -163,7 +165,7 @@
         "@rika/coding-tools": "workspace:*",
         "@rika/kernel": "workspace:*",
         "@rika/product": "workspace:*",
-        "@tenetkit/pg": "0.30.0",
+        "@tenetkit/pg": "0.31.0",
         "effect": "catalog:",
         "tenetkit": "catalog:",
       },
@@ -872,7 +874,7 @@
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
-    "@tenetkit/pg": ["@tenetkit/pg@0.30.0", "", { "dependencies": { "@effect/sql-pg": "4.0.0-rc.109", "tenetkit": "0.30.0" }, "peerDependencies": { "effect": "4.0.0-rc.109" } }, "sha512-iiFTxTPqtmNemTFGcXAYFvdzpsHWva9TbyupRAYttdfZDFnRATmaOdcrQfKQlgTbZL5NYXT9rp9OtdQ88FwndA=="],
+    "@tenetkit/pg": ["@tenetkit/pg@0.31.0", "", { "dependencies": { "@effect/sql-pg": "4.0.0-rc.109", "tenetkit": "0.31.0" }, "peerDependencies": { "effect": "4.0.0-rc.109" } }, "sha512-FTVW/QNMDcS3vZG/Xbjv1N73BY+rEaajslWXOIirB5JjPniP+5tx4oOIyRFx0tzyvlpppjQXGp0AMXNMu4VqGg=="],
 
     "@tsconfig/bun": ["@tsconfig/bun@1.0.9", "", {}, "sha512-4M0/Ivfwcpz325z6CwSifOBZYji3DFOEpY6zEUt0+Xi2qRhzwvmqQN9XAHJh3OVvRJuAqVTLU2abdCplvp6mwQ=="],
 
