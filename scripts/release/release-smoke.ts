@@ -11,7 +11,7 @@ class ReleaseSmokeError extends Data.TaggedError("ReleaseSmokeError")<{
 
 const failure = (step: string, message: string) => new ReleaseSmokeError({ step, message })
 const mapFailure = (step: string) =>
-  Effect.mapError((error: { readonly message: string }) => failure(step, error.message))
+  Effect.mapError((error: { readonly message: string }) => failure(step, `${step}: ${error.message}`))
 
 const NamedItemsJson = Schema.fromJsonString(Schema.Array(Schema.Struct({ name: Schema.String })))
 const ThreadsJson = Schema.fromJsonString(Schema.Array(Schema.Struct({ id: Schema.String })))
@@ -255,7 +255,7 @@ const program = Effect.scoped(
         "packaged harness",
         `A refinement one run stored was not readable by the next: ${carried.slice(-2_000)} stored=${stored} carriedTail=${carried.slice(-600)}`,
       )
-    const threads = yield* output(["threads", "list"])
+    const threads = yield* output(["thread", "list"])
     const decoded = yield* Schema.decodeUnknownEffect(ThreadsJson)(threads).pipe(mapFailure("decode threads list"))
     if (decoded.length !== 1) return yield* failure("threads list", `Expected one thread, saw ${decoded.length}`)
     yield* Effect.log(`Release smoke passed for ${target}`)
