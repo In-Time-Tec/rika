@@ -1,0 +1,19 @@
+id: effect-prefer-terminal
+language: TypeScript
+severity: info
+message: Effect TS advisory — prefer Terminal for interactive I/O and a typed application result for exit status; keep raw process streams and process.exit in the process host.
+rule:
+  any:
+    - pattern: process.stdin
+    - pattern: process.stdout
+    - pattern: process.stderr
+    - pattern: process.exit($$$ARGS)
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "node_modules/**"
+  - "repos/**"

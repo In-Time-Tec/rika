@@ -1,0 +1,14 @@
+id: no-rivet-imports
+language: TypeScript
+severity: error
+message: Rika v2 must not import Rivet or RivetKit.
+rule:
+  kind: string_fragment
+  regex: "^(@rivetkit/|rivetkit$)"
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "node_modules/**"
+  - "repos/effect/**"

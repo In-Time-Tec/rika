@@ -1,0 +1,24 @@
+     :::••••••••••••••••:::·......        ? for shortcuts
+     .··::::••••••:::::::··.......
+      ..···::::::::::····........
+       ....····:::···...........
+         ......···............
+            ...............
+                   .
+╭─────────────────────────────────────────────────────────────────────── high ─╮
+│ Ctrl+O command palette          Ctrl+R prompt history                        │
+│ Ctrl+V paste images             Shift+Enter newline                          │
+│ Ctrl+S switch modes             Ctrl+Y context & usage                       │
+│ Ctrl+G edit in $EDITOR          Opt+T toggle file tree                       │
+│ @ / @@ mention files/threads    Tab/Shift+Tab navigate messages              │
+│ D toggle details                ? toggle this help                           │
+│                                                                              │
+│ Sidebar                                                                      │
+│ Opt+S toggle changed files                                                   │
+│ Enter open selected thread                                                   │
+│                                                                              │
+│ ──────────────────────────────────────────────────────────────────────────── │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰───────────────────────────────────────────────────────────────── /workspace ─╯

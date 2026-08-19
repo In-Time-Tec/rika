@@ -1,0 +1,23 @@
+id: effect-prefer-socket
+language: TypeScript
+severity: warning
+message: Effect TS advisory — prefer effect/unstable/socket Socket with Scope-managed lifetime; keep WebSocket or raw network interop in a transport adapter.
+rule:
+  any:
+    - pattern: new WebSocket($$$ARGS)
+    - kind: import_statement
+      has:
+        field: source
+        regex: '^[''"](?:node:)?(?:net|tls|dgram)[''"]$'
+    - pattern: require("node:net")
+    - pattern: require("node:tls")
+    - pattern: require("node:dgram")
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "node_modules/**"
+  - "repos/**"

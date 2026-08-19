@@ -1,0 +1,5 @@
+# Thread retrieval tools
+
+A cell uses `rika.threads.search` to search local Threads, `rika.threads.find` to list Thread metadata without reading a transcript, and `rika.threads.read` to retrieve a bounded transcript containing persisted user, assistant, tool, child-agent, compaction, and outcome context. A read selects an overview, a subagent subtree, recent Turns, or Turns relevant to a query, with a cursor. Queries are scoped to the Execution's Workspace, and search supports historical Threads by plain terms and Workspace, repository, reference, author, label, file, and date filters. Archived Threads are excluded unless requested. Substantial cross-Thread research is delegated to the ReadThread agent.
+
+ReadThread returns a concise free-form answer, identifies the Threads used, and checks later Turns for revised or superseded decisions. Result counts, Turn counts, and source text are bounded and report truncation. Unknown Thread identifiers, invalid filters or limits, and unavailable retrieval return typed failures; these tools read local Thread state only.

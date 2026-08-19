@@ -1,0 +1,5 @@
+# Server transport
+
+Stateful clients use one authenticated WebSocket contract to the Rika Server on loopback. The typed contract carries operations, interactive commands, output, heartbeats, sequenced feed events, acknowledgements, replay, resync, completion, and typed failures; identities, nonces, build identities, connection roles, and connection identifiers prevent a client from attaching to the wrong Server or trusting an unauthenticated build-mismatch claim.
+
+Frames, fragments, feeds, and outbound queues are bounded. Feed overflow or an oversized live event requests an ordered resync from durable state instead of failing the Execution. Reconnect resyncs the selected Thread beneath one stable interactive callback, including while a newly launched build replaces the Server. The TUI stays mounted and its bottom-left status shows `Connecting` before the first usable session and `Reconnecting` while that session is being restored. Reads may resume after reconnect, but a client does not resend a mutation when its outcome is unknown. Build identity initiates takeover only for a launch; an authenticated reattach joins the current owner and never supersedes it.

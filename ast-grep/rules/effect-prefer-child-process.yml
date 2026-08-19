@@ -1,0 +1,24 @@
+id: effect-prefer-child-process
+language: TypeScript
+severity: warning
+message: Effect TS advisory — prefer effect/unstable/process ChildProcessSpawner with scoped process lifetimes instead of direct child_process, Bun.spawn, or Deno.Command calls.
+rule:
+  any:
+    - kind: import_statement
+      has:
+        field: source
+        regex: '^[''"](?:node:)?child_process[''"]$'
+    - pattern: require("node:child_process")
+    - pattern: require("child_process")
+    - pattern: Bun.spawn($$$ARGS)
+    - pattern: Bun.spawnSync($$$ARGS)
+    - pattern: new Deno.Command($$$ARGS)
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "node_modules/**"
+  - "repos/**"

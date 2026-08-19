@@ -1,0 +1,58 @@
+import type { Run } from "tenetkit/runtime"
+import * as Projection from "@rika/product/execution-projection"
+import type { SemanticTreeEvent } from "./semantic-event"
+
+export interface ToolState {
+  readonly rawId: string
+  readonly key: string
+  readonly blockId: string
+}
+
+export interface CellState {
+  readonly rawId: string
+  readonly key: string
+  readonly blockId: string
+  partial: string
+}
+
+export interface Node {
+  rawRunId: string
+  readonly publicId: string
+  readonly parentRawRunId?: string
+  readonly parentUnitKey?: string
+  readonly parentBlockId?: string
+  readonly hidden: boolean
+  readonly tools: Map<string, ToolState>
+  readonly cells: Map<string, CellState>
+  phase: number
+  status: "running" | "waiting" | "completed" | "failed" | "cancelled"
+  lifecycle: "unknown" | "accepted" | "active" | "waiting" | "terminal"
+  started: boolean
+  attempt?: number
+}
+
+export interface Card {
+  readonly parentRawRunId: string
+  readonly rawInvocationId: string
+  readonly publicId: string
+  readonly unitKey: string
+  readonly blockId: string
+  readonly selection: string
+  readonly label?: string
+  prompt: string
+  promptTruncated: boolean
+  readonly memberKey?: string
+  rawChildRunId?: string
+}
+
+export interface Projector {
+  readonly snapshot: () => Projection.Snapshot
+  readonly apply: (input: SemanticTreeEvent) => Projection.Patch
+  readonly applyAll: (inputs: ReadonlyArray<SemanticTreeEvent>) => Projection.Patch
+  readonly previewRunIds: () => ReadonlyArray<string>
+  readonly previewParentId: (runId: string) => string | undefined
+  readonly applyTitle: (
+    text: string | undefined,
+    usage: ReadonlyArray<Run.RawUsageFact>,
+  ) => Projection.Patch | undefined
+}

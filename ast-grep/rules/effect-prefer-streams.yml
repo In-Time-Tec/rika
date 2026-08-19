@@ -1,0 +1,22 @@
+id: effect-prefer-streams
+language: TypeScript
+severity: info
+message: Effect TS advisory — prefer Stream/Channel for streaming and Queue/PubSub for coordination; isolate Node streams or EventEmitter behind an adapter.
+rule:
+  any:
+    - kind: import_statement
+      has:
+        field: source
+        regex: '^[''"](?:node:)?(?:stream|events)[''"]$'
+    - pattern: require("node:stream")
+    - pattern: require("node:events")
+    - pattern: new EventEmitter($$$ARGS)
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "node_modules/**"
+  - "repos/**"

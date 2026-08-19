@@ -1,0 +1,18 @@
+id: effect-prefer-random
+language: TypeScript
+severity: info
+message: Effect TS advisory — prefer Random for deterministic randomness or the Crypto service for secure bytes and UUIDs.
+rule:
+  any:
+    - pattern: Math.random()
+    - pattern: crypto.randomUUID()
+    - pattern: crypto.getRandomValues($$$ARGS)
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "node_modules/**"
+  - "repos/**"

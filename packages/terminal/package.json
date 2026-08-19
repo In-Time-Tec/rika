@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/terminal",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./opentui-surface": "./src/opentui/surface/opentui-surface.ts",
+    "./terminal-message": "./src/state/model/terminal-message.ts",
+    "./terminal-performance-evaluation": "./src/performance/terminal-performance-evaluation.ts",
+    "./terminal-session": "./src/terminal-session.ts",
+    "./terminal-state": "./src/state/model/terminal-state.ts",
+    "./terminal-state-reducer": "./src/state/reducer/terminal-state-reducer.ts",
+    "./terminal-timeline-bounds": "./src/state/model/terminal-timeline-bounds.ts",
+    "./terminal-transcript-presentation": "./src/presentation/transcript/terminal-transcript-presentation.ts",
+    "./transcript-viewport": "./src/presentation/transcript/transcript-viewport.ts",
+    "./terminal-submission-state": "./src/state/model/terminal-submission-state.ts"
+  },
+  "dependencies": {
+    "@opentui/core": "catalog:",
+    "@pierre/diffs": "catalog:",
+    "@rika/configuration": "workspace:*",
+    "@rika/transcript": "workspace:*",
+    "cli-spinners": "catalog:",
+    "effect": "catalog:",
+    "marked": "catalog:",
+    "prismjs": "catalog:",
+    "string-width": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/prismjs": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "rika": {
+    "kind": "adapter",
+    "domain": "terminal"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/terminal/src packages/terminal/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  }
+}

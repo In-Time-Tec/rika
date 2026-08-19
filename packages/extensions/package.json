@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/extensions",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./execution-extension-service": "./src/plugin/execution-extension-service.ts",
+    "./mcp-configuration": "./src/mcp/mcp-configuration.ts",
+    "./mcp-discovery": "./src/mcp/mcp-discovery.ts",
+    "./mcp-oauth-service": "./src/mcp/mcp-oauth-service.ts",
+    "./mcp-runtime": "./src/mcp/mcp-runtime.ts",
+    "./plugin-contract": "./src/plugin/plugin-contract.ts",
+    "./plugin-digest": "./src/plugin/plugin-digest.ts",
+    "./plugin-registry": "./src/plugin/plugin-registry.ts",
+    "./skill-prompt-listing": "./src/skill/skill-prompt-listing.ts",
+    "./skill-file-system": "./src/skill/skill-file-system.ts",
+    "./skill-registry": "./src/skill/skill-registry.ts",
+    "./skill-registry-model": "./src/skill/skill-registry-model.ts"
+  },
+  "dependencies": {
+    "tenetkit": "catalog:",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "rika": {
+    "kind": "capability",
+    "domain": "extensions"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/extensions/src packages/extensions/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  }
+}

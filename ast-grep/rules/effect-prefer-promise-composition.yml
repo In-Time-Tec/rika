@@ -1,0 +1,32 @@
+id: effect-prefer-promise-composition
+language: TypeScript
+severity: warning
+message: Effect TS advisory — prefer Effect.all, Effect.forEach, Effect.race, or typed Effect recovery; bridge a foreign Promise with Effect.tryPromise at an adapter.
+note: Promise interop can remain at a named outer boundary, but internal APIs should expose Effect rather than Promise.
+rule:
+  any:
+    - pattern: new Promise($$$ARGS)
+    - pattern: Promise.withResolvers($$$ARGS)
+    - pattern: Promise.all($$$ARGS)
+    - pattern: Promise.allSettled($$$ARGS)
+    - pattern: Promise.any($$$ARGS)
+    - pattern: Promise.race($$$ARGS)
+    - pattern: Promise.resolve($$$ARGS)
+    - pattern: Promise.reject($$$ARGS)
+    - pattern: Effect.promise($$$ARGS)
+    - pattern: $VALUE.then($$$ARGS)
+    - pattern: $VALUE.catch($$$ARGS)
+    - pattern: $VALUE.finally($$$ARGS)
+constraints:
+  VALUE:
+    not:
+      regex: "^(?:Effect|Layer|Stream|Sink|Channel|Schema|Option|Either|Exit|Cause|Schedule|Config|Fiber|Queue|PubSub|Deferred|Ref|Scope|Runtime|ManagedRuntime|Clock|Random|FileSystem|Path|Terminal|HttpClient|HttpServer|Socket|ChildProcess|ChildProcessSpawner|Stdio)$"
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "node_modules/**"
+  - "repos/**"

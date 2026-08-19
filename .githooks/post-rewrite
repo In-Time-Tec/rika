@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+[ "${1:-}" = rebase ] || exit 0
+exec "$(dirname "$0")/vendor" sync

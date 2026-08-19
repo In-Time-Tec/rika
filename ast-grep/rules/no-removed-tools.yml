@@ -1,0 +1,15 @@
+id: no-removed-tools
+language: TypeScript
+severity: error
+message: Rika v2 does not include semantic_search or ast_grep_outline product tools.
+rule:
+  kind: string_fragment
+  regex: "^(semantic_search|ast_grep_outline)$"
+files:
+  - "apps/**/*.ts"
+  - "apps/**/*.tsx"
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "node_modules/**"

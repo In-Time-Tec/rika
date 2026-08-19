@@ -1,0 +1,19 @@
+id: effect-prefer-scheduling
+language: TypeScript
+severity: warning
+message: Effect TS advisory — prefer Effect.sleep, Schedule, and scoped Fibers instead of raw timers or microtasks.
+rule:
+  any:
+    - pattern: setTimeout($$$ARGS)
+    - pattern: setInterval($$$ARGS)
+    - pattern: setImmediate($$$ARGS)
+    - pattern: queueMicrotask($$$ARGS)
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "node_modules/**"
+  - "repos/**"

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/kernel",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./binding-modules": "./src/binding/binding-modules.ts",
+    "./nested-operation-envelope": "./src/binding/nested-operation-envelope.ts",
+    "./workspace-binding": "./src/binding/workspace-binding.ts",
+    "./processes-binding": "./src/binding/processes-binding.ts",
+    "./web-binding": "./src/binding/web-binding.ts",
+    "./media-binding": "./src/binding/media-binding.ts",
+    "./threads-binding": "./src/binding/threads-binding.ts",
+    "./context-binding": "./src/binding/context-binding.ts",
+    "./harness-binding": "./src/binding/harness-binding.ts",
+    "./harness-scope-policy": "./src/harness/harness-scope-policy.ts",
+    "./harness-store-locations": "./src/harness/harness-store-locations.ts",
+    "./harness-snapshot-pin": "./src/harness/harness-snapshot-pin.ts",
+    "./harness-prompt-sections": "./src/harness/harness-prompt-sections.ts",
+    "./execution-pins": "./src/harness/execution-pins.ts",
+    "./goal-binding": "./src/binding/goal-binding.ts",
+    "./mcp-binding": "./src/binding/mcp-binding.ts",
+    "./artifacts-binding": "./src/binding/artifacts-binding.ts",
+    "./edits-binding": "./src/binding/edits-binding.ts",
+    "./artifact-store": "./src/binding/artifact-store.ts",
+    "./kernel-bootstrap": "./src/kernel-bootstrap.ts",
+    "./kernel-composition": "./src/kernel-composition.ts",
+    "./kernel-profile-registration": "./src/kernel-profile-registration.ts",
+    "./kernel-state-store-file-system": "./src/kernel-state-store-file-system.ts"
+  },
+  "dependencies": {
+    "tenetkit": "catalog:",
+    "@rika/coding-tools": "workspace:*",
+    "@rika/configuration": "workspace:*",
+    "@rika/extensions": "workspace:*",
+    "@rika/product": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "rika": {
+    "kind": "capability",
+    "domain": "kernel"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/kernel/src packages/kernel/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  }
+}

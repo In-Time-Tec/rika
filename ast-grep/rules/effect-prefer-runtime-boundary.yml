@@ -1,0 +1,18 @@
+id: effect-prefer-runtime-boundary
+language: TypeScript
+severity: info
+message: Effect TS advisory — return and compose this Effect; call Effect.run* only from an explicit application, process, test-host, or external-framework boundary.
+rule:
+  pattern: Effect.$RUN($$$ARGS)
+constraints:
+  RUN:
+    regex: "^run"
+files:
+  - "packages/**/src/**/*.ts"
+  - "packages/**/src/**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "node_modules/**"
+  - "repos/**"

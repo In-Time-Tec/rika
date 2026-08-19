@@ -1,0 +1,10 @@
+import { Schema } from "effect"
+
+export const LocalPathReason = Schema.Literals(["not_found", "ambiguous_case"])
+export type LocalPathReason = typeof LocalPathReason.Type
+
+export class LocalPathError extends Schema.TaggedError<LocalPathError>()("LocalPathError", {
+  path: Schema.String,
+  reason: LocalPathReason,
+  candidates: Schema.Array(Schema.String),
+}) {}

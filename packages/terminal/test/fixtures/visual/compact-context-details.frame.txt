@@ -1,0 +1,12 @@
+╭─ Context & Usage ────╮
+│ ━━━╌╌╌╌╌╌╌╌╌ 23%     │
+│ Used       56.1K     │
+│ Available  187.9K    │
+├─ Window ─────────────┤
+│ Usable     244K      │
+│ Full       372K      │
+├─ Session ────────────┤
+│ Cost       $1.25     │
+│ Cached     0%        │
+│ Active     ◷ 1m 43s  │
+╰── Ctrl+Y toggle ── e…╯

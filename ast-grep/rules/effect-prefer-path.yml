@@ -1,0 +1,21 @@
+id: effect-prefer-path
+language: TypeScript
+severity: info
+message: Effect TS advisory — prefer the Path service when path behavior belongs to an Effect program; direct node:path use is appropriate only in a pure or outer adapter boundary.
+rule:
+  any:
+    - kind: import_statement
+      has:
+        field: source
+        regex: '^[''"](?:node:)?path[''"]$'
+    - pattern: require("node:path")
+    - pattern: require("path")
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "node_modules/**"
+  - "repos/**"

@@ -1,0 +1,52 @@
+#!/bin/sh
+set -eu
+
+root=$(git rev-parse --show-toplevel)
+
+sync() {
+  git -C "$root" submodule sync
+}
+
+update() {
+  sync
+  git -C "$root" submodule update --init --remote --depth 1
+}
+
+check() {
+  configured=$(git -C "$root" config --file .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{ print $2 }' | sort)
+  [ -n "$configured" ] || {
+    printf '%s\n' 'No direct submodules are configured.' >&2
+    exit 1
+  }
+
+  status=$(git -C "$root" submodule status)
+  present=$(printf '%s\n' "$status" | awk '{ print $2 }' | sort)
+  [ "$present" = "$configured" ] || {
+    printf '%s\n' 'Direct vendor submodules are missing.' >&2
+    exit 1
+  }
+
+  if printf '%s\n' "$status" | grep -Eq '^[-U]'; then
+    printf '%s\n' 'Direct vendor submodules are not initialized.' >&2
+    printf '%s\n' "$status" >&2
+    exit 1
+  fi
+}
+
+case "${1:-}" in
+  setup)
+    git -C "$root" config core.hooksPath .githooks
+    git -C "$root" config submodule.recurse true
+    update
+    ;;
+  sync|update)
+    update
+    ;;
+  check)
+    check
+    ;;
+  *)
+    printf 'Usage: %s {setup|update|check}\n' "$0" >&2
+    exit 2
+    ;;
+esac

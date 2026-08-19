@@ -1,0 +1,17 @@
+id: effect-prefer-effect-signatures
+language: TypeScript
+severity: warning
+message: Effect TS advisory — expose Effect in application and library signatures; keep Promise and PromiseLike types inside a named foreign adapter implementation.
+note: A Promise return type is appropriate only where an external framework requires that exact host signature.
+rule:
+  kind: type_identifier
+  regex: "^Promise(?:Like)?$"
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "node_modules/**"
+  - "repos/**"

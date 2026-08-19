@@ -1,0 +1,19 @@
+id: effect-prefer-config
+language: TypeScript
+severity: warning
+message: Effect TS advisory — prefer Config and provide configuration at the application Layer boundary instead of reading environment globals throughout the program.
+rule:
+  any:
+    - pattern: process.env.$NAME
+    - pattern: process.env[$NAME]
+    - pattern: Bun.env.$NAME
+    - pattern: Deno.env.get($$$ARGS)
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "node_modules/**"
+  - "repos/**"

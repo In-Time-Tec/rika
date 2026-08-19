@@ -1,0 +1,25 @@
+id: effect-prefer-http
+language: TypeScript
+severity: warning
+message: Effect TS advisory — prefer effect/unstable/http HttpClient for outbound requests and HttpApi/HttpServer for inbound HTTP; keep fetch or host-server interop in an adapter.
+rule:
+  any:
+    - pattern: fetch($$$ARGS)
+    - pattern: Bun.serve($$$ARGS)
+    - kind: import_statement
+      has:
+        field: source
+        regex: '^[''"](?:node:)?https?[''"]$'
+    - pattern: require("node:http")
+    - pattern: require("node:https")
+    - pattern: require("http")
+    - pattern: require("https")
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "node_modules/**"
+  - "repos/**"

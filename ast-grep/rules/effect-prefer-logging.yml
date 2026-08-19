@@ -1,0 +1,20 @@
+id: effect-prefer-logging
+language: TypeScript
+severity: info
+message: Effect TS advisory — prefer Effect.logDebug/logInfo/logWarning/logError so logging stays structured and attached to the current Fiber.
+rule:
+  any:
+    - pattern: console.log($$$ARGS)
+    - pattern: console.info($$$ARGS)
+    - pattern: console.warn($$$ARGS)
+    - pattern: console.error($$$ARGS)
+    - pattern: console.debug($$$ARGS)
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "node_modules/**"
+  - "repos/**"

@@ -1,0 +1,26 @@
+id: effect-prefer-program-construction
+language: TypeScript
+severity: warning
+message: Effect TS advisory — prefer Effect.fn and Effect.gen with yield*; use Effect.tryPromise only in a named adapter for a foreign Promise API.
+note: This is guidance, not a ban. Keep the JavaScript form when it is the unavoidable outer integration boundary.
+rule:
+  any:
+    - pattern: async function $NAME($$$ARGS) { $$$BODY }
+    - pattern: async function* $NAME($$$ARGS) { $$$BODY }
+    - pattern: async ($$$ARGS) => $BODY
+    - pattern: async $ARG => $BODY
+    - pattern:
+        context: class EffectAdvisory { async $NAME($$$ARGS) { $$$BODY } }
+        selector: method_definition
+    - pattern:
+        context: const effectAdvisory = { async $NAME($$$ARGS) { $$$BODY } }
+        selector: method_definition
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "node_modules/**"
+  - "repos/**"

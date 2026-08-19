@@ -1,0 +1,29 @@
+id: effect-prefer-filesystem
+language: TypeScript
+severity: warning
+message: Effect TS advisory — prefer the FileSystem service for Effectful file operations; keep node:fs, Bun.file/write, or Deno file interop in a platform adapter.
+rule:
+  any:
+    - kind: import_statement
+      has:
+        field: source
+        regex: '^[''"](?:node:)?fs(?:/promises)?[''"]$'
+    - pattern: require("node:fs")
+    - pattern: require("node:fs/promises")
+    - pattern: require("fs")
+    - pattern: require("fs/promises")
+    - pattern: Bun.file($$$ARGS)
+    - pattern: Bun.write($$$ARGS)
+    - pattern: Deno.readFile($$$ARGS)
+    - pattern: Deno.readTextFile($$$ARGS)
+    - pattern: Deno.writeFile($$$ARGS)
+    - pattern: Deno.writeTextFile($$$ARGS)
+files:
+  - "**/*.ts"
+  - "**/*.tsx"
+ignores:
+  - "**/dist/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "node_modules/**"
+  - "repos/**"

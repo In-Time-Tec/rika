@@ -1,0 +1,71 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "lint": {
+      "dependsOn": ["^build"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "//#lint": {
+      "inputs": [
+        "package.json",
+        "apps/**/*.ts",
+        "packages/**/*.ts",
+        "scripts/**/*.ts",
+        "!**/dist/**"
+      ]
+    },
+    "//#test-unit": {
+      "inputs": [
+        "vitest.config.ts",
+        "tsconfig.json",
+        "bun.lock",
+        "apps/**",
+        "packages/**",
+        "scripts/**",
+        "test/**",
+        "!**/dist/**"
+      ]
+    },
+    "//#test-tui": {
+      "inputs": [
+        "vitest.config.ts",
+        "tsconfig.json",
+        "bun.lock",
+        "apps/**",
+        "packages/**",
+        "scripts/**",
+        "test/**",
+        "!**/dist/**"
+      ]
+    },
+    "//#test-proc": {
+      "inputs": [
+        "vitest.config.ts",
+        "tsconfig.json",
+        "bun.lock",
+        "apps/**",
+        "packages/**",
+        "scripts/**",
+        "test/**",
+        "!**/dist/**"
+      ]
+    },
+    "//#ast-grep-check": {
+      "inputs": [
+        "sgconfig.yml",
+        "ast-grep/**",
+        "apps/**/*.ts",
+        "packages/**/*.ts",
+        "scripts/**/*.ts",
+        "test/**/*.ts",
+        "!**/dist/**"
+      ]
+    }
+  }
+}
