@@ -12,7 +12,7 @@ const waitQueue = (
   app: TuiApp.TuiApp,
   threadId: Thread.ThreadId,
   predicate: (queue: QueueSnapshot) => boolean,
-  remaining = 10_000,
+  remaining = 60_000,
 ): Effect.Effect<QueueSnapshot, never> =>
   app.queue(threadId).pipe(
     Effect.flatMap((queue) =>

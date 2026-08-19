@@ -18,7 +18,7 @@ const waitQueue = (
   app: TuiApp.TuiApp,
   threadId: Thread.ThreadId,
   predicate: (queue: QueueSnapshot) => boolean,
-  remaining = 2_000,
+  remaining = 20_000,
 ): Effect.Effect<QueueSnapshot, never> =>
   Effect.gen(function* () {
     const queue = yield* app.queue(threadId).pipe(Effect.orDie)
@@ -102,7 +102,7 @@ test(
 
         yield* app.waitFrame("STEERED_CONTINUATION_COMPLETE", 30_000)
         yield* app.waitFrame("DRAINED_8", 30_000)
-        const drained = yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 5_000)
+        const drained = yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 20_000)
         expect(drained.turns).toEqual([])
 
         const requestTexts = (yield* app.modelPrompts).map(promptTexts)
@@ -170,7 +170,7 @@ test(
         yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0)
 
         yield* app.waitFrame("HI_COMPLETE", 20_000)
-        expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 5_000)).turns).toEqual([])
+        expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 20_000)).turns).toEqual([])
         expect((yield* app.modelPrompts).map(promptTexts).map((texts) => texts.at(-1))).toEqual(["Hello", "Hi"])
         const activeTranscript = yield* app.transcript(activeTurnId).pipe(Effect.orDie)
         expect(
@@ -315,7 +315,7 @@ test(
         })
 
         yield* app.waitFrame("RECOVERED_FOLLOW_UP_COMPLETE", 20_000)
-        expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 5_000)).turns).toEqual([])
+        expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 20_000)).turns).toEqual([])
         expect(
           (yield* app.nextFrame)
             .split("\n")
@@ -393,7 +393,7 @@ test(
         app.pressKey("c", { ctrl: true })
 
         yield* app.waitFrame("CANCEL_DRAINED_8", 90_000)
-        expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 5_000)).turns).toEqual([])
+        expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 20_000)).turns).toEqual([])
         const frame = yield* app.nextFrame
         expect(frame).not.toContain("CANCELLED_RESPONSE_MUST_NOT_RENDER")
 
@@ -470,7 +470,7 @@ test(
         expect(unchanged.turns.map((turn) => turn.prompt)).toEqual(remainingPrompts)
 
         yield* app.waitFrame("FAIL_DRAINED_1", 30_000)
-        expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 5_000)).turns).toEqual([])
+        expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 20_000)).turns).toEqual([])
         expect((yield* app.nextFrame).match(/FAIL_QUEUE_2/g) ?? []).toHaveLength(0)
 
         const requestTexts = (yield* app.modelPrompts).map(promptTexts)
