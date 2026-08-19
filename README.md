@@ -1,6 +1,6 @@
 # Rika
 
-Rika is a local coding-agent CLI and terminal application. Every Turn runs as a durable execution that survives restarts, Threads and Turns stay in local SQLite, and the whole session renders in your terminal.
+Rika is a collaborative coding-agent CLI and terminal application. Every Turn runs as a durable execution that survives client and executor restarts. Local execution remains the default, while an explicitly remote Thread runs in an isolated E2B workspace. Hosted identity, access, Threads, and Baton execution authority live in PostgreSQL.
 
 ## Install
 
@@ -45,25 +45,20 @@ rika-dev --version
 
 ## Configuration
 
-Global settings live at `~/.config/rika/settings.json`. A workspace can override them with `.rika/settings.json`. Credentials stay out of JSON: a provider override names the environment variable that supplies its API key.
+Global settings live at `~/.config/rika/settings.json`. A workspace can override them with `.rika/settings.json`. Local credentials stay in the operating-system credential store. Hosted user and Organization credentials are encrypted by the control plane and are never returned by read APIs.
 
 ```json
 {
   "subagents": {
     "maxDepth": 4,
     "maxSubagents": 4
-  },
-  "providers": {
-    "openai": {
-      "baseUrl": "http://127.0.0.1:9000/v1",
-      "apiKeyEnv": "RIKA_MODEL_API_KEY"
-    }
   }
 }
 ```
 
 ```bash
-export RIKA_MODEL_API_KEY="your-provider-key"
+rika auth login
+rika credential set openai --scope local
 rika config list
 rika doctor
 rika

@@ -1,36 +1,9 @@
 # Provider connection configuration
 
-Settings may override the built-in `openai` and `anthropic` HTTP connections with `baseUrl` and `apiKeyEnv`, and the built-in `bedrock` connection with non-secret AWS identity fields. A workspace provider entry replaces the matching global provider entry as a unit; omitted values fall back to the built-in connection, not fields from the global override.
+Model routes and non-secret provider connection settings may be defined locally or by the hosted control plane. Credentials have one explicit scope: `local`, `user`, or `organization`. Local credentials stay in the operating-system credential store and are usable only by that device. Hosted credential read APIs return metadata, never secret material.
 
-`baseUrl` must be an absolute HTTP or HTTPS URL without embedded credentials, and `apiKeyEnv` must name an uppercase environment variable. Literal keys, tokens, protocols, and custom providers are rejected; API-key credentials are read from the named environment variable and configuration output reports only whether they are present.
+A hosted credential is envelope-encrypted with a fresh AWS KMS data key and AES-256-GCM. Its authenticated data binds credential identity, owner, provider, and revision. Railway stores only ciphertext and the wrapped data key; plaintext and plaintext data keys remain operation-scoped and redacted. Revocation prevents new decrypts and interrupts dependent model fibers but cannot claw back a request already sent to a provider.
 
-`rika auth login openai` stores an OpenAI account session under the active Profile. A newly admitted route that uses the built-in OpenAI connection selects that account session and pins its non-secret fingerprint; if no account is stored, the route falls back to `OPENAI_API_KEY`. Baton sends account-backed requests to the Codex subscription endpoint and refreshes rejected credentials without persisting tokens in execution state. A customized OpenAI `baseUrl` always remains an API-key connection and never reads the stored account.
+A user credential may serve an Organization Thread only through an explicit Thread binding by its owner. That binding records consent for eligible controllers and is visible in audit history. An Organization owner or admin manages Organization credentials, and a Project operator may bind one to a Thread. Membership removal deletes that member's grants and bindings. Executors receive only short-lived assignment-scoped grants and never store hosted credentials in checkpoints, metadata, process arguments, or logs.
 
-Bedrock uses Baton's AWS default credential chain, including environment, shared profiles, SSO, roles, web identity, ECS, and EC2 metadata. Bearer mode uses `AWS_BEARER_TOKEN_BEDROCK`. In default auth mode, an optional structured `authRefresh` command is run only after Baton classifies an eligible credential rejection; its argv is never persisted or displayed. The command cannot modify Rika's environment, so it should update a shared credential cache, as `aws sso login` does.
-
-```json
-{
-  "providers": {
-    "bedrock": {
-      "region": "us-east-1",
-      "profile": "engineering",
-      "authRefresh": { "command": "aws", "args": ["sso", "login", "--profile", "engineering"] }
-    }
-  },
-  "modelAliases": {
-    "bedrock-fable": {
-      "base": "fable",
-      "provider": "bedrock",
-      "candidates": ["us.anthropic.claude-sonnet-4-20250514-v1:0"]
-    },
-    "bedrock-opus": {
-      "base": "opus",
-      "provider": "bedrock",
-      "candidates": ["us.anthropic.claude-opus-4-1-20250805-v1:0"]
-    }
-  },
-  "modelRoutes": {
-    "modes": { "high": { "main": "bedrock-opus", "oracle": "bedrock-opus" } }
-  }
-}
-```
+Provider account login is separate from Rika account login. Human identity uses `rika auth`; provider secrets use `rika credential`. GitHub sign-in is also separate from the repository GitHub App, whose installation tokens are minted on demand and scoped to one repository and the required permissions.
