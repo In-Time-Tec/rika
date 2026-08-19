@@ -422,6 +422,47 @@ describe("interactive ThreadView controller", () => {
     expect(started.entries.filter((entry) => entry.role === "user" && entry.text === "follow up")).toHaveLength(1)
   })
 
+  it("does not carry pending transcript entries into an activated new thread", () => {
+    const previousThreadId = Thread.ThreadId.make("previous-thread")
+    const newThreadId = Thread.ThreadId.make("new-thread")
+    const loaded = InteractiveController.update(state(), {
+      _tag: "ThreadViewSnapshot",
+      snapshot: snapshot(previousThreadId),
+    }).state
+    const submitted = reduceModel(
+      { ...loaded.model, input: "previous thread prompt", cursor: 22 },
+      { _tag: "Submitted", submissionId: "previous-submission" },
+    )
+    const activated = reduceModel(submitted, {
+      _tag: "ThreadActivated",
+      threadId: newThreadId,
+      title: "New thread",
+    })
+    const createdSnapshot = snapshot(newThreadId, 0)
+    const created = InteractiveController.update(
+      { ...loaded, model: activated },
+      {
+        _tag: "ThreadViewSnapshot",
+        snapshot: {
+          ...createdSnapshot,
+          thread: { ...createdSnapshot.thread, title: "New thread" },
+        },
+      },
+    ).state.model
+
+    expect(created).toMatchObject({
+      currentThreadId: "new-thread",
+      currentThreadTitle: "New thread",
+      entries: [],
+      blocks: [],
+      items: [],
+      queue: [],
+      busy: false,
+    })
+    expect(created.activeTurnId).toBeUndefined()
+    expect(created.activity).toBeUndefined()
+  })
+
   it("reconciles duplicate steering text by request identity at consumption and discard", () => {
     const turn = {
       kind: "agent" as const,

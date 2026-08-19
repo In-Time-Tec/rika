@@ -5,6 +5,7 @@ test("dispatches every session action and reports absent optional callbacks", ()
   const adapter: Adapter = {
     submit: vi.fn(),
     quit: vi.fn(),
+    newThread: vi.fn(),
     editQueued: vi.fn(),
     dequeue: vi.fn(),
     steer: vi.fn(),
@@ -15,6 +16,7 @@ test("dispatches every session action and reports absent optional callbacks", ()
   const actions: ReadonlyArray<Action> = [
     { _tag: "Submit", prompt: "a", parts: [{ type: "text", text: "a" }], mode: "medium" },
     { _tag: "Quit" },
+    { _tag: "NewThread" },
     { _tag: "EditQueued", id: "one", prompt: "b" },
     { _tag: "Dequeue", id: "two" },
     { _tag: "Steer", prompt: "c", requestId: "request-c" },
@@ -25,6 +27,7 @@ test("dispatches every session action and reports absent optional callbacks", ()
   for (const action of actions) expect(execute(adapter, action)).toBe(true)
   expect(adapter.submit).toHaveBeenCalledWith("a", [{ type: "text", text: "a" }], "medium", undefined, undefined)
   expect(adapter.quit).toHaveBeenCalledOnce()
+  expect(adapter.newThread).toHaveBeenCalledOnce()
   const minimal: Adapter = { submit: vi.fn(), quit: vi.fn() }
   for (const action of actions.slice(2)) expect(execute(minimal, action)).toBe(false)
 })
