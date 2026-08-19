@@ -26,6 +26,11 @@ export const makeEventRouter = (runtime: Runtime) => {
     loop.threadView = cleared.view
     loop.modelPreview = cleared.modelPreview
   }
+  const dismissCtrlCMenuWhenBusy = () => {
+    if (!loop.model.busy || !loop.ctrlCMenuVisible) return
+    loop.ctrlCMenuVisible = false
+    loop.renderer?.surface.showCtrlCMenu(false)
+  }
   const dispatch = (event: InteractiveEvent.InteractiveEvent) => {
     if (loop.closed) return
     if (
@@ -64,6 +69,7 @@ export const makeEventRouter = (runtime: Runtime) => {
         const threadId = event._tag === "ResyncRequired" ? String(event.threadId) : loop.model.currentThreadId
         if (threadId !== undefined) requestSelectionResync(threadId)
       }
+      dismissCtrlCMenuWhenBusy()
       if (controlled.preserveAnchor) loop.renderer?.surface.update(loop.model, true)
       else render(event._tag === "ResyncRequired")
       if (!loop.model.busy && loop.model.activeTurnId === undefined && loop.model.activity === undefined)
@@ -185,6 +191,7 @@ export const makeEventRouter = (runtime: Runtime) => {
       if (loop.model.threadSwitcher.open && selectedThreadMetadata(loop.model)?.id === event.threadId)
         loop.model = update(loop.model, event)
     } else if (event._tag === "AssistantCompleted") loop.model = update(loop.model, event)
+    dismissCtrlCMenuWhenBusy()
     if (!loop.model.busy && loop.model.activeTurnId === undefined && loop.model.activity === undefined)
       loop.submittedSinceIdle = false
     render(

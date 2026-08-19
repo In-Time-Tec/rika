@@ -145,43 +145,45 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
       invoke: (
         session: InteractiveSession.InteractiveSession,
       ) => Effect.Effect<void, ProductOperation.OperationUnavailable>,
+      confirmationRequired = false,
     ) =>
       awaitSession.pipe(
         Effect.flatMap((session) =>
           invoke(session).pipe(
             Effect.catchCause((cause) => {
               if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
-              if (isDisconnectedOperation(Cause.squash(cause)))
-                return invalidate(session).pipe(
-                  Effect.andThen(
-                    Effect.sync(() =>
-                      report({
-                        _tag: "ExecutionFailed",
-                        failure: {
-                          tag: "TransportDisconnected",
-                          category: "transport-degraded",
-                          message: "Server transport disconnected; the action outcome is unknown and was not retried",
-                          retryable: true,
-                          retry: "automatic",
-                          actor: "environment",
-                        },
-                      }),
+              const recovery = isDisconnectedOperation(Cause.squash(cause))
+                ? invalidate(session).pipe(
+                    Effect.andThen(
+                      Effect.sync(() =>
+                        report({
+                          _tag: "ExecutionFailed",
+                          failure: {
+                            tag: "TransportDisconnected",
+                            category: "transport-degraded",
+                            message: "Server transport disconnected; the action outcome is unknown and was not retried",
+                            retryable: true,
+                            retry: "automatic",
+                            actor: "environment",
+                          },
+                        }),
+                      ),
                     ),
-                  ),
-                )
-              return Effect.sync(() =>
-                report({
-                  _tag: "ExecutionFailed",
-                  failure: {
-                    tag: "TransportOperationFailed",
-                    category: "transport-degraded",
-                    message: String(Cause.squash(cause)),
-                    retryable: true,
-                    retry: "automatic",
-                    actor: "environment",
-                  },
-                }),
-              )
+                  )
+                : Effect.sync(() =>
+                    report({
+                      _tag: "ExecutionFailed",
+                      failure: {
+                        tag: "TransportOperationFailed",
+                        category: "transport-degraded",
+                        message: String(Cause.squash(cause)),
+                        retryable: true,
+                        retry: "automatic",
+                        actor: "environment",
+                      },
+                    }),
+                  )
+              return confirmationRequired ? recovery.pipe(Effect.andThen(Effect.failCause(cause))) : recovery
             }),
           ),
         ),
@@ -232,6 +234,10 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
       quit: mutation((session) => session.quit),
       newThread: Ref.set(selected, { _tag: "latest" as const }).pipe(
         Effect.andThen(mutation((session) => session.newThread)),
+      ),
+      archiveThread: mutation((session) => session.archiveThread, true),
+      archiveAndNewThread: mutation((session) => session.archiveAndNewThread, true).pipe(
+        Effect.andThen(Ref.set(selected, { _tag: "latest" as const })),
       ),
       selectThread: (threadId) =>
         Effect.gen(function* () {

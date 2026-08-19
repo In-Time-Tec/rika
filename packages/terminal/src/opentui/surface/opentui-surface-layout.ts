@@ -189,8 +189,12 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       contentColumnWidth(previousModel) !== contentColumnWidth(model)
     if (goalChanged) this.renderGoalLabel(model)
     this.workspaceLabel.right = sidebarWidth + 2
-    this.quitConfirmationBox.bottom = renderedInputHeight + 1
-    this.quitConfirmationBox.width = Math.max(1, Math.min(24, model.width - 4))
+    this.ctrlCMenuBox.bottom = renderedInputHeight + 1
+    const ctrlCMenuWidth = Math.max(1, Math.min(33, model.width - 4))
+    this.ctrlCMenuBox.width = ctrlCMenuWidth
+    this.ctrlCMenuTitle.left = model.width - ctrlCMenuWidth - 1
+    this.ctrlCMenuTitle.top = Math.max(0, model.height - renderedInputHeight - 7)
+    this.ctrlCMenuTitle.visible = this.ctrlCMenuBox.visible && model.width >= 19
     const workspaceChanged =
       previousModel === undefined ||
       previousModel.workspace !== model.workspace ||

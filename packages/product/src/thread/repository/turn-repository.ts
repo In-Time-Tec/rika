@@ -7,6 +7,8 @@ import type { PageOptions, PageResult } from "./turn-repository-pagination"
 import type { QueuedSteeringAdmissionPreparation, SteeringAdmission } from "./turn-repository-steering"
 import type { QueueClaim, QueueClaimFinish, QueueItemChange, QueueSnapshot, Submission } from "./turn-repository-queue"
 
+export type { QueueSnapshot } from "./turn-repository-queue"
+
 export class RepositoryError extends Schema.TaggedError<RepositoryError>()("TurnRepositoryError", {
   message: Schema.String,
 }) {}

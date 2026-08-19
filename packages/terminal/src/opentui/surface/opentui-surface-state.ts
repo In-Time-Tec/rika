@@ -92,8 +92,9 @@ export class SurfaceState {
   public goalLabel!: TextRenderable
   public toastBox!: BoxRenderable
   public toast!: TextRenderable
-  public quitConfirmationBox!: BoxRenderable
-  public quitConfirmation!: TextRenderable
+  public ctrlCMenuBox!: BoxRenderable
+  public ctrlCMenuTitle!: TextRenderable
+  public ctrlCMenu!: TextRenderable
   protected lastPaste: { readonly text: string; readonly at: number } | undefined
   protected welcomeController!: WelcomeController
   protected goalController!: GoalController

@@ -134,6 +134,7 @@ export interface InteractiveSessionState {
     epoch: number,
     dispatch: (event: InteractiveEvent) => void,
     activeTurn?: Turn.Turn,
+    preparedQueue?: import("@rika/product/turn-repository").QueueSnapshot,
   ) => Effect.Effect<void, OperationError | TurnRepository.RepositoryError, TurnRepository.Service>
   readonly selectionAdmission: Semaphore.Semaphore
   readonly transcriptPageAdmission: Semaphore.Semaphore

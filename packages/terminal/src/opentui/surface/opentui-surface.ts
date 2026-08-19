@@ -5,6 +5,7 @@ import {
   StyledText,
   TextRenderable,
   SystemClock,
+  bg,
   bold,
   dim,
   fg,
@@ -255,13 +256,13 @@ export class Surface extends SurfaceLifecycle {
     })
     this.toast = new TextRenderable(renderer, { content: "", fg: toOpenColor(colors.text) })
     this.toastBox.add(this.toast)
-    this.quitConfirmationBox = new BoxRenderable(renderer, {
+    this.ctrlCMenuBox = new BoxRenderable(renderer, {
       visible: false,
       position: "absolute",
       right: 2,
       bottom: spacing.inputHeight + 1,
-      width: 24,
-      height: 4,
+      width: 33,
+      height: 6,
       zIndex: 40,
       border: true,
       borderStyle: "rounded",
@@ -271,20 +272,38 @@ export class Surface extends SurfaceLifecycle {
       paddingLeft: 1,
       paddingRight: 1,
       overflow: "hidden",
-      title: " Ctrl+C then ",
-      titleColor: toOpenColor(colors.amber),
-      titleAlignment: "left",
     })
-    this.quitConfirmation = new TextRenderable(renderer, {
+    this.ctrlCMenuTitle = new TextRenderable(renderer, {
+      visible: false,
+      position: "absolute",
+      top: 0,
+      left: 0,
+      width: 14,
+      height: 1,
+      zIndex: 41,
       content: new StyledText([
+        bg(toOpenColor(colors.surface))(fg(toOpenColor(colors.text))("─ ")),
+        bold(bg(toOpenColor(colors.surface))(fg(toOpenColor(colors.amber))("Ctrl+C"))),
+        dim(bg(toOpenColor(colors.surface))(fg(toOpenColor(colors.text))(" then"))),
+        bg(toOpenColor(colors.surface))(" "),
+      ]),
+      selectable: false,
+    })
+    this.ctrlCMenu = new TextRenderable(renderer, {
+      content: new StyledText([
+        bold(fg(toOpenColor(colors.blue))("Ctrl+N")),
+        fg(toOpenColor(colors.text))(" Archive and new thread\n"),
+        bold(fg(toOpenColor(colors.blue))("Ctrl+E")),
+        fg(toOpenColor(colors.text))(" Archive and quit\n"),
         bold(fg(toOpenColor(colors.blue))("Ctrl+C")),
         fg(toOpenColor(colors.text))(" Quit\n"),
+        fg(toOpenColor(colors.text))("         "),
         bold(fg(toOpenColor(colors.blue))("Esc")),
         dim(fg(toOpenColor(colors.text))(" cancel")),
       ]),
       selectable: false,
     })
-    this.quitConfirmationBox.add(this.quitConfirmation)
+    this.ctrlCMenuBox.add(this.ctrlCMenu)
     this.paletteBox = new BoxRenderable(renderer, {
       visible: false,
       position: "absolute",
@@ -463,7 +482,8 @@ export class Surface extends SurfaceLifecycle {
     renderer.root.add(this.overlayHintOne)
     renderer.root.add(this.overlayHintTwo)
     renderer.root.add(this.toastBox)
-    renderer.root.add(this.quitConfirmationBox)
+    renderer.root.add(this.ctrlCMenuBox)
+    renderer.root.add(this.ctrlCMenuTitle)
     renderer.keyInput.on("keypress", this.onKey)
     renderer.keyInput.on("paste", this.onPaste)
     renderer.on(CliRenderEvents.RESIZE, this.onResize)

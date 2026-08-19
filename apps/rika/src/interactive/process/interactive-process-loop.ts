@@ -82,6 +82,7 @@ export const interactiveTui =
           pendingJobControlPause: false,
           releaseJobControlPause: undefined as (() => boolean) | undefined,
           openingPath: false,
+          ctrlCMenuVisible: false,
         }
         if (resolvedModeRoutes !== undefined) loop.model = withModeRouteMap(loop.model, resolvedModeRoutes)
         const writeTerminalTitle = options.writeTerminalTitle ?? ((sequence: string) => process.stdout.write(sequence))

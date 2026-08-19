@@ -26,6 +26,7 @@ export interface ListInput {
 
 export interface Interface {
   readonly create: (input: CreateInput) => Effect.Effect<Thread, RepositoryError>
+  readonly archiveAndCreate: (currentId: ThreadId, input: CreateInput) => Effect.Effect<Thread, RepositoryError>
   readonly get: (id: ThreadId) => Effect.Effect<Thread | undefined, RepositoryError>
   readonly list: (input?: ListInput) => Effect.Effect<ReadonlyArray<Thread>, RepositoryError>
   readonly listAll: Effect.Effect<ReadonlyArray<Thread>, RepositoryError>

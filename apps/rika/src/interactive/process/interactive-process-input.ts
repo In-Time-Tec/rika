@@ -1,16 +1,18 @@
 import { create as createTui } from "@rika/terminal/opentui-surface"
 import { expandPastedText, execute, promptParts, type Action } from "@rika/terminal/terminal-session"
 import { canSubmit, selectedThreadMetadata, update } from "@rika/terminal/terminal-state-reducer"
+import * as ProductOperation from "@rika/product/product-operation"
 import { Effect } from "effect"
 import type { InteractiveInputContext } from "./interactive-runtime-context"
 import { imagePasteBlockedNotice } from "../input/prompt-input"
 import { nextSubmissionId } from "../controller/terminal-turn-submission"
 import { pasteClipboardPng, pastedImagePath, persistPastedImage } from "./process-workspace"
 
-type InputContext = Omit<InteractiveInputContext, "options" | "resume">
+type InputContext = Omit<InteractiveInputContext, "options" | "resume"> & {
+  readonly startSelection: (select: () => Effect.Effect<void, ProductOperation.OperationUnavailable>) => void
+}
 
 export const createInputHandlers = (context: InputContext): Partial<Parameters<typeof createTui>[0]> => {
-  let quitConfirmationVisible = false
   let previewRequestId = 0
   const {
     loop,
@@ -27,7 +29,12 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
     consumePendingAction,
     loadChangedFiles,
     adapter,
+    startSelection,
   } = context
+  const showCtrlCMenu = (visible: boolean) => {
+    loop.ctrlCMenuVisible = visible
+    loop.renderer?.surface.showCtrlCMenu(visible)
+  }
   return {
     workingFrame: (frame) => {
       if (loop.workingFrame === frame) return
@@ -122,19 +129,42 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       render()
     },
     key: (key) => {
+      if (loop.model.busy && loop.ctrlCMenuVisible) showCtrlCMenu(false)
       if (key.ctrl && key.name === "c" && !loop.model.busy) {
-        if (quitConfirmationVisible) {
+        if (loop.ctrlCMenuVisible) {
+          showCtrlCMenu(false)
           close()
           return
         }
-        quitConfirmationVisible = true
-        loop.renderer?.surface.showQuitConfirmation(true)
+        showCtrlCMenu(true)
         return
       }
-      if (quitConfirmationVisible) {
+      if (loop.ctrlCMenuVisible) {
         if (key.name === "escape") {
-          quitConfirmationVisible = false
-          loop.renderer?.surface.showQuitConfirmation(false)
+          showCtrlCMenu(false)
+          return
+        }
+        if (key.ctrl && key.name === "n") {
+          showCtrlCMenu(false)
+          startSelection(() =>
+            session.archiveAndNewThread.pipe(
+              Effect.tapError((failure) =>
+                Effect.sync(() => loop.renderer?.surface.showToast(failure.message, "#e06c75")),
+              ),
+            ),
+          )
+          return
+        }
+        if (key.ctrl && key.name === "e") {
+          showCtrlCMenu(false)
+          run(
+            session.archiveThread.pipe(
+              Effect.tap(() => Effect.sync(close)),
+              Effect.tapError((failure) =>
+                Effect.sync(() => loop.renderer?.surface.showToast(failure.message, "#e06c75")),
+              ),
+            ),
+          )
         }
         return
       }
