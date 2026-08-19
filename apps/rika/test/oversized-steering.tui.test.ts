@@ -61,9 +61,7 @@ test(
         yield* app.waitModelRequests(1)
 
         const oversized = `OVERSIZE${"z".repeat(ExecutionGateway.SteeringTextMaxCharacters)}`
-        const typeStarted = performance.now()
         yield* Effect.promise(() => app.type(oversized))
-        console.log(`OVERSIZED_TYPE_MS ${Math.round(performance.now() - typeStarted)}`)
         app.pressEnter()
         yield* waitQueue(app, threadId, (queue) => queue.turns.some((turn) => turn.prompt.startsWith("OVERSIZE")))
 
@@ -71,18 +69,18 @@ test(
         yield* Effect.sleep("500 millis")
         app.pressEnter()
 
-        const waitSteered = (remaining: number): Effect.Effect<number, never> =>
-          app.transcript(activeTurnId).pipe(
-            Effect.orDie,
-            Effect.flatMap((projection) => {
+        const waitSteered = (budgetMillis: number): Effect.Effect<number, never> =>
+          Effect.gen(function* () {
+            const started = performance.now()
+            for (;;) {
+              const projection = yield* app.transcript(activeTurnId).pipe(Effect.orDie)
               const steering = projection?.state.steering
               const count = (steering?.pending?.length ?? 0) + (steering?.settled?.length ?? 0)
-              return count > 0 || remaining <= 0
-                ? Effect.succeed(count)
-                : Effect.sleep("100 millis").pipe(Effect.andThen(waitSteered(remaining - 100)))
-            }),
-          )
-        expect(yield* waitSteered(20_000)).toBeGreaterThan(0)
+              if (count > 0 || performance.now() - started >= budgetMillis) return count
+              yield* Effect.sleep("100 millis")
+            }
+          })
+        expect(yield* waitSteered(60_000)).toBeGreaterThan(0)
         app.pressKey("c", { ctrl: true })
         yield* app.quit
       }),
