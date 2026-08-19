@@ -11,6 +11,7 @@ import {
   type IdentityRuntime,
 } from "@rika/identity"
 import { handleRequest, type HttpDependencies } from "../src/http"
+import { HostedProductError, type HostedProductService } from "../src/hosted-product"
 
 const account: Account = {
   user: {
@@ -52,6 +53,12 @@ const devices: CliDeviceDirectory = {
   revoke: () => Effect.succeed(false),
 }
 
+const product: HostedProductService = {
+  ready: Effect.void,
+  projects: () => Effect.succeed([]),
+  createConnection: () => Effect.succeed({ threadId: "thread-1" }),
+}
+
 const dependencies = (
   options: {
     readonly userId?: string
@@ -65,6 +72,7 @@ const dependencies = (
     account: () => Effect.succeed(options.account),
   },
   devices,
+  product,
   production: true,
 })
 
@@ -104,6 +112,7 @@ describe("control-plane HTTP", () => {
           account: () => Effect.fail(IdentityDirectoryError.make({ operation: "account" })),
         },
         devices,
+        product: { ...product, ready: Effect.fail(HostedProductError.make({ message: "product readiness" })) },
         production: true,
       }
       const result = yield* response("/healthz", unavailable)
@@ -240,6 +249,100 @@ describe("control-plane HTTP", () => {
       const result = yield* response("/api/account", dependencies({ userId: "user-1", account }))
       expect(result.status).toBe(200)
       expect(yield* Effect.promise(() => result.json())).toEqual(account)
+    }),
+  )
+
+  it.effect("returns product projects visible to the authenticated memberships", () =>
+    Effect.gen(function* () {
+      const result = yield* response("/api/v1/me/context", {
+        ...dependencies({ userId: "user-1", account }),
+        product: {
+          ...product,
+          projects: (memberIds) => {
+            expect(memberIds).toEqual(["member-1"])
+            return Effect.succeed([
+              { id: "project-1", organizationId: "organization-1", name: "Control Plane", role: "owner" },
+            ])
+          },
+        },
+      })
+      expect(result.status).toBe(200)
+      const body = yield* Effect.promise(() => result.json() as Promise<{ readonly projects: unknown }>)
+      expect(body.projects).toEqual([
+        { id: "project-1", organizationId: "organization-1", name: "Control Plane", slug: "control-plane" },
+      ])
+    }),
+  )
+
+  it.effect("invites through Better Auth only for an authenticated organization membership", () =>
+    Effect.gen(function* () {
+      let forwarded: Request | undefined
+      const base = dependencies({ userId: "user-1", account })
+      const accepted = yield* response(
+        "/api/v1/organizations/organization-1/invitations",
+        {
+          ...base,
+          identity: {
+            ...base.identity,
+            handle: (forwardedRequest) => {
+              forwarded = forwardedRequest
+              return Effect.succeed(Response.json({ id: "invite-1", email: "new@example.test" }))
+            },
+          },
+        },
+        { method: "POST", body: encodeJson({ email: "new@example.test" }) },
+      )
+      const rejected = yield* response("/api/v1/organizations/foreign/invitations", base, {
+        method: "POST",
+        body: encodeJson({ email: "new@example.test" }),
+      })
+      expect(accepted.status).toBe(200)
+      expect(rejected.status).toBe(404)
+      expect(forwarded?.url).toBe("https://control.example.com/api/auth/organization/invite-member")
+      expect(yield* Effect.promise(() => forwarded!.json())).toEqual({
+        email: "new@example.test",
+        organizationId: "organization-1",
+        role: "member",
+      })
+    }),
+  )
+
+  it.effect("creates connections from authenticated membership and device authority", () =>
+    Effect.gen(function* () {
+      let input: Parameters<HostedProductService["createConnection"]>[0] | undefined
+      const principal: IdentityPrincipal = { userId: "user-1", clientId: "client-1", dpopJkt: "thumbprint-1" }
+      const base = dependencies({ userId: "user-1", account })
+      const result = yield* response(
+        "/api/v1/connections",
+        {
+          ...base,
+          identity: { ...base.identity, identify: () => Effect.succeed(principal) },
+          devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
+          product: {
+            ...product,
+            createConnection: (value) => {
+              input = value
+              return Effect.succeed({ threadId: "thread-1" })
+            },
+          },
+        },
+        {
+          method: "POST",
+          body: encodeJson({ organization_id: "organization-1", project_id: "project-1", placement: "e2b" }),
+        },
+      )
+      expect(result.status).toBe(201)
+      expect(input).toEqual({
+        authority: {
+          organizationId: "organization-1",
+          memberId: "member-1",
+          deviceId: "device-1",
+          clientId: "client-1",
+          dpopJkt: "thumbprint-1",
+        },
+        projectId: "project-1",
+        placement: "e2b",
+      })
     }),
   )
 

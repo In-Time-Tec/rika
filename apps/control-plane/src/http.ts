@@ -7,6 +7,7 @@ import type {
   IdentityRuntime,
   IdentityRuntimeError,
 } from "@rika/identity"
+import type { HostedProductService } from "./hosted-product"
 import {
   accountPage,
   consentPage,
@@ -27,6 +28,7 @@ export interface HttpDependencies {
   readonly identity: IdentityRuntime
   readonly directory: IdentityDirectory
   readonly devices: CliDeviceDirectory
+  readonly product: HostedProductService
   readonly production: boolean
 }
 
@@ -46,6 +48,12 @@ const CliRegistrationRequest = Schema.Struct({
 })
 
 const OAuthRegistrationResponse = Schema.Struct({ client_id: Schema.NonEmptyString })
+const InvitationRequest = Schema.Struct({ email: Schema.String.check(Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) })
+const ConnectionRequest = Schema.Struct({
+  organization_id: Schema.NonEmptyString,
+  project_id: Schema.optionalKey(Schema.NonEmptyString),
+  placement: Schema.optionalKey(Schema.Literals(["local", "e2b"])),
+})
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const securityHeaders = (production: boolean) => {
@@ -200,7 +208,7 @@ const routeRequest = Effect.fn("ControlPlaneHttp.route")(function* (request: Req
   if (pathname === "/healthz" && request.method === "GET") return json({ status: "ok" }, dependencies.production)
 
   if (pathname === "/readyz" && request.method === "GET") {
-    const ready = yield* dependencies.directory.ready.pipe(
+    const ready = yield* Effect.all([dependencies.directory.ready, dependencies.product.ready]).pipe(
       Effect.as(true),
       Effect.orElseSucceed(() => false),
     )
@@ -252,36 +260,44 @@ const routeRequest = Effect.fn("ControlPlaneHttp.route")(function* (request: Req
     const expectedResource = `${url.origin}/api/v1`
     if (decoded.value.resource !== expectedResource)
       return json({ message: "Invalid OAuth resource" }, dependencies.production, 400)
-    const delegated = yield* dependencies.identity.handle(
-      new Request(`${url.origin}/api/auth/oauth2/register`, {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json" },
-        body: encodeJson({
-          client_name: "Rika CLI",
-          application_type: "native",
-          token_endpoint_auth_method: "none",
-          grant_types: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"],
-          scope: "openid profile email offline_access account",
-          software_id: "rika-cli",
-          dpop_bound_access_tokens: true,
-          resources: [expectedResource],
+    const delegated = yield* dependencies.identity
+      .handle(
+        new Request(`${url.origin}/api/auth/oauth2/register`, {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: encodeJson({
+            client_name: "Rika CLI",
+            application_type: "native",
+            token_endpoint_auth_method: "none",
+            grant_types: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"],
+            scope: "openid profile email offline_access account",
+            software_id: "rika-cli",
+            dpop_bound_access_tokens: true,
+            resources: [expectedResource],
+          }),
         }),
-      }),
-    ).pipe(Effect.option)
-    if (delegated._tag === "None") return json({ message: "Identity service unavailable" }, dependencies.production, 503)
+      )
+      .pipe(Effect.option)
+    if (delegated._tag === "None")
+      return json({ message: "Identity service unavailable" }, dependencies.production, 503)
     if (!delegated.value.ok) return secured(delegated.value, dependencies.production)
-    const registration = yield* Effect.tryPromise({ try: () => delegated.value.clone().json(), catch: () => undefined }).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(OAuthRegistrationResponse)),
-      Effect.option,
-    )
+    const registration = yield* Effect.tryPromise({
+      try: () => delegated.value.clone().json(),
+      catch: () => undefined,
+    }).pipe(Effect.flatMap(Schema.decodeUnknownEffect(OAuthRegistrationResponse)), Effect.option)
     if (registration._tag === "None")
       return json({ message: "Identity service returned an invalid registration" }, dependencies.production, 503)
-    const stored = yield* dependencies.devices.register({
-      clientId: registration.value.client_id,
-      deviceId: decoded.value.reference_id.slice("cli-device:".length),
-      publicJwk: decoded.value.jwk,
-      jwkThumbprint: decoded.value.dpop_jkt,
-    }).pipe(Effect.as(true), Effect.orElseSucceed(() => false))
+    const stored = yield* dependencies.devices
+      .register({
+        clientId: registration.value.client_id,
+        deviceId: decoded.value.reference_id.slice("cli-device:".length),
+        publicJwk: decoded.value.jwk,
+        jwkThumbprint: decoded.value.dpop_jkt,
+      })
+      .pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      )
     if (!stored) {
       yield* dependencies.devices.discard(registration.value.client_id).pipe(Effect.ignore)
       return json({ message: "CLI registration could not be persisted" }, dependencies.production, 503)
@@ -292,6 +308,10 @@ const routeRequest = Effect.fn("ControlPlaneHttp.route")(function* (request: Req
   if (pathname === "/api/v1/me/context" && request.method === "GET") {
     const access = yield* accountAccess(request, dependencies)
     if (access._tag !== "account") return accessFailure(access, dependencies)
+    const projects = yield* dependencies.product
+      .projects(access.account.memberships.map((membership) => membership.id))
+      .pipe(Effect.option)
+    if (projects._tag === "None") return json({ message: "Product service unavailable" }, dependencies.production, 503)
     return json(
       {
         account: {
@@ -300,7 +320,15 @@ const routeRequest = Effect.fn("ControlPlaneHttp.route")(function* (request: Req
           name: access.account.user.name,
         },
         organizations: access.account.memberships.map((membership) => membership.organization),
-        projects: [],
+        projects: projects.value.map((project) => ({
+          id: project.id,
+          organizationId: project.organizationId,
+          name: project.name,
+          slug: project.name
+            .toLowerCase()
+            .replaceAll(/[^a-z0-9]+/g, "-")
+            .replaceAll(/^-|-$/g, ""),
+        })),
       },
       dependencies.production,
     )
@@ -326,6 +354,59 @@ const routeRequest = Effect.fn("ControlPlaneHttp.route")(function* (request: Req
     return revoked.value
       ? new Response(null, { status: 204, headers: securityHeaders(dependencies.production) })
       : json({ message: "CLI device was not found" }, dependencies.production, 404)
+  }
+
+  const invitationRoute = /^\/api\/v1\/organizations\/([^/]+)\/invitations$/.exec(pathname)
+  if (invitationRoute?.[1] !== undefined && request.method === "POST") {
+    const access = yield* accountAccess(request, dependencies)
+    if (access._tag !== "account") return accessFailure(access, dependencies)
+    const membership = access.account.memberships.find(
+      (candidate) => candidate.organization.id === decodeURIComponent(invitationRoute[1] as string),
+    )
+    if (membership === undefined) return json({ message: "Organization is unavailable" }, dependencies.production, 404)
+    const decoded = yield* decodeJson(request, InvitationRequest)
+    if (decoded._tag === "None") return json({ message: "Invalid invitation" }, dependencies.production, 400)
+    return yield* dependencies.identity
+      .handle(
+        new Request(`${url.origin}/api/auth/organization/invite-member`, {
+          method: "POST",
+          headers: request.headers,
+          body: encodeJson({ email: decoded.value.email, organizationId: membership.organization.id, role: "member" }),
+        }),
+      )
+      .pipe(
+        Effect.map((response) => secured(response, dependencies.production)),
+        Effect.orElseSucceed(() => json({ message: "Identity service unavailable" }, dependencies.production, 503)),
+      )
+  }
+
+  if (pathname === "/api/v1/connections" && request.method === "POST") {
+    const access = yield* accountAccess(request, dependencies)
+    if (access._tag !== "account") return accessFailure(access, dependencies)
+    if (access.deviceId === undefined || access.principal.clientId === undefined)
+      return json({ message: "CLI device authentication required" }, dependencies.production, 401)
+    const decoded = yield* decodeJson(request, ConnectionRequest)
+    if (decoded._tag === "None") return json({ message: "Invalid connection" }, dependencies.production, 400)
+    const membership = access.account.memberships.find(
+      (candidate) => candidate.organization.id === decoded.value.organization_id,
+    )
+    if (membership === undefined) return json({ message: "Organization is unavailable" }, dependencies.production, 404)
+    const connection = yield* dependencies.product
+      .createConnection({
+        authority: {
+          organizationId: membership.organization.id,
+          memberId: membership.id,
+          deviceId: access.deviceId,
+          clientId: access.principal.clientId,
+          ...(access.principal.dpopJkt === undefined ? {} : { dpopJkt: access.principal.dpopJkt }),
+        },
+        ...(decoded.value.project_id === undefined ? {} : { projectId: decoded.value.project_id }),
+        placement: decoded.value.placement ?? "local",
+      })
+      .pipe(Effect.option)
+    return connection._tag === "None"
+      ? json({ message: "Connection could not be created" }, dependencies.production, 403)
+      : json(connection.value, dependencies.production, 201)
   }
 
   if (isAuthPath(pathname)) {

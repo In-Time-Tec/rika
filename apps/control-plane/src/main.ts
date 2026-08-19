@@ -1,3 +1,4 @@
+import { BunCrypto } from "@effect/platform-bun"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import { Console, Context, Effect, Layer } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
@@ -11,6 +12,7 @@ import {
   makeResendMailSender,
 } from "@rika/identity"
 import { serveControlPlane } from "./adapters/bun-server"
+import { HostedProduct, postgres as hostedProductPostgres } from "./hosted-product"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -36,12 +38,20 @@ const program = Effect.scoped(
       pool,
       mail: makeResendMailSender({ config, client: httpClient }),
     })
+    const product = yield* Layer.build(
+      hostedProductPostgres({
+        url: config.databaseUrl,
+        ssl: config.databaseSsl === "disable" ? false : { rejectUnauthorized: config.databaseSsl === "verify-full" },
+        maxConnections: 10,
+      }),
+    )
     yield* serveControlPlane({
       config,
       dependencies: {
         identity,
         directory: makePostgresIdentityDirectory(pool),
         devices: makePostgresCliDeviceDirectory(pool),
+        product: Context.get(product, HostedProduct),
         production: config.production,
       },
     })
@@ -50,4 +60,4 @@ const program = Effect.scoped(
   }),
 )
 
-BunRuntime.runMain(program.pipe(provideLayerScoped(FetchHttpClient.layer)))
+BunRuntime.runMain(program.pipe(provideLayerScoped(Layer.merge(FetchHttpClient.layer, BunCrypto.layer))))

@@ -14,9 +14,11 @@
   },
   "dependencies": {
     "@effect/platform-bun": "4.0.0-rc.109",
+    "@effect/sql-pg": "4.0.0-rc.109",
     "@rika/identity": "workspace:*",
-    "@rika/product-store": "workspace:*",
+    "@rika/product": "workspace:*",
     "@rika/execution": "workspace:*",
+    "@rika/product-store": "workspace:*",
     "effect": "4.0.0-rc.109"
   },
   "devDependencies": {
