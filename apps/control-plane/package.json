@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "bun build ./src/main.ts --outdir dist --target bun --format esm",
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js apps/control-plane/src apps/control-plane/test",
+    "migrate": "bun ./src/migrate.ts",
+    "start": "bun ./src/main.ts",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "4.0.0-rc.109",
+    "@rika/identity": "workspace:*",
+    "effect": "4.0.0-rc.109"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.109",
+    "@types/bun": "1.3.13",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  },
+  "rika": {
+    "kind": "application",
+    "domain": "control-plane"
+  }
+}
