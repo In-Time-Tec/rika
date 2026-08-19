@@ -65,6 +65,7 @@ describe("Provider", () => {
 
   it.effect("maps every lifecycle operation and redacts controller and bootstrap secrets from failures", () => {
     const calls: Array<string> = []
+    let bootstrapUrl = ""
     const sdk: Sdk = {
       create: () => Promise.reject(new Error("e2b-controller-secret bootstrap-secret")),
       connect: (sandboxId) => {
@@ -84,7 +85,10 @@ describe("Provider", () => {
         return Promise.resolve()
       },
       list: () => ({ hasNext: false, nextItems: () => Promise.resolve([]) }),
-      bootstrap: () => Promise.resolve(),
+      bootstrap: (input) => {
+        bootstrapUrl = input.url
+        return Promise.resolve()
+      },
     }
     const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
@@ -92,6 +96,8 @@ describe("Provider", () => {
       expect(failed.message).not.toContain("e2b-controller-secret")
       expect(failed.message).not.toContain("bootstrap-secret")
       expect(yield* provider.connect("sandbox", 900_000)).toEqual({ sandboxId: "sandbox", state: "running" })
+      yield* provider.bootstrap({ sandboxId: "sandbox", credential: Redacted.make("bootstrap-secret") })
+      expect(bootstrapUrl).toBe("https://7070-sandbox.e2b.app/.rika/bootstrap")
       expect(yield* provider.pauseFilesystem("sandbox")).toBe(true)
       yield* provider.touch("sandbox", 900_000)
       expect(yield* provider.kill("sandbox")).toBe(true)

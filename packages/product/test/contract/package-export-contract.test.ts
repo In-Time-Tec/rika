@@ -151,6 +151,7 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "migrations",
     "migrations/postgres/0001-hosted-authority.sql",
     "migrations/postgres/0002-hosted-identity-ancestry.sql",
+    "migrations/postgres/0003-hosted-authority-fences.sql",
     "product-database-layer",
     "sqlite-goal-repository",
     "sqlite-thread-search-repository",

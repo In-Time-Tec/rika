@@ -14,13 +14,15 @@
     ]
   },
   "deploy": {
-    "preDeployCommand": "bun --cwd apps/control-plane migrate",
+    "preDeployCommand": [
+      "bun --cwd apps/control-plane migrate"
+    ],
     "startCommand": "bun --cwd apps/control-plane start",
     "healthcheckPath": "/readyz",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 5,
     "overlapSeconds": 30,
-    "drainingSeconds": 30
+    "drainingSeconds": 60
   }
 }

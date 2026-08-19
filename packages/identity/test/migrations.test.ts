@@ -8,6 +8,7 @@ describe("identity migrations", () => {
       expect(identityMigrations).toHaveLength(2)
       const migration = identityMigrations[0]
       expect(migration?.id).toBe("identity/0001_better_auth_1_7_1")
+      expect(migration?.checksum).toBe("c07ac178826ea802f00c94f35fbc9b1fad12bbf5efa9a53500f4dc203446df38")
 
       const sql = yield* Effect.promise(() => Bun.file(migration?.url ?? "").text())
       const tables = [...sql.matchAll(/CREATE TABLE "([^"]+)"/g)].map((match) => match[1]).sort()
@@ -41,6 +42,7 @@ describe("identity migrations", () => {
     Effect.gen(function* () {
       const migration = identityMigrations[1]
       expect(migration?.id).toBe("identity/0002_cli_devices")
+      expect(migration?.checksum).toBe("594c5e7c4bfe49c06ecf0305993e4b53886363ff3619a3da61bf43df9fdeccef")
 
       const sql = yield* Effect.promise(() => Bun.file(migration?.url ?? "").text())
       expect(sql).toContain("CREATE TABLE rika_cli_registration")

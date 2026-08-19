@@ -96,14 +96,15 @@ describe("Controller", () => {
     }).pipe(provideLayer(harness.layer))
   })
 
-  it.effect("uses filesystem pause, explicit demand resume, lease renewal, and kill", () => {
+  it.effect("uses filesystem pause, demand provisioning resume, lease renewal, and kill", () => {
     const harness = makeHarness()
     return Effect.gen(function* () {
       const service = yield* controller
       yield* provision()
       const first = yield* authenticate(harness, 1)
+      expect((yield* service.provision("assignment-1")).state).toBe("running")
       expect((yield* service.pause({ assignmentId: "assignment-1", generation: 1 })).state).toBe("paused")
-      expect((yield* service.resume({ assignmentId: "assignment-1", generation: 1 })).state).toBe("provisioning")
+      expect((yield* service.provision("assignment-1")).state).toBe("provisioning")
       expect(
         (yield* Effect.flip(
           service.heartbeat({ version: 1, access: first.access, cursor: { sequence: 1, value: "stale" } }),
@@ -119,6 +120,7 @@ describe("Controller", () => {
       expect(harness.provider.pauses).toEqual(["sandbox-1"])
       expect(harness.provider.connects).toEqual([
         { sandboxId: "sandbox-1", timeoutMillis: Controller.IdleTimeoutMillis },
+        { sandboxId: "sandbox-1", timeoutMillis: Controller.IdleTimeoutMillis },
       ])
       expect(harness.provider.touches).toEqual([
         { sandboxId: "sandbox-1", timeoutMillis: Controller.IdleTimeoutMillis },
@@ -128,7 +130,25 @@ describe("Controller", () => {
     }).pipe(provideLayer(harness.layer))
   })
 
-  it.effect("authenticates bootstrap once and never treats sandbox ID possession as authority", () => {
+  it.effect("keeps durable pause fencing and retries an unknown provider pause outcome", () => {
+    const harness = makeHarness()
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* provision()
+      yield* authenticate(harness, 1)
+      harness.provider.pauseFailure = true
+      expect(
+        (yield* Effect.flip(service.pause({ assignmentId: "assignment-1", generation: 1 }))).kind,
+      ).toBe("provider")
+      expect((yield* readAssignment()).lifecycle._tag).toBe("Paused")
+      harness.provider.pauseFailure = false
+      expect((yield* service.pause({ assignmentId: "assignment-1", generation: 1 })).state).toBe("paused")
+      expect(harness.provider.pauses).toEqual(["sandbox-1", "sandbox-1"])
+      expect((yield* service.provision("assignment-1")).state).toBe("provisioning")
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("promotes bootstrap to an ack-safe scoped session without trusting sandbox ID possession", () => {
     const harness = makeHarness()
     return Effect.gen(function* () {
       const service = yield* controller
@@ -156,10 +176,18 @@ describe("Controller", () => {
       )
       const { welcome, access } = yield* authenticate(harness, 1)
       expect(String(welcome.sessionToken)).toBe("<redacted:executor-session>")
-      expect((yield* Effect.flip(service.hello({ ...hello, bootstrapToken: bootstrap }))).kind).toBe("authentication")
-      expect((yield* Effect.flip(service.reconnect({ ...access, sessionToken: Redacted.make("wrong") }))).kind).toBe(
-        "authentication",
-      )
+      const acknowledgedHello = yield* service.hello({ ...hello, bootstrapToken: bootstrap })
+      expect(acknowledgedHello.leaseEpoch).toBe(welcome.leaseEpoch)
+      expect(Redacted.value(acknowledgedHello.sessionToken)).toBe(Redacted.value(welcome.sessionToken))
+      expect(
+        (yield* Effect.flip(
+          service.reconnect({
+            ...access,
+            leaseEpoch: acknowledgedHello.leaseEpoch,
+            sessionToken: Redacted.make("wrong"),
+          }),
+        )).kind,
+      ).toBe("authentication")
       expect(json(welcome)).not.toContain(Redacted.value(welcome.sessionToken))
     }).pipe(provideLayer(harness.layer))
   })
@@ -253,6 +281,43 @@ describe("Controller", () => {
     }).pipe(provideLayer(harness.layer))
   })
 
+  it.effect("reconciles an unknown create outcome and removes duplicate generation sandboxes", () => {
+    const harness = makeHarness()
+    harness.provider.createFailure = true
+    const metadata = {
+      "rika.managed": "e2b-executor",
+      "rika.app-id": "rika",
+      "rika.deployment-id": "test",
+      "rika.assignment-id": "assignment-1",
+      "rika.generation": "1",
+    }
+    harness.provider.inventory = [
+      {
+        sandboxId: "sandbox-z-duplicate",
+        state: "running",
+        templateBuildId: "template-build-v1-immutable",
+        metadata,
+      },
+      {
+        sandboxId: "sandbox-a-adopt",
+        state: "running",
+        templateBuildId: "template-build-v1-immutable",
+        metadata,
+      },
+    ]
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* createAssignment()
+      expect(yield* service.provision("assignment-1")).toMatchObject({
+        sandboxId: "sandbox-a-adopt",
+        state: "provisioning",
+      })
+      expect(harness.provider.creates).toHaveLength(1)
+      expect(harness.provider.bootstraps.map((entry) => entry.sandboxId)).toEqual(["sandbox-a-adopt"])
+      expect(harness.provider.kills).toEqual(["sandbox-z-duplicate"])
+    }).pipe(provideLayer(harness.layer))
+  })
+
   it.effect("kills only managed inventory entries without a durable assignment", () => {
     const harness = makeHarness()
     harness.provider.inventory = [
@@ -274,6 +339,23 @@ describe("Controller", () => {
       yield* provision()
       expect(yield* service.cleanupOrphans).toEqual(["sandbox-orphan"])
       expect(harness.provider.kills).toEqual(["sandbox-orphan"])
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("rejects a cell dispatch access after its lease expires or is replaced", () => {
+    const harness = makeHarness()
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* provision()
+      const { access } = yield* authenticate(harness, 1)
+      yield* service.validateAccess(access)
+      yield* TestClock.adjust("1 minute")
+      expect((yield* Effect.flip(service.validateAccess(access))).kind).toBe("fenced")
+      const reconnected = yield* service.reconnect(access)
+      const renewed = { ...access, leaseEpoch: reconnected.leaseEpoch }
+      yield* service.validateAccess(renewed)
+      yield* service.replace({ assignmentId: "assignment-1", generation: 1 })
+      expect((yield* Effect.flip(service.validateAccess(renewed))).kind).toBe("fenced")
     }).pipe(provideLayer(harness.layer))
   })
 })

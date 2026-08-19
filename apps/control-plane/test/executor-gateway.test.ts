@@ -45,17 +45,18 @@ const controller = (overrides: Partial<Controller> = {}): Controller =>
         fence,
         sessionToken: Redacted.make("session-token"),
         leaseEpoch: 1,
-        leaseExpiresAt: 100,
+        leaseExpiresAt: 4_102_444_800_000,
         heartbeatIntervalMillis: 20,
         cursor: { sequence: 0, value: "" },
       }),
     reconnect: () => Effect.die("unused"),
+    validateAccess: () => Effect.void,
     heartbeat: () =>
       Effect.succeed({
         version: 1,
         fence,
         leaseEpoch: 1,
-        leaseExpiresAt: 100,
+        leaseExpiresAt: 4_102_444_800_000,
         cursor: { sequence: 1, value: "cursor-1" },
       }),
     checkpoint: () => Effect.die("unused"),
@@ -90,6 +91,90 @@ describe("executor gateway", () => {
         _tag: "ExecutorWelcome",
         welcome: { sessionToken: "session-token" },
       })
+    }),
+  )
+
+  it.effect("rejects an acknowledged Hello replay without displacing the live socket", () =>
+    Effect.gen(function* () {
+      const first = socket()
+      const replay = socket()
+      const gateway = yield* makeGateway(controller())
+      const hello = encode({
+        _tag: "ExecutorHello",
+        hello: {
+          minimumVersion: 1,
+          maximumVersion: 1,
+          fence,
+          templateBuildId: "build-1",
+          capabilities: { cells: true, checkpoints: false, pty: false },
+          cursors: { command: 0, event: 0, pty: 0 },
+          latestCheckpointId: null,
+          bootstrapToken: "bootstrap-token",
+        },
+      })
+      yield* gateway.receive(first, hello)
+      yield* gateway.receive(replay, hello)
+      expect(first.closed).toEqual([])
+      expect(replay.sent).toEqual([])
+      expect(replay.closed).toEqual([[1008, "duplicate"]])
+    }),
+  )
+
+  it.effect("replaces authority instead of accepting a stale reconnect when no live session exists", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      let replacements = 0
+      const gateway = yield* makeGateway(
+        controller({
+          reconnect: () => Effect.fail(ControllerError.make({ kind: "fenced", message: "stale reconnect" })),
+          replace: () =>
+            Effect.sync(() => {
+              replacements += 1
+              return {
+                assignmentId: "assignment-1",
+                threadId: "thread-1",
+                generation: 2,
+                templateBuildId: "build-1",
+                sandboxId: "sandbox-2",
+                state: "provisioning" as const,
+                cursor: { sequence: 0, value: "" },
+              }
+            }),
+        }),
+      )
+      yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+      expect(replacements).toBe(1)
+      expect(decode(target.sent[0]!)).toEqual({ _tag: "Fenced", fence, message: "stale reconnect" })
+      expect(target.closed).toEqual([[1008, "fenced"]])
+    }),
+  )
+
+  it.effect("does not replace a provisioning resume when its persisted reconnect is fenced", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      let replacements = 0
+      const gateway = yield* makeGateway(
+        controller({
+          reconnect: () => Effect.fail(ControllerError.make({ kind: "fenced", message: "resume in progress" })),
+          validateAccess: () => Effect.fail(ControllerError.make({ kind: "fenced", message: "not active" })),
+          replace: () =>
+            Effect.sync(() => {
+              replacements += 1
+              return {
+                assignmentId: "assignment-1",
+                threadId: "thread-1",
+                generation: 2,
+                templateBuildId: "build-1",
+                sandboxId: "sandbox-2",
+                state: "provisioning" as const,
+                cursor: { sequence: 0, value: "" },
+              }
+            }),
+        }),
+      )
+      yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+      expect(replacements).toBe(0)
+      expect(target.closed).toEqual([[1008, "fenced"]])
     }),
   )
 
@@ -187,6 +272,111 @@ describe("executor gateway", () => {
       yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
       expect(decode(target.sent[0]!)).toEqual({ _tag: "Fenced", fence, message: "stale lease" })
       expect(target.closed).toEqual([[1008, "fenced"]])
+    }),
+  )
+
+  it.effect("does not send a cell after the gateway observes an expired lease", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      const gateway = yield* makeGateway(
+        controller({
+          hello: () =>
+            Effect.succeed({
+              version: 1,
+              fence,
+              sessionToken: Redacted.make("session-token"),
+              leaseEpoch: 1,
+              leaseExpiresAt: 0,
+              heartbeatIntervalMillis: 20,
+              cursor: { sequence: 0, value: "" },
+            }),
+        }),
+      )
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      const error = yield* Effect.flip(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "expired-operation",
+          workspace: "/workspace",
+          sessionId: "thread-1",
+          code: "echo should-not-run",
+        }),
+      )
+      expect(error.kind).toBe("fenced")
+      expect(target.sent).toHaveLength(1)
+    }),
+  )
+
+  it.effect("disconnects replaced sockets and fails their pending cell results", () =>
+    Effect.gen(function* () {
+      const firstSocket = socket()
+      const replacementSocket = socket()
+      const gateway = yield* makeGateway(
+        controller({
+          reconnect: () =>
+            Effect.succeed({
+              version: 1,
+              fence,
+              leaseEpoch: 2,
+              leaseExpiresAt: 4_102_444_800_000,
+              heartbeatIntervalMillis: 20,
+              cursor: { sequence: 0, value: "" },
+            }),
+        }),
+      )
+      yield* gateway.receive(
+        firstSocket,
+        encode({
+          _tag: "ExecutorHello",
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      const running = yield* Effect.forkChild(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "replacement-operation",
+          workspace: "/workspace",
+          sessionId: "thread-1",
+          code: "echo hosted-mvp",
+        }),
+      )
+      yield* Effect.yieldNow
+      yield* gateway.receive(replacementSocket, encode({ _tag: "ExecutorReconnect", access }))
+      expect(firstSocket.closed).toEqual([[1008, "fenced"]])
+      expect((yield* Effect.flip(Fiber.join(running))).kind).toBe("disconnected")
+      yield* gateway.receive(
+        firstSocket,
+        encode({
+          _tag: "CellResult",
+          operationKey: "replacement-operation",
+          response: { _tag: "Success", result: { stdout: "stale\n", stderr: "", exitCode: 0 } },
+        }),
+      )
+      expect(replacementSocket.sent).toHaveLength(1)
     }),
   )
 })

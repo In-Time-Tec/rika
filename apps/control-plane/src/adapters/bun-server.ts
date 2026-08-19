@@ -5,15 +5,29 @@ import { isControlPlaneApiPath, makeControlPlaneApiHandler } from "../api"
 import { makeWebRequestHandler, secureResponse, type HttpDependencies } from "../http"
 
 interface Session {
+  readonly attach: (socket: Bun.ServerWebSocket<Session>) => void
   readonly receive: (socket: Socket, message: unknown) => void
+  readonly drain: () => Promise<void>
+  readonly close: () => void
 }
 
 const session = (gateway: Gateway): Session => {
-  let pending = Promise.resolve()
+  let pending: Promise<unknown> = Promise.resolve()
+  let activeSocket: Bun.ServerWebSocket<Session> | undefined
+  let draining = false
   return {
+    attach: (socket) => {
+      activeSocket = socket
+    },
     receive: (socket, message) => {
+      if (draining) return
       pending = pending.then(() => Effect.runPromise(gateway.receive(socket, message))).catch(() => undefined)
     },
+    drain: () => {
+      draining = true
+      return pending.then(() => undefined)
+    },
+    close: () => activeSocket?.close(1001, "server draining"),
   }
 }
 
@@ -24,6 +38,31 @@ export const serveControlPlane = (input: {
   Effect.acquireRelease(
     Effect.sync(() => {
       const api = makeControlPlaneApiHandler(input.dependencies)
+      const sessions = new Set<Session>()
+      const idleWaiters = new Set<() => void>()
+      let activeRequests = 0
+      const track = (response: Promise<Response>) => {
+        activeRequests += 1
+        return response.finally(() => {
+          activeRequests -= 1
+          if (activeRequests === 0) {
+            for (const resolve of idleWaiters) resolve()
+            idleWaiters.clear()
+          }
+        })
+      }
+      const waitForRequests = Effect.callback<void>((resume) => {
+        if (activeRequests === 0) {
+          resume(Effect.void)
+          return Effect.void
+        }
+        const resolve = () => resume(Effect.void)
+        idleWaiters.add(resolve)
+        return Effect.sync(() => {
+          idleWaiters.delete(resolve)
+        })
+      })
+      const web = makeWebRequestHandler(input.dependencies)
       const server = Bun.serve<Session>({
         hostname: "0.0.0.0",
         port: input.config.port,
@@ -36,18 +75,30 @@ export const serveControlPlane = (input: {
               : new Response("WebSocket upgrade required", { status: 426 })
           }
           if (isControlPlaneApiPath(pathname))
-            return api.handler(request).then(secureResponse(input.dependencies.production))
-          return makeWebRequestHandler(input.dependencies)(request)
+            return track(api.handler(request).then(secureResponse(input.dependencies.production)))
+          return track(Promise.resolve(web(request)))
         },
         websocket: {
+          open: (socket) => {
+            socket.data!.attach(socket)
+            sessions.add(socket.data!)
+          },
           message: (socket, message) => socket.data!.receive(socket, message),
           close: (socket) => {
+            sessions.delete(socket.data!)
             Effect.runFork(input.dependencies.executor.gateway.disconnected(socket))
           },
         },
       })
-      return { api, server }
+      return { api, server, sessions, waitForRequests }
     }),
-    ({ api, server }) =>
-      Effect.all([Effect.promise(() => server.stop(true)), Effect.promise(api.dispose)], { discard: true }),
+    ({ api, server, sessions, waitForRequests }) =>
+      Effect.gen(function* () {
+        const stopped = server.stop()
+        yield* waitForRequests
+        yield* Effect.promise(() => Promise.all(Array.from(sessions, (current) => current.drain())))
+        for (const current of sessions) current.close()
+        yield* Effect.promise(() => stopped)
+        yield* Effect.promise(api.dispose)
+      }),
   )

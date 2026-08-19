@@ -18,9 +18,9 @@ import {
   ThreadId,
   WorkspaceId,
 } from "@rika/product/hosted-model"
-import { HostedStore } from "@rika/product/hosted-store"
+import { HostedStore, StoreError } from "@rika/product/hosted-store"
 import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
-import type { AccessWire, CellResponse } from "@rika/remote-execution/protocol"
+import { CellResponse as CellResponseSchema, type AccessWire, type CellResponse } from "@rika/remote-execution/protocol"
 
 export interface ProjectContext {
   readonly id: string
@@ -41,13 +41,25 @@ export interface AdmittedRun {
   readonly operationKey: string
   readonly commandSequence: Sequence
   readonly prompt: string
+  readonly previous?: CellResponse
 }
 
 export class HostedProductError extends Schema.TaggedError<HostedProductError>()("HostedProductError", {
+  kind: Schema.optionalKey(Schema.Literals(["conflict", "not-found", "forbidden", "unavailable"])),
   message: Schema.String,
 }) {}
 
-const unavailable = () => HostedProductError.make({ message: "Hosted product service is unavailable" })
+const unavailable = () =>
+  HostedProductError.make({ kind: "unavailable", message: "Hosted product service is unavailable" })
+
+const storeFailure = (error: unknown) => {
+  if (!Schema.is(StoreError)(error)) return unavailable()
+  let kind: NonNullable<HostedProductError["kind"]> = "unavailable"
+  if (error.reason === "conflict" || error.reason === "stale-fence") kind = "conflict"
+  else if (error.reason === "not-found") kind = "not-found"
+  else if (error.reason === "invalid-authority") kind = "forbidden"
+  return HostedProductError.make({ kind, message: "Hosted product operation was rejected" })
+}
 
 export interface HostedProductService {
   readonly ready: Effect.Effect<void, HostedProductError>
@@ -215,12 +227,30 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
           command: { _tag: "SubmitPrompt", prompt: input.prompt },
           admittedAt: DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis)),
         })
+        const previousRows = yield* sql<{ readonly event: unknown }>`SELECT event
+          FROM rika_hosted_thread_events
+          WHERE organization_id = ${organizationId}
+            AND thread_id = ${ThreadId.make(input.threadId)}
+            AND idempotency_key = ${command.idempotencyKey}
+          LIMIT 1`.pipe(Effect.mapError(unavailable))
+        const previousEvent = previousRows[0]?.event
+        const previous =
+          typeof previousEvent === "object" &&
+          previousEvent !== null &&
+          "_tag" in previousEvent &&
+          previousEvent._tag === "CellResult" &&
+          "response" in previousEvent
+            ? yield* Schema.decodeUnknownEffect(CellResponseSchema)(previousEvent.response).pipe(
+                Effect.mapError(unavailable),
+              )
+            : undefined
         return {
           operationKey: String(command.idempotencyKey),
           commandSequence: command.sequence,
           prompt: input.prompt,
+          ...(previous === undefined ? {} : { previous }),
         }
-      }, Effect.mapError(unavailable))
+      }, Effect.mapError(storeFailure))
 
       const completeRun: HostedProductService["completeRun"] = Effect.fn("HostedProduct.completeRun")(function* (
         input,
@@ -238,7 +268,7 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
             response: input.response,
           },
         })
-      }, Effect.mapError(unavailable))
+      }, Effect.mapError(storeFailure))
 
       return HostedProduct.of({
         ready: sql`SELECT 1 FROM rika_hosted_projects LIMIT 1`.pipe(Effect.asVoid, Effect.mapError(unavailable)),

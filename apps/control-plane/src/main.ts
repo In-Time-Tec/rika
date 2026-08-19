@@ -1,6 +1,6 @@
 import { BunCrypto } from "@effect/platform-bun"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
-import { Console, Context, Effect, Layer } from "effect"
+import { Console, Context, Effect, Layer, Redacted } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import {
   closePostgresPool,
@@ -12,6 +12,9 @@ import {
   makeResendMailSender,
 } from "@rika/identity"
 import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
+import * as HostedExecution from "@rika/execution"
+import * as ExecutionPostgres from "@rika/execution/postgres"
+import * as RemoteCells from "@rika/execution/remote-cells"
 import { serveControlPlane } from "./adapters/bun-server"
 import { config as executorConfig, Executor, layer as executorLayer, service as executorService } from "./executor"
 import { HostedProduct, postgres as hostedProductPostgres } from "./hosted-product"
@@ -66,6 +69,39 @@ const program = Effect.scoped(
       ),
       Executor,
     )
+    const execution = Context.get(
+      yield* Layer.build(
+        HostedExecution.layerHosted({
+          kernel: { runtimeVersion: Bun.version, dataRoot: "/workspace" },
+          cells: HostedExecution.remoteCells({
+            cells: RemoteCells.layer({
+              execute: (request) =>
+                executor
+                  .run({ threadId: request.sessionId, operationKey: request.operationKey, code: request.code })
+                  .pipe(
+                    Effect.map((result) => result.response),
+                    Effect.mapError((error) => RemoteCells.Unavailable.make({ message: error.message })),
+                  ),
+            }),
+            maxRetries: 3,
+            retryDelayMillis: 250,
+          }),
+          postgres: {
+            url: Redacted.value(config.databaseUrl),
+            source: "rika-control-plane",
+            maxConnections: postgres.maxConnections,
+            worker: {
+              workerId: Bun.env.RAILWAY_DEPLOYMENT_ID ?? executorOptions.deploymentId,
+              concurrency: 8,
+              leaseMillis: 30_000,
+              pollIntervalMillis: 250,
+              cancellationIntervalMillis: 1_000,
+            },
+          },
+        }),
+      ),
+      ExecutionPostgres.Readiness,
+    )
     yield* serveControlPlane({
       config,
       dependencies: {
@@ -74,6 +110,7 @@ const program = Effect.scoped(
         devices: makePostgresCliDeviceDirectory(pool),
         product,
         executor,
+        execution,
         production: config.production,
       },
     })

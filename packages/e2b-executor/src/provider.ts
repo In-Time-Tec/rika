@@ -73,6 +73,7 @@ export interface Sdk {
     readonly sandboxId: string
     readonly body: string
     readonly apiKey: string
+    readonly url: string
   }) => Promise<void>
 }
 
@@ -89,8 +90,8 @@ const liveSdk: Sdk = {
   kill: (sandboxId, options) => Sandbox.kill(sandboxId, options),
   setTimeout: (sandboxId, timeoutMillis, options) => Sandbox.setTimeout(sandboxId, timeoutMillis, options),
   list: (options) => Sandbox.list(options),
-  bootstrap: ({ sandboxId, body, apiKey }) =>
-    Bun.fetch(`https://${sandboxId}.e2b.app/.rika/bootstrap`, {
+  bootstrap: ({ body, apiKey, url }) =>
+    Bun.fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json", "x-e2b-traffic-access-token": apiKey },
       body,
@@ -100,6 +101,10 @@ const liveSdk: Sdk = {
 }
 
 const managedMetadata = { "rika.managed": "e2b-executor" } as const
+const bootstrapUrl = (sandboxId: string, domain = "e2b.app") =>
+  `https://7070-${sandboxId}.${domain}/.rika/bootstrap`
+
+export const testing = { bootstrapUrl } as const
 
 const makeProvider = (options: Options, sdk: Sdk): Interface => {
   const apiKey = Redacted.value(options.apiKey)
@@ -145,7 +150,12 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
   const bootstrap = (request: BootstrapRequest) => {
     const credential = Redacted.value(request.credential)
     return attempt("bootstrap", () =>
-      sdk.bootstrap({ sandboxId: request.sandboxId, apiKey, body: JSON.stringify({ credential }) }),
+      sdk.bootstrap({
+        sandboxId: request.sandboxId,
+        apiKey,
+        body: JSON.stringify({ credential }),
+        url: bootstrapUrl(request.sandboxId, options.domain),
+      }),
     )
   }
 

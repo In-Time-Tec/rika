@@ -16,7 +16,7 @@ import {
   type Options,
   layer as controllerLayer,
 } from "../../src/controller"
-import { Provider, type CreateRequest, type InventoryEntry } from "../../src/provider"
+import { Provider, ProviderError, type CreateRequest, type InventoryEntry } from "../../src/provider"
 
 const digest = (_algorithm: string, data: Uint8Array) =>
   Effect.promise(() => globalThis.crypto.subtle.digest("SHA-256", data).then((value) => new Uint8Array(value)))
@@ -28,6 +28,8 @@ export interface FakeProviderState {
   readonly kills: Array<string>
   readonly touches: Array<{ readonly sandboxId: string; readonly timeoutMillis: number }>
   readonly bootstraps: Array<{ readonly sandboxId: string; readonly credential: Redacted.Redacted<string> }>
+  createFailure: boolean
+  pauseFailure: boolean
   inventory: Array<InventoryEntry>
 }
 
@@ -49,7 +51,9 @@ const providerLayer = (state: FakeProviderState) =>
     Provider.of({
       create: (request) => {
         state.creates.push(request)
-        return Effect.succeed({ sandboxId: `sandbox-${state.creates.length}`, state: "running" })
+        return state.createFailure
+          ? Effect.fail(ProviderError.make({ operation: "create", message: "create outcome unknown" }))
+          : Effect.succeed({ sandboxId: `sandbox-${state.creates.length}`, state: "running" })
       },
       bootstrap: (request) => {
         state.bootstraps.push(request)
@@ -61,7 +65,9 @@ const providerLayer = (state: FakeProviderState) =>
       },
       pauseFilesystem: (sandboxId) => {
         state.pauses.push(sandboxId)
-        return Effect.succeed(true)
+        return state.pauseFailure
+          ? Effect.fail(ProviderError.make({ operation: "pause", message: "pause outcome unknown" }))
+          : Effect.succeed(true)
       },
       kill: (sandboxId) => {
         state.kills.push(sandboxId)
@@ -94,6 +100,8 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     kills: [],
     touches: [],
     bootstraps: [],
+    createFailure: false,
+    pauseFailure: false,
     inventory: [],
   }
   const checkpointInspections: Array<string> = []

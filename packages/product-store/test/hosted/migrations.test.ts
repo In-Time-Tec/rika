@@ -1,0 +1,18 @@
+import { expect, it } from "@effect/vitest"
+import { Effect } from "effect"
+import { createHash } from "node:crypto"
+import { migrations } from "../../src/hosted/migrations"
+
+it.effect("keeps hosted PostgreSQL migration identities and checksums exact", () =>
+  Effect.gen(function* () {
+    expect(migrations.map(({ id }) => id)).toEqual([
+      "product/0001_hosted_authority",
+      "product/0002_hosted_identity_ancestry",
+      "product/0003_hosted_authority_fences",
+    ])
+    for (const migration of migrations) {
+      const sql = yield* Effect.promise(() => Bun.file(migration.url).arrayBuffer())
+      expect(migration.checksum).toBe(createHash("sha256").update(Buffer.from(sql)).digest("hex"))
+    }
+  }),
+)

@@ -70,6 +70,10 @@ const executor: Executor = {
   ready: Effect.void,
 }
 
+const execution = {
+  check: Effect.succeed({ backend: "postgres" as const, source: "test", workerId: "test-worker" }),
+}
+
 const dependencies = (
   options: {
     readonly userId?: string
@@ -85,6 +89,7 @@ const dependencies = (
   devices,
   product,
   executor,
+  execution,
   production: true,
 })
 
@@ -133,6 +138,7 @@ describe("control-plane HTTP", () => {
         devices,
         product: { ...product, ready: Effect.fail(HostedProductError.make({ message: "product readiness" })) },
         executor,
+        execution,
         production: true,
       }
       const result = yield* response("/healthz", unavailable)
@@ -437,6 +443,97 @@ describe("control-plane HTTP", () => {
       })
       expect(executed).toEqual({ threadId: "e2b_thread-1", operationKey, code: "echo hosted-mvp" })
       expect(completed).toMatchObject({ run: { operationKey }, access })
+    }),
+  )
+
+  it.effect("returns a previously persisted operation result without redispatching", () =>
+    Effect.gen(function* () {
+      const operationKey = "019d1a56-286d-7000-8000-000000000004"
+      const base = dependencies({ userId: "user-1", account })
+      let dispatched = false
+      let completed = false
+      const result = yield* response(
+        "/api/v1/threads/e2b_thread-1/operations",
+        {
+          ...base,
+          identity: {
+            ...base.identity,
+            identify: () => Effect.succeed({ userId: "user-1", clientId: "client-1" }),
+          },
+          devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
+          product: {
+            ...product,
+            admitRun: (input) =>
+              Effect.succeed({
+                operationKey,
+                commandSequence: "1" as never,
+                prompt: input.prompt,
+                previous: {
+                  _tag: "Success",
+                  result: { exitCode: 0, stdout: "hosted-mvp\n", stderr: "" },
+                },
+              }),
+            completeRun: () => {
+              completed = true
+              return Effect.die("must not persist a replay twice")
+            },
+          },
+          executor: {
+            ...executor,
+            run: () => {
+              dispatched = true
+              return Effect.die("must not redispatch")
+            },
+          },
+        },
+        {
+          method: "POST",
+          headers: { "idempotency-key": operationKey },
+          body: encodeJson({ kind: "run", organization_id: "organization-1", prompt: ["echo hosted-mvp"] }),
+        },
+      )
+      expect(result.status).toBe(200)
+      expect(yield* Effect.promise(() => result.json())).toEqual({ output: "hosted-mvp\n" })
+      expect(dispatched).toBe(false)
+      expect(completed).toBe(false)
+    }),
+  )
+
+  it.effect("reports an idempotency conflict without dispatching", () =>
+    Effect.gen(function* () {
+      const operationKey = "019d1a56-286d-7000-8000-000000000003"
+      const base = dependencies({ userId: "user-1", account })
+      let dispatched = false
+      const result = yield* response(
+        "/api/v1/threads/e2b_thread-1/operations",
+        {
+          ...base,
+          identity: {
+            ...base.identity,
+            identify: () => Effect.succeed({ userId: "user-1", clientId: "client-1" }),
+          },
+          devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
+          product: {
+            ...product,
+            admitRun: () =>
+              Effect.fail(HostedProductError.make({ kind: "conflict", message: "conflicting operation" })),
+          },
+          executor: {
+            ...executor,
+            run: () => {
+              dispatched = true
+              return Effect.die("must not dispatch")
+            },
+          },
+        },
+        {
+          method: "POST",
+          headers: { "idempotency-key": operationKey },
+          body: encodeJson({ kind: "run", organization_id: "organization-1", prompt: ["different"] }),
+        },
+      )
+      expect(result.status).toBe(409)
+      expect(dispatched).toBe(false)
     }),
   )
 

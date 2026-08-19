@@ -256,6 +256,8 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
   const create: AssignmentsService["create"] = Effect.fn(
     "PostgresAssignments.create",
   )(function* (input) {
+    if (String(input.id) !== String(input.threadId))
+      return yield* failure("invalid-authority", "Executor assignment identity must equal its thread identity")
     return yield* transaction(
       sql,
       Effect.gen(function* () {

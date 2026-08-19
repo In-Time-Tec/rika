@@ -129,19 +129,7 @@ export interface LayerOptions {
   readonly scheduler?: Runtime.LayerOptions["scheduler"]
 }
 
-interface ReleasedPostgresOptions extends Runtime.LayerOptions {
-  readonly url: string
-  readonly source: string
-  readonly maxConnections: number
-}
-
-type PostgresServices = Runtime.Runtime | RunStore.RunStore | RunClaims.RunClaims | ExecutionHost.ExecutionHost
-
-const runtimeLayer = upstreamLayer as unknown as (
-  options: ReleasedPostgresOptions,
-) => Layer.Layer<PostgresServices, RuntimeUnavailable>
-
-const runtimeUnavailable = (cause: Cause.Cause<RuntimeUnavailable>) =>
+const runtimeUnavailable = (cause: Cause.Cause<unknown>) =>
   RuntimeUnavailable.make({ message: String(Cause.squash(cause)) })
 
 export const layer = (
@@ -158,7 +146,7 @@ export const layer = (
   Layer.unwrap(
     validateOptions(options.postgres).pipe(
       Effect.map((postgres) => {
-        const postgresLayerOptions: ReleasedPostgresOptions = {
+        const postgresLayerOptions = {
           url: postgres.url,
           source: postgres.source,
           maxConnections: postgres.maxConnections,
@@ -169,7 +157,7 @@ export const layer = (
             : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
           ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
         }
-        const runtime = runtimeLayer(postgresLayerOptions).pipe(
+        const runtime = upstreamLayer(postgresLayerOptions).pipe(
           Layer.catchCause((cause) => Layer.effectContext(Effect.fail(runtimeUnavailable(cause)))),
         )
         const worker = workerLayer(postgres.worker).pipe(Layer.provideMerge(runtime))

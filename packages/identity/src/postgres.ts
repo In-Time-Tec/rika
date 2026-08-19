@@ -128,7 +128,12 @@ const clientQuery = (client: PoolClient, operation: string, text: string, values
     catch: postgresError(operation),
   })
 
-export const runMigration = (input: { readonly pool: Pool; readonly id: string; readonly sql: string }) =>
+export const runMigration = (input: {
+  readonly pool: Pool
+  readonly id: string
+  readonly checksum: string
+  readonly sql: string
+}) =>
   Effect.acquireUseRelease(
     Effect.tryPromise({ try: () => input.pool.connect(), catch: postgresError("connect for migration") }),
     (client) =>
@@ -136,28 +141,40 @@ export const runMigration = (input: { readonly pool: Pool; readonly id: string; 
         yield* clientQuery(client, "begin migration", "begin")
         yield* clientQuery(
           client,
+          "lock migrations",
+          "select pg_advisory_xact_lock(hashtext('rika-control-plane-migrations'))",
+        )
+        yield* clientQuery(
+          client,
           "create migration metadata",
           `create table if not exists control_plane_migration (
             id text primary key,
+            checksum text not null,
             applied_at timestamptz not null default now()
           )`,
         )
         yield* clientQuery(
           client,
-          "lock migrations",
-          "select pg_advisory_xact_lock(hashtext('rika-control-plane-migrations'))",
+          "add migration checksums",
+          "alter table control_plane_migration add column if not exists checksum text",
         )
         const applied = yield* clientQuery(
           client,
           "check migration",
-          "select id from control_plane_migration where id = $1",
+          "select checksum from control_plane_migration where id = $1",
           [input.id],
         )
+        if (applied.rowCount !== 0 && applied.rows[0]?.checksum !== input.checksum) {
+          return yield* PostgresAdapterError.make({ operation: `migration checksum mismatch: ${input.id}` })
+        }
         if (applied.rowCount === 0) {
           yield* clientQuery(client, `apply migration ${input.id}`, input.sql)
-          yield* clientQuery(client, "record migration", "insert into control_plane_migration (id) values ($1)", [
-            input.id,
-          ])
+          yield* clientQuery(
+            client,
+            "record migration",
+            "insert into control_plane_migration (id, checksum) values ($1, $2)",
+            [input.id, input.checksum],
+          )
         }
         yield* clientQuery(client, "commit migration", "commit")
         return applied.rowCount === 0

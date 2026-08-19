@@ -113,6 +113,7 @@ export interface Interface {
   readonly kill: (key: AssignmentKey) => Effect.Effect<Assignment, ControllerError>
   readonly hello: (hello: Hello) => Effect.Effect<Welcome, ControllerError>
   readonly reconnect: (access: ProtocolAccess) => Effect.Effect<ReconnectWelcome, ControllerError>
+  readonly validateAccess: (access: ProtocolAccess) => Effect.Effect<void, ControllerError>
   readonly heartbeat: (heartbeat: Heartbeat) => Effect.Effect<Receipt, ControllerError>
   readonly checkpoint: (
     access: ProtocolAccess,
@@ -322,11 +323,30 @@ export const layer = (
         return yield* createAndBootstrap(provisioning, credential)
       })
 
+      const resumeAssignment = Effect.fn("Controller.resumeAssignment")(function* (
+        assignment: ExecutorAssignment,
+      ) {
+        const credential = yield* issueSecret("executor-bootstrap")
+        const provisioning = yield* assignments
+          .resume({
+            ...version(assignment),
+            bootstrapCredentialDigest: yield* digest(credential),
+            bootstrapLifetimeMillis,
+          })
+          .pipe(Effect.mapError(assignmentFailure))
+        return yield* createAndBootstrap(provisioning, credential)
+      })
+
       const provision = Effect.fn("Controller.provision")(function* (assignmentId: string) {
         const assignment = yield* load(assignmentId)
         yield* e2bPlacement(assignment)
-        if (assignment.lifecycle._tag === "Active" || assignment.lifecycle._tag === "Paused")
+        if (assignment.lifecycle._tag === "Active") {
+          yield* provider
+            .connect(assignment.lifecycle.providerInstanceId, idleTimeoutMillis)
+            .pipe(Effect.mapError(providerFailure))
           return publicAssignment(assignment)
+        }
+        if (assignment.lifecycle._tag === "Paused") return yield* resumeAssignment(assignment)
         if (assignment.lifecycle._tag === "Terminated")
           return yield* failure("fenced", `Assignment ${assignmentId} is terminated`)
         return yield* beginProvisioning(assignment)
@@ -334,6 +354,8 @@ export const layer = (
 
       const replace = Effect.fn("Controller.replace")(function* (key: AssignmentKey) {
         const previous = yield* current(key)
+        if (previous.lifecycle._tag !== "Active")
+          return yield* failure("assignment-conflict", "Only an active assignment can be replaced")
         const retiringProviderId = providerInstanceId(previous)
         const identity = yield* issueSecret("executor-bootstrap")
         const replacing = yield* assignments
@@ -353,24 +375,20 @@ export const layer = (
         if (assignment.lifecycle._tag === "Active") return publicAssignment(assignment)
         if (assignment.lifecycle._tag !== "Paused")
           return yield* failure("assignment-conflict", "Assignment is not paused")
-        const credential = yield* issueSecret("executor-bootstrap")
-        const provisioning = yield* assignments
-          .resume({
-            ...version(assignment),
-            bootstrapCredentialDigest: yield* digest(credential),
-            bootstrapLifetimeMillis,
-          })
-          .pipe(Effect.mapError(assignmentFailure))
-        return yield* createAndBootstrap(provisioning, credential)
+        return yield* resumeAssignment(assignment)
       })
 
       const pause = Effect.fn("Controller.pause")(function* (key: AssignmentKey) {
         const assignment = yield* current(key)
-        if (assignment.lifecycle._tag === "Paused") return publicAssignment(assignment)
+        if (assignment.lifecycle._tag === "Paused") {
+          yield* provider.pauseFilesystem(assignment.lifecycle.providerInstanceId).pipe(Effect.mapError(providerFailure))
+          return publicAssignment(assignment)
+        }
         if (assignment.lifecycle._tag !== "Active")
           return yield* failure("assignment-conflict", "Only an active assignment can pause")
+        const paused = yield* assignments.pause(version(assignment)).pipe(Effect.mapError(assignmentFailure))
         yield* provider.pauseFilesystem(assignment.lifecycle.providerInstanceId).pipe(Effect.mapError(providerFailure))
-        return publicAssignment(yield* assignments.pause(version(assignment)).pipe(Effect.mapError(assignmentFailure)))
+        return publicAssignment(paused)
       })
 
       const kill = Effect.fn("Controller.kill")(function* (key: AssignmentKey) {
@@ -405,24 +423,45 @@ export const layer = (
         })
         const placement = yield* e2bPlacement(assignment)
         const lifecycle = assignment.lifecycle
+        const sessionToken = Redacted.make(Redacted.value(input.bootstrapToken), { label: "executor-session" })
+        let active: ExecutorAssignment
         if (
-          lifecycle._tag !== "AwaitingBootstrap" ||
-          lifecycle.providerInstanceId !== input.fence.instanceId ||
-          input.templateBuildId !== placement.templateBuildId
-        )
-          return yield* failure("authentication", "Executor sandbox does not match the active assignment")
-        const sessionToken = yield* issueSecret("executor-session")
-        const active = yield* assignments
-          .openSession({
-            ...version(assignment),
-            providerInstanceId: input.fence.instanceId,
-            executorInstanceId: ExecutorInstanceId.make(input.fence.executorId),
-            processIncarnation: input.fence.processIncarnation,
-            presentedBootstrapCredentialDigest: yield* digest(input.bootstrapToken),
-            sessionCredentialDigest: yield* digest(sessionToken),
-            leaseLifetimeMillis,
-          })
-          .pipe(Effect.mapError(assignmentFailure))
+          lifecycle._tag === "Active" &&
+          lifecycle.providerInstanceId === input.fence.instanceId &&
+          lifecycle.executorInstanceId === input.fence.executorId &&
+          lifecycle.processIncarnation === input.fence.processIncarnation &&
+          input.templateBuildId === placement.templateBuildId
+        ) {
+          active = yield* assignments
+            .authenticate({
+              assignmentId: assignment.id,
+              assignmentGeneration: assignment.generation,
+              providerInstanceId: lifecycle.providerInstanceId,
+              executorInstanceId: lifecycle.executorInstanceId,
+              processIncarnation: lifecycle.processIncarnation,
+              leaseEpoch: lifecycle.leaseEpoch,
+              presentedSessionCredentialDigest: yield* digest(sessionToken),
+            })
+            .pipe(Effect.mapError(assignmentFailure))
+        } else {
+          if (
+            lifecycle._tag !== "AwaitingBootstrap" ||
+            lifecycle.providerInstanceId !== input.fence.instanceId ||
+            input.templateBuildId !== placement.templateBuildId
+          )
+            return yield* failure("authentication", "Executor sandbox does not match the active assignment")
+          active = yield* assignments
+            .openSession({
+              ...version(assignment),
+              providerInstanceId: input.fence.instanceId,
+              executorInstanceId: ExecutorInstanceId.make(input.fence.executorId),
+              processIncarnation: input.fence.processIncarnation,
+              presentedBootstrapCredentialDigest: yield* digest(sessionToken),
+              sessionCredentialDigest: yield* digest(sessionToken),
+              leaseLifetimeMillis,
+            })
+            .pipe(Effect.mapError(assignmentFailure))
+        }
         if (active.lifecycle._tag !== "Active")
           return yield* failure("repository", "Executor session did not become active")
         return {
@@ -449,6 +488,10 @@ export const layer = (
           heartbeatIntervalMillis,
           cursor: { sequence: number(active.cursor.sequence), value: active.cursor.value },
         }
+      })
+
+      const validateAccess = Effect.fn("Controller.validateAccess")(function* (input: ProtocolAccess) {
+        yield* assignments.authenticate(yield* assignmentAccess(input)).pipe(Effect.mapError(assignmentFailure))
       })
 
       const heartbeat = Effect.fn("Controller.heartbeat")(function* (input: Heartbeat) {
@@ -558,6 +601,7 @@ export const layer = (
         kill,
         hello,
         reconnect,
+        validateAccess,
         heartbeat,
         checkpoint,
         checkout,

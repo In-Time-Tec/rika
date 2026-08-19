@@ -9,6 +9,7 @@ import type {
 } from "@rika/identity"
 import type { HostedProductService } from "./hosted-product"
 import type { Runtime as Executor } from "./executor"
+import type { ReadinessInterface as ExecutionReadiness } from "@rika/execution/postgres"
 import {
   accountPage,
   consentPage,
@@ -31,6 +32,7 @@ export interface HttpDependencies {
   readonly devices: CliDeviceDirectory
   readonly product: HostedProductService
   readonly executor: Executor
+  readonly execution: ExecutionReadiness
   readonly production: boolean
 }
 

@@ -20,7 +20,7 @@ const program = Effect.scoped(
     yield* Effect.forEach([...identityMigrations, ...productMigrations], (migration) =>
       Effect.gen(function* () {
         const sql = yield* fileSystem.readFileString(migration.url.pathname)
-        const applied = yield* runMigration({ pool, id: migration.id, sql })
+        const applied = yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
         yield* Console.log(applied ? `Applied ${migration.id}` : `${migration.id} is already applied`)
       }),
     )
@@ -28,6 +28,7 @@ const program = Effect.scoped(
       url: Redacted.value(config.databaseUrl),
       source: "rika-control-plane",
     })
+    yield* Console.log("TenetKit PostgreSQL schema is compatible")
   }),
 )
 

@@ -18,6 +18,8 @@ export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", Mess
 
 export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", Message, { httpApiStatus: 404 }) {}
 
+export class Conflict extends Schema.TaggedError<Conflict>()("Conflict", Message, { httpApiStatus: 409 }) {}
+
 export class Unprocessable extends Schema.TaggedError<Unprocessable>()("Unprocessable", Message, {
   httpApiStatus: 422,
 }) {}
@@ -92,7 +94,7 @@ class ProductGroup extends HttpApiGroup.make("product", { topLevel: true })
       headers: { "idempotency-key": OperationKey },
       payload: OperationRequest,
       success: OperationResponse,
-      error: [Forbidden, NotFound, Unprocessable, ServiceUnavailable],
+      error: [Forbidden, NotFound, Conflict, Unprocessable, ServiceUnavailable],
     }),
   )
   .middleware(Authorization) {}
@@ -122,7 +124,12 @@ const publicHandlers = (dependencies: HttpDependencies) =>
     handlers.handleAll({
       health: () => Effect.succeed({ status: "ok" }),
       ready: () =>
-        Effect.all([dependencies.directory.ready, dependencies.product.ready, dependencies.executor.ready]).pipe(
+        Effect.all([
+          dependencies.directory.ready,
+          dependencies.product.ready,
+          dependencies.executor.ready,
+          dependencies.execution.check,
+        ]).pipe(
           Effect.as({ status: "ready" }),
           Effect.mapError(() => ServiceUnavailable.make({ message: "Control plane is unavailable" })),
         ),
@@ -201,16 +208,28 @@ const productHandlers = (dependencies: HttpDependencies) =>
               operationKey: headers["idempotency-key"],
               prompt: payload.prompt.join("\n"),
             })
-            .pipe(Effect.mapError(() => Forbidden.make({ message: "Operation was not admitted" })))
-          const result = yield* dependencies.executor
-            .run({ threadId: params.threadId, operationKey: run.operationKey, code: run.prompt })
-            .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Executor is unavailable" })))
-          yield* dependencies.product
-            .completeRun({ run, access: result.access, response: result.response })
             .pipe(
-              Effect.mapError(() => ServiceUnavailable.make({ message: "Operation result could not be persisted" })),
+              Effect.mapError((error) => {
+                if (error.kind === "conflict") return Conflict.make({ message: "Operation identity conflicts" })
+                if (error.kind === "not-found") return NotFound.make({ message: "Thread is unavailable" })
+                if (error.kind === "forbidden") return Forbidden.make({ message: "Operation was not admitted" })
+                return ServiceUnavailable.make({ message: "Product service unavailable" })
+              }),
             )
-          const response = result.response
+          let response = run.previous
+          if (response === undefined) {
+            const result = yield* dependencies.executor
+              .run({ threadId: params.threadId, operationKey: run.operationKey, code: run.prompt })
+              .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Executor is unavailable" })))
+            yield* dependencies.product
+              .completeRun({ run, access: result.access, response: result.response })
+              .pipe(
+                Effect.mapError(() =>
+                  ServiceUnavailable.make({ message: "Operation result could not be persisted" }),
+                ),
+              )
+            response = result.response
+          }
           if (response._tag === "Suspend")
             return yield* ServiceUnavailable.make({ message: "Executor operation suspended" })
           if (response._tag === "DomainFailure")

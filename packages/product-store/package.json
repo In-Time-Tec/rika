@@ -13,6 +13,7 @@
     "./migrations": "./src/hosted/migrations.ts",
     "./migrations/postgres/0001-hosted-authority.sql": "./migrations/postgres/0001-hosted-authority.sql",
     "./migrations/postgres/0002-hosted-identity-ancestry.sql": "./migrations/postgres/0002-hosted-identity-ancestry.sql",
+    "./migrations/postgres/0003-hosted-authority-fences.sql": "./migrations/postgres/0003-hosted-authority-fences.sql",
     "./product-database-layer": "./src/database/product-database-layer.ts",
     "./sqlite-goal-repository": "./src/goal/sqlite-goal-repository.ts",
     "./sqlite-thread-search-repository": "./src/search/sqlite-thread-search-repository.ts",
@@ -36,7 +37,9 @@
     "@rika/coding-tools": "workspace:*",
     "@rika/extensions": "workspace:*",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@types/pg": "8.15.5",
+    "pg": "8.21.0"
   },
   "rika": {
     "kind": "adapter",

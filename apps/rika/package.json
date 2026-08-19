@@ -31,7 +31,11 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "@rika/identity": "workspace:*",
+    "@rika/remote-execution": "workspace:*",
     "@types/bun": "catalog:",
+    "@types/pg": "8.15.5",
+    "pg": "8.21.0",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
