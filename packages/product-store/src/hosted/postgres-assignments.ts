@@ -270,7 +270,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
           (id, organization_id, thread_id, executor_kind, placement, checkout, generation, revision,
             last_lease_epoch, lifecycle)
           VALUES (${input.id}, ${input.organizationId}, ${input.threadId}, ${kind}, ${sql.json(input.placement)},
-            ${sql.json(input.checkout)}, 1, 0, 0, 'pending')
+            ${input.checkout === null ? null : sql.json(input.checkout)}, 1, 0, 0, 'pending')
           ON CONFLICT DO NOTHING RETURNING id`)
         if (rows[0] === undefined) return yield* failure("conflict", "Thread already has an executor assignment")
         return yield* decodeAssignment(yield* locked(input.id, "UPDATE"))

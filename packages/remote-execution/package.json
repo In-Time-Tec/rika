@@ -8,6 +8,7 @@
     "./host": "./src/host.ts",
     "./runtime": "./src/runtime.ts",
     "./operations": "./src/operations.ts",
+    "./cells": "./src/cells.ts",
     "./protocol": "./src/protocol.ts",
     "./pty": "./src/pty.ts"
   },

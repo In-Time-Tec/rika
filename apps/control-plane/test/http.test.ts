@@ -12,6 +12,8 @@ import {
 } from "@rika/identity"
 import { handleRequest, type HttpDependencies } from "../src/http"
 import { HostedProductError, type HostedProductService } from "../src/hosted-product"
+import type { Runtime as Executor } from "../src/executor"
+import { isControlPlaneApiPath, makeControlPlaneApiHandler } from "../src/api"
 
 const account: Account = {
   user: {
@@ -57,6 +59,15 @@ const product: HostedProductService = {
   ready: Effect.void,
   projects: () => Effect.succeed([]),
   createConnection: () => Effect.succeed({ threadId: "thread-1" }),
+  admitRun: () => Effect.die("unused"),
+  completeRun: () => Effect.die("unused"),
+}
+
+const executor: Executor = {
+  controller: undefined as never,
+  gateway: undefined as never,
+  run: () => Effect.die("unused"),
+  ready: Effect.void,
 }
 
 const dependencies = (
@@ -73,13 +84,21 @@ const dependencies = (
   },
   devices,
   product,
+  executor,
   production: true,
 })
 
 const request = (path: string, options?: RequestInit) => new Request(`https://control.example.com${path}`, options)
 
-const response = (path: string, deps = dependencies(), options?: RequestInit) =>
-  handleRequest({ request: request(path, options), dependencies: deps })
+const response = (path: string, deps = dependencies(), options?: RequestInit) => {
+  const input = request(path, options)
+  if (!isControlPlaneApiPath(new URL(input.url).pathname)) return handleRequest({ request: input, dependencies: deps })
+  return Effect.acquireUseRelease(
+    Effect.sync(() => makeControlPlaneApiHandler(deps)),
+    (api) => Effect.promise(() => api.handler(input)),
+    (api) => Effect.promise(api.dispose),
+  )
+}
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
@@ -113,6 +132,7 @@ describe("control-plane HTTP", () => {
         },
         devices,
         product: { ...product, ready: Effect.fail(HostedProductError.make({ message: "product readiness" })) },
+        executor,
         production: true,
       }
       const result = yield* response("/healthz", unavailable)
@@ -343,6 +363,80 @@ describe("control-plane HTTP", () => {
         projectId: "project-1",
         placement: "e2b",
       })
+    }),
+  )
+
+  it.effect("admits, executes, and persists one hosted operation", () =>
+    Effect.gen(function* () {
+      const operationKey = "019d1a56-286d-7000-8000-000000000002"
+      const principal: IdentityPrincipal = { userId: "user-1", clientId: "client-1", dpopJkt: "thumbprint-1" }
+      const base = dependencies({ userId: "user-1", account })
+      let admitted: Parameters<HostedProductService["admitRun"]>[0] | undefined
+      let executed: Parameters<Executor["run"]>[0] | undefined
+      let completed: Parameters<HostedProductService["completeRun"]>[0] | undefined
+      const access = {
+        version: 1 as const,
+        fence: {
+          target: "e2b" as const,
+          assignmentId: "e2b_thread-1",
+          assignmentGeneration: 1,
+          instanceId: "sandbox-1",
+          executorId: "executor-1",
+          processIncarnation: "process-1",
+        },
+        leaseEpoch: 1,
+        sessionToken: "session-token",
+      }
+      const result = yield* response(
+        "/api/v1/threads/e2b_thread-1/operations",
+        {
+          ...base,
+          identity: { ...base.identity, identify: () => Effect.succeed(principal) },
+          devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
+          product: {
+            ...product,
+            admitRun: (input) => {
+              admitted = input
+              return Effect.succeed({ operationKey, commandSequence: "1" as never, prompt: input.prompt })
+            },
+            completeRun: (input) => {
+              completed = input
+              return Effect.void
+            },
+          },
+          executor: {
+            ...executor,
+            run: (input) => {
+              executed = input
+              return Effect.succeed({
+                access,
+                response: { _tag: "Success", result: { exitCode: 0, stdout: "hosted-mvp\n", stderr: "" } },
+              })
+            },
+          },
+        },
+        {
+          method: "POST",
+          headers: { "idempotency-key": operationKey },
+          body: encodeJson({ kind: "run", organization_id: "organization-1", prompt: ["echo hosted-mvp"] }),
+        },
+      )
+      expect(result.status).toBe(200)
+      expect(yield* Effect.promise(() => result.json())).toEqual({ output: "hosted-mvp\n" })
+      expect(admitted).toEqual({
+        authority: {
+          organizationId: "organization-1",
+          memberId: "member-1",
+          deviceId: "device-1",
+          clientId: "client-1",
+          dpopJkt: "thumbprint-1",
+        },
+        threadId: "e2b_thread-1",
+        operationKey,
+        prompt: "echo hosted-mvp",
+      })
+      expect(executed).toEqual({ threadId: "e2b_thread-1", operationKey, code: "echo hosted-mvp" })
+      expect(completed).toMatchObject({ run: { operationKey }, access })
     }),
   )
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { ExecutorAssignments } from "@rika/product/executor-assignments"
 import type { Access } from "@rika/remote-execution/protocol"
 import { Effect, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
@@ -74,6 +75,7 @@ describe("Controller", () => {
         environment: {
           RIKA_EXECUTOR_TARGET: "e2b",
           RIKA_EXECUTOR_ID: "assignment-1:g1",
+          RIKA_EXECUTOR_WORKSPACE: "/workspace",
         },
       })
       expect(Object.keys(harness.provider.creates[0]!.environment).sort()).toEqual([
@@ -84,6 +86,7 @@ describe("Controller", () => {
         "RIKA_EXECUTOR_ID",
         "RIKA_EXECUTOR_TARGET",
         "RIKA_EXECUTOR_TEMPLATE_BUILD_ID",
+        "RIKA_EXECUTOR_WORKSPACE",
       ])
       const bootstrap = harness.provider.bootstraps[0]!.credential
       expect(String(bootstrap)).toBe("<redacted:executor-bootstrap>")
@@ -101,7 +104,11 @@ describe("Controller", () => {
       const first = yield* authenticate(harness, 1)
       expect((yield* service.pause({ assignmentId: "assignment-1", generation: 1 })).state).toBe("paused")
       expect((yield* service.resume({ assignmentId: "assignment-1", generation: 1 })).state).toBe("provisioning")
-      expect((yield* Effect.flip(service.heartbeat({ version: 1, access: first.access, cursor: { sequence: 1, value: "stale" } }))).kind).toBe("fenced")
+      expect(
+        (yield* Effect.flip(
+          service.heartbeat({ version: 1, access: first.access, cursor: { sequence: 1, value: "stale" } }),
+        )).kind,
+      ).toBe("fenced")
       const { access } = yield* authenticate(harness, 1)
       const receipt = yield* service.heartbeat({
         version: 1,
@@ -144,14 +151,12 @@ describe("Controller", () => {
         cursors: { command: 0, event: 0, pty: 0 },
         latestCheckpointId: null,
       }
-      expect(
-        (yield* Effect.flip(service.hello({ ...hello, bootstrapToken: Redacted.make("wrong") }))).kind,
-      ).toBe("authentication")
-      const { welcome, access } = yield* authenticate(harness, 1)
-      expect(String(welcome.sessionToken)).toBe("<redacted:executor-session>")
-      expect((yield* Effect.flip(service.hello({ ...hello, bootstrapToken: bootstrap }))).kind).toBe(
+      expect((yield* Effect.flip(service.hello({ ...hello, bootstrapToken: Redacted.make("wrong") }))).kind).toBe(
         "authentication",
       )
+      const { welcome, access } = yield* authenticate(harness, 1)
+      expect(String(welcome.sessionToken)).toBe("<redacted:executor-session>")
+      expect((yield* Effect.flip(service.hello({ ...hello, bootstrapToken: bootstrap }))).kind).toBe("authentication")
       expect((yield* Effect.flip(service.reconnect({ ...access, sessionToken: Redacted.make("wrong") }))).kind).toBe(
         "authentication",
       )
@@ -228,6 +233,23 @@ describe("Controller", () => {
       })
       expect(String(credential.token)).toBe("<redacted:github-installation-token>")
       expect(json(credential)).not.toContain("ghs_actual_secret")
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("reports checkout as unavailable when the assignment has no repository", () => {
+    const harness = makeHarness()
+    return Effect.gen(function* () {
+      const service = yield* controller
+      const assignments = yield* ExecutorAssignments
+      yield* assignments.create({ ...assignmentInput, checkout: null })
+      yield* service.provision(assignmentInput.id)
+      const { access } = yield* authenticate(harness, 1)
+
+      expect(yield* Effect.flip(service.checkout(access))).toMatchObject({
+        kind: "checkout",
+        message: "Repository checkout is unavailable for this assignment",
+      })
+      expect(harness.checkoutRequests).toEqual([])
     }).pipe(provideLayer(harness.layer))
   })
 

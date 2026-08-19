@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { FilesystemCheckpoint, HostMessage } from "../src/protocol"
+import { CellRequest, ControllerMessage, FilesystemCheckpoint, HostMessage } from "../src/protocol"
 
 const fence = {
   target: "e2b" as const,
@@ -66,6 +66,26 @@ describe("executor protocol v1", () => {
         (yield* Effect.flip(
           Schema.decodeUnknownEffect(FilesystemCheckpoint)({ ...checkpoint, contentDigest: "sha256:not-a-digest" }),
         )).issue,
+      ).toBeDefined()
+    }),
+  )
+
+  it.effect("accepts a schema-validated operation-keyed cell request", () =>
+    Effect.gen(function* () {
+      const request = CellRequest.make({
+        access: { version: 1, fence, leaseEpoch: 1, sessionToken: "session" },
+        operationKey: "run:1:cell:1",
+        workspace: "/workspace",
+        sessionId: "session-1",
+        toolCallId: "call-1",
+        code: "console.log('hello')",
+      })
+      expect(yield* Schema.decodeUnknownEffect(ControllerMessage)({ _tag: "CellExecute", request })).toEqual({
+        _tag: "CellExecute",
+        request,
+      })
+      expect(
+        (yield* Effect.flip(Schema.decodeUnknownEffect(CellRequest)({ ...request, operationKey: "" }))).issue,
       ).toBeDefined()
     }),
   )

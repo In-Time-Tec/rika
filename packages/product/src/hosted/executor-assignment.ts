@@ -97,7 +97,7 @@ export const ExecutorAssignment = Schema.Struct({
   threadId: ThreadId,
   executorKind: ExecutorKind,
   placement: ExecutorPlacement,
-  checkout: RepositoryCheckout,
+  checkout: Schema.NullOr(RepositoryCheckout),
   generation: FencingGeneration,
   revision: AssignmentRevision,
   lastLeaseEpoch: Sequence,

@@ -23,14 +23,6 @@ const ids = {
   organization: OrganizationId.make("organization"),
 }
 
-const checkout = {
-  repositoryId: "repository",
-  installationId: "installation",
-  owner: "rika",
-  name: "rika",
-  commitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-}
-
 const version = (assignment: ExecutorAssignment): Version => ({
   assignmentId: assignment.id,
   generation: assignment.generation,
@@ -45,7 +37,7 @@ const open = (suffix: string) =>
       organizationId: ids.organization,
       threadId: ThreadId.make(`thread-${suffix}`),
       placement: { _tag: "E2BPlacement", templateBuildId: "template", providerScope: "scope" },
-      checkout,
+      checkout: null,
     })
     const provisioning = yield* assignments.beginProvisioning({
       ...version(created),
@@ -170,6 +162,15 @@ it.layer(layer)("executor assignments", (test) => {
         _tag: "Failure",
         failure: { reason: "stale-fence" },
       })
+    }),
+  )
+
+  test.effect("preserves an explicit absent repository checkout", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-01-01T00:00:00.000Z"))
+      const { active } = yield* open("no-checkout")
+
+      expect(active.checkout).toBeNull()
     }),
   )
 })

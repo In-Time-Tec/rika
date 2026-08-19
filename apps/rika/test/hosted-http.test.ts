@@ -62,6 +62,8 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
           return Effect.succeed(
             response(request, { threadId: "thread-1", url: "https://hosted.example.test/threads/thread-1" }),
           )
+        if (path === "/api/v1/threads/e2b_thread-1/operations")
+          return Effect.succeed(response(request, { output: "done" }))
         return Effect.succeed(response(request, {}))
       })
       const context = yield* Layer.build(
@@ -74,6 +76,7 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
       const jkt = yield* thumbprint(publicKey)
       const accessToken = Redacted.make("access")
       const session = { accessToken, privateJwk }
+      const threadId = "e2b_thread-1"
       expect((yield* http.register(origin, "device-1", publicKey, jkt)).clientId).toBe("install-client")
       expect((yield* http.startDeviceAuthorization(origin, "install-client", privateJwk)).deviceCode).toBe(
         "device-code",
@@ -91,6 +94,10 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
       expect((yield* http.invite(origin, "org-1", "new@example.test", session)).id).toBe("invite-1")
       yield* http.revokeDevice(origin, "device-1", session)
       expect((yield* http.createRemoteConnection(origin, "org-1", "project-1", session)).threadId).toBe("thread-1")
+      expect(
+        (yield* http.runThread(origin, "org-1", threadId, { prompt: ["hello"], mode: "low" }, "operation-1", session))
+          .output,
+      ).toBe("done")
       expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
         "/api/v1/auth/cli/registrations",
         "/api/auth/device/code",
@@ -101,11 +108,14 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
         "/api/v1/organizations/org-1/invitations",
         "/api/v1/auth/cli/devices/device-1/revoke",
         "/api/v1/connections",
+        "/api/v1/threads/e2b_thread-1/operations",
       ])
       for (const request of requests.slice(1)) expect(request.headers.dpop).toEqual(expect.any(String))
       expect(requests[4]?.headers.authorization).toBe("DPoP access")
       expect(bodyText(requests[0]!)).toContain('"reference_id":"cli-device:device-1"')
       expect(bodyText(requests[8]!)).toContain('"placement":"e2b"')
+      expect(requests[9]?.headers["idempotency-key"]).toBe("operation-1")
+      expect(bodyText(requests[9]!)).toBe('{"kind":"run","organization_id":"org-1","prompt":["hello"],"mode":"low"}')
     }),
   ),
 )

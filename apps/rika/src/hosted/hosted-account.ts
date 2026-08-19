@@ -13,6 +13,7 @@ import {
   type Session,
   type TokenSet,
 } from "./hosted-contract"
+import type { RunRequest } from "./hosted-contract"
 import * as Dpop from "./hosted-dpop"
 
 const failure = (kind: HostedError["kind"], message: string) => HostedError.make({ kind, message })
@@ -309,4 +310,18 @@ export const createRemoteThread = Effect.fn("HostedAccount.createRemoteThread")(
   yield* Console.log(
     `Created remote E2B thread ${connection.threadId}${connection.url === undefined ? "" : `\n${connection.url}`}`,
   )
+})
+
+export const runThread = Effect.fn("HostedAccount.runThread")(function* (threadId: string, request: RunRequest) {
+  const profile = yield* selectedProfile()
+  if (profile.organization === undefined) return yield* failure("invalid-input", "Run rika org use first")
+  const crypto = yield* Crypto.Crypto
+  const http = yield* Http
+  const key = yield* crypto.randomUUIDv4.pipe(
+    Effect.mapError(() => failure("host", "Could not create a hosted operation identifier")),
+  )
+  const result = yield* authenticated(profile, (session) =>
+    http.runThread(profile.origin, profile.organization!, threadId, request, key, session),
+  )
+  yield* Console.log(result.output)
 })

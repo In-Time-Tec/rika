@@ -141,13 +141,15 @@ CREATE TABLE rika_hosted_executor_assignments (
     jsonb_typeof(placement) = 'object'
     AND placement ->> '_tag' IN ('LocalDevicePlacement', 'E2BPlacement')
   ),
-  checkout JSONB NOT NULL CHECK (
-    jsonb_typeof(checkout) = 'object'
-    AND length(checkout ->> 'repositoryId') > 0
-    AND length(checkout ->> 'installationId') > 0
-    AND length(checkout ->> 'owner') > 0
-    AND length(checkout ->> 'name') > 0
-    AND checkout ->> 'commitSha' ~* '^[a-f0-9]{40}$'
+  checkout JSONB CHECK (
+    checkout IS NULL OR (
+      jsonb_typeof(checkout) = 'object'
+      AND length(checkout ->> 'repositoryId') > 0
+      AND length(checkout ->> 'installationId') > 0
+      AND length(checkout ->> 'owner') > 0
+      AND length(checkout ->> 'name') > 0
+      AND checkout ->> 'commitSha' ~* '^[a-f0-9]{40}$'
+    )
   ),
   generation BIGINT NOT NULL CHECK (generation >= 1),
   revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),

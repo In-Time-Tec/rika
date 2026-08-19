@@ -9,6 +9,7 @@ import {
   Invitation,
   Registration,
   RemoteConnection,
+  RunResult,
   scopes,
   type DevicePoll,
   type PrivateJwk,
@@ -306,6 +307,20 @@ export const layer = Layer.effect(
           session,
           RemoteConnection,
           "Remote connection creation",
+        )
+      },
+      runThread: (origin, organization, threadId, request, idempotencyKey, session) => {
+        const url = `${origin}/api/v1/threads/${encodeURIComponent(threadId)}/operations`
+        return authenticatedJson(
+          "POST",
+          url,
+          HttpClientRequest.post(url).pipe(
+            HttpClientRequest.setHeader("idempotency-key", idempotencyKey),
+            HttpClientRequest.bodyJsonUnsafe({ kind: "run", organization_id: organization, ...request }),
+          ),
+          session,
+          RunResult,
+          "Hosted thread operation",
         )
       },
     })

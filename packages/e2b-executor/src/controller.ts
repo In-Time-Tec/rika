@@ -1,12 +1,5 @@
-import {
-  type ExecutorAssignment,
-  type E2BPlacement,
-} from "@rika/product/executor-assignment"
-import {
-  AssignmentError,
-  ExecutorAssignments,
-  type Access,
-} from "@rika/product/executor-assignments"
+import { type ExecutorAssignment, type E2BPlacement } from "@rika/product/executor-assignment"
+import { AssignmentError, ExecutorAssignments, type Access } from "@rika/product/executor-assignments"
 import {
   AssignmentLeaseEpoch,
   CheckpointId,
@@ -193,15 +186,7 @@ const version = (assignment: ExecutorAssignment) => ({
 
 export const layer = (
   options: Options,
-): Layer.Layer<
-  Controller,
-  ControllerError,
-  | Inspector
-  | Credentials
-  | Crypto.Crypto
-  | Provider
-  | ExecutorAssignments
-> =>
+): Layer.Layer<Controller, ControllerError, Inspector | Credentials | Crypto.Crypto | Provider | ExecutorAssignments> =>
   Layer.effect(
     Controller,
     Effect.gen(function* () {
@@ -253,9 +238,7 @@ export const layer = (
         return assignment
       })
 
-      const createRequest = Effect.fn("Controller.createRequest")(function* (
-        assignment: ExecutorAssignment,
-      ) {
+      const createRequest = Effect.fn("Controller.createRequest")(function* (assignment: ExecutorAssignment) {
         const placement = yield* e2bPlacement(assignment)
         const request: CreateRequest = {
           appId: options.appId,
@@ -273,6 +256,7 @@ export const layer = (
             RIKA_EXECUTOR_ID: `${assignment.id}:g${assignment.generation}`,
             RIKA_EXECUTOR_TEMPLATE_BUILD_ID: placement.templateBuildId,
             RIKA_EXECUTOR_CONTROLLER_URL: options.controllerUrl,
+            RIKA_EXECUTOR_WORKSPACE: "/workspace",
             RIKA_CHECKPOINT_OBJECT_PREFIX: `assignments/${assignment.id}/g${assignment.generation}/`,
           },
         }
@@ -285,9 +269,7 @@ export const layer = (
         metadata["rika.assignment-id"] === assignment.id &&
         metadata["rika.generation"] === assignment.generation
 
-      const reconcileCreate = Effect.fn("Controller.reconcileCreate")(function* (
-        assignment: ExecutorAssignment,
-      ) {
+      const reconcileCreate = Effect.fn("Controller.reconcileCreate")(function* (assignment: ExecutorAssignment) {
         const inventory = yield* provider.inventory.pipe(Effect.mapError(providerFailure))
         const matches = inventory.filter((entry) => matchesGeneration(assignment, entry.metadata))
         if (matches.length === 0) return yield* failure("provider", "create outcome is unknown and no sandbox exists")
@@ -324,15 +306,11 @@ export const layer = (
               existingProviderId === null ? provider.kill(sandbox.sandboxId).pipe(Effect.ignore) : Effect.void,
             ),
           )
-        yield* provider
-          .bootstrap({ sandboxId: sandbox.sandboxId, credential })
-          .pipe(Effect.mapError(providerFailure))
+        yield* provider.bootstrap({ sandboxId: sandbox.sandboxId, credential }).pipe(Effect.mapError(providerFailure))
         return publicAssignment(bound)
       })
 
-      const beginProvisioning = Effect.fn("Controller.beginProvisioning")(function* (
-        assignment: ExecutorAssignment,
-      ) {
+      const beginProvisioning = Effect.fn("Controller.beginProvisioning")(function* (assignment: ExecutorAssignment) {
         const credential = yield* issueSecret("executor-bootstrap")
         const provisioning = yield* assignments
           .beginProvisioning({
@@ -392,9 +370,7 @@ export const layer = (
         if (assignment.lifecycle._tag !== "Active")
           return yield* failure("assignment-conflict", "Only an active assignment can pause")
         yield* provider.pauseFilesystem(assignment.lifecycle.providerInstanceId).pipe(Effect.mapError(providerFailure))
-        return publicAssignment(
-          yield* assignments.pause(version(assignment)).pipe(Effect.mapError(assignmentFailure)),
-        )
+        return publicAssignment(yield* assignments.pause(version(assignment)).pipe(Effect.mapError(assignmentFailure)))
       })
 
       const kill = Effect.fn("Controller.kill")(function* (key: AssignmentKey) {
@@ -488,7 +464,9 @@ export const layer = (
             ),
           )
         if (active.lifecycle._tag !== "Active") return yield* failure("repository", "Executor session is not active")
-        yield* provider.touch(active.lifecycle.providerInstanceId, idleTimeoutMillis).pipe(Effect.mapError(providerFailure))
+        yield* provider
+          .touch(active.lifecycle.providerInstanceId, idleTimeoutMillis)
+          .pipe(Effect.mapError(providerFailure))
         return {
           version: 1 as const,
           fence: input.access.fence,
@@ -507,7 +485,10 @@ export const layer = (
         const expectedPrefix = `assignments/${assignment.id}/g${assignment.generation}/`
         if (!staged.objectKey.startsWith(expectedPrefix))
           return yield* failure("checkpoint", "Checkpoint object is outside the assignment prefix")
-        if (staged.cursor.sequence !== number(assignment.cursor.sequence) || staged.cursor.value !== assignment.cursor.value)
+        if (
+          staged.cursor.sequence !== number(assignment.cursor.sequence) ||
+          staged.cursor.value !== assignment.cursor.value
+        )
           return yield* failure("checkpoint", "Checkpoint cursor is not the acknowledged executor cursor")
         const inspected = yield* checkpointInspector
           .inspect(staged.objectKey)
@@ -539,6 +520,8 @@ export const layer = (
         const assignment = yield* assignments
           .authenticate(yield* assignmentAccess(input))
           .pipe(Effect.mapError(assignmentFailure))
+        if (assignment.checkout === null)
+          return yield* failure("checkout", "Repository checkout is unavailable for this assignment")
         return yield* checkoutBroker
           .issue(assignment.checkout)
           .pipe(Effect.mapError((cause) => failure("checkout", cause.message)))

@@ -28,6 +28,7 @@ const operation = (input: Input) => {
     if (input.action === "use") return HostedAccount.useOrganization(input.organization)
     return HostedAccount.invite(input.email)
   }
+  if (input._tag === "RemoteRun") return HostedAccount.runThread(input.threadId, input.request)
   return HostedAccount.createRemoteThread()
 }
 

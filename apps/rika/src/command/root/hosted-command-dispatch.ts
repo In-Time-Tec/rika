@@ -1,5 +1,6 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Context, Effect } from "effect"
+import type { RunRequest } from "../../hosted/hosted-contract"
 
 export type Input =
   | {
@@ -16,6 +17,7 @@ export type Input =
   | { readonly _tag: "Organization"; readonly action: "use"; readonly organization: string }
   | { readonly _tag: "Organization"; readonly action: "invite"; readonly email: string }
   | { readonly _tag: "RemoteThread"; readonly action: "new" }
+  | { readonly _tag: "RemoteRun"; readonly threadId: string; readonly request: RunRequest }
 
 export interface Interface {
   readonly run: (

@@ -8,7 +8,7 @@ import { expect, it } from "@effect/vitest"
 import { run } from "../src/command/root/rika-command"
 import * as HostedCommand from "../src/command/root/hosted-command-dispatch"
 
-it.effect("routes human auth, provider credentials, and explicit remote threads", () =>
+it.effect("routes hosted execution without calling the local server operation", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const productCalls = yield* Ref.make<ReadonlyArray<ProductInput>>([])
@@ -41,6 +41,7 @@ it.effect("routes human auth, provider credentials, and explicit remote threads"
       yield* invoke(["org", "invite", "dev@example.test"])
       yield* invoke(["thread", "new"])
       yield* invoke(["thread", "new", "--remote"])
+      yield* invoke(["--execute", "hello", "--thread", "e2b_thread-1", "--mode", "low"])
       yield* invoke(["credential", "set", "openai"])
       yield* invoke(["credential", "list", "openrouter"])
       yield* invoke(["credential", "rotate", "openai", "--device-code"])
@@ -52,6 +53,9 @@ it.effect("routes human auth, provider credentials, and explicit remote threads"
         { _tag: "Auth", action: "login", provider: "openai", deviceCode: true },
         { _tag: "Auth", action: "logout", provider: "openrouter" },
       ])
+      expect(yield* Ref.get(productCalls)).not.toContainEqual(
+        expect.objectContaining({ _tag: "Run", threadId: "e2b_thread-1" }),
+      )
       expect(yield* Ref.get(hostedCalls)).toEqual([
         { _tag: "Auth", action: "login", noOpen: false },
         { _tag: "Auth", action: "login", server: "https://hosted.example.test/base", noOpen: true },
@@ -64,6 +68,7 @@ it.effect("routes human auth, provider credentials, and explicit remote threads"
         { _tag: "Organization", action: "use", organization: "engineering" },
         { _tag: "Organization", action: "invite", email: "dev@example.test" },
         { _tag: "RemoteThread", action: "new" },
+        { _tag: "RemoteRun", threadId: "e2b_thread-1", request: { prompt: ["hello"], mode: "low" } },
       ])
       expect((yield* Effect.exit(invoke(["credential", "list", "--scope", "user"])))._tag).toBe("Failure")
       expect(yield* Ref.get(productCalls)).toHaveLength(5)

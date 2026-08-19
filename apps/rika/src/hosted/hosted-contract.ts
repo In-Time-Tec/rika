@@ -118,6 +118,20 @@ export const RemoteConnection = Schema.Struct({
 })
 export type RemoteConnection = typeof RemoteConnection.Type
 
+export const HostedThreadId = Schema.String.check(Schema.isPattern(/^e2b_[A-Za-z0-9_-]+$/))
+export type HostedThreadId = typeof HostedThreadId.Type
+
+export const isHostedThreadId = Schema.is(HostedThreadId)
+
+export const RunRequest = Schema.Struct({
+  prompt: Schema.Array(Schema.String),
+  mode: Schema.optionalKey(Schema.String),
+})
+export type RunRequest = typeof RunRequest.Type
+
+export const RunResult = Schema.Struct({ output: Schema.String })
+export type RunResult = typeof RunResult.Type
+
 export interface HttpInterface {
   readonly register: (
     origin: string,
@@ -157,6 +171,14 @@ export interface HttpInterface {
     project: string | undefined,
     session: Session,
   ) => Effect.Effect<RemoteConnection, HostedError>
+  readonly runThread: (
+    origin: string,
+    organization: string,
+    threadId: HostedThreadId,
+    request: RunRequest,
+    idempotencyKey: string,
+    session: Session,
+  ) => Effect.Effect<RunResult, HostedError>
 }
 
 export class Http extends Context.Service<Http, HttpInterface>()("@rika/cli/hosted/hosted-contract/Http") {}

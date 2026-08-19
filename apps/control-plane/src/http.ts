@@ -8,6 +8,7 @@ import type {
   IdentityRuntimeError,
 } from "@rika/identity"
 import type { HostedProductService } from "./hosted-product"
+import type { Runtime as Executor } from "./executor"
 import {
   accountPage,
   consentPage,
@@ -29,6 +30,7 @@ export interface HttpDependencies {
   readonly directory: IdentityDirectory
   readonly devices: CliDeviceDirectory
   readonly product: HostedProductService
+  readonly executor: Executor
   readonly production: boolean
 }
 
@@ -49,11 +51,6 @@ const CliRegistrationRequest = Schema.Struct({
 
 const OAuthRegistrationResponse = Schema.Struct({ client_id: Schema.NonEmptyString })
 const InvitationRequest = Schema.Struct({ email: Schema.String.check(Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) })
-const ConnectionRequest = Schema.Struct({
-  organization_id: Schema.NonEmptyString,
-  project_id: Schema.optionalKey(Schema.NonEmptyString),
-  placement: Schema.optionalKey(Schema.Literals(["local", "e2b"])),
-})
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const securityHeaders = (production: boolean) => {
@@ -75,6 +72,8 @@ const secured = (response: Response, production: boolean) => {
   securityHeaders(production).forEach((value, name) => headers.set(name, value))
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
 }
+
+export const secureResponse = (production: boolean) => (response: Response) => secured(response, production)
 
 const html = (body: string, production: boolean, status = 200) => {
   const headers = securityHeaders(production)
@@ -123,7 +122,7 @@ const requiresOrganization = (path: string) =>
 const isBrowserAuthorization = (path: string, request: Request) =>
   path === "/api/auth/oauth2/authorize" && request.method === "GET"
 
-type AccountAccess =
+export type AccountAccess =
   | {
       readonly _tag: "account"
       readonly account: Account
@@ -134,7 +133,7 @@ type AccountAccess =
   | { readonly _tag: "invalid" }
   | { readonly _tag: "unavailable" }
 
-const accountAccess = Effect.fn("ControlPlaneHttp.accountAccess")(function* (
+export const accountAccess = Effect.fn("ControlPlaneHttp.accountAccess")(function* (
   request: Request,
   dependencies: HttpDependencies,
 ): Effect.fn.Return<AccountAccess> {
@@ -204,16 +203,6 @@ const protectedPage = Effect.fn("ControlPlaneHttp.protectedPage")(function* (
 const routeRequest = Effect.fn("ControlPlaneHttp.route")(function* (request: Request, dependencies: HttpDependencies) {
   const url = new URL(request.url)
   const { pathname } = url
-
-  if (pathname === "/healthz" && request.method === "GET") return json({ status: "ok" }, dependencies.production)
-
-  if (pathname === "/readyz" && request.method === "GET") {
-    const ready = yield* Effect.all([dependencies.directory.ready, dependencies.product.ready]).pipe(
-      Effect.as(true),
-      Effect.orElseSucceed(() => false),
-    )
-    return json({ status: ready ? "ready" : "unavailable" }, dependencies.production, ready ? 200 : 503)
-  }
 
   if (
     pathname === "/.well-known/oauth-protected-resource/api/v1" &&
@@ -305,35 +294,6 @@ const routeRequest = Effect.fn("ControlPlaneHttp.route")(function* (request: Req
     return secured(delegated.value, dependencies.production)
   }
 
-  if (pathname === "/api/v1/me/context" && request.method === "GET") {
-    const access = yield* accountAccess(request, dependencies)
-    if (access._tag !== "account") return accessFailure(access, dependencies)
-    const projects = yield* dependencies.product
-      .projects(access.account.memberships.map((membership) => membership.id))
-      .pipe(Effect.option)
-    if (projects._tag === "None") return json({ message: "Product service unavailable" }, dependencies.production, 503)
-    return json(
-      {
-        account: {
-          id: access.account.user.id,
-          email: access.account.user.email,
-          name: access.account.user.name,
-        },
-        organizations: access.account.memberships.map((membership) => membership.organization),
-        projects: projects.value.map((project) => ({
-          id: project.id,
-          organizationId: project.organizationId,
-          name: project.name,
-          slug: project.name
-            .toLowerCase()
-            .replaceAll(/[^a-z0-9]+/g, "-")
-            .replaceAll(/^-|-$/g, ""),
-        })),
-      },
-      dependencies.production,
-    )
-  }
-
   if (pathname === "/api/v1/auth/cli/devices" && request.method === "GET") {
     const access = yield* accountAccess(request, dependencies)
     if (access._tag !== "account") return accessFailure(access, dependencies)
@@ -378,35 +338,6 @@ const routeRequest = Effect.fn("ControlPlaneHttp.route")(function* (request: Req
         Effect.map((response) => secured(response, dependencies.production)),
         Effect.orElseSucceed(() => json({ message: "Identity service unavailable" }, dependencies.production, 503)),
       )
-  }
-
-  if (pathname === "/api/v1/connections" && request.method === "POST") {
-    const access = yield* accountAccess(request, dependencies)
-    if (access._tag !== "account") return accessFailure(access, dependencies)
-    if (access.deviceId === undefined || access.principal.clientId === undefined)
-      return json({ message: "CLI device authentication required" }, dependencies.production, 401)
-    const decoded = yield* decodeJson(request, ConnectionRequest)
-    if (decoded._tag === "None") return json({ message: "Invalid connection" }, dependencies.production, 400)
-    const membership = access.account.memberships.find(
-      (candidate) => candidate.organization.id === decoded.value.organization_id,
-    )
-    if (membership === undefined) return json({ message: "Organization is unavailable" }, dependencies.production, 404)
-    const connection = yield* dependencies.product
-      .createConnection({
-        authority: {
-          organizationId: membership.organization.id,
-          memberId: membership.id,
-          deviceId: access.deviceId,
-          clientId: access.principal.clientId,
-          ...(access.principal.dpopJkt === undefined ? {} : { dpopJkt: access.principal.dpopJkt }),
-        },
-        ...(decoded.value.project_id === undefined ? {} : { projectId: decoded.value.project_id }),
-        placement: decoded.value.placement ?? "local",
-      })
-      .pipe(Effect.option)
-    return connection._tag === "None"
-      ? json({ message: "Connection could not be created" }, dependencies.production, 403)
-      : json(connection.value, dependencies.production, 201)
   }
 
   if (isAuthPath(pathname)) {

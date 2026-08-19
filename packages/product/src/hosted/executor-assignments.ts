@@ -42,7 +42,7 @@ export interface CreateInput {
   readonly organizationId: OrganizationId
   readonly threadId: ThreadId
   readonly placement: ExecutorPlacement
-  readonly checkout: RepositoryCheckout
+  readonly checkout: RepositoryCheckout | null
 }
 
 export interface Version {

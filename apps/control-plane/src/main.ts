@@ -11,7 +11,9 @@ import {
   makePostgresPool,
   makeResendMailSender,
 } from "@rika/identity"
+import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
 import { serveControlPlane } from "./adapters/bun-server"
+import { config as executorConfig, Executor, layer as executorLayer, service as executorService } from "./executor"
 import { HostedProduct, postgres as hostedProductPostgres } from "./hosted-product"
 
 const provideLayerScoped =
@@ -38,12 +40,31 @@ const program = Effect.scoped(
       pool,
       mail: makeResendMailSender({ config, client: httpClient }),
     })
-    const product = yield* Layer.build(
-      hostedProductPostgres({
-        url: config.databaseUrl,
-        ssl: config.databaseSsl === "disable" ? false : { rejectUnauthorized: config.databaseSsl === "verify-full" },
-        maxConnections: 10,
-      }),
+    const postgres = {
+      url: config.databaseUrl,
+      ssl: config.databaseSsl === "disable" ? false : { rejectUnauthorized: config.databaseSsl === "verify-full" },
+      maxConnections: 10,
+    }
+    const executorOptions = executorConfig(Bun.env)
+    const product = Context.get(
+      yield* Layer.build(
+        hostedProductPostgres({
+          database: postgres,
+          templateBuildId: executorOptions.templateBuildId,
+          providerScope: executorOptions.deploymentId,
+        }),
+      ),
+      HostedProduct,
+    )
+    const executor = Context.get(
+      yield* Layer.build(
+        executorService.pipe(
+          Layer.provide(executorLayer(executorOptions)),
+          Layer.provide(postgresLayer(postgres)),
+          Layer.provide(BunCrypto.layer),
+        ),
+      ),
+      Executor,
     )
     yield* serveControlPlane({
       config,
@@ -51,7 +72,8 @@ const program = Effect.scoped(
         identity,
         directory: makePostgresIdentityDirectory(pool),
         devices: makePostgresCliDeviceDirectory(pool),
-        product: Context.get(product, HostedProduct),
+        product,
+        executor,
         production: config.production,
       },
     })

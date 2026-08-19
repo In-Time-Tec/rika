@@ -39,6 +39,7 @@ const unusedHttp: HttpInterface = {
   devices: () => Effect.die("unused"),
   revokeDevice: () => Effect.die("unused"),
   createRemoteConnection: () => Effect.die("unused"),
+  runThread: () => Effect.die("unused"),
 }
 
 it.effect("polls pending and network failures, applies RFC slow_down, and completes", () =>

@@ -113,6 +113,28 @@ export const redactAccess = (access: AccessWire): Access => ({
   sessionToken: Redacted.make(access.sessionToken, { label: "executor-session" }),
 })
 
+export const CellRequest = Schema.Struct({
+  access: AccessWire,
+  operationKey: Identifier,
+  workspace: Identifier,
+  sessionId: Identifier,
+  toolCallId: Identifier,
+  code: Schema.String,
+  runId: Schema.optionalKey(Identifier),
+  rootRunId: Schema.optionalKey(Identifier),
+  attempt: Schema.optionalKey(Sequence),
+  admittedAt: Schema.optionalKey(Identifier),
+  deadline: Schema.optionalKey(Identifier),
+})
+export type CellRequest = typeof CellRequest.Type
+
+export const CellResponse = Schema.Union([
+  Schema.TaggedStruct("Success", { result: Schema.Json }),
+  Schema.TaggedStruct("DomainFailure", { failure: Schema.Json }),
+  Schema.TaggedStruct("Suspend", { token: Schema.String }),
+])
+export type CellResponse = typeof CellResponse.Type
+
 export const HeartbeatWire = Schema.Struct({
   version: ProtocolVersion,
   access: AccessWire,
@@ -221,6 +243,7 @@ export const HostMessage = Schema.Union([
   Schema.TaggedStruct("PtyOpened", { access: AccessWire, pty: PtyCreate }),
   Schema.TaggedStruct("PtyOutput", { access: AccessWire, ptyId: Identifier, chunk: PtyTranscriptChunk }),
   Schema.TaggedStruct("PtyDisconnected", { access: AccessWire, ptyId: Identifier, cursor: Sequence }),
+  Schema.TaggedStruct("CellResult", { operationKey: Identifier, response: CellResponse }),
 ])
 export type HostMessage = typeof HostMessage.Type
 
@@ -235,6 +258,7 @@ export const ControllerMessage = Schema.Union([
   Schema.TaggedStruct("PtyResize", { fence: Fence, request: PtyResize }),
   Schema.TaggedStruct("PtyDisconnect", { fence: Fence, ptyId: Identifier }),
   Schema.TaggedStruct("PtyReconnect", { fence: Fence, request: PtyReconnect }),
+  Schema.TaggedStruct("CellExecute", { request: CellRequest }),
   Schema.TaggedStruct("Fenced", { fence: Fence, message: Schema.String }),
 ])
 export type ControllerMessage = typeof ControllerMessage.Type
