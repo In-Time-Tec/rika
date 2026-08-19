@@ -2,16 +2,16 @@ import { Clock, Context, Effect, Layer, Schema } from "effect"
 import { Goal, exhausted } from "@rika/product/goal-record"
 import * as GoalRepository from "@rika/product/goal-repository"
 
-export class GoalUnavailable extends Schema.TaggedErrorClass<GoalUnavailable>()("GoalUnavailable", {
+export class GoalUnavailable extends Schema.TaggedError<GoalUnavailable>()("GoalUnavailable", {
   threadId: Schema.String,
   message: Schema.String,
 }) {}
 
-export class GoalAlreadyActive extends Schema.TaggedErrorClass<GoalAlreadyActive>()("GoalAlreadyActive", {
+export class GoalAlreadyActive extends Schema.TaggedError<GoalAlreadyActive>()("GoalAlreadyActive", {
   threadId: Schema.String,
 }) {}
 
-export class GoalNotActive extends Schema.TaggedErrorClass<GoalNotActive>()("GoalNotActive", {
+export class GoalNotActive extends Schema.TaggedError<GoalNotActive>()("GoalNotActive", {
   threadId: Schema.String,
 }) {}
 

@@ -17,7 +17,7 @@ export interface WebProviderDescriptor {
   readonly credentialEnvironment: string
 }
 
-export class WebProviderConfigurationError extends Schema.TaggedErrorClass<WebProviderConfigurationError>()(
+export class WebProviderConfigurationError extends Schema.TaggedError<WebProviderConfigurationError>()(
   "WebProviderConfigurationError",
   { message: Schema.String },
 ) {}

@@ -9,7 +9,7 @@ const record = (value: unknown): Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null ? (value as Readonly<Record<string, unknown>>) : {}
 const optionalString = (value: unknown): string => (typeof value === "string" ? value : "")
 const inputRecord = (input: string): Readonly<Record<string, unknown>> => {
-  const decoded = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(input)
+  const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(input)
   return Option.isSome(decoded) ? record(decoded.value) : {}
 }
 const field = (input: Readonly<Record<string, unknown>>, names: ReadonlyArray<string>): string | undefined => {

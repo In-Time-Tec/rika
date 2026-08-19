@@ -186,7 +186,7 @@ test("sends SIGTERM to a live shell process when the registry scope closes", () 
         const fileSystem = yield* FileSystem.FileSystem
         const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-process-signal-" })
         const marker = `${workspace}/terminated`
-        const encodedMarker = yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(marker)
+        const encodedMarker = yield* Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(marker)
         yield* Effect.scoped(
           Effect.gen(function* () {
             const registry = yield* ProcessRegistry.Service

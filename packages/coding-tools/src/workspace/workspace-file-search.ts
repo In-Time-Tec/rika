@@ -8,7 +8,7 @@ import type { GlobOptions, SearchOptions, GrepOptions, PathItem, SearchResult } 
 import type { GrepMatch, GrepResult } from "./workspace-search-results"
 import { Operation } from "./workspace-search-operation"
 
-export class WorkspaceIndexError extends Schema.TaggedErrorClass<WorkspaceIndexError>()("WorkspaceIndexError", {
+export class WorkspaceIndexError extends Schema.TaggedError<WorkspaceIndexError>()("WorkspaceIndexError", {
   operation: Operation,
   message: Schema.String,
 }) {}

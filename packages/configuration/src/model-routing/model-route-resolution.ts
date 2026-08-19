@@ -3,7 +3,7 @@ import type { ModeId } from "./behavior-mode"
 import type { ModelRoute } from "./model-route"
 import type { ConfigurationSettings } from "../settings/configuration-settings"
 
-export class ModelRouteError extends Schema.TaggedErrorClass<ModelRouteError>()("ModelRouteError", {
+export class ModelRouteError extends Schema.TaggedError<ModelRouteError>()("ModelRouteError", {
   mode: Schema.String,
   message: Schema.String,
 }) {}

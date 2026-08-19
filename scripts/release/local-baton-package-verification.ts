@@ -13,7 +13,7 @@ class LocalBatonSmokeError extends Data.TaggedError("LocalBatonSmokeError")<{
 }> {}
 
 const failure = (step: string, message: string) => new LocalBatonSmokeError({ step, message })
-const UnknownJson = Schema.UnknownFromJsonString
+const UnknownJson = Schema.fromJsonString(Schema.Unknown)
 
 export type PackedBatonPackage = {
   readonly manifest: string

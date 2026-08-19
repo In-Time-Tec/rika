@@ -4,7 +4,7 @@ import * as TurnRepository from "../thread/repository/turn-repository"
 import { Cause, Schema } from "effect"
 import { StaleQueuedTurns } from "../thread/queue/pending-turn-policy"
 
-export class OperationError extends Schema.TaggedErrorClass<OperationError>()("OperationError", {
+export class OperationError extends Schema.TaggedError<OperationError>()("OperationError", {
   message: Schema.String,
   cause: Schema.optionalKey(Schema.Unknown),
 }) {}

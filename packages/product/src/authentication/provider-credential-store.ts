@@ -1,6 +1,6 @@
 import { Context, Effect, Option, Redacted, Schema } from "effect"
 
-export class ProviderCredentialStoreError extends Schema.TaggedErrorClass<ProviderCredentialStoreError>()(
+export class ProviderCredentialStoreError extends Schema.TaggedError<ProviderCredentialStoreError>()(
   "ProviderCredentialStoreError",
   { kind: Schema.Literals(["corrupt", "io", "missing", "unsafe"]), message: Schema.String },
 ) {}

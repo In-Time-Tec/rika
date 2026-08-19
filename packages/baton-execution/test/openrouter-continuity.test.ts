@@ -15,6 +15,7 @@ const cannedResponse = () => {
     object: "chat.completion",
     created: 0,
     model: "deepseek/deepseek-v4-flash-0731",
+    system_fingerprint: null,
     choices: [
       {
         index: 0,
@@ -71,7 +72,7 @@ describe("OpenRouter provider conversation continuity", () => {
           expect(captured.length).toBe(1)
           const second = captured[0]!
           expect(second.url).toBe("https://openrouter.ai/api/v1/chat/completions")
-          const body = (yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(second.body)) as {
+          const body = (yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(second.body)) as {
             readonly messages: ReadonlyArray<{ readonly role: string }>
             readonly input?: unknown
             readonly previous_response_id?: unknown
@@ -79,7 +80,7 @@ describe("OpenRouter provider conversation continuity", () => {
           expect(body.input).toBeUndefined()
           expect(body.previous_response_id).toBeUndefined()
           expect(body.messages.map((message) => message.role)).toEqual(["system", "user", "assistant", "user"])
-          expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(body)).not.toContain('"id":null')
+          expect(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(body)).not.toContain('"id":null')
         }).pipe(Effect.provide(context)),
       ),
     ),

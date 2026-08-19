@@ -18,7 +18,7 @@ const PackageManifestJson = Schema.fromJsonString(Schema.Struct({ version: Schem
 
 const writeJson = Effect.fn("NpmPackage.writeJson")(function* (file: string, value: unknown) {
   const fileSystem = yield* FileSystem.FileSystem
-  const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(value)
+  const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(value)
   yield* fileSystem.writeFileString(file, `${encoded}\n`)
 })
 

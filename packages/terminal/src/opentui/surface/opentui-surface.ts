@@ -471,7 +471,7 @@ export class Surface extends SurfaceLifecycle {
   }
 }
 
-export class AdapterError extends Schema.TaggedErrorClass<AdapterError>()("TuiAdapterError", {
+export class AdapterError extends Schema.TaggedError<AdapterError>()("TuiAdapterError", {
   message: Schema.String,
 }) {}
 const adapterError = (cause: unknown) => AdapterError.make({ message: String(cause) })

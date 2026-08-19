@@ -5,7 +5,7 @@ import * as ModelRouteResolution from "@rika/configuration/model-route-resolutio
 import * as ConfigurationService from "@rika/configuration/configuration-service"
 import { Console, Context, Effect, Layer, Schema } from "effect"
 
-export class AdapterError extends Schema.TaggedErrorClass<AdapterError>()("ConfigOperationsAdapterError", {
+export class AdapterError extends Schema.TaggedError<AdapterError>()("ConfigOperationsAdapterError", {
   message: Schema.String,
 }) {}
 

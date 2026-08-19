@@ -92,7 +92,7 @@ describe("Operation", () => {
         expect(catalogOutput[0]!.toLowerCase()).not.toContain(forbidden.toLowerCase())
         expect(catalogOutput[5]!.toLowerCase()).not.toContain(forbidden.toLowerCase())
       }
-      const listedJson = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(catalogOutput[0]!)
+      const listedJson = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(catalogOutput[0]!)
       const definitions = yield* Schema.decodeUnknownEffect(Schema.Array(ToolCatalog.Definition))(listedJson)
       expect(definitions.length).toBeGreaterThan(0)
       expect(definitions.length).toBeLessThanOrEqual(64)
@@ -110,7 +110,7 @@ describe("Operation", () => {
             presentation.completeLabel.length > 0,
         ),
       ).toBe(true)
-      const shownJson = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(catalogOutput[5]!)
+      const shownJson = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(catalogOutput[5]!)
       const shown = yield* Schema.decodeUnknownEffect(ToolCatalog.Definition)(shownJson)
       expect(shown).toEqual(definitions.find(({ name }) => name === "read"))
     }),

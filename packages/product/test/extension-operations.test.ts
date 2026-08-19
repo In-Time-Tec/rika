@@ -7,7 +7,7 @@ import * as SkillRegistry from "@rika/extensions/skill-registry"
 import * as ExtensionOperations from "../src/operation/contract/extension-operation"
 import { provideLayer } from "./product-test-layer"
 
-const decodeJson = Schema.decodeSync(Schema.UnknownFromJsonString)
+const decodeJson = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))
 
 describe("ExtensionOperations", () => {
   const oauthLayer = Layer.succeed(

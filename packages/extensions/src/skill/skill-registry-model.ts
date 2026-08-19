@@ -37,7 +37,7 @@ export interface Discovered {
   readonly activate: (name: string) => Effect.Effect<Activation, SkillRegistryError>
 }
 
-export class SkillRegistryError extends Schema.TaggedErrorClass<SkillRegistryError>()(
+export class SkillRegistryError extends Schema.TaggedError<SkillRegistryError>()(
   "@rika/extensions/SkillRegistryError",
   {
     operation: Schema.String,

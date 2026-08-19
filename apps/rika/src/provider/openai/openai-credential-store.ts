@@ -164,7 +164,7 @@ const layerImpl = (filename: string, options: Options = {}) =>
           const text = yield* syncIo(() =>
             new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, offset)),
           ).pipe(Effect.mapError(() => failure("corrupt", corruptMessage)))
-          const json = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(text).pipe(
+          const json = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
             Effect.mapError(() => failure("corrupt", corruptMessage)),
           )
           return json

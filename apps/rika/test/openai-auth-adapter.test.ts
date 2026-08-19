@@ -9,7 +9,7 @@ import { hostLayer, httpLayer } from "../src/provider/openai/openai-auth-adapter
 const response = (request: HttpClientRequest.HttpClientRequest, status: number, body: unknown) =>
   HttpClientResponse.fromWeb(
     request,
-    new Response(Schema.encodeSync(Schema.UnknownFromJsonString)(body), {
+    new Response(Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(body), {
       status,
       headers: { "content-type": "application/json" },
     }),
@@ -31,7 +31,7 @@ const build = (execute: (request: HttpClientRequest.HttpClientRequest) => HttpCl
 const requestText = (request: HttpClientRequest.HttpClientRequest) =>
   request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : ""
 
-const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const provideLayer = <A, E, R, ROut, E2, RIn>(effect: Effect.Effect<A, E, R>, provided: Layer.Layer<ROut, E2, RIn>) =>
   Effect.scoped(Layer.build(provided).pipe(Effect.flatMap((context) => Effect.provide(effect, context))))
 

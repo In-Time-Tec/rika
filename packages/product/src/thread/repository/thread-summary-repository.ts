@@ -8,7 +8,7 @@ import * as TurnRepository from "./turn-repository"
 import { TurnId } from "@rika/product/turn-record"
 import * as ThreadState from "@rika/product/thread-state"
 
-export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadSummaryRepositoryError", {
+export class RepositoryError extends Schema.TaggedError<RepositoryError>()("ThreadSummaryRepositoryError", {
   message: Schema.String,
 }) {}
 

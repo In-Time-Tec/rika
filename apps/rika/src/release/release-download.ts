@@ -19,7 +19,7 @@ const UpdateFailure = Schema.Literals([
 ])
 type UpdateFailure = typeof UpdateFailure.Type
 
-export class ReleaseUpdateError extends Schema.TaggedErrorClass<ReleaseUpdateError>()("ReleaseUpdateError", {
+export class ReleaseUpdateError extends Schema.TaggedError<ReleaseUpdateError>()("ReleaseUpdateError", {
   failure: UpdateFailure,
   message: Schema.String,
 }) {}

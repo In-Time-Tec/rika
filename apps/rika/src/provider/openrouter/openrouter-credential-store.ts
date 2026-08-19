@@ -141,7 +141,7 @@ export const layer: {
             () => new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, offset)),
             "Credential file is corrupt",
           )
-          const json = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(text).pipe(
+          const json = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
             Effect.mapError(() => failure("corrupt", "Credential file is corrupt")),
           )
           return yield* Schema.decodeUnknownEffect(CredentialDisk)(json).pipe(

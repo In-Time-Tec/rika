@@ -4,7 +4,7 @@ import * as Request from "./web-search-provider-contract"
 import * as Result from "./web-search-result-contract"
 import type { ProviderOptions } from "./web-search-provider-options"
 
-const unknownJson = Schema.UnknownFromJsonString
+const unknownJson = Schema.fromJsonString(Schema.Unknown)
 const decodeBody = (response: HttpClientResponse.HttpClientResponse) =>
   response.text.pipe(Effect.flatMap(Schema.decodeEffect(unknownJson)))
 

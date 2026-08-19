@@ -177,7 +177,9 @@ describe("ConfigService", () => {
     Effect.gen(function* () {
       const config = yield* ConfigurationService.effectiveConfiguration()
       expect(config.environment.providerCredentials).toEqual({})
-      expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(config)).not.toContain("aws-secret-must-not-leak")
+      expect(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(config)).not.toContain(
+        "aws-secret-must-not-leak",
+      )
     }).pipe(
       provideLayer(
         ConfigurationService.liveConfigurationLayer({ webProviders }).pipe(
@@ -242,7 +244,7 @@ describe("ConfigService", () => {
         "RIKA_MODEL_API_KEY",
       ])
       expect(Redacted.value(effective.environment.providerCredentials.RIKA_MODEL_API_KEY!)).toBe(secret)
-      const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(effective)
+      const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(effective)
       expect(encoded).not.toContain(secret)
       expect(encoded).not.toContain("must-not-be-read")
     })
@@ -256,7 +258,7 @@ describe("ConfigService", () => {
       expect(config.settings.webSearch.providers).toEqual({ exa: { configured: true }, custom: { configured: true } })
       expect(Redacted.value(config.environment.webSearchCredentials.exa!)).toBe(workspaceSecret)
       expect(Redacted.value(config.environment.webSearchCredentials.custom!)).toBe(globalSecret)
-      const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(config)
+      const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(config)
       expect(encoded).not.toContain(globalSecret)
       expect(encoded).not.toContain(workspaceSecret)
     }).pipe(

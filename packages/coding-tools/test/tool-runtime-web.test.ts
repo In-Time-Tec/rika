@@ -92,7 +92,7 @@ describe("Runtime web tools", () => {
         objective: "Find current documentation",
         searchQueries: ["current documentation"],
       })
-      expect(yield* Schema.decodeEffect(Schema.UnknownFromJsonString)(result.text)).toEqual([
+      expect(yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(result.text)).toEqual([
         {
           provider: "fixture",
           results: [{ url: "https://example.com", title: "Example", publishedAt: null, excerpts: ["result"] }],

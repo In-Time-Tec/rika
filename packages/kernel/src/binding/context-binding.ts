@@ -5,7 +5,7 @@ import { operation } from "./nested-operation-envelope"
 
 export const name = "context"
 
-export class ContextUnavailable extends Schema.TaggedErrorClass<ContextUnavailable>()("ContextUnavailable", {
+export class ContextUnavailable extends Schema.TaggedError<ContextUnavailable>()("ContextUnavailable", {
   message: Schema.String,
 }) {}
 

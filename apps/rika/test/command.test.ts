@@ -4,6 +4,7 @@ import { Service } from "@rika/product/product-operation-service"
 import type { Input } from "@rika/product/product-operation"
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Ref, Stream } from "effect"
 import { TestConsole } from "effect/testing"
+import { FetchHttpClient } from "effect/unstable/http"
 import { expect, it } from "@effect/vitest"
 import { run as runClient } from "../src/client/client-process"
 import { cleanInteractiveRuntimeExit } from "../src/client/client-process"
@@ -49,7 +50,7 @@ const execute = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>)
 const capture = (argv: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const calls = yield* Ref.make<ReadonlyArray<Input>>([])
-    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, testLayer(calls))
+    const layer = Layer.mergeAll(BunServices.layer, FetchHttpClient.layer, TestConsole.layer, testLayer(calls))
     yield* execute(run(argv), layer)
     return yield* Ref.get(calls)
   })
@@ -57,7 +58,7 @@ const capture = (argv: ReadonlyArray<string>) =>
 const failsWithoutDispatch = (argv: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const calls = yield* Ref.make<ReadonlyArray<Input>>([])
-    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, testLayer(calls))
+    const layer = Layer.mergeAll(BunServices.layer, FetchHttpClient.layer, TestConsole.layer, testLayer(calls))
     const exit = yield* Effect.exit(execute(run(argv), layer))
     expect(exit._tag).toBe("Failure")
     expect(yield* Ref.get(calls)).toEqual([])
@@ -98,6 +99,7 @@ it.effect("maps stdin failures and dispatch failures", () =>
     expect(read._tag === "Failure" && read.failure.message).toContain("Unable to read JSON input")
     const layer = Layer.mergeAll(
       BunServices.layer,
+      FetchHttpClient.layer,
       TestConsole.layer,
       Layer.succeed(
         Service,
@@ -116,7 +118,7 @@ it.effect("maps stdin failures and dispatch failures", () =>
 it.effect("renders help without dispatching an operation", () =>
   Effect.gen(function* () {
     const calls = yield* Ref.make<ReadonlyArray<Input>>([])
-    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, testLayer(calls))
+    const layer = Layer.mergeAll(BunServices.layer, FetchHttpClient.layer, TestConsole.layer, testLayer(calls))
     const output = yield* execute(
       Effect.gen(function* () {
         yield* run(["--help"])
@@ -150,14 +152,14 @@ it.effect("renders client help without creating the configured data root", () =>
         expect(yield* fileSystem.exists(dataRoot)).toBe(false)
       }),
     ),
-    Layer.merge(BunServices.layer, TestConsole.layer),
+    Layer.mergeAll(BunServices.layer, FetchHttpClient.layer, TestConsole.layer),
   ),
 )
 
 it.effect("inspects and exports malformed crash evidence without dispatching an operation", () =>
   Effect.gen(function* () {
     const calls = yield* Ref.make<ReadonlyArray<Input>>([])
-    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, testLayer(calls))
+    const layer = Layer.mergeAll(BunServices.layer, FetchHttpClient.layer, TestConsole.layer, testLayer(calls))
     yield* execute(
       Effect.scoped(
         Effect.gen(function* () {
@@ -199,7 +201,7 @@ it.effect("inspects and exports malformed crash evidence without dispatching an 
 it.effect("updates the install in this process instead of dispatching to the server", () =>
   Effect.gen(function* () {
     const calls = yield* Ref.make<ReadonlyArray<Input>>([])
-    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, testLayer(calls))
+    const layer = Layer.mergeAll(BunServices.layer, FetchHttpClient.layer, TestConsole.layer, testLayer(calls))
     yield* execute(
       Effect.scoped(
         Effect.gen(function* () {
@@ -414,7 +416,7 @@ it.effect("dispatches every MCP operation and validates add transport", () =>
 it.effect("renders version and branch help without dispatching", () =>
   Effect.gen(function* () {
     const calls = yield* Ref.make<ReadonlyArray<Input>>([])
-    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, testLayer(calls))
+    const layer = Layer.mergeAll(BunServices.layer, FetchHttpClient.layer, TestConsole.layer, testLayer(calls))
     const output = yield* execute(
       Effect.gen(function* () {
         yield* run(["version"])

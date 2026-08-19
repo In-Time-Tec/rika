@@ -135,7 +135,7 @@ describe("ThreadQuery", () => {
       const continuations = new Set<string>()
       while (pages.at(-1)?.omissions[0] !== undefined) {
         const continuation = pages.at(-1)!.omissions[0]!.continuation
-        const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(continuation)
+        const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(continuation)
         expect(continuations.has(encoded)).toBe(false)
         continuations.add(encoded)
         const next = yield* Schema.decodeUnknownEffect(Fixtures.ThreadRead.ThreadContract.ReadThreadInput)({
@@ -147,7 +147,7 @@ describe("ThreadQuery", () => {
         pages.push(yield* read(next.selection))
         if (pages.length > units.length + 2) return yield* Effect.die("subtree continuation did not terminate")
       }
-      const rendered = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(pages)
+      const rendered = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(pages)
       expect(rendered).toContain("nested-four")
       expect(rendered).toContain("root-agent")
       expect(rendered).not.toContain("sibling-agent")
@@ -159,7 +159,7 @@ describe("ThreadQuery", () => {
     Effect.gen(function* () {
       const toolkit = yield* Fixtures.ThreadToolkits.ThreadContract.findToolkit
       const chunks = yield* toolkit.handle("find_thread", { query: "auth" }).pipe(Effect.flatMap(Stream.runCollect))
-      expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)([...chunks])).toContain("Fix auth")
+      expect(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([...chunks])).toContain("Fix auth")
     }).pipe(provideLayer(ThreadToolHandlers.findHandlerLayer.pipe(Layer.provide(queryLayer)))),
   )
 
@@ -168,7 +168,7 @@ describe("ThreadQuery", () => {
       const toolkit = yield* Fixtures.ThreadToolkits.ThreadContract.findToolkit
       const result = yield* toolkit.handle("find_thread", { query: "auth" }).pipe(
         Effect.flatMap(Stream.runCollect),
-        Effect.flatMap((chunks) => Schema.encodeEffect(Schema.UnknownFromJsonString)([...chunks])),
+        Effect.flatMap((chunks) => Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([...chunks])),
       )
       expect(result).not.toContain("Fix auth")
     }).pipe(

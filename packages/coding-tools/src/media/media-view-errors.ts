@@ -1,16 +1,16 @@
 import { Schema } from "effect"
 
-export class MediaAnalysisError extends Schema.TaggedErrorClass<MediaAnalysisError>()("MediaAnalysisError", {
+export class MediaAnalysisError extends Schema.TaggedError<MediaAnalysisError>()("MediaAnalysisError", {
   message: Schema.String,
 }) {}
-export class MediaMissingError extends Schema.TaggedErrorClass<MediaMissingError>()("MediaMissingError", {
+export class MediaMissingError extends Schema.TaggedError<MediaMissingError>()("MediaMissingError", {
   path: Schema.String,
 }) {}
-export class MediaOversizedError extends Schema.TaggedErrorClass<MediaOversizedError>()("MediaOversizedError", {
+export class MediaOversizedError extends Schema.TaggedError<MediaOversizedError>()("MediaOversizedError", {
   path: Schema.String,
   size: Schema.Finite,
   maximum: Schema.Finite,
 }) {}
-export class UnsupportedMediaError extends Schema.TaggedErrorClass<UnsupportedMediaError>()("UnsupportedMediaError", {
+export class UnsupportedMediaError extends Schema.TaggedError<UnsupportedMediaError>()("UnsupportedMediaError", {
   path: Schema.String,
 }) {}

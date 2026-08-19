@@ -4,7 +4,7 @@ import { Function, Schema } from "effect"
 
 export const queuedTurnPromoteMaxAgeMs = 86_400_000
 
-export class StaleQueuedTurns extends Schema.TaggedErrorClass<StaleQueuedTurns>()("StaleQueuedTurns", {
+export class StaleQueuedTurns extends Schema.TaggedError<StaleQueuedTurns>()("StaleQueuedTurns", {
   threadId: Thread.ThreadId,
   turnIds: Schema.Array(Turn.TurnId),
   maxAgeMs: Schema.Finite,

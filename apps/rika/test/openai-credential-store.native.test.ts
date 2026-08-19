@@ -70,7 +70,7 @@ const errorKind = <A, E>(effect: Effect.Effect<A, E>) =>
       typeof failure === "object" && failure !== null && "kind" in failure ? failure.kind : undefined,
     onSuccess: () => undefined,
   })
-const encodeJson = Schema.encodeEffect(Schema.UnknownFromJsonString)
+const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))
 const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect.pipe(Effect.orDie))
 
 test("saves and loads with private modes", () =>

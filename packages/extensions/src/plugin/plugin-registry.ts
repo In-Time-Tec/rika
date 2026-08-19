@@ -13,7 +13,7 @@ export interface Generation {
   readonly diagnostics: ReadonlyArray<string>
 }
 
-export class GenerationUnavailable extends Schema.TaggedErrorClass<GenerationUnavailable>()(
+export class GenerationUnavailable extends Schema.TaggedError<GenerationUnavailable>()(
   "@rika/extensions/PluginGenerationUnavailable",
   { generation: Schema.String },
 ) {}

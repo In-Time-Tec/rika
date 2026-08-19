@@ -16,7 +16,7 @@ const streamFlags = {
 }
 const optionalValue = <A>(value: Option.Option<A>): A | undefined => Option.getOrUndefined(value)
 type RunOperation = Extract<ProductOperation.Input, { readonly _tag: "Run" }>
-const JsonLine = Schema.UnknownFromJsonString
+const JsonLine = Schema.fromJsonString(Schema.Unknown)
 
 const runInput = (values: {
   readonly mode: Option.Option<ModeId>

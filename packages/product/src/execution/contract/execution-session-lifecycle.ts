@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Schema } from "effect"
 
-export class Unavailable extends Schema.TaggedErrorClass<Unavailable>()("ExecutionSessionLifecycleUnavailable", {
+export class Unavailable extends Schema.TaggedError<Unavailable>()("ExecutionSessionLifecycleUnavailable", {
   message: Schema.String,
 }) {}
 

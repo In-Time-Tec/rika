@@ -221,7 +221,7 @@ export const Input = Schema.Union([
 ])
 export type Input = typeof Input.Type
 
-export class OperationUnavailable extends Schema.TaggedErrorClass<OperationUnavailable>()("OperationUnavailable", {
+export class OperationUnavailable extends Schema.TaggedError<OperationUnavailable>()("OperationUnavailable", {
   operation: Schema.String,
   message: Schema.String,
 }) {
@@ -229,7 +229,7 @@ export class OperationUnavailable extends Schema.TaggedErrorClass<OperationUnava
   override readonly [Runtime.errorReported] = false
 }
 
-export class InvalidInput extends Schema.TaggedErrorClass<InvalidInput>()("InvalidInput", {
+export class InvalidInput extends Schema.TaggedError<InvalidInput>()("InvalidInput", {
   message: Schema.String,
 }) {
   override readonly [Runtime.errorExitCode] = 2

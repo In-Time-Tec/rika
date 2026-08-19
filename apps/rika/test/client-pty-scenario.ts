@@ -30,7 +30,7 @@ export const PtyAction = Schema.Struct({
   timeoutMs: Schema.optionalKey(Schema.Int),
 })
 export const PtyActions = Schema.fromJsonString(Schema.Array(PtyAction))
-export const UnknownJson = Schema.UnknownFromJsonString
+export const UnknownJson = Schema.fromJsonString(Schema.Unknown)
 
 export const escape = String.fromCharCode(27)
 export const bell = String.fromCharCode(7)

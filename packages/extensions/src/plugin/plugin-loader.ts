@@ -11,7 +11,7 @@ export interface Source {
   readonly load: Effect.Effect<PluginV1, LoadError>
 }
 
-export class LoadError extends Schema.TaggedErrorClass<LoadError>()("@rika/extensions/PluginLoadError", {
+export class LoadError extends Schema.TaggedError<LoadError>()("@rika/extensions/PluginLoadError", {
   message: Schema.String,
 }) {}
 

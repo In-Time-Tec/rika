@@ -11,7 +11,7 @@ const StartupLease = Schema.Struct({
 })
 
 const decodeLease = Schema.decodeUnknownEffect(Schema.fromJsonString(StartupLease))
-const encodeLease = Schema.encodeSync(Schema.UnknownFromJsonString)
+const encodeLease = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const processIsAlive = (pid: number) => {
   try {

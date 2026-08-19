@@ -24,7 +24,7 @@ const agentEntries = (configured: Configured) =>
 
 const profileNameOf = (entry: ReturnType<typeof agentEntries>[number]) => entry.manifest.name.replace("rika-", "")
 
-const modelCandidates = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
+const modelCandidates = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 /**
  * Values a host holds as credentials. A registration that carried any of these would leak it into

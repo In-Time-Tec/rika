@@ -15,6 +15,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as WebSearchProvider from "@rika/coding-tools/web-search-provider"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Schema, Scope, Stream } from "effect"
 import { TestConsole } from "effect/testing"
+import { FetchHttpClient } from "effect/unstable/http"
 import { expect, it } from "@effect/vitest"
 import { run } from "../src/command/root/rika-command"
 
@@ -159,7 +160,10 @@ interface CliResult {
 const openCli = <E>(layer: Layer.Layer<Service, E>) =>
   Effect.gen(function* () {
     const scope = yield* Effect.scope
-    const context = yield* Layer.buildWithScope(Layer.mergeAll(BunServices.layer, TestConsole.layer, layer), scope)
+    const context = yield* Layer.buildWithScope(
+      Layer.mergeAll(BunServices.layer, FetchHttpClient.layer, TestConsole.layer, layer),
+      scope,
+    )
     const invoke = (argv: ReadonlyArray<string>): Effect.Effect<CliResult> =>
       Effect.gen(function* () {
         const logsBefore = (yield* TestConsole.logLines).length
@@ -289,7 +293,7 @@ it.effect(
         const settingsInput = {
           providers: { openai: { baseUrl: "http://127.0.0.1:1/v1", apiKeyEnv: "DOCTOR_MODEL_KEY" } },
         }
-        const settingsJson = yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(settingsInput)
+        const settingsJson = yield* Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(settingsInput)
         yield* fileSystem.makeDirectory(path.dirname(context.workspaceConfigPath), { recursive: true })
         yield* fileSystem.writeFileString(context.workspaceConfigPath, settingsJson)
         const workspaceSettings = SettingsDecoder.Decoder.decodeSettingsInput(

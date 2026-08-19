@@ -34,7 +34,7 @@ const StartupMessage = Schema.Union([
   Schema.Struct({ _tag: Schema.tag("failed"), message: Schema.String }),
 ])
 
-const encode = Schema.encodeSync(Schema.UnknownFromJsonString)
+const encode = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const startupFdEnvironment = "RIKA_INTERNAL_SERVER_STARTUP_FD"
 let signalled = false
 const closeDescriptor = (descriptor: number) =>
@@ -89,7 +89,7 @@ const loadSettingsFile = Effect.fn("Server.loadSettingsFile")(function* (filenam
         SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({ path: filename, message: String(error) }),
       ),
     )
-  const value = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(text).pipe(
+  const value = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
     Effect.mapError((error) =>
       SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({
         path: filename,
