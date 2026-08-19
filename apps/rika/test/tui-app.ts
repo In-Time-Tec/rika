@@ -61,6 +61,7 @@ export type CapturedSpans = ReturnType<Awaited<ReturnType<typeof createTestRende
 export interface TuiApp {
   readonly workspace: string
   readonly type: (text: string) => Promise<void>
+  readonly paste: (text: string) => Promise<void>
   readonly pressEnter: () => void
   readonly pressEscape: () => void
   readonly pressArrow: (direction: "up" | "down" | "left" | "right") => void
@@ -305,6 +306,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   const app: TuiApp = {
     workspace,
     type: (text) => setup.mockInput.typeText(text),
+    paste: (text) => setup.mockInput.pasteBracketedText(text),
     pressEnter: () => setup.mockInput.pressEnter(),
     pressEscape: () => setup.mockInput.pressEscape(),
     pressArrow: (direction) => setup.mockInput.pressArrow(direction),
