@@ -1,17 +1,20 @@
 # Rika Product
 
-Rika is a personal coding agent for one developer working in local repositories. It combines a clear terminal interface with durable threads, parallel agent work, and restart-safe execution. The goal is to make substantial coding work understandable while it runs and recoverable when a process stops.
+Rika is a collaborative coding agent for organizations working in local repositories and isolated remote workspaces. It combines a clear terminal interface with durable Threads, parallel agent work, restart-safe execution, and shared control. The goal is to make substantial coding work understandable while it runs, recoverable when an executor stops, and accessible to the people an organization trusts.
 
 ## Audience
 
-Rika is for a technical owner who prefers a local CLI and TUI, controls the workspace and credentials, and wants automation without operating a hosted Rika service.
+Rika is for technical teams that prefer a CLI and TUI, need local development to remain direct, and want an explicit remote option for durable collaborative work.
 
 ## Direction
 
-- Keep product state and authority local.
+- Keep organization, access, and shared Thread authority in the hosted control plane.
+- Keep local and remote execution as explicit first-class choices; never move work between them implicitly.
+- Run remote work only in isolated E2B workspaces while preserving Baton as execution authority.
+- Let multiple authorized people inspect and control durable work without sharing host or provider credentials.
 - Make ongoing and completed agent work easy to inspect in the terminal.
 - Preserve durable work across process failure without duplicating execution authority.
-- Expose one programmable environment whose capabilities act with the local user's authority.
+- Expose one programmable environment whose capabilities act with the selected executor's authority.
 - Keep model routes configurable while modes describe stable user intent.
 - Consume framework behavior through released package contracts.
 - Prefer one current pre-1.0 contract over compatibility layers.
@@ -19,6 +22,6 @@ Rika is for a technical owner who prefers a local CLI and TUI, controls the work
 
 ## Boundaries
 
-Rika owns local product semantics, workspace policy, configuration, projections, tools, extensions, persistence, and terminal behavior. Baton owns durable execution and the agent loop. OpenTUI stays behind the rendering adapter.
+Rika owns identity integration, organizations, access, execution placement, workspace policy, configuration, projections, tools, extensions, product persistence, and terminal behavior. Baton owns durable execution and the agent loop. E2B supplies remote sandbox infrastructure without becoming product authority. OpenTUI stays behind the rendering adapter.
 
-Rika is not a hosted collaboration service, public agent SDK, account or billing system, web or IDE client, remote runner, sandbox platform, or social sharing product. The kernel it runs code in is a lifecycle boundary, not an isolation boundary. It does not copy another product's branding or protocol, and it does not own a local semantic code index or an ast-grep outline subsystem.
+Rika is not a billing system, public agent SDK, web or IDE coding client, general sandbox platform, or social network. Local execution is not isolated from the developer's machine; remote isolation belongs to E2B. Rika does not copy another product's branding or protocol, support interchangeable remote providers, or own a local semantic code index or ast-grep outline subsystem.
