@@ -181,6 +181,25 @@ it.layer(layer)("hosted store", (test) => {
         now: at(0),
       })
       expect(remote.inheritProjectGrants).toBe(true)
+      const privateWorkspace = yield* store.createWorkspace({
+        id: WorkspaceId.make("private-workspace"),
+        organizationId: ids.organization,
+        projectId: ProjectId.make("sharing-project"),
+        createdByMemberId: ids.member,
+        executorKind: "e2b",
+        inheritProjectGrants: false,
+        now: at(0),
+      })
+      const privateThread = yield* store.createThread({
+        id: ThreadId.make("private-thread"),
+        organizationId: ids.organization,
+        projectId: ProjectId.make("sharing-project"),
+        workspaceId: privateWorkspace.id,
+        createdByMemberId: ids.member,
+        executorKind: "e2b",
+        now: at(0),
+      })
+      expect(privateThread.inheritProjectGrants).toBe(false)
       expect(
         yield* Effect.result(
           store.createThread({

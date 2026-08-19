@@ -274,7 +274,6 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
   })
 
   const createThread = Effect.fn("PostgresStore.createThread")(function* (input: CreateThreadInput) {
-    const inheritProjectGrants = input.executorKind === "e2b" ? (input.inheritProjectGrants ?? true) : false
     if (input.executorKind === "local_device" && input.inheritProjectGrants === true) {
       return yield* failure("invalid-authority", "Local threads cannot inherit project grants")
     }
@@ -289,12 +288,20 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
         const rows = yield* query(sql`INSERT INTO rika_hosted_threads
           (id, organization_id, project_id, workspace_id, created_by_member_id, executor_kind,
             inherit_project_grants, created_at)
-          VALUES (${input.id}, ${input.organizationId}, ${input.projectId}, ${input.workspaceId}, ${input.createdByMemberId},
-            ${input.executorKind}, ${inheritProjectGrants}, ${input.now})
+          SELECT ${input.id}, ${input.organizationId}, ${input.projectId}, workspace.id, ${input.createdByMemberId},
+            ${input.executorKind}, COALESCE(${input.inheritProjectGrants ?? null}, workspace.inherit_project_grants),
+            ${input.now}
+          FROM rika_hosted_workspaces workspace
+          WHERE workspace.id = ${input.workspaceId}
+            AND workspace.organization_id = ${input.organizationId}
+            AND workspace.project_id = ${input.projectId}
+            AND workspace.executor_kind = ${input.executorKind}
           RETURNING id, organization_id AS "organizationId", project_id AS "projectId", workspace_id AS "workspaceId",
             created_by_member_id AS "createdByMemberId", executor_kind AS "executorKind",
             inherit_project_grants AS "inheritProjectGrants",
             to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"`)
+        if (rows[0] === undefined)
+          return yield* failure("invalid-authority", "Workspace does not belong to the project and organization")
         yield* query(sql`INSERT INTO rika_hosted_thread_grants
           (organization_id, thread_id, member_id, role, granted_by_member_id, created_at, updated_at)
           VALUES (${input.organizationId}, ${input.id}, ${input.createdByMemberId}, 'owner',
