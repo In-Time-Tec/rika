@@ -7,11 +7,14 @@
   "exports": {
     "./baton-execution": "./src/baton-execution.ts",
     "./baton-route": "./src/baton-route.ts",
+    "./postgres-control-plane": "./src/postgres-control-plane.ts",
+    "./remote-cell-dispatcher": "./src/remote-cell-dispatcher.ts",
     "./baton-cell-call-context": "./src/baton-cell-call-context.ts",
     "./scripted-model": "./src/scripted-model.ts",
     "./baton-test-harness": "./src/baton-test-harness.ts"
   },
   "dependencies": {
+    "@tenetkit/pg": "0.30.0",
     "tenetkit": "catalog:",
     "@rika/coding-tools": "workspace:*",
     "@rika/kernel": "workspace:*",

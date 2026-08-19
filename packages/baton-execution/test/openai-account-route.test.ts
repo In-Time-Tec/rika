@@ -7,7 +7,7 @@ import { ConfigProvider, Context, Effect, Exit, Layer, Redacted, Schema } from "
 import { Chat, LanguageModel } from "effect/unstable/ai"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import * as CandidateRegistry from "../src/baton-candidate-registry"
-import { configure } from "../src/baton-route"
+import { configure } from "./baton-test-adapters"
 
 const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const
 

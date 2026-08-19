@@ -7,7 +7,8 @@ import * as ExecutionPins from "@rika/kernel/execution-pins"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 import type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Function, Layer } from "effect"
+import type * as RemoteCellDispatcher from "./remote-cell-dispatcher"
 
 type RouteSnapshot = ExecutionRoute.ExecutionRouteSnapshot
 
@@ -18,11 +19,43 @@ export interface KernelOptions {
   readonly trustMode?: KernelProfile.TrustMode
 }
 
+export type LocalCellServices = KernelPool.KernelPool | CellCallContext.CellCallContext
+
+export interface LocalCellRoute {
+  readonly _tag: "Local"
+  readonly services: Context.Context<LocalCellServices>
+}
+
+export interface RemoteCellRoute {
+  readonly _tag: "Remote"
+  readonly dispatcher: Layer.Layer<RemoteCellDispatcher.RemoteCellDispatcher>
+  readonly maxRetries: number
+  readonly retryDelayMillis: number
+}
+
+export type CellRoute = LocalCellRoute | RemoteCellRoute
+
+export interface LocalCellResolver {
+  readonly _tag: "Local"
+  readonly forWorkspace: (workspace: string) => Effect.Effect<Context.Context<LocalCellServices>>
+}
+
+export type CellResolver = LocalCellResolver | RemoteCellRoute
+
+export const resolveCellRoute: {
+  (workspace: string): (resolver: CellResolver) => Effect.Effect<CellRoute>
+  (resolver: CellResolver, workspace: string): Effect.Effect<CellRoute>
+} = Function.dual(2, (resolver: CellResolver, workspace: string): Effect.Effect<CellRoute> =>
+  resolver._tag === "Remote"
+    ? Effect.succeed(resolver)
+    : resolver.forWorkspace(workspace).pipe(Effect.map((services) => ({ _tag: "Local" as const, services }))),
+)
+
 export interface ConfigureOptions {
   readonly executionRoute: RouteSnapshot
   readonly workspace: string
   readonly kernel: KernelOptions
-  readonly kernelPool?: Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>
+  readonly cell: CellRoute
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: HarnessState.HarnessState
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
@@ -42,15 +75,7 @@ export interface ConfiguredExecutable {
 
 export interface ResolverOptions {
   readonly kernel: KernelOptions
-  /**
-   * A Server answers every workspace, so a Run resolves the kernel for the workspace its own
-   * registration pinned rather than sharing one the Server chose at startup.
-   */
-  readonly kernelPool?: {
-    readonly forWorkspace: (
-      workspace: string,
-    ) => Effect.Effect<Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>>
-  }
+  readonly cell: CellResolver
   /**
    * A harness pin encodes the workspace scope it was read for, so a recovered Run resolves the
    * capabilities of the workspace its own registration pinned rather than one the Server chose.

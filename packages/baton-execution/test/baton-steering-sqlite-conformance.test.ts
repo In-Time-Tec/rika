@@ -1,15 +1,16 @@
 import { expect, it } from "@effect/vitest"
 import { Errors, RunStore, RunTree, Runtime } from "tenetkit/runtime"
 import { Context, Effect, Layer, Random, Stream } from "effect"
-import { configure, makeResolver } from "../src/baton-route"
+import { makeResolver } from "../src/baton-route"
 import { laneExecutionRoute, makeLaneModels } from "../src/baton-test-harness"
+import { configure, remoteCell } from "./baton-test-adapters"
 
 const kernel = (dataRoot: string) => ({ runtimeVersion: Bun.version, dataRoot })
 
 const runtimeLayer = (filename: string, models: Effect.Success<ReturnType<typeof makeLaneModels>>) =>
   Runtime.layerSqlite({
     filename,
-    resolver: makeResolver({ kernel: kernel("/tmp"), modelServices: models.registryLayer }),
+    resolver: makeResolver({ kernel: kernel("/tmp"), cell: remoteCell, modelServices: models.registryLayer }),
     addresses: [],
     scheduler: { concurrency: 0 },
   })

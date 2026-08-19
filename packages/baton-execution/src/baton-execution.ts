@@ -12,8 +12,16 @@ import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 export type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 export type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
 import { Cause, Context, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
-import type { KernelOptions } from "./baton-route-options"
+import {
+  type CellResolver,
+  type KernelOptions,
+  type LocalCellResolver,
+  type LocalCellServices,
+  type RemoteCellRoute,
+  resolveCellRoute,
+} from "./baton-route-options"
 import { configure, makeResolver } from "./baton-route"
+import * as PostgresControlPlane from "./postgres-control-plane"
 import { TreeProjector } from "./projection/tree"
 import { resolveSemanticTreeEvent } from "./projection/semantic-event"
 
@@ -28,49 +36,22 @@ const derivedKernelOptions = (filename: string): KernelOptions => {
   return { runtimeVersion: Bun.version, dataRoot: separator > 0 ? filename.slice(0, separator) : "." }
 }
 
-const kernelOptions = (options: Options): KernelOptions => options.kernel ?? derivedKernelOptions(options.filename)
-
 /** The kernel a cell runs in, plus the seam that answers its host requests. */
 export type KernelPoolServices = KernelPool.KernelPool | CellCallContext.CellCallContext
 
-export interface Options {
-  readonly filename: string
-  readonly kernel?: KernelOptions
-  /**
-   * The kernel a cell runs in, already built and owned by the caller's scope. It outlives every
-   * cell, so a host builds it once where a Server-lifetime scope exists rather than letting the
-   * first cell that needs one decide how long it lives.
-   *
-   * A Server answers every workspace, so this resolves per workspace rather than being one value.
-   * A kernel carries the working directory its cells run in and the root its `rika.workspace.*`
-   * surface is mounted on, so one Server-wide kernel made those disagree with the Turn's own
-   * workspace for every Thread except whichever one happened to start the Server.
-   */
-  readonly kernelPool?: {
-    /** The kernel that answers cells for one workspace, built on first use and reused after. */
-    readonly forWorkspace: (
-      workspace: string,
-    ) => Effect.Effect<
+export interface LocalCellAdapter extends LocalCellResolver {
+  readonly built: Effect.Effect<
+    ReadonlyArray<
       Context.Context<KernelPoolServices> | Context.Context<KernelPoolServices | KernelStateStore.KernelStateStore>
     >
-    /**
-     * Every kernel built so far. A Session is closed by thread, not by workspace, and a thread that
-     * moved between workspaces has state in more than one, so closing asks all of them.
-     */
-    readonly built: Effect.Effect<
-      ReadonlyArray<
-        Context.Context<KernelPoolServices> | Context.Context<KernelPoolServices | KernelStateStore.KernelStateStore>
-      >
-    >
-  }
-  /**
-   * The skills and harness one Execution pins, resolved for the workspace that Execution runs in.
-   *
-   * A harness pin encodes the workspace scope it was read for, so a Server that pinned one snapshot
-   * from its own startup directory registered a pin every Turn in a different workspace then failed
-   * to verify: the resolver recomputes the expectation from the Run's own workspace and reads a
-   * different pin than the one the Server admitted.
-   */
+  >
+}
+
+export type CellAdapter = LocalCellAdapter | RemoteCellRoute
+
+interface SharedOptions {
+  readonly kernel: KernelOptions
+  readonly cell: CellAdapter
   readonly capabilities?: (workspace: string) => Effect.Effect<{
     readonly skills: ReadonlyArray<ExecutionPins.SkillPin>
     readonly harnessSnapshot: HarnessState.HarnessState
@@ -81,6 +62,51 @@ export interface Options {
   readonly subscriberQueueCapacity?: number
   readonly scheduler?: Runtime.LayerOptions["scheduler"]
 }
+
+export interface Options extends SharedOptions {
+  readonly postgres: PostgresControlPlane.Options
+}
+
+export interface SqliteTestOptions extends Omit<SharedOptions, "kernel"> {
+  readonly filename: string
+  readonly kernel?: KernelOptions
+}
+
+export interface LocalCellAdapterOptions {
+  readonly forWorkspace: (
+    workspace: string,
+  ) => Effect.Effect<
+    Context.Context<KernelPoolServices> | Context.Context<KernelPoolServices | KernelStateStore.KernelStateStore>
+  >
+  /**
+   * Every kernel built so far. A Session is closed by thread, not by workspace, and a thread that
+   * moved between workspaces has state in more than one, so closing asks all of them.
+   */
+  readonly built: Effect.Effect<
+    ReadonlyArray<
+      Context.Context<KernelPoolServices> | Context.Context<KernelPoolServices | KernelStateStore.KernelStateStore>
+    >
+  >
+}
+
+export const localCellAdapter = (options: LocalCellAdapterOptions): LocalCellAdapter => ({
+  _tag: "Local",
+  ...options,
+})
+
+export const remoteCellAdapter = (options: Omit<RemoteCellRoute, "_tag">): RemoteCellRoute => ({
+  _tag: "Remote",
+  ...options,
+})
+
+const cellResolver = (cell: CellAdapter): CellResolver =>
+  cell._tag === "Remote"
+    ? cell
+    : {
+        _tag: "Local",
+        forWorkspace: (workspace) =>
+          cell.forWorkspace(workspace).pipe(Effect.map((services) => services as Context.Context<LocalCellServices>)),
+      }
 
 const message = (cause: unknown) => {
   if (cause instanceof Error && cause.message.length > 0) return cause.message
@@ -151,7 +177,7 @@ const status = (value: Run.RunStatus): Status => {
   }
 }
 
-const make = (options: Options, credentialStore: ProviderCredentialStoreShape | undefined) =>
+const make = (options: SharedOptions, credentialStore: ProviderCredentialStoreShape | undefined) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime.Runtime
     // A replayPolicy:"never" operation interrupted by cancellation parks the Run in
@@ -231,15 +257,14 @@ const make = (options: Options, credentialStore: ProviderCredentialStoreShape | 
     const gateway = ExecutionGateway.Service.of({
       startTurn: (input) =>
         Effect.gen(function* () {
-          const turnKernelPool =
-            options.kernelPool === undefined ? undefined : yield* options.kernelPool.forWorkspace(input.workspace)
+          const cell = yield* resolveCellRoute(cellResolver(options.cell), input.workspace)
           const turnCapabilities =
             options.capabilities === undefined ? undefined : yield* options.capabilities(input.workspace)
           const configured = yield* configure({
             executionRoute: input.executionRoute,
             workspace: input.workspace,
-            kernel: kernelOptions(options),
-            ...(turnKernelPool === undefined ? {} : { kernelPool: turnKernelPool }),
+            kernel: options.kernel,
+            cell,
             ...(turnCapabilities === undefined
               ? {}
               : { skills: turnCapabilities.skills, harnessSnapshot: turnCapabilities.harnessSnapshot }),
@@ -455,7 +480,7 @@ const make = (options: Options, credentialStore: ProviderCredentialStoreShape | 
         ),
     })
     const unavailable = (cause: unknown) => ExecutionSessionLifecycle.Unavailable.make({ message: message(cause) })
-    const builtPools = options.kernelPool === undefined ? Effect.succeed([]) : options.kernelPool.built
+    const builtPools = options.cell._tag === "Local" ? options.cell.built : Effect.succeed([])
     const lifecycle = ExecutionSessionLifecycle.Service.of({
       requestCancellation: (input) => runtime.cancelSession(input).pipe(Effect.mapError(unavailable)),
       awaitTerminal: (input) => runtime.awaitSessionTerminal(input).pipe(Effect.mapError(unavailable)),
@@ -481,8 +506,9 @@ const make = (options: Options, credentialStore: ProviderCredentialStoreShape | 
     )
   })
 
-export const layer = (
-  options: Options,
+const executionLayer = <E>(
+  options: SharedOptions,
+  runtimeLayer: (credentialStore: ProviderCredentialStoreShape | undefined) => Layer.Layer<Runtime.Runtime, E>,
 ): Layer.Layer<ExecutionGateway.Service | ExecutionSessionLifecycle.Service, ExecutionGateway.StartTurnFailure> =>
   Layer.unwrap(
     Effect.gen(function* () {
@@ -490,24 +516,10 @@ export const layer = (
         options.credentialStore === undefined
           ? undefined
           : Context.get(yield* Layer.build(options.credentialStore), ProviderCredentialStore)
-      const runtimeLayer = Runtime.layerSqlite({
-        filename: options.filename,
-        resolver: makeResolver({
-          kernel: kernelOptions(options),
-          ...(options.kernelPool === undefined ? {} : { kernelPool: options.kernelPool }),
-          ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
-          ...(credentialStore === undefined ? {} : { credentialStore }),
-          ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
-          ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
-        }),
-        addresses: [],
-        ...(options.subscriberQueueCapacity === undefined
-          ? {}
-          : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
-        ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
-      })
-      const executionLayer = Layer.effectContext(make(options, credentialStore)).pipe(Layer.provide(runtimeLayer))
-      return executionLayer.pipe(
+      const providedExecution = Layer.effectContext(make(options, credentialStore)).pipe(
+        Layer.provide(runtimeLayer(credentialStore)),
+      )
+      return providedExecution.pipe(
         Layer.catchCause((cause) =>
           Layer.effectContext(
             Effect.fail(ExecutionGateway.StartTurnFailure.make({ message: message(Cause.squash(cause)) })),
@@ -516,3 +528,70 @@ export const layer = (
       )
     }),
   )
+
+const resolverFor = (options: SharedOptions, credentialStore: ProviderCredentialStoreShape | undefined) =>
+  makeResolver({
+    kernel: options.kernel,
+    cell: cellResolver(options.cell),
+    ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
+    ...(credentialStore === undefined ? {} : { credentialStore }),
+    ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
+    ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
+  })
+
+export const layerPostgres = (
+  options: Options,
+): Layer.Layer<
+  ExecutionGateway.Service | ExecutionSessionLifecycle.Service | PostgresControlPlane.Readiness,
+  ExecutionGateway.StartTurnFailure
+> =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const credentialStore: ProviderCredentialStoreShape | undefined =
+        options.credentialStore === undefined
+          ? undefined
+          : Context.get(yield* Layer.build(options.credentialStore), ProviderCredentialStore)
+      const controlPlane = PostgresControlPlane.layer({
+        postgres: options.postgres,
+        resolver: resolverFor(options, credentialStore),
+        ...(options.subscriberQueueCapacity === undefined
+          ? {}
+          : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
+        ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
+      })
+      const execution = Layer.effectContext(make(options, credentialStore)).pipe(Layer.provide(controlPlane))
+      const readiness = Layer.effect(
+        PostgresControlPlane.Readiness,
+        Effect.map(PostgresControlPlane.Readiness, PostgresControlPlane.Readiness.of),
+      ).pipe(Layer.provide(controlPlane))
+      return Layer.merge(execution, readiness).pipe(
+        Layer.catchCause((cause) =>
+          Layer.effectContext(
+            Effect.fail(ExecutionGateway.StartTurnFailure.make({ message: message(Cause.squash(cause)) })),
+          ),
+        ),
+      )
+    }),
+  )
+
+export const layerSqliteTest = (
+  options: SqliteTestOptions,
+): Layer.Layer<ExecutionGateway.Service | ExecutionSessionLifecycle.Service, ExecutionGateway.StartTurnFailure> => {
+  const shared: SharedOptions = {
+    ...options,
+    kernel: options.kernel ?? derivedKernelOptions(options.filename),
+  }
+  return executionLayer(shared, (credentialStore) =>
+    Runtime.layerSqlite({
+      filename: options.filename,
+      resolver: resolverFor(shared, credentialStore),
+      addresses: [],
+      ...(options.subscriberQueueCapacity === undefined
+        ? {}
+        : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
+      ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
+    }),
+  )
+}
+
+export const layer = layerPostgres

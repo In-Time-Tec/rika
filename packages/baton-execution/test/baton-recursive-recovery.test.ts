@@ -4,7 +4,7 @@ import type { Change } from "@rika/product/execution-projection"
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import { Database } from "bun:sqlite"
 import { Context, Effect, Layer, Random, Schedule, Schema, Stream } from "effect"
-import { layer } from "../src/baton-execution"
+import { sqliteLayer as layer } from "./baton-test-adapters"
 import {
   laneExecutionRoute,
   makeLaneModels,

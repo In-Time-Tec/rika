@@ -6,7 +6,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import type { Change } from "@rika/product/execution-projection"
 import { Context, Effect, Layer, Random, Stream } from "effect"
-import { layer } from "../src/baton-execution"
+import { sqliteLayer as layer } from "./baton-test-adapters"
 
 const registryLayer = (...fixtures: ReadonlyArray<TestModel.Fixture>) =>
   ModelRegistry.layer(

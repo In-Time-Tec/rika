@@ -1,4 +1,11 @@
-import { type ConfigureOptions, type ConfiguredExecutable, type ResolverOptions } from "./baton-route-options"
+import {
+  type ConfigureOptions,
+  type ConfiguredExecutable,
+  type LocalCellServices,
+  type RemoteCellRoute,
+  type ResolverOptions,
+  resolveCellRoute,
+} from "./baton-route-options"
 import {
   Agent,
   AgentManifest,
@@ -7,6 +14,7 @@ import {
   LanguageModel,
   ModelRegistry,
   Pins,
+  ToolContext,
   ToolExecutor,
 } from "tenetkit"
 import { ModelRoute } from "tenetkit/ai"
@@ -19,11 +27,12 @@ import * as HarnessPromptSections from "@rika/kernel/harness-prompt-sections"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
-import { Context, Effect, Function, Layer, Schema, Stream } from "effect"
+import { Context, Effect, Function, Layer, Schedule, Schema, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import { profileInstructions } from "./baton-agent-profile"
 import * as CandidateRegistry from "./baton-candidate-registry"
 import * as Registration from "./baton-registration"
+import * as RemoteCellDispatcher from "./remote-cell-dispatcher"
 
 type ModelSnapshot = ExecutionRoute.ExecutionRouteModelSnapshot
 type RouteSnapshot = ExecutionRoute.ExecutionRouteSnapshot
@@ -217,20 +226,12 @@ const agentDefinition = (
 const rootChildNames = ["Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
 type ChildProfileName = (typeof rootChildNames)[number]
 
-const missingKernel = (tool: string) =>
+const unsupportedCellTool = (tool: string) =>
   ToolExecutor.FrameworkFailure.make({
     stage: "handler",
     tool,
-    message: "the typescript cell requires a kernel pool",
+    message: `the configured cell adapter does not route ${tool}`,
   })
-
-const workspaceState = (workspace: string): Effect.Effect<"empty" | "not empty"> =>
-  Effect.promise(() =>
-    Array.fromAsync(new Bun.Glob("*").scan({ cwd: workspace, dot: true, onlyFiles: false })).then(
-      (entries) => (entries.length === 0 ? "empty" : "not empty"),
-      () => "empty",
-    ),
-  )
 
 const deadlineFailure = (failure: Cell.CellFailure, deadlineMillis: number): Cell.CellFailure => {
   if (failure._tag !== "tenetkit/repl/CellExecutionFailed") return failure
@@ -266,16 +267,16 @@ const deadlinePool = (pool: KernelPool.Interface, deadlineMillis: number): Kerne
  * and must be removed when it ends.
  */
 const cellExecutor = (
-  pool: Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext> | undefined,
+  services: Context.Context<LocalCellServices>,
   deadlineMillis: number,
 ): Layer.Layer<ToolExecutor.ToolExecutor> =>
   Layer.succeed(
     ToolExecutor.ToolExecutor,
     ToolExecutor.ToolExecutor.of({
       execute: (request) => {
-        if (!CellTool.route.matches(request) || pool === undefined) return missingKernel(request.call.name)
+        if (!CellTool.route.matches(request)) return unsupportedCellTool(request.call.name)
         return Effect.scoped(
-          Context.get(pool, CellCallContext.CellCallContext)
+          Context.get(services, CellCallContext.CellCallContext)
             .enter(request.sessionId)
             .pipe(
               Effect.andThen(
@@ -284,7 +285,9 @@ const cellExecutor = (
                   .pipe(
                     Effect.provideService(
                       KernelPool.KernelPool,
-                      KernelPool.KernelPool.of(deadlinePool(Context.get(pool, KernelPool.KernelPool), deadlineMillis)),
+                      KernelPool.KernelPool.of(
+                        deadlinePool(Context.get(services, KernelPool.KernelPool), deadlineMillis),
+                      ),
                     ),
                   ),
               ),
@@ -293,6 +296,67 @@ const cellExecutor = (
       },
     }),
   )
+
+const remoteCellExecutor = (route: RemoteCellRoute, workspace: string): Layer.Layer<ToolExecutor.ToolExecutor> =>
+  Layer.effect(
+    ToolExecutor.ToolExecutor,
+    Effect.map(RemoteCellDispatcher.RemoteCellDispatcher, (dispatcher) =>
+      ToolExecutor.ToolExecutor.of({
+        execute: (request) => {
+          if (!CellTool.route.matches(request)) return unsupportedCellTool(request.call.name)
+          return Effect.gen(function* () {
+            const context = yield* ToolContext.ToolContext
+            const remote = ToolExecutor.remote({
+              toolkit: CellTool.toolkit,
+              tools: [CellTool.name],
+              idempotent: true,
+              operationKey: () => context.operationKey ?? "",
+              maxRetries: route.maxRetries,
+              schedule: Schedule.exponential(route.retryDelayMillis),
+              execute: (placement) =>
+                Effect.gen(function* () {
+                  const parameters = yield* Schema.decodeUnknownEffect(CellTool.Parameters)(placement.call.params).pipe(
+                    Effect.mapError((cause) =>
+                      ToolExecutor.FrameworkFailure.make({
+                        stage: "decode-input",
+                        tool: placement.call.name,
+                        message: String(cause),
+                      }),
+                    ),
+                  )
+                  const response = yield* dispatcher.dispatchDeduplicated(
+                    RemoteCellDispatcher.Request.make({
+                      operationKey: placement.operationKey,
+                      workspace,
+                      sessionId: placement.sessionId,
+                      toolCallId: context.toolCallId ?? placement.call.id,
+                      code: parameters.code,
+                      ...(context.runId === undefined ? {} : { runId: context.runId }),
+                      ...(context.rootRunId === undefined ? {} : { rootRunId: context.rootRunId }),
+                      ...(context.attempt === undefined ? {} : { attempt: context.attempt }),
+                      ...(context.admittedAt === undefined ? {} : { admittedAt: context.admittedAt }),
+                      ...(context.deadline === undefined ? {} : { deadline: context.deadline }),
+                    }),
+                  )
+                  return yield* Schema.decodeUnknownEffect(RemoteCellDispatcher.Response, {
+                    onExcessProperty: "error",
+                  })(response).pipe(
+                    Effect.mapError((cause) =>
+                      ToolExecutor.FrameworkFailure.make({
+                        stage: "placement",
+                        tool: placement.call.name,
+                        message: `remote cell response is invalid: ${String(cause)}`,
+                      }),
+                    ),
+                  )
+                }),
+            })
+            return yield* remote.execute(request)
+          })
+        },
+      }),
+    ),
+  ).pipe(Layer.provide(route.dispatcher))
 
 export const configure = (
   options: ConfigureOptions,
@@ -360,30 +424,29 @@ export const configure = (
         ? { capabilities: [], registrations: [] }
         : ExecutionPins.harness(options.harnessSnapshot)
     const pinnedCapabilities = { skills: skillPins.capabilities, services: harnessPins.capabilities }
-    const cellLayer = cellExecutor(
-      options.kernelPool,
-      options.kernel.limits?.cellDeadlineMillis ?? KernelProfileRegistration.defaultLimits.cellDeadlineMillis,
-    )
+    const cellLayer =
+      options.cell._tag === "Local"
+        ? cellExecutor(
+            options.cell.services,
+            options.kernel.limits?.cellDeadlineMillis ?? KernelProfileRegistration.defaultLimits.cellDeadlineMillis,
+          )
+        : remoteCellExecutor(options.cell, options.workspace)
     const environment = (name: keyof typeof routes): AgentEnvironment => {
       const model = routed[name].layer
       if (name === "Title" || name === "Compaction") return Layer.orDie(model)
       return Layer.orDie(Layer.mergeAll(model, compactionLayer, cellLayer))
     }
     const supplemental = harnessSupplement(options.harnessSnapshot, options.skills ?? [])
-    const mountedModules =
-      options.kernelPool === undefined
-        ? []
-        : BindingModules.make({
-            workspace: options.workspace,
-            workspaceDigest: "",
-            trustMode: options.kernel.trustMode ?? "trusted-local",
-            servers: [],
-          })
+    const mountedModules = BindingModules.make({
+      workspace: options.workspace,
+      workspaceDigest: "",
+      trustMode: options.kernel.trustMode ?? "trusted-local",
+      servers: [],
+    })
     const limits = options.kernel.limits ?? KernelProfileRegistration.defaultLimits
     const cellSurface = BindingModules.cellInstructions({
       modules: mountedModules,
       workspace: options.workspace,
-      workspaceState: yield* workspaceState(options.workspace),
       channelBytes: limits.channelBytes,
       cellDeadlineMillis: limits.cellDeadlineMillis,
     })
@@ -573,19 +636,14 @@ export const makeResolver = (options: ResolverOptions): ExecutableResolver.Inter
         const active = input.manifest.entries.find((entry) => entry.pin === input.ref.active)
         if (active === undefined) return yield* Errors.ExecutablePinMissing.make({ runId: input.runId, ref: input.ref })
         const context = yield* Registration.read(Registration.codecs.applicationContext, input.registrations)
-        /**
-         * A recovered Run resolves the kernel for the workspace its own registration pinned, so a
-         * Run adopted by a Server started elsewhere still runs its cells against its own workspace.
-         */
-        const kernelPool =
-          options.kernelPool === undefined ? undefined : yield* options.kernelPool.forWorkspace(context.workspace)
+        const cell = yield* resolveCellRoute(options.cell, context.workspace)
         const capabilities =
           options.capabilities === undefined ? undefined : yield* options.capabilities(context.workspace)
         const configured = yield* configure({
           executionRoute: context.executionRoute,
           workspace: context.workspace,
           kernel: options.kernel,
-          ...(kernelPool === undefined ? {} : { kernelPool }),
+          cell,
           ...(capabilities === undefined
             ? {}
             : { skills: capabilities.skills, harnessSnapshot: capabilities.harnessSnapshot }),

@@ -4,7 +4,7 @@ import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { ExecutableRegistration } from "tenetkit/runtime"
 import { Cause, Effect, Exit } from "effect"
 import * as Registration from "../src/baton-registration"
-import { configure } from "../src/baton-route"
+import { configure } from "./baton-test-adapters"
 
 const workspace = "/workspace"
 const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const

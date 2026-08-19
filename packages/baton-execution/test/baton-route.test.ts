@@ -9,7 +9,8 @@ import * as ExecutionRouteResolution from "@rika/product/execution-route-resolut
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Cause, ConfigProvider, Effect, Exit, Schema } from "effect"
 import * as Registration from "../src/baton-registration"
-import { configure, profileInstructions } from "../src/baton-route"
+import { profileInstructions } from "../src/baton-route"
+import { configure } from "./baton-test-adapters"
 
 const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const
 

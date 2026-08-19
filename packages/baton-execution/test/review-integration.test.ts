@@ -8,7 +8,7 @@ import { reviewIntent } from "@rika/product/review-policy"
 import { Database } from "bun:sqlite"
 import { randomUUID } from "node:crypto"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
-import { layer } from "../src/baton-execution"
+import { sqliteLayer as layer } from "./baton-test-adapters"
 
 const fanOutJoin = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
