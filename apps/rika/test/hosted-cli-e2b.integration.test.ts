@@ -176,6 +176,7 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
         const controller = controllerLayer({
           appId: "rika",
           deploymentId: "integration-test",
+          templateId: "ar7-template-alias",
           templateBuildId: "template-build-v1-immutable",
           controllerUrl: "wss://control.example.test/api/v1/executors",
           allowedEgress: ["control.example.test", "github.com", "api.github.com"],

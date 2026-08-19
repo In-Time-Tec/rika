@@ -22,6 +22,7 @@ export const config = (environment: Record<string, string | undefined>) => {
   return {
     appId: required(environment, "E2B_APP_ID"),
     deploymentId: required(environment, "E2B_DEPLOYMENT_ID"),
+    templateId: required(environment, "E2B_TEMPLATE_ID"),
     templateBuildId: required(environment, "E2B_TEMPLATE_BUILD_ID"),
     controllerUrl,
     allowedEgress: [new URL(controllerUrl).hostname, "github.com", "api.github.com"],

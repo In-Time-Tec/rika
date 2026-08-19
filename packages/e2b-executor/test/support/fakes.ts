@@ -140,6 +140,7 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
   const controller = controllerLayer({
     appId: "rika",
     deploymentId: "test",
+    templateId: "ar7-template-alias",
     templateBuildId: "template-build-v1-immutable",
     controllerUrl: "wss://controller.example.test/executors",
     allowedEgress: ["controller.example.test", "github.com", "api.github.com"],

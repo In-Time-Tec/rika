@@ -18,6 +18,11 @@ Set these service variables in Railway. Railway supplies `PORT`; do not replace 
 - `BETTER_AUTH_TRUSTED_ORIGINS`: comma-separated HTTPS browser origins, including `BETTER_AUTH_URL`.
 - `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`: OAuth application credentials.
 - `RESEND_API_KEY` and `EMAIL_FROM`: an authorized Resend API key and sender.
+- `E2B_API_KEY`: the controller-only E2B API key.
+- `E2B_APP_ID` and `E2B_DEPLOYMENT_ID`: stable ownership labels for managed sandbox inventory.
+- `E2B_TEMPLATE_ID`: the commit-qualified E2B template ID accepted by `Sandbox.create`.
+- `E2B_TEMPLATE_BUILD_ID`: the successful build receipt UUID used for assignment identity and fencing.
+- `RIKA_EXECUTOR_CONTROLLER_URL`: this service's public `wss://` origin with `/api/v1/executors`.
 
 Keep all credentials in Railway variables. Do not put them in the repository, Docker build arguments, or image files.
 

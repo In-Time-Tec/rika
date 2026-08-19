@@ -12,6 +12,7 @@ import { Context, Effect, Layer, Redacted, Schema } from "effect"
 export interface CreateRequest {
   readonly appId: string
   readonly deploymentId: string
+  readonly templateId: string
   readonly templateBuildId: string
   readonly assignmentId: string
   readonly threadId: string
@@ -63,7 +64,7 @@ export interface Paginator {
 }
 
 export interface Sdk {
-  readonly create: (templateBuildId: string, options: SandboxOpts) => Promise<SdkHandle>
+  readonly create: (templateId: string, options: SandboxOpts) => Promise<SdkHandle>
   readonly connect: (sandboxId: string, options: SandboxConnectOpts) => Promise<SdkHandle>
   readonly pause: (sandboxId: string, options: SandboxPauseOpts) => Promise<boolean>
   readonly kill: (sandboxId: string, options: SandboxConnectOpts) => Promise<boolean>
@@ -89,24 +90,26 @@ const bootstrapHeaders = (trafficAccessToken: string) => ({
 })
 
 const liveSdk: Sdk = {
-  create: (templateBuildId, options) => Sandbox.create(templateBuildId, options),
+  create: (templateId, options) => Sandbox.create(templateId, options),
   connect: (sandboxId, options) => Sandbox.connect(sandboxId, options),
   pause: (sandboxId, options) => Sandbox.pause(sandboxId, options),
   kill: (sandboxId, options) => Sandbox.kill(sandboxId, options),
   setTimeout: (sandboxId, timeoutMillis, options) => Sandbox.setTimeout(sandboxId, timeoutMillis, options),
   list: (options) => Sandbox.list(options),
-  bootstrap: async ({ sandboxId, body, connection, url }) => {
-    const sandbox = await Sandbox.connect(sandboxId, connection)
-    if (sandbox.trafficAccessToken === undefined) {
-      throw new Error("secure sandbox did not provide a traffic access token")
-    }
-    const response = await Bun.fetch(url, {
-      method: "POST",
-      headers: bootstrapHeaders(sandbox.trafficAccessToken),
-      body,
-    })
-    if (!response.ok) throw new Error(`bootstrap endpoint returned ${response.status}`)
-  },
+  bootstrap: ({ sandboxId, body, connection, url }) =>
+    Sandbox.connect(sandboxId, connection)
+      .then((sandbox) => {
+        if (sandbox.trafficAccessToken === undefined)
+          throw new Error("secure sandbox did not provide a traffic access token")
+        return Bun.fetch(url, {
+          method: "POST",
+          headers: bootstrapHeaders(sandbox.trafficAccessToken),
+          body,
+        })
+      })
+      .then((response) => {
+        if (!response.ok) throw new Error(`bootstrap endpoint returned ${response.status}`)
+      }),
 }
 
 const managedMetadata = { "rika.managed": "e2b-executor" } as const
@@ -130,7 +133,7 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
 
   const create = Effect.fn("Provider.create")(function* (request: CreateRequest) {
     const sandbox = yield* attempt("create", () =>
-      sdk.create(request.templateBuildId, {
+      sdk.create(request.templateId, {
         ...connection,
         timeoutMs: request.idleTimeoutMillis,
         secure: true,
@@ -188,12 +191,12 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
     })
     const entries: Array<SandboxInfo> = []
     while (paginator.hasNext) entries.push(...(yield* attempt("inventory", () => paginator.nextItems())))
-    return entries.map((entry) => ({
-      sandboxId: entry.sandboxId,
-      state: entry.state,
-      templateBuildId: entry.metadata["rika.template-build-id"] ?? entry.templateId,
-      metadata: entry.metadata,
-    }))
+    return entries.flatMap((entry) => {
+      const templateBuildId = entry.metadata["rika.template-build-id"]
+      return templateBuildId === undefined
+        ? []
+        : [{ sandboxId: entry.sandboxId, state: entry.state, templateBuildId, metadata: entry.metadata }]
+    })
   })
 
   return Provider.of({ create, bootstrap, connect, pauseFilesystem, kill, touch, inventory })

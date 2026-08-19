@@ -96,6 +96,7 @@ export const DefaultBootstrapLifetimeMillis = 5 * 60 * 1_000
 export interface Options {
   readonly appId: string
   readonly deploymentId: string
+  readonly templateId: string
   readonly templateBuildId: string
   readonly controllerUrl: string
   readonly allowedEgress: ReadonlyArray<string>
@@ -191,6 +192,7 @@ export const layer = (
   Layer.effect(
     Controller,
     Effect.gen(function* () {
+      if (options.templateId.length === 0) return yield* failure("protocol", "Template ID is required")
       if (options.templateBuildId.length === 0) return yield* failure("protocol", "Template build ID is required")
       if (
         options.allowedEgress.length === 0 ||
@@ -244,6 +246,7 @@ export const layer = (
         const request: CreateRequest = {
           appId: options.appId,
           deploymentId: options.deploymentId,
+          templateId: options.templateId,
           templateBuildId: placement.templateBuildId,
           assignmentId: assignment.id,
           threadId: assignment.threadId,
@@ -264,15 +267,23 @@ export const layer = (
         return request
       })
 
-      const matchesGeneration = (assignment: ExecutorAssignment, metadata: Readonly<Record<string, string>>) =>
+      const matchesGeneration = (
+        assignment: ExecutorAssignment,
+        templateBuildId: string,
+        metadata: Readonly<Record<string, string>>,
+      ) =>
         metadata["rika.app-id"] === options.appId &&
         metadata["rika.deployment-id"] === options.deploymentId &&
         metadata["rika.assignment-id"] === assignment.id &&
-        metadata["rika.generation"] === assignment.generation
+        metadata["rika.generation"] === assignment.generation &&
+        assignment.placement._tag === "E2BPlacement" &&
+        templateBuildId === assignment.placement.templateBuildId
 
       const reconcileCreate = Effect.fn("Controller.reconcileCreate")(function* (assignment: ExecutorAssignment) {
         const inventory = yield* provider.inventory.pipe(Effect.mapError(providerFailure))
-        const matches = inventory.filter((entry) => matchesGeneration(assignment, entry.metadata))
+        const matches = inventory.filter((entry) =>
+          matchesGeneration(assignment, entry.templateBuildId, entry.metadata),
+        )
         if (matches.length === 0) return yield* failure("provider", "create outcome is unknown and no sandbox exists")
         const [adopt, ...duplicates] = [...matches].sort((left, right) => left.sandboxId.localeCompare(right.sandboxId))
         yield* Effect.forEach(

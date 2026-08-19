@@ -67,6 +67,7 @@ describe("Controller", () => {
       })
       expect(harness.provider.creates).toHaveLength(1)
       expect(harness.provider.creates[0]).toMatchObject({
+        templateId: "ar7-template-alias",
         templateBuildId: "template-build-v1-immutable",
         assignmentId: "assignment-1",
         threadId: "thread-1",
@@ -75,6 +76,7 @@ describe("Controller", () => {
         environment: {
           RIKA_EXECUTOR_TARGET: "e2b",
           RIKA_EXECUTOR_ID: "assignment-1:g1",
+          RIKA_EXECUTOR_TEMPLATE_BUILD_ID: "template-build-v1-immutable",
           RIKA_EXECUTOR_WORKSPACE: "/workspace",
         },
       })
@@ -315,6 +317,32 @@ describe("Controller", () => {
       expect(harness.provider.creates).toHaveLength(1)
       expect(harness.provider.bootstraps.map((entry) => entry.sandboxId)).toEqual(["sandbox-a-adopt"])
       expect(harness.provider.kills).toEqual(["sandbox-z-duplicate"])
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("does not reconcile an unknown create outcome against a mutable template alias", () => {
+    const harness = makeHarness()
+    harness.provider.createFailure = true
+    harness.provider.inventory = [
+      {
+        sandboxId: "sandbox-wrong-build",
+        state: "running",
+        templateBuildId: "different-build-receipt",
+        metadata: {
+          "rika.managed": "e2b-executor",
+          "rika.app-id": "rika",
+          "rika.deployment-id": "test",
+          "rika.assignment-id": "assignment-1",
+          "rika.generation": "1",
+        },
+      },
+    ]
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* createAssignment()
+      expect((yield* Effect.flip(service.provision("assignment-1"))).kind).toBe("provider")
+      expect(harness.provider.bootstraps).toEqual([])
+      expect(harness.provider.kills).toEqual([])
     }).pipe(provideLayer(harness.layer))
   })
 

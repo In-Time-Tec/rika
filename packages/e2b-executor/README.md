@@ -1,6 +1,6 @@
 # E2B executor control plane
 
-This package is the E2B-only control-plane adapter. It owns explicit assignment, immutable template build selection, short-lived bootstrap and lease credentials, E2B lifecycle calls, verified filesystem checkpoint metadata, GitHub App installation-token brokering, and managed-orphan cleanup.
+This package is the E2B-only control-plane adapter. It owns explicit assignment, immutable template build selection, short-lived bootstrap and lease credentials, E2B lifecycle calls, verified filesystem checkpoint metadata, GitHub App installation-token brokering, and managed-orphan cleanup. `E2B_TEMPLATE_ID` selects the E2B template for `Sandbox.create`; `E2B_TEMPLATE_BUILD_ID` is the successful build receipt stored in assignment placement, executor identity, fencing, and inventory metadata.
 
 It does not implement the product `ExecutionGateway`, TenetKit RunStore, an agent loop, workspace tools, processes, or PTYs. Application composition must keep `ExecutionGateway` as the product boundary and TenetKit as the sole durable Run authority. Executors receive neither Postgres credentials nor E2B/GitHub App controller credentials.
 
@@ -11,7 +11,7 @@ The application must provide durable optimistic `AssignmentStore`, `CheckpointOb
 Run the credentialed lifecycle validation only after building the immutable template:
 
 ```sh
-E2B_API_KEY=... E2B_TEMPLATE_BUILD_ID=... \
+E2B_API_KEY=... E2B_TEMPLATE_ID=... E2B_TEMPLATE_BUILD_ID=... \
   bun run packages/e2b-executor/test/provider.live.ts
 ```
 

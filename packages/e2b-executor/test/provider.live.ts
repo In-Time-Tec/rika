@@ -17,11 +17,13 @@ const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const program = Effect.gen(function* () {
   const apiKey = Redacted.make(yield* required("E2B_API_KEY"), { label: "e2b-api-key" })
+  const templateId = yield* required("E2B_TEMPLATE_ID")
   const templateBuildId = yield* required("E2B_TEMPLATE_BUILD_ID")
   const provider = make({ apiKey })
   const sandbox = yield* provider.create({
     appId: "rika",
     deploymentId: "live-validation",
+    templateId,
     templateBuildId,
     assignmentId: "live-validation",
     threadId: "live-validation",
@@ -33,6 +35,7 @@ const program = Effect.gen(function* () {
       RIKA_EXECUTOR_ASSIGNMENT_ID: "live-validation",
       RIKA_EXECUTOR_GENERATION: "1",
       RIKA_EXECUTOR_ID: "live-validation:g1",
+      RIKA_EXECUTOR_TEMPLATE_BUILD_ID: templateBuildId,
       RIKA_EXECUTOR_CONTROLLER_URL: "wss://controller.invalid/executors",
     },
   })
