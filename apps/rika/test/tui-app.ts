@@ -10,6 +10,7 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as Turn from "@rika/product/turn-record"
 import * as ThreadQuery from "@rika/product/thread-query-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
+import type { ModeConfiguration } from "@rika/terminal/terminal-state"
 import { Config, Context, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Scope, SubscriptionRef } from "effect"
 import { performance } from "node:perf_hooks"
 import { interactiveTui } from "../src/interactive/process/interactive-process-loop"
@@ -54,6 +55,7 @@ export interface TuiAppOptions {
   readonly mapInteractiveEvent?: (event: SessionEvent) => SessionEvent
   readonly historicalTranscriptFixture?: HistoricalTranscriptFixture
   readonly prepareRuntimeState?: RuntimeStatePreparation
+  readonly modeConfiguration?: ModeConfiguration
 }
 
 export type CapturedSpans = ReturnType<Awaited<ReturnType<typeof createTestRenderer>>["captureSpans"]>
@@ -218,6 +220,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
         : Effect.sleep("10 millis").pipe(Effect.andThen(awaitSelectionLoaded(count))),
     )
   const runInteractive = interactiveTui({
+    modeConfiguration: () => options.modeConfiguration,
     makeRenderer: () => Promise.resolve(setup.renderer),
     writeTerminalTitle: (sequence) => terminalTitles.push(sequence.slice(4, -1)),
   })
@@ -399,7 +402,9 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
       yield* Fiber.join(operationFiber).pipe(Effect.asVoid, Effect.orDie)
     }),
   }
-  yield* app.waitFrame("medium")
+  const readyModes =
+    options.modeConfiguration === undefined ? ["medium"] : Object.keys(options.modeConfiguration.routes)
+  yield* app.waitFrameMatch((captured) => readyModes.some((mode) => captured.includes(mode)))
   if (options.historicalTranscriptFixture !== undefined) {
     const current = session ?? (yield* Effect.die("TUI session is unavailable"))
     const before = selectionsLoaded

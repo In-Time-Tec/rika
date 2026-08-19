@@ -49,6 +49,13 @@ export const interactiveTui =
       )
       const lifecycle = yield* SubscriptionRef.make<TuiLifecycle>({ _tag: "Running" })
       const resolvedModeConfiguration = options.modeConfiguration?.()
+      const rememberedMode = resolvedModeConfiguration?.rememberedMode
+      const configuredRememberedMode =
+        resolvedModeConfiguration !== undefined &&
+        rememberedMode !== undefined &&
+        Object.hasOwn(resolvedModeConfiguration.routes, rememberedMode)
+          ? rememberedMode
+          : undefined
       return yield* Effect.callback<void, ProductOperation.OperationUnavailable>((resume) => {
         let renderPending = false
         let initialConnectionStatus: Model["connectionStatus"]
@@ -56,7 +63,10 @@ export const interactiveTui =
         else if (connection.initialStatus === "reconnecting") initialConnectionStatus = "Reconnecting"
         const loop: InteractiveLoop = {
           model: {
-            ...initial(input.workspace ?? process.cwd(), input.mode ?? resolvedModeConfiguration?.defaultMode),
+            ...initial(
+              input.workspace ?? process.cwd(),
+              input.mode ?? configuredRememberedMode ?? resolvedModeConfiguration?.defaultMode,
+            ),
             connectionStatus: initialConnectionStatus,
           },
           threadView: undefined,
