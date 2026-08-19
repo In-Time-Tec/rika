@@ -390,6 +390,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     denyAuthorization: (turnId, authorizationId) => run(session.denyAuthorization(turnId, authorizationId)),
     interruptAndSend: (prompt) => run(session.interruptAndSend(prompt)),
     cancel: () => run(session.cancel),
+    newThread: () => startSelection(() => session.newThread),
     selectThread: (id) => {
       loop.requestedThreadId = id
       startSelection(() => session.selectThread(id))
@@ -397,9 +398,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
   }
   const consumePendingAction = () => {
     const action = loop.model.pendingAction as unknown
-    const command = PaletteController.paletteCommand(action)
-    if (command?._tag === "NewThread") startSelection(() => session.newThread)
-    else if (
+    if (
       action !== null &&
       typeof action === "object" &&
       "_tag" in action &&

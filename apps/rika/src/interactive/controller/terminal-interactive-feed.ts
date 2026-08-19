@@ -37,7 +37,12 @@ const clearTimeline = (model: Model): Model => ({
   eventCursor: undefined,
 })
 
-const project = (model: Model, view: ThreadView.ThreadViewAccumulator, modelPreview?: ModelPreview.Overlay): Model => {
+const project = (
+  model: Model,
+  view: ThreadView.ThreadViewAccumulator,
+  preserveOptimisticState: boolean,
+  modelPreview?: ModelPreview.Overlay,
+): Model => {
   const snapshot = view.snapshot()
   const active = snapshot.turns.find(
     (entry) =>
@@ -72,7 +77,8 @@ const project = (model: Model, view: ThreadView.ThreadViewAccumulator, modelPrev
     busy: active !== undefined,
     activity: undefined,
     pendingSteering: authoritativeSteering,
-    steeringRequests,
+    steeringRequests: preserveOptimisticState ? steeringRequests : [],
+    submittedDrafts: preserveOptimisticState ? model.submittedDrafts : [],
     editingTurnId: editing ? model.editingTurnId : undefined,
     editReturn: editing ? model.editReturn : undefined,
     queue: snapshot.pending.map((item) => ({ id: item.id, prompt: item.prompt })),
@@ -93,8 +99,7 @@ const project = (model: Model, view: ThreadView.ThreadViewAccumulator, modelPrev
   for (const entry of snapshot.turns) next = applyRootUnits(next, String(entry.turn.id), entry.units)
   const previewUnits = ModelPreview.units(modelPreview, view)
   if (previewUnits.length > 0) next = applyRootUnits(next, String(previewUnits[0]!.turnId), previewUnits)
-  if (model.currentThreadId === undefined || model.currentThreadId === String(snapshot.thread.id))
-    next = overlayPendingSubmissions(next, model)
+  if (preserveOptimisticState) next = overlayPendingSubmissions(next, model)
   next = { ...next, activity: activeUnitActivity(active, modelPreview, next) }
   if (active === undefined && model.activeTurnId !== undefined) {
     const settled = snapshot.turns.find((entry) => String(entry.turn.id) === model.activeTurnId)?.turn
@@ -376,12 +381,16 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
       }
     const view = hydrated.success
     const modelPreview = ModelPreview.reconcile(state.modelPreview, view)
+    const preserveOptimisticState =
+      state.view === undefined
+        ? state.model.currentThreadId === undefined || state.model.currentThreadId === String(event.snapshot.thread.id)
+        : sameThread
     return {
       state: {
         ...state,
         view,
         modelPreview,
-        model: project(state.model, view, modelPreview),
+        model: project(state.model, view, preserveOptimisticState, modelPreview),
       },
       preserveAnchor: sameThread,
     }

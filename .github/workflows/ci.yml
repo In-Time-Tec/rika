@@ -71,7 +71,7 @@ jobs:
 
   tui:
     name: tui
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 20
     services:
       postgres:

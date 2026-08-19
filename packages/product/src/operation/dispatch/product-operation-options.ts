@@ -23,7 +23,7 @@ export interface ProductLayerOptions<
     BackendError
   >
   readonly resolveExecutionRoute?: (
-    mode: import("@rika/configuration/behavior-mode").ModeId,
+    mode?: import("@rika/configuration/behavior-mode").ModeId,
     tuning?: { readonly fastMode?: boolean },
     workspace?: string,
   ) => import("effect").Effect.Effect<

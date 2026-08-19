@@ -1,8 +1,9 @@
-import { modeIds } from "@rika/configuration/behavior-mode"
 import { Function } from "effect"
 import type { Message } from "../model/terminal-message"
 import { contentColumnWidth } from "../model/terminal-layout-state"
 import type { Model } from "../model/terminal-state"
+
+const modeIds = (model: Model) => Object.keys(model.modeRoutes)
 
 const openModeSelector = (model: Model): Model => ({
   ...model,
@@ -11,7 +12,14 @@ const openModeSelector = (model: Model): Model => ({
     contentColumnWidth(model) < 24 ? { ...model.threadSidebar, open: false, focused: false } : model.threadSidebar,
   paletteOpen: false,
   palette: { open: false, query: "", selected: 0 },
-  modePicker: { open: true, selected: modeIds.indexOf(model.mode) },
+  modePicker: {
+    open: true,
+    selected: modeIds(model).indexOf(
+      model.rememberedMode !== undefined && Object.hasOwn(model.modeRoutes, model.rememberedMode)
+        ? model.rememberedMode
+        : model.mode,
+    ),
+  },
   filePicker: { ...model.filePicker, open: false },
   threadSwitcher: { open: false, query: "", selected: 0, kind: "switch" },
   threadPreview: { _tag: "Idle" },
@@ -28,7 +36,9 @@ const slidePosition = (picker: Model["modePicker"]): number => {
 
 const turnModeSelector = (model: Model, offset: number): Model => {
   if (!model.modePicker.open) return model
-  const selected = (model.modePicker.selected + offset + modeIds.length) % modeIds.length
+  const modes = modeIds(model)
+  if (modes.length === 0) return model
+  const selected = (model.modePicker.selected + offset + modes.length) % modes.length
   return {
     ...model,
     modePicker: {
@@ -42,11 +52,12 @@ const turnModeSelector = (model: Model, offset: number): Model => {
 }
 
 const commitModeSelector = (model: Model, selected = model.modePicker.selected): Model => {
-  const next = modeIds[selected]
+  const next = modeIds(model)[selected]
   if (next === undefined) return model
   return {
     ...model,
     mode: next,
+    rememberedMode: next,
     modePicker: { open: false, selected },
     modeCommit: next === model.mode ? undefined : { from: model.mode, to: next, tick: 0 },
   }
@@ -83,7 +94,7 @@ const reduceModeInteractionImpl = (model: Model, message: Message): Model | unde
     case "ModeCommitted":
       return commitModeSelector(model, message.selected)
     case "ModeHovered":
-      return model.modePicker.open && modeIds[message.selected] !== undefined
+      return model.modePicker.open && modeIds(model)[message.selected] !== undefined
         ? { ...model, modePicker: { ...model.modePicker, selected: message.selected } }
         : model
     case "AnimationTicked":

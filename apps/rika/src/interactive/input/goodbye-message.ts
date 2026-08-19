@@ -9,11 +9,25 @@ export interface GoodbyeInput {
   readonly threadTitle?: string
 }
 
-const modeRgb: Record<GoodbyeMode, readonly [number, number, number]> = {
+const modeRgb: Readonly<Record<string, readonly [number, number, number]>> = {
   low: [255, 215, 0],
   medium: [61, 255, 166],
   high: [61, 212, 255],
   ultra: [216, 179, 255],
+}
+const customModeRgb = [
+  modeRgb.low!,
+  modeRgb.medium!,
+  modeRgb.high!,
+  modeRgb.ultra!,
+  [255, 143, 177],
+  [255, 184, 108],
+] as const
+const rgb = (mode: GoodbyeMode): readonly [number, number, number] => {
+  const configured = modeRgb[mode]
+  if (configured !== undefined) return configured
+  const hash = [...mode].reduce((value, character) => (value * 31 + character.codePointAt(0)!) >>> 0, 0)
+  return customModeRgb[hash % customModeRgb.length]!
 }
 
 const glyphs = ["     .#*+:", "   *##%%#+--", "  *#%##%@*=.:", "  +****=....:", "   =::......", "     ....."] as const
@@ -36,7 +50,7 @@ export const renderGoodbye = (input: GoodbyeInput): string => {
   let workspaceLine = input.workspace.replace(/^\/Users\/[^/]+(?=\/|$)/, "~")
   if (input.workspace === home) workspaceLine = "~"
   else if (input.workspace.startsWith(`${home}/`)) workspaceLine = `~${input.workspace.slice(home.length)}`
-  const [markR, markG, markB] = modeRgb[input.mode]
+  const [markR, markG, markB] = rgb(input.mode)
   const details = new Map<number, string>([
     [1, input.threadTitle === undefined || input.threadTitle.length === 0 ? "" : input.threadTitle],
     [2, workspaceLine.length === 0 ? "" : `${muted}${workspaceLine}${reset}`],

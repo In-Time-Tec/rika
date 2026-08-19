@@ -65,6 +65,39 @@ test("mounts entries appended below a detached transcript that fits the mount bu
       }
     }),
   ))
+test("replaces a populated transcript with the welcome view for an empty thread", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      const empty: Model = {
+        ...initial("/work", "high"),
+        currentThreadId: "thread-empty",
+        currentThreadTitle: "New thread",
+      }
+      const populated: Model = {
+        ...initial("/work", "high"),
+        currentThreadId: "thread-populated",
+        currentThreadTitle: "Existing thread",
+        entries: [{ role: "user", text: "OLD_THREAD_TRANSCRIPT", turnId: "turn-old" }],
+        items: [{ _tag: "Entry", index: 0, id: "old-thread-entry", turnId: "turn-old" }],
+      }
+      try {
+        surface.update(populated)
+        yield* openTui(() => setup.flush())
+        expect(setup.captureCharFrame()).toContain("OLD_THREAD_TRANSCRIPT")
+
+        surface.update(empty)
+        yield* openTui(() => setup.flush())
+        const frame = setup.captureCharFrame()
+        expect(frame).toContain("Welcome to Rika")
+        expect(frame).not.toContain("OLD_THREAD_TRANSCRIPT")
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
 test("reports prepend anchor geometry without requesting another page", () =>
   Effect.runPromise(
     Effect.gen(function* () {

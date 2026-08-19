@@ -32,6 +32,8 @@ export interface InteractiveSession {
   readonly cancel: Effect.Effect<void, OperationUnavailable>
   readonly quit: Effect.Effect<void, OperationUnavailable>
   readonly newThread: Effect.Effect<void, OperationUnavailable>
+  readonly archiveThread: Effect.Effect<void, OperationUnavailable>
+  readonly archiveAndNewThread: Effect.Effect<void, OperationUnavailable>
   readonly selectThread: (threadId: string) => Effect.Effect<void, OperationUnavailable>
   readonly readQueue: (threadId: string) => Effect.Effect<void, OperationUnavailable>
   readonly previewThread: (threadId: string, requestId: number) => Effect.Effect<void, OperationUnavailable>
@@ -106,7 +108,7 @@ export interface InteractiveSessionInput {
   readonly rootTurnOwner: RootTurnOwnerInterface
   readonly turnMutationAdmission: Semaphore.Semaphore
   readonly resolveExecutionRoute: (
-    mode: ModeId,
+    mode?: ModeId,
     tuning?: { readonly fastMode?: boolean },
     workspace?: string,
   ) => Effect.Effect<ExecutionRouteSnapshot, OperationError, import("@rika/product/execution-gateway").Service>

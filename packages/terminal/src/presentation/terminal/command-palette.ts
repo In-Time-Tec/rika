@@ -7,6 +7,7 @@ export interface Command {
 }
 
 export type PaletteAction =
+  | { readonly _tag: "NewThread" }
   | { readonly _tag: "OpenModePicker" }
   | { readonly _tag: "SwitchThread" }
   | { readonly _tag: "Quit" }
@@ -16,6 +17,7 @@ export type PaletteAction =
   | { readonly _tag: "SetSubagentLimit"; readonly limit: "maxDepth" | "maxSubagents"; readonly value: number }
 
 export const commands: ReadonlyArray<Command> = [
+  { id: "new-thread", category: "thread", label: "new thread", action: { _tag: "NewThread" } },
   { id: "threads", category: "thread", label: "switch", keybinding: "Ctrl+T", action: { _tag: "SwitchThread" } },
   { id: "mode", category: "mode", label: "change mode", keybinding: "Ctrl+S", action: { _tag: "OpenModePicker" } },
   {

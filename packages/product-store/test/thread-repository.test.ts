@@ -86,6 +86,27 @@ const behavior = (name: string, layer: Layer.Layer<ThreadRepository.Service>) =>
         expect((yield* repository.get(id("thread-a")))?.title).toBe("Generated")
       }).pipe(provideLayer(layer)),
     )
+
+    it.effect("archives the current thread while creating its replacement", () =>
+      Effect.gen(function* () {
+        const repository = yield* ThreadRepository.Service
+        yield* repository.create({
+          id: id("thread-a"),
+          workspace: "/work/a",
+          title: "Current",
+          now: 1,
+        })
+        const created = yield* repository.archiveAndCreate(id("thread-a"), {
+          id: id("thread-b"),
+          workspace: "/work/a",
+          title: "Replacement",
+          now: 2,
+        })
+
+        expect(created).toMatchObject({ id: id("thread-b"), archived: false })
+        expect(yield* repository.get(id("thread-a"))).toMatchObject({ archived: true, updatedAt: 2 })
+      }).pipe(provideLayer(layer)),
+    )
   })
 }
 
@@ -134,6 +155,34 @@ describe("sql layer", () => {
           "SELECT * FROM rika_threads WHERE id = ? AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id)",
         ])
         expect(sql.statements[1]?.parameters).toEqual(["thread-a", "/work/a", "First", '{"_tag":"Original"}', 1, 1])
+      }),
+    ),
+  )
+
+  it.effect("archives and creates in one SQL transaction", () =>
+    sqlTest((sql) =>
+      Effect.gen(function* () {
+        sql.rows(row())
+        sql.rows()
+        sql.rows()
+        sql.rows(row({ id: "thread-b", title: "Replacement", created_at: 2, updated_at: 2 }))
+        sql.rows()
+        const repository = yield* ThreadRepository.Service
+        const created = yield* repository.archiveAndCreate(id("thread-a"), {
+          id: id("thread-b"),
+          workspace: "/work/a",
+          title: "Replacement",
+          now: 2,
+        })
+
+        expect(created.id).toBe(id("thread-b"))
+        expect(sql.statements.map((statement) => statement.sql)).toEqual([
+          "SELECT * FROM rika_threads WHERE id = ? AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id)",
+          "INSERT INTO rika_workspaces (path, created_at) VALUES (?, ?) ON CONFLICT(path) DO NOTHING",
+          "INSERT INTO rika_threads (id, workspace, title, labels_json, pinned, archived, lineage_json, created_at, updated_at) VALUES (?, ?, ?, '[]', 0, 0, ?, ?, ?)",
+          "SELECT * FROM rika_threads WHERE id = ? AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id)",
+          "UPDATE rika_threads SET archived = 1, updated_at = ? WHERE id = ?",
+        ])
       }),
     ),
   )

@@ -1,13 +1,12 @@
-import type { ModeId } from "./behavior-mode"
-
 export namespace ModelRoute {
   export type Role = "main" | "oracle"
   export type AgentId = "librarian" | "painter" | "readThread" | "review" | "surgeon" | "task"
   export type Effort = "low" | "medium" | "high" | "xhigh" | "max"
   export type ProviderId = "openai" | "anthropic" | "bedrock" | "openrouter"
+  export type HttpProtocol = "openai-responses" | "openai-chat-completions" | "anthropic" | "openrouter"
 
   export interface HttpProviderConnection {
-    readonly protocol: "openai" | "anthropic" | "openrouter"
+    readonly protocol: HttpProtocol
     readonly baseUrl: string
     readonly apiKeyEnv?: string | undefined
     readonly credentialIdentity?: string | undefined
@@ -41,6 +40,7 @@ export namespace ModelRoute {
     readonly credentialIdentity?: string
     readonly streamingOnly?: boolean
     readonly promptCaching?: boolean
+    readonly api?: "responses" | "chat-completions"
   }
 
   export type ProviderOverride = HttpProviderOverride | Partial<Omit<AmazonBedrockProviderConnection, "protocol">>
@@ -65,21 +65,34 @@ export namespace ModelRoute {
     >
   }
 
-  export interface RoleRoute {
-    readonly alias: string
+  interface RouteOptions {
     readonly effort: Effort
     readonly fast?: boolean
   }
 
+  export interface DirectModelRoute extends RouteOptions {
+    readonly provider: ProviderId
+    readonly model: string
+    readonly alias?: never
+  }
+
+  export interface AliasRoute extends RouteOptions {
+    readonly alias: string
+    readonly provider?: never
+    readonly model?: never
+  }
+
+  export type RoleRoute = DirectModelRoute | AliasRoute
+
   export interface ModeConfig {
     readonly main: RoleRoute
     readonly oracle: RoleRoute
+    readonly agents: Partial<Readonly<Record<AgentId, RoleRoute>>>
   }
 
   export interface SettingsModelRoutes {
-    readonly modes: Readonly<Record<ModeId, ModeConfig>>
+    readonly modes: Readonly<Record<string, ModeConfig>>
     readonly threadTitle: RoleRoute
-    readonly agents: Partial<Readonly<Record<AgentId, RoleRoute>>>
     readonly compaction: { readonly summaryModel: RoleRoute }
   }
 }

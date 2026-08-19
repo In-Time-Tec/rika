@@ -93,6 +93,7 @@ test("summarizes direct subagents and tools without inflating them with descenda
 })
 test("exposes thread, mode, context, fast mode, subagent limits, and quit commands in the command palette", () => {
   expect(commands.map((command) => command.id)).toEqual([
+    "new-thread",
     "threads",
     "mode",
     "context",
@@ -100,6 +101,14 @@ test("exposes thread, mode, context, fast mode, subagent limits, and quit comman
     "max-subagents",
     "max-depth",
     "quit",
+  ])
+  expect(filter("new thread")).toEqual([
+    {
+      id: "new-thread",
+      category: "thread",
+      label: "new thread",
+      action: { _tag: "NewThread" },
+    },
   ])
   expect(filter("set max subagents")).toEqual([
     {

@@ -191,6 +191,8 @@ export const makeInteractiveSessionEvents = (
   | "events"
   | "submit"
   | "newThread"
+  | "archiveThread"
+  | "archiveAndNewThread"
   | "shell"
   | "editQueued"
   | "dequeue"
@@ -200,6 +202,8 @@ export const makeInteractiveSessionEvents = (
 > => {
   const operationFeed: InteractiveOperationFeed = input.operationFeed
   const submissionAdmission: Semaphore.Semaphore = input.submissionAdmission
+  const operationUnavailable = (operation: string) => (error: unknown) =>
+    Schema.is(OperationUnavailable)(error) ? error : OperationUnavailable.make({ operation, message: String(error) })
   const events = (dispatch: Parameters<InteractiveSession["events"]>[0]) =>
     Effect.gen(function* () {
       yield* input.dispatchThreadSummaries(input.sessionDispatch)
@@ -232,6 +236,18 @@ export const makeInteractiveSessionEvents = (
       input.sessionDispatch,
       submissionAdmission.withPermits(1)(Effect.uninterruptible(input.createAndSelectThread())),
     ),
+    archiveThread: input
+      .archiveCurrentThread()
+      .pipe(
+        Effect.provide(input.executionDependencies),
+        Effect.mapError(operationUnavailable("InteractiveSession.archiveThread")),
+      ),
+    archiveAndNewThread: submissionAdmission
+      .withPermits(1)(Effect.uninterruptible(input.archiveAndCreateThread()))
+      .pipe(
+        Effect.provide(input.executionDependencies),
+        Effect.mapError(operationUnavailable("InteractiveSession.archiveAndNewThread")),
+      ),
     shell: (threadId, command, incognito) => shell(threadId, command, incognito),
     editQueued: (id, prompt) => input.safe(input.sessionDispatch, input.control.editQueued(id, prompt)),
     dequeue: (id) => input.safe(input.sessionDispatch, input.control.dequeue(id)),
@@ -324,6 +340,8 @@ export const makeInteractiveSession = (
       submit: (prompt, mode, parts, tuning, submissionId) =>
         state.composition.admit(implementation.submit(prompt, mode, parts, tuning, submissionId)),
       newThread: state.composition.admitLocal(implementation.newThread),
+      archiveThread: state.composition.admitLocal(implementation.archiveThread),
+      archiveAndNewThread: state.composition.admitLocal(implementation.archiveAndNewThread),
       shell: (threadId, command, incognito) =>
         state.composition.admitLocal(implementation.shell(threadId, command, incognito)),
       editQueued: (turnId, prompt) => state.composition.admitLocal(implementation.editQueued(turnId, prompt)),

@@ -292,6 +292,8 @@ describe("Rika Server protocol", () => {
       { _tag: "Cancel" },
       { _tag: "Quit" },
       { _tag: "NewThread" },
+      { _tag: "ArchiveThread" },
+      { _tag: "ArchiveAndNewThread" },
       { _tag: "SelectThread", threadId: "thread" },
       { _tag: "ReadQueue", threadId: "thread" },
       { _tag: "PreviewThread", threadId: "thread", requestId: 42 },

@@ -422,6 +422,66 @@ describe("interactive ThreadView controller", () => {
     expect(started.entries.filter((entry) => entry.role === "user" && entry.text === "follow up")).toHaveLength(1)
   })
 
+  it("does not carry transcript or optimistic state into an activated new thread", () => {
+    const previousThreadId = Thread.ThreadId.make("previous-thread")
+    const newThreadId = Thread.ThreadId.make("new-thread")
+    const loaded = InteractiveController.update(state(), {
+      _tag: "ThreadViewSnapshot",
+      snapshot: snapshot(previousThreadId),
+    }).state
+    const submitted = reduceModel(
+      { ...loaded.model, input: "previous thread prompt", cursor: 22 },
+      { _tag: "Submitted", submissionId: "previous-submission" },
+    )
+    const previousTranscript = {
+      ...submitted,
+      entries: [...submitted.entries, { role: "assistant" as const, text: "previous assistant" }],
+      items: [
+        ...submitted.items,
+        { _tag: "Entry" as const, index: submitted.entries.length, id: "previous-assistant" },
+      ],
+      steeringRequests: [
+        { requestId: "previous-steering", turnId: "previous-turn", text: "redirect", origin: "composer" as const },
+      ],
+      busy: false,
+      activity: undefined,
+    }
+    expect(previousTranscript.entries.map((entry) => entry.text)).toEqual([
+      "previous thread prompt",
+      "previous assistant",
+    ])
+    const activated = reduceModel(previousTranscript, {
+      _tag: "ThreadActivated",
+      threadId: newThreadId,
+      title: "New thread",
+    })
+    const createdSnapshot = snapshot(newThreadId, 0)
+    const created = InteractiveController.update(
+      { ...loaded, model: activated },
+      {
+        _tag: "ThreadViewSnapshot",
+        snapshot: {
+          ...createdSnapshot,
+          thread: { ...createdSnapshot.thread, title: "New thread" },
+        },
+      },
+    ).state.model
+
+    expect(created).toMatchObject({
+      currentThreadId: "new-thread",
+      currentThreadTitle: "New thread",
+      entries: [],
+      blocks: [],
+      items: [],
+      queue: [],
+      submittedDrafts: [],
+      steeringRequests: [],
+      busy: false,
+    })
+    expect(created.activeTurnId).toBeUndefined()
+    expect(created.activity).toBeUndefined()
+  })
+
   it("reconciles duplicate steering text by request identity at consumption and discard", () => {
     const turn = {
       kind: "agent" as const,

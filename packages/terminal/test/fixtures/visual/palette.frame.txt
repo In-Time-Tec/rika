@@ -5,6 +5,7 @@
   │ >                                                                        │
   │                                                                          │
   │                                                                          │
+  │           thread  new thread                                             │
   │           thread  switch                                         Ctrl+T  │
   │             mode  change mode                                    Ctrl+S  │
   │            usage  show context and usage                         Ctrl+Y  │
@@ -13,7 +14,6 @@
   │        subagents  set max depth                                          │
   │             rika  quit                                           Ctrl+C  │
   ╰──────────────────────────────────────────────────────────────────────────╯
-         ......···............
             ...............
                    .
 

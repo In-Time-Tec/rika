@@ -26,6 +26,7 @@ export type Action =
   | { readonly _tag: "InterruptAndSend"; readonly prompt: string }
   | { readonly _tag: "Cancel" }
   | { readonly _tag: "Quit" }
+  | { readonly _tag: "NewThread" }
   | { readonly _tag: "SelectThread"; readonly id: string }
 
 export interface Adapter {
@@ -37,6 +38,7 @@ export interface Adapter {
     submissionId?: string,
   ) => void
   readonly quit: () => void
+  readonly newThread?: () => void
   readonly editQueued?: (id: string, prompt: string) => void
   readonly dequeue?: (id: string) => void
   readonly steerQueued?: (id: string, prompt: string, requestId: string) => void
@@ -88,6 +90,9 @@ export const execute: {
     case "Quit":
       adapter.quit()
       return true
+    case "NewThread":
+      adapter.newThread?.()
+      return adapter.newThread !== undefined
     case "SelectThread":
       adapter.selectThread?.(action.id)
       return adapter.selectThread !== undefined

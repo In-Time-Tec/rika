@@ -47,3 +47,18 @@ describe("Interactive preview commands", () => {
     }),
   )
 })
+
+describe("Interactive thread lifecycle commands", () => {
+  it.effect("dispatches archive and archive-and-new commands", () =>
+    Effect.gen(function* () {
+      const calls: Array<string> = []
+      const session = {
+        archiveThread: Effect.sync(() => calls.push("archive")),
+        archiveAndNewThread: Effect.sync(() => calls.push("archive-and-new")),
+      } as unknown as InteractiveSession
+      yield* executeInteractiveCommand(session, { _tag: "ArchiveThread" })
+      yield* executeInteractiveCommand(session, { _tag: "ArchiveAndNewThread" })
+      expect(calls).toEqual(["archive", "archive-and-new"])
+    }),
+  )
+})

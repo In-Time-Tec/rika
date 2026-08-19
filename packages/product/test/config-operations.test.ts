@@ -51,6 +51,8 @@ it.effect("prints effective redacted config and keymap", () =>
     expect(lines.join("\n")).not.toContain("never-print-this")
     expect(lines.join("\n")).not.toContain("local-mcp-secret")
     expect(lines.join("\n")).not.toContain("remote-mcp-secret")
+    expect(lines[0]).toContain('"defaultMode": "medium"')
+    expect(lines[0]).toContain('"protocol": "openai-responses"')
     expect(lines[0]).toContain('"providerId": "openai"')
     expect(lines[0]).toContain('"apiKey": "missing"')
     expect(lines[1]).toContain('"submit": "enter"')
@@ -81,6 +83,29 @@ it.effect("reports an overridden provider without an API key as not configured",
     expect(lines[0]).toContain('"apiKey": "not-configured"')
     expect(lines[1]).toContain('"apiKey": "not-configured"')
     expect(lines.join("\n")).not.toContain("must-not-use-this")
+  }),
+)
+
+it.effect("reports the configured custom default mode instead of a built-in route", () =>
+  Effect.gen(function* () {
+    const layer = Layer.mergeAll(
+      TestConsole.layer,
+      ConfigurationService.memoryConfigurationLayer({
+        global: {
+          defaultMode: "deep-review",
+          modes: {
+            "deep-review": { main: { provider: "anthropic", model: "claude-opus-direct", effort: "high" } },
+          },
+        },
+      }),
+      ConfigOperations.testLayer({ edit: () => Effect.void, exists: () => Effect.succeed(false) }),
+    )
+    const lines = yield* Effect.gen(function* () {
+      yield* ConfigOperations.run({ _tag: "Config", action: "list" }, options)
+      return yield* TestConsole.logLines
+    }).pipe(provideLayer(layer))
+    expect(lines[0]).toContain('"defaultMode": "deep-review"')
+    expect(lines[0]).toContain('"selection": "claude-opus-direct"')
   }),
 )
 

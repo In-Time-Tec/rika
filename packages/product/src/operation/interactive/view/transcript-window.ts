@@ -185,10 +185,10 @@ export const makeInteractiveTranscriptLifecycle = (input: InteractiveTranscriptL
     openSelectionProjectionFeed,
     transcriptPageAdmission,
     notifyThreadSummaries,
+    interactiveThread,
     closeCandidateProjectionFeed,
     interruptSelectionLoad,
     setSelectionLoadFiber,
-    setActiveSelectionState,
     options,
     workspace,
     setSelectionLoad,
@@ -233,25 +233,68 @@ export const makeInteractiveTranscriptLifecycle = (input: InteractiveTranscriptL
       ),
     )
   })
-  const createAndSelectThread = Effect.fn("ProductOperation.interactive.createAndSelectThread")(function* () {
-    setActiveSelectionState(undefined)
-    setCandidateSelectionState(undefined)
-    yield* interruptSelectionLoad
-    yield* interruptSelectionBackground
-    const threads = yield* ThreadRepository.Service
-    const thread = yield* threads.create({
+  const refreshThreadSummaries = notifyThreadSummaries.pipe(
+    Effect.catch((error) =>
+      Effect.logWarning("thread-summaries.refresh.failed").pipe(
+        Effect.annotateLogs({ "rika.failure.kind": String(error) }),
+      ),
+    ),
+  )
+  const newThreadInput = Effect.fn("ProductOperation.interactive.newThreadInput")(function* () {
+    return {
       id: yield* options.makeThreadId,
       workspace,
       title: "New thread",
       now: yield* Clock.currentTimeMillis,
-    })
+    }
+  })
+  const createThread = Effect.fn("ProductOperation.interactive.createThread")(function* () {
+    const threads = yield* ThreadRepository.Service
+    return yield* threads.create(yield* newThreadInput())
+  })
+  const activateNewThread = Effect.fn("ProductOperation.interactive.activateNewThread")(function* (
+    thread: Thread.Thread,
+    preparedQueue?: TurnRepository.QueueSnapshot,
+  ) {
+    setCandidateSelectionState(undefined)
+    yield* interruptSelectionLoad
+    yield* interruptSelectionBackground
     const epoch = input.getCurrentSelectionEpoch() + 1
     setSelectionLoad(undefined)
     yield* Ref.set(selectionRequest, epoch)
-    yield* activateCreatedThread(thread, epoch, sessionDispatch)
-    yield* notifyThreadSummaries
+    yield* activateCreatedThread(thread, epoch, sessionDispatch, undefined, preparedQueue)
+    yield* refreshThreadSummaries
   })
-  return { loadThread, runThreadLoad, createAndSelectThread }
+  const createAndSelectThread = Effect.fn("ProductOperation.interactive.createAndSelectThread")(function* () {
+    yield* activateNewThread(yield* createThread())
+  })
+  const archiveCurrentThread = Effect.fn("ProductOperation.interactive.archiveCurrentThread")(function* () {
+    const current = yield* Ref.get(interactiveThread)
+    if (current === undefined) return
+    const threads = yield* ThreadRepository.Service
+    yield* threads.setArchived(current.id, true, yield* Clock.currentTimeMillis)
+    yield* refreshThreadSummaries
+  })
+  const archiveAndCreateThread = Effect.fn("ProductOperation.interactive.archiveAndCreateThread")(function* () {
+    const current = yield* Ref.get(interactiveThread)
+    if (current === undefined) return yield* createAndSelectThread()
+    const threads = yield* ThreadRepository.Service
+    const turns = yield* TurnRepository.Service
+    const createInput = yield* newThreadInput()
+    const queue = yield* turns.readQueue(createInput.id)
+    yield* Effect.uninterruptible(
+      threads
+        .archiveAndCreate(current.id, createInput)
+        .pipe(Effect.flatMap((created) => activateNewThread(created, queue))),
+    )
+  })
+  return {
+    loadThread,
+    runThreadLoad,
+    createAndSelectThread,
+    archiveCurrentThread,
+    archiveAndCreateThread,
+  }
 }
 
 export type InteractiveTranscriptPageLoader = (

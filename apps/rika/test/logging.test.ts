@@ -186,7 +186,7 @@ describe("Logging", () => {
           "rika.follow.cursor",
           "rika.follow.reason",
           "rika.follow.scope",
-          "rika.model.alias",
+          "rika.model.selection",
           "rika.model.backend.kind",
           "rika.model.name",
           "rika.model.provider",

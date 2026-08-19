@@ -13,7 +13,7 @@
     ],
     "catalog": {
       "@ast-grep/cli": "0.44.0",
-      "tenetkit": "0.30.0",
+      "tenetkit": "0.31.0",
       "@effect/platform-bun": "4.0.0-rc.109",
       "@effect/sql-mysql2": "4.0.0-rc.109",
       "@effect/sql-pg": "4.0.0-rc.109",

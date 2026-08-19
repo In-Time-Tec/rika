@@ -89,9 +89,10 @@ export const makeInteractiveSelectionProjection = (input: InteractiveSelectionPr
     epoch: number,
     dispatch: (event: InteractiveEvent) => void,
     activeTurn?: Turn.Turn,
+    preparedQueue?: TurnRepository.QueueSnapshot,
   ) {
     const turns = yield* TurnRepository.Service
-    const queue = yield* turns.readQueue(thread.id)
+    const queue = preparedQueue ?? (yield* turns.readQueue(thread.id))
     const state = makeSelectionState(thread, epoch)
     setActiveSelectionState(state)
     setCurrentSelectionEpoch(epoch)

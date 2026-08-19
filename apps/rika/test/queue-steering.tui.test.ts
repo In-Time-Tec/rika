@@ -21,12 +21,11 @@ const waitQueue = (
   budgetMillis = 20_000,
 ): Effect.Effect<QueueSnapshot, never> =>
   Effect.gen(function* () {
-    const start = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-    while (true) {
+    const started = performance.now()
+    for (;;) {
       const queue = yield* app.queue(threadId).pipe(Effect.orDie)
       if (predicate(queue)) return queue
-      const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-      if (now - start >= budgetMillis)
+      if (performance.now() - started >= budgetMillis)
         return yield* Effect.die(
           `queue condition was not met: ${queue.turns.map((turn) => String(turn.id)).join(", ")}`,
         )
@@ -345,10 +344,13 @@ test(
               unit.content._tag === "Entry" && unit.content.role === "user" && unit.content.text === request.text,
           ),
         ).toHaveLength(1)
-        const followUpTranscript = yield* app.transcript(followUpTurnId).pipe(Effect.orDie)
-        expect(followUpTranscript?.state.status).toBe("completed")
+        const followUpTranscript = yield* app.waitTranscript(
+          followUpTurnId,
+          (projection) => projection.state.status === "completed",
+          20_000,
+        )
         expect(
-          followUpTranscript?.units.filter(
+          followUpTranscript.units.filter(
             (unit) =>
               unit.content._tag === "Entry" &&
               unit.content.role === "assistant" &&

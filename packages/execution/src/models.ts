@@ -1,5 +1,13 @@
 import { ModelRegistry } from "tenetkit"
-import { AmazonBedrock, Anthropic, Deterministic, OpenAi, OpenRouter } from "tenetkit/ai"
+import {
+  AmazonBedrock,
+  Anthropic,
+  Deterministic,
+  OpenAi,
+  OpenAiChatCompletions,
+  OpenAiResponses,
+  OpenRouter,
+} from "tenetkit/ai"
 import { Errors } from "tenetkit/runtime"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
@@ -37,7 +45,7 @@ export const layer = (options: {
   const httpClientLayer = options.httpClientLayer ?? FetchHttpClient.layer
   const registrationKey = candidate.registrationIdentity
   switch (candidate.providerConnection.protocol) {
-    case "openai":
+    case "openai-responses":
       if (candidate.providerConnection.authentication === "account") {
         const fingerprint = candidate.providerConnection.credentialIdentity
         if (fingerprint === undefined)
@@ -59,16 +67,26 @@ export const layer = (options: {
         return OpenAi.layerAccount({
           model: candidate.model,
           registrationKey,
-          config: OpenAi.decodeConfig(candidate.providerOptions),
+          config: OpenAiResponses.decodeConfig(candidate.providerOptions),
           credentials: OpenAiAccountCredentials.fromRikaAuth(openAiAccountAuth, fingerprint),
         }).pipe(Layer.provide(httpClientLayer))
       }
-      return OpenAi.layer({
+      return OpenAiResponses.layer({
         model: candidate.model,
+        provider: candidate.providerConnection.provider,
         registrationKey,
-        config: OpenAi.decodeConfig(candidate.providerOptions),
+        config: OpenAiResponses.decodeConfig(candidate.providerOptions),
         apiKey: apiKey(candidate),
-        clientConfig: { apiUrl: Config.succeed(candidate.providerConnection.baseUrl) },
+        baseUrl: candidate.providerConnection.baseUrl,
+      }).pipe(Layer.provide(httpClientLayer))
+    case "openai-chat-completions":
+      return OpenAiChatCompletions.layer({
+        model: candidate.model,
+        provider: candidate.providerConnection.provider,
+        registrationKey,
+        config: OpenAiChatCompletions.decodeConfig(candidate.providerOptions),
+        apiKey: apiKey(candidate),
+        baseUrl: candidate.providerConnection.baseUrl,
       }).pipe(Layer.provide(httpClientLayer))
     case "anthropic":
       return Anthropic.layer({

@@ -380,6 +380,7 @@ it.effect("dispatches catalog, extension, and maintenance operations", () =>
       [["credential", "revoke", "openai"], { _tag: "Auth", action: "logout", provider: "openai" }],
       [["tools", "list"], { _tag: "ToolCatalog", action: "list" }],
       [["tools", "list", "--mode", "ultra"], { _tag: "ToolCatalog", action: "list", mode: "ultra" }],
+      [["tools", "list", "--mode", "deep-review"], { _tag: "ToolCatalog", action: "list", mode: "deep-review" }],
       [["tools", "show", "read"], { _tag: "ToolCatalog", action: "show", name: "read" }],
       [["skills", "list"], { _tag: "Skill", action: "list" }],
       [["skills", "inspect", "x"], { _tag: "Skill", action: "inspect", name: "x" }],

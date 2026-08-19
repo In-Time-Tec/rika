@@ -1,5 +1,4 @@
 import { Function } from "effect"
-import { modeIds } from "@rika/configuration/behavior-mode"
 import type { Message } from "../model/terminal-message"
 import type { Model } from "../model/terminal-state"
 import { filteredFiles, filteredThreads } from "../model/terminal-thread-navigation"
@@ -226,7 +225,14 @@ const reduceKeyboardPickerImpl = (
               ...model,
               paletteOpen: false,
               palette: { open: false, query: "", selected: 0 },
-              modePicker: { open: true, selected: modeIds.indexOf(model.mode) },
+              modePicker: {
+                open: true,
+                selected: Object.keys(model.modeRoutes).indexOf(
+                  model.rememberedMode !== undefined && Object.hasOwn(model.modeRoutes, model.rememberedMode)
+                    ? model.rememberedMode
+                    : model.mode,
+                ),
+              },
             }
       if (action._tag === "SwitchThread")
         return {

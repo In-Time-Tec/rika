@@ -98,7 +98,7 @@ const createOperationLayerImpl = (
         openAiAccountStatus: openAiAccountAuth.status,
       })
       const resolveWorkspaceExecutionRoute = (
-        mode: "low" | "medium" | "high" | "ultra",
+        mode: string | undefined,
         tuning: { readonly fastMode?: boolean } | undefined,
         workspace = workspaceRoot,
       ) => resolveRoute(mode, tuning, workspace)

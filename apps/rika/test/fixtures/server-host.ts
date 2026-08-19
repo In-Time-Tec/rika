@@ -491,6 +491,8 @@ const program = Effect.gen(function* () {
                 activeWork = 0
               }).pipe(Effect.andThen(append("quit-commands.log", `${process.pid}\n`))),
               newThread: Effect.void,
+              archiveThread: Effect.void,
+              archiveAndNewThread: Effect.void,
               selectThread: () => Effect.void,
               readQueue: () => Effect.void,
               previewThread: () => Effect.void,
