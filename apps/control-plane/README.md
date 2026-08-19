@@ -4,7 +4,24 @@ The control plane is a Railway-ready Bun service and the composition root for `@
 
 The browser surface is server-rendered HTML with one static script and stylesheet. `/healthz` is the Railway liveness endpoint and `/readyz` checks PostgreSQL readiness.
 
-## Configure
+## Deploy to Railway
+
+Railway builds the root `Dockerfile`, runs `migrate` as the pre-deploy command, and only promotes a release after `GET /readyz` can reach PostgreSQL. The configured 30-second overlap keeps the healthy release serving while its replacement becomes ready; Railway then gives the old release 30 seconds to drain after `SIGTERM`.
+
+Set these service variables in Railway. Railway supplies `PORT`; do not replace it with a fixed production value.
+
+- `NODE_ENV=production`
+- `DATABASE_URL`: reference the attached Railway PostgreSQL service's private connection URL.
+- `DATABASE_SSL`: `disable` for that trusted private network, or `verify-full` when using a publicly trusted PostgreSQL certificate.
+- `BETTER_AUTH_URL`: the public HTTPS origin for this service.
+- `BETTER_AUTH_SECRET`: a unique value with at least 32 high-entropy characters and 16 distinct characters.
+- `BETTER_AUTH_TRUSTED_ORIGINS`: comma-separated HTTPS browser origins, including `BETTER_AUTH_URL`.
+- `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`: OAuth application credentials.
+- `RESEND_API_KEY` and `EMAIL_FROM`: an authorized Resend API key and sender.
+
+Keep all credentials in Railway variables. Do not put them in the repository, Docker build arguments, or image files.
+
+## Configure locally
 
 Copy `.env.example` into the deployment environment. `BETTER_AUTH_URL` and every comma-separated `BETTER_AUTH_TRUSTED_ORIGINS` entry must be HTTPS origins in production. Generate `BETTER_AUTH_SECRET` with at least 32 high-entropy characters and 16 distinct characters.
 
