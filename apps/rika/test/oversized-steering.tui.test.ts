@@ -61,7 +61,9 @@ test(
         yield* app.waitModelRequests(1)
 
         const oversized = `OVERSIZE${"z".repeat(ExecutionGateway.SteeringTextMaxCharacters)}`
+        const typeStarted = performance.now()
         yield* Effect.promise(() => app.type(oversized))
+        console.log(`OVERSIZED_TYPE_MS ${Math.round(performance.now() - typeStarted)}`)
         app.pressEnter()
         yield* waitQueue(app, threadId, (queue) => queue.turns.some((turn) => turn.prompt.startsWith("OVERSIZE")))
 
