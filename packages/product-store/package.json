@@ -5,6 +5,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./memory-hosted-authority-repository": "./src/hosted/memory-hosted-authority-repository.ts",
+    "./postgres-hosted-authority-layer": "./src/hosted/postgres-hosted-authority-layer.ts",
+    "./postgres-hosted-authority-repository": "./src/hosted/postgres-hosted-authority-repository.ts",
+    "./migrations/postgres/0001-hosted-authority.sql": "./migrations/postgres/0001-hosted-authority.sql",
     "./product-database-layer": "./src/database/product-database-layer.ts",
     "./sqlite-goal-repository": "./src/goal/sqlite-goal-repository.ts",
     "./sqlite-thread-search-repository": "./src/search/sqlite-thread-search-repository.ts",
@@ -14,10 +18,11 @@
     "./sqlite-turn-repository": "./src/turn/sqlite-turn-repository.ts"
   },
   "dependencies": {
+    "@effect/sql-pg": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",
+    "@rika/product": "workspace:*",
     "@rika/transcript": "workspace:*",
-    "effect": "catalog:",
-    "@rika/product": "workspace:*"
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@effect/platform-bun": "catalog:",
