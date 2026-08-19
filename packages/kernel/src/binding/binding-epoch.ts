@@ -1,4 +1,4 @@
-import { KernelProfile } from "@batonfx/repl"
+import { KernelProfile } from "tenetkit/repl"
 import { source } from "../kernel-bootstrap"
 import { moduleNames } from "./binding-module-catalog"
 

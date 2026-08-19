@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type { HostBindingRegistry } from "@batonfx/repl"
+import type { HostBindingRegistry } from "tenetkit/repl"
 import type * as McpDiscovery from "@rika/extensions/mcp-discovery"
 import * as McpRuntime from "@rika/extensions/mcp-runtime"
 import { nested, NestedOperationFailed, operation, type Requirements } from "./nested-operation-envelope"

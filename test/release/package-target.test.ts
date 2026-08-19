@@ -129,7 +129,7 @@ describe("release target construction", () => {
       "/packages/terminal/",
     ])
       expect(files).not.toContain(forbidden)
-    for (const forbidden of ["@batonfx/providers", "@opentui/", "@ff-labs/"]) expect(external).not.toContain(forbidden)
+    for (const forbidden of ["tenetkit/ai", "@opentui/", "@ff-labs/"]) expect(external).not.toContain(forbidden)
     expect(files).toContain("/product-operation-service.ts")
     expect(files).toContain("/transport/client/server-client-transport.ts")
   })
@@ -141,7 +141,7 @@ describe("release target construction", () => {
     const serverFiles = [...server.files].join("\n")
     expect(interactiveFiles).not.toContain("/transport/host/server-host-transport.ts")
     expect(interactiveFiles).not.toContain("/model-provider-runtime.ts")
-    expect([...interactive.external].join("\n")).not.toContain("@batonfx/providers")
+    expect([...interactive.external].join("\n")).not.toContain("tenetkit/ai")
     expect(serverFiles).not.toContain("/packages/terminal/")
     expect([...server.external].join("\n")).not.toContain("@opentui/")
   }, 30_000)

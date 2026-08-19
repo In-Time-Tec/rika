@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { HarnessEntry } from "@batonfx/harness"
+import { HarnessEntry } from "tenetkit/harness"
 import { Schema } from "effect"
 import * as ScopePolicy from "@rika/kernel/harness-scope-policy"
 import * as StoreLocations from "@rika/kernel/harness-store-locations"

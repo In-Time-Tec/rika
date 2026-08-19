@@ -4,10 +4,10 @@ import { optionalString, record, string } from "./values"
 type Cell = Extract<Block, { readonly _tag: "Cell" }>
 export type CellNotice = Cell["notices"][number]
 
-export const cellExecutionFailedTag = "@batonfx/repl/CellExecutionFailed"
-export const kernelUnavailableTag = "@batonfx/repl/KernelUnavailable"
-export const kernelProtocolViolationTag = "@batonfx/repl/KernelProtocolViolation"
-export const cellOutcomeUnknownTag = "@batonfx/repl/CellOutcomeUnknown"
+export const cellExecutionFailedTag = "tenetkit/repl/CellExecutionFailed"
+export const kernelUnavailableTag = "tenetkit/repl/KernelUnavailable"
+export const kernelProtocolViolationTag = "tenetkit/repl/KernelProtocolViolation"
+export const cellOutcomeUnknownTag = "tenetkit/repl/CellOutcomeUnknown"
 
 const names = (value: unknown): ReadonlyArray<string> =>
   Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []

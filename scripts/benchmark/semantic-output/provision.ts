@@ -1,6 +1,6 @@
 import { HostFiles } from "./host-files"
-import { batonReleaseInventoryError, batonReleasePackages } from "../../release/local-baton-smoke"
-import { batonPackages } from "../../release/local-baton-package-verification"
+import { batonReleaseInventoryError, tenetkitReleasePackages } from "../../release/local-baton-smoke"
+import { tenetkitPackages } from "../../release/local-baton-package-verification"
 
 interface Evidence {
   readonly schemaVersion: number
@@ -109,9 +109,10 @@ export const install = (input: {
 
 const verifyCandidateLock = (root: string): void => {
   const lock = HostFiles.read(HostFiles.join(root, "bun.lock"))
-  if (lock.includes("npmjs.org/@batonfx")) throw new Error("candidate source resolved a Baton package from npm")
-  for (const packageName of batonPackages) {
-    const filename = `batonfx-${packageName}-0.20.2.tgz`
+  if (lock.includes("npmjs.org/tenetkit"))
+    throw new Error("candidate source resolved a TenetKit package from npm")
+  for (const packageName of tenetkitPackages) {
+    const filename = `${packageName.replace("@tenetkit/", "tenetkit-")}-0.20.2.tgz`
     if (!lock.includes(filename)) throw new Error(`candidate source lock does not name ${filename}`)
   }
 }
@@ -136,9 +137,9 @@ const pinCandidateTarballs = (sourceRoot: string, releaseDirectory: string): voi
     readonly [key: string]: unknown
   }
   const tarballs = Object.fromEntries(
-    batonReleasePackages.map((packageName) => [
-      `@batonfx/${packageName}`,
-      `file:${HostFiles.join(releaseDirectory, `batonfx-${packageName}-0.20.2.tgz`)}`,
+    tenetkitReleasePackages.map((packageName) => [
+      packageName,
+      `file:${HostFiles.join(releaseDirectory, `${packageName.replace("@tenetkit/", "tenetkit-")}-0.20.2.tgz`)}`,
     ]),
   )
   HostFiles.write(

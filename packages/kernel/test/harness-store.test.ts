@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { HarnessState, HarnessStore } from "@batonfx/harness"
+import { HarnessState, HarnessStore } from "tenetkit/harness"
 import { Effect, FileSystem, Layer } from "effect"
 import * as StoreLocations from "@rika/kernel/harness-store-locations"
 

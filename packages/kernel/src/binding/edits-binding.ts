@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type { HostBindingRegistry } from "@batonfx/repl"
+import type { HostBindingRegistry } from "tenetkit/repl"
 import * as CodingToolResult from "@rika/coding-tools/coding-tool-result"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { nested, NestedOperationFailed, operation, type Requirements } from "./nested-operation-envelope"

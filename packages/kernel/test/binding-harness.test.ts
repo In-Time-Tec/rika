@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import { NestedOperation } from "@batonfx/core"
+import { NestedOperation } from "tenetkit"
 import { Context, Effect } from "effect"
-import { HarnessState, HarnessStore } from "@batonfx/harness"
+import { HarnessState, HarnessStore } from "tenetkit/harness"
 import * as HarnessBinding from "@rika/kernel/harness-binding"
 import { journal, mountModules } from "./binding-support"
 
@@ -61,7 +61,7 @@ describe("harness binding", () => {
           input: { id: "note", title: "t", content: "c" },
         }),
       )
-      expect(failure._tag).toBe("@batonfx/repl/HostBindingSchemaFailure")
+      expect(failure._tag).toBe("tenetkit/repl/HostBindingSchemaFailure")
     }),
   )
 

@@ -1,4 +1,4 @@
-import { RunTree, type RunEvent } from "@batonfx/runtime"
+import { RunTree, type RunEvent } from "tenetkit/runtime"
 import { DateTime } from "effect"
 import { describe, expect, it } from "@effect/vitest"
 import { TreeProjector } from "../src/projection/tree"

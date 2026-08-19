@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type { HostBindingRegistry } from "@batonfx/repl"
+import type { HostBindingRegistry } from "tenetkit/repl"
 import { ArtifactStore, ArtifactUnavailable, Stored } from "./artifact-store"
 import { nested, NestedOperationFailed, operation, type Requirements } from "./nested-operation-envelope"
 

@@ -56,7 +56,7 @@ describe("friendly failure presentation in the projector", () => {
       treeEvent("raw-root-run", {
         _tag: "RunFailed",
         error: {
-          _tag: "@batonfx/runtime/AgentExecutionFailure",
+          _tag: "tenetkit/runtime/AgentExecutionFailure",
           message: "effect/ai/AiError/AiError: OpenAiClient.createResponseStream: Rate Limit exceeded",
         },
       } as never),
@@ -85,7 +85,7 @@ describe("friendly failure presentation in the projector", () => {
       treeEvent("raw-root-run", {
         _tag: "RunFailed",
         error: {
-          _tag: "@batonfx/runtime/AgentExecutionFailure",
+          _tag: "tenetkit/runtime/AgentExecutionFailure",
           message: "effect/ai/AiError/AiError: OpenAiClient.createResponseStream: Rate Limit exceeded",
         },
       } as never),

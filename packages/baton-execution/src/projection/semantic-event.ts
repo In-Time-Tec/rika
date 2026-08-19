@@ -1,4 +1,4 @@
-import type { RunEvent, RunTree, Runtime } from "@batonfx/runtime"
+import type { RunEvent, RunTree, Runtime } from "tenetkit/runtime"
 import { Effect, Function } from "effect"
 
 type ModelResponseEvent = Extract<

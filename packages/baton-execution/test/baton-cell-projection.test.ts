@@ -133,7 +133,7 @@ describe("Baton cell projection", () => {
           "cell-4",
           "throw new Error('boom')",
           {
-            _tag: "@batonfx/repl/CellExecutionFailed",
+            _tag: "tenetkit/repl/CellExecutionFailed",
             cellId: "cell-4",
             epoch: 1,
             sequence: 3,
@@ -167,7 +167,7 @@ describe("Baton cell projection", () => {
         "cell-5",
         "await rika.workspace.write({ path: 'a', content: 'b' })",
         {
-          _tag: "@batonfx/repl/CellOutcomeUnknown",
+          _tag: "tenetkit/repl/CellOutcomeUnknown",
           sessionId: "session",
           cellId: "cell-5",
           epoch: 0,
@@ -193,7 +193,7 @@ describe("Baton cell projection", () => {
         "cell-6",
         "1 + 1",
         {
-          _tag: "@batonfx/repl/KernelUnavailable",
+          _tag: "tenetkit/repl/KernelUnavailable",
           sessionId: "session",
           reason: "start-failed",
           message: "no worker",

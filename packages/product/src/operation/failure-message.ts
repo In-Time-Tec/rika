@@ -10,8 +10,8 @@ import type { ModelFailureCategory } from "./failure-policy"
 const internalPrefixes = [
   "effect/ai/AiError/AiError: ",
   "effect/ai/AiError/AiError:",
-  "@batonfx/runtime/AgentExecutionFailure: ",
-  "@batonfx/runtime/AgentExecutionFailure:",
+  "tenetkit/runtime/AgentExecutionFailure: ",
+  "tenetkit/runtime/AgentExecutionFailure:",
   "OpenAiLanguageModel.streamText: ",
   "OpenAiClient.createResponseStream: ",
   "AnthropicLanguageModel.streamText: ",

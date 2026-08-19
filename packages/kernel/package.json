@@ -30,9 +30,7 @@
     "./kernel-state-store-file-system": "./src/kernel-state-store-file-system.ts"
   },
   "dependencies": {
-    "@batonfx/core": "catalog:",
-    "@batonfx/harness": "catalog:",
-    "@batonfx/repl": "catalog:",
+    "tenetkit": "catalog:",
     "@rika/coding-tools": "workspace:*",
     "@rika/configuration": "workspace:*",
     "@rika/extensions": "workspace:*",

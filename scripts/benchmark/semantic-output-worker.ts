@@ -1,7 +1,7 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Agent, AgentManifest, ExecutableManifest, Pins } from "@batonfx/core"
-import { ExecutableRegistration, ExecutableResolver, ExecutionHost, Runtime, RunStore } from "@batonfx/runtime"
+import { Agent, AgentManifest, ExecutableManifest, Pins } from "tenetkit"
+import { ExecutableRegistration, ExecutableResolver, ExecutionHost, Runtime, RunStore } from "tenetkit/runtime"
 import { Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { LanguageModel, Response } from "effect/unstable/ai"
 import { Command } from "effect/unstable/cli"
@@ -162,8 +162,8 @@ const execute = (options: WorkerOptions) =>
     const batonSql = sqlAccounting(isolation.batonDatabase)
     const identityFile = options.identity
     const identity = decodeJson(HostFiles.read(identityFile)) as Record<string, unknown>
-    const resolvedCore = import.meta.resolve("@batonfx/core")
-    const resolvedRuntime = import.meta.resolve("@batonfx/runtime")
+    const resolvedCore = import.meta.resolve("tenetkit")
+    const resolvedRuntime = import.meta.resolve("tenetkit/runtime")
     const manifestAt = (resolved: string) => {
       const packageRoot = HostFiles.dirname(HostFiles.dirname(new URL(resolved).pathname))
       return JSON.parse(HostFiles.read(HostFiles.join(packageRoot, "package.json"))) as {

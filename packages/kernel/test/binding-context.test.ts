@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect } from "effect"
-import { NestedOperation, Prompt, Session } from "@batonfx/core"
+import { NestedOperation, Prompt, Session } from "tenetkit"
 import * as ContextBinding from "@rika/kernel/context-binding"
 import { journal, mountModules } from "./binding-support"
 

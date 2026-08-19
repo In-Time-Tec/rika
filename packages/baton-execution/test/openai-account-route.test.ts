@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { ModelRegistry } from "@batonfx/core"
+import { ModelRegistry } from "tenetkit"
 import * as Settings from "@rika/configuration/configuration-settings"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
@@ -88,7 +88,7 @@ it.effect("fails recovered account routes through the typed registration channel
     if (Exit.isFailure(failed))
       expect(failed.cause.reasons.find((reason) => reason._tag === "Fail")).toMatchObject({
         error: {
-          _tag: "@batonfx/runtime/ExecutableRegistrationInvalid",
+          _tag: "tenetkit/runtime/ExecutableRegistrationInvalid",
           message: expect.stringContaining("authentication is unavailable"),
         },
       })

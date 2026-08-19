@@ -19,9 +19,7 @@
     "./skill-registry-model": "./src/skill/skill-registry-model.ts"
   },
   "dependencies": {
-    "@batonfx/core": "catalog:",
-    "@batonfx/mcp": "catalog:",
-    "@batonfx/skills": "catalog:",
+    "tenetkit": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {

@@ -1,5 +1,5 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { OAuth } from "@batonfx/mcp"
+import { OAuth } from "tenetkit/mcp"
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, FileSystem, Fiber, Layer, Option, Redacted, Ref } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"

@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
-import { NestedOperation, ToolContext } from "@batonfx/core"
-import type { HostBindingRegistry } from "@batonfx/repl"
+import { NestedOperation, ToolContext } from "tenetkit"
+import type { HostBindingRegistry } from "tenetkit/repl"
 import { Context, Effect, Layer, Schema } from "effect"
 import * as CellCallContext from "../src/baton-cell-call-context"
 

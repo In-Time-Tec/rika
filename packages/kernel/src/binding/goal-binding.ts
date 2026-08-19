@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
-import { ToolContext } from "@batonfx/core"
-import type { HostBindingRegistry } from "@batonfx/repl"
+import { ToolContext } from "tenetkit"
+import type { HostBindingRegistry } from "tenetkit/repl"
 import { Goal } from "@rika/product/goal-record"
 import { GoalAlreadyActive, GoalNotActive, GoalService, GoalUnavailable } from "@rika/product/goal-service"
 import { nested, NestedOperationFailed, operation, type Requirements } from "./nested-operation-envelope"

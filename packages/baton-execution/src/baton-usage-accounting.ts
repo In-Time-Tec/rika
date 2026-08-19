@@ -1,4 +1,4 @@
-import type { RunEvent } from "@batonfx/runtime"
+import type { RunEvent } from "tenetkit/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import { type Node } from "./projection/model"
 import { type AttemptStart, type ModelCallState } from "./projection/persistence"

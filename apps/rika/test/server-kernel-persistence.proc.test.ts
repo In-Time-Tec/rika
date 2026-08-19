@@ -1,6 +1,6 @@
 import { expect, layer } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { KernelPool } from "@batonfx/repl"
+import { KernelPool } from "tenetkit/repl"
 import { Context, Effect, FileSystem, Layer } from "effect"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as GoalRepository from "@rika/product/goal-repository"

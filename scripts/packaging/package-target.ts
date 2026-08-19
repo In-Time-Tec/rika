@@ -49,7 +49,9 @@ const program = Effect.gen(function* () {
       const catalog = yield* fileSystem
         .readFileString(path.join(root, "package.json"))
         .pipe(Effect.flatMap(Schema.decodeUnknownEffect(WorkspaceCatalogJson)))
-      const pinned = Object.entries(catalog.workspaces.catalog).filter(([name]) => name.startsWith("@batonfx/"))
+      const pinned = Object.entries(catalog.workspaces.catalog).filter(
+        ([name]) => name === "tenetkit" || name.startsWith("@tenetkit/"),
+      )
       const drift = yield* Effect.forEach(pinned, ([name, expected]) =>
         Effect.try({
           try: () => Bun.resolveSync(`${name}/package.json`, path.join(root, "apps/rika")),

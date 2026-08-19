@@ -1,5 +1,5 @@
 import { Function } from "effect"
-import type { RunEvent } from "@batonfx/runtime"
+import type { RunEvent } from "tenetkit/runtime"
 import { bounded, record } from "./values"
 import { toolTextLimit } from "./values"
 

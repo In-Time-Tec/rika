@@ -1,6 +1,6 @@
 import { Clock, Effect, FileSystem, Function } from "effect"
 
-const schemaChecksumMismatch = "@batonfx/runtime/SchemaChecksumMismatch"
+const schemaChecksumMismatch = "tenetkit/runtime/SchemaChecksumMismatch"
 
 export const isSchemaChecksumMismatch = (cause: unknown): boolean => {
   if (typeof cause === "string") return cause.includes(schemaChecksumMismatch)

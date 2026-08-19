@@ -17,9 +17,7 @@
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@opentui/core": "catalog:",
-    "@batonfx/core": "catalog:",
-    "@batonfx/harness": "catalog:",
-    "@batonfx/repl": "catalog:",
+    "tenetkit": "catalog:",
     "@rika/baton-execution": "workspace:*",
     "@rika/kernel": "workspace:*",
     "@rika/product": "workspace:*",

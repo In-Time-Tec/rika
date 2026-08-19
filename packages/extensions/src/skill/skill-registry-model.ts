@@ -1,4 +1,4 @@
-import { SkillSource } from "@batonfx/core"
+import { SkillSource } from "tenetkit"
 import { Effect, Schema } from "effect"
 
 export interface Options {

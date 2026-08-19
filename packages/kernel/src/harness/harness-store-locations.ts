@@ -1,11 +1,11 @@
-import { FileSystemHarnessStore, type HarnessStore } from "@batonfx/harness"
+import { FileSystemHarnessStore, type HarnessStore } from "tenetkit/harness"
 import { globalDirectory, workspaceDirectory } from "@rika/configuration/configuration-paths"
 import type { FileSystem, Layer, Path as EffectPath } from "effect"
 import { scopeName } from "./harness-scope-policy"
 
 /**
  * Where one harness scope's file lives. `@rika/extensions` cannot own this: the package boundary
- * forbids it importing `@rika/configuration` or `@batonfx/harness`, so the kernel owns the location
+ * forbids it importing `@rika/configuration` or `tenetkit/harness`, so the kernel owns the location
  * decision `FileSystemHarnessStore` delegates to its host.
  */
 export interface Roots {

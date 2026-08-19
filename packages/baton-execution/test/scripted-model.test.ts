@@ -1,4 +1,4 @@
-import { ModelRegistry } from "@batonfx/core"
+import { ModelRegistry } from "tenetkit"
 import { it } from "@effect/vitest"
 import { Context, Effect, Layer } from "effect"
 import { expect } from "vitest"

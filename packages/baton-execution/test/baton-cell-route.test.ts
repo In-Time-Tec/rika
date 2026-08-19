@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
-import { ToolContext, ToolExecutor } from "@batonfx/core"
-import { Cell, CellTool, KernelProfile, TestKernel } from "@batonfx/repl"
+import { ToolContext, ToolExecutor } from "tenetkit"
+import { Cell, CellTool, KernelProfile, TestKernel } from "tenetkit/repl"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Layer } from "effect"
 import { Response } from "effect/unstable/ai"
@@ -145,8 +145,8 @@ it.effect("fails typed when a cell is called without a kernel pool", () =>
         .execute(request("1", "session-a"))
         .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-a"))),
     )
-    expect(failure._tag).toBe("@batonfx/core/FrameworkFailure")
-    if (failure._tag === "@batonfx/core/FrameworkFailure") {
+    expect(failure._tag).toBe("tenetkit/core/FrameworkFailure")
+    if (failure._tag === "tenetkit/core/FrameworkFailure") {
       expect(failure.tool).toBe(CellTool.name)
       expect(failure.message).toContain("kernel pool")
     }
@@ -182,8 +182,8 @@ it.effect("refuses any tool name other than the one advertised cell tool", () =>
         })
         .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-a"))),
     )
-    expect(failure._tag).toBe("@batonfx/core/FrameworkFailure")
-    if (failure._tag === "@batonfx/core/FrameworkFailure") expect(failure.tool).toBe("bash")
+    expect(failure._tag).toBe("tenetkit/core/FrameworkFailure")
+    if (failure._tag === "tenetkit/core/FrameworkFailure") expect(failure.tool).toBe("bash")
   }).pipe(Effect.scoped),
 )
 
@@ -229,13 +229,13 @@ it.effect("names an async deadline and keeps the next cell healthy", () =>
     expect(failed).toMatchObject({
       _tag: "DomainFailure",
       failure: {
-        _tag: "@batonfx/repl/CellExecutionFailed",
+        _tag: "tenetkit/repl/CellExecutionFailed",
         name: "CellDeadlineExceeded",
       },
     })
     if (failed._tag === "DomainFailure") {
       const failure = failed.failure as Cell.CellFailure
-      if (failure._tag === "@batonfx/repl/CellExecutionFailed") {
+      if (failure._tag === "tenetkit/repl/CellExecutionFailed") {
         expect(failure.message).toContain("cell exceeded the 120s deadline")
         expect(failure.message).toContain("rika.processes.start")
       }

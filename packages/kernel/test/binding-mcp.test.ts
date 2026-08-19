@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { NestedOperation } from "@batonfx/core"
+import { NestedOperation } from "tenetkit"
 import { Context, Effect } from "effect"
 import type * as McpDiscovery from "@rika/extensions/mcp-discovery"
 import * as McpRuntime from "@rika/extensions/mcp-runtime"

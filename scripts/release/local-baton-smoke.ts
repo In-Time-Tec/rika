@@ -6,30 +6,15 @@ import { Command, Flag } from "effect/unstable/cli"
 import { archiveName } from "../packaging/release-archive"
 import { isPackageTarget, type PackageTarget } from "../packaging/package-target-contract"
 import {
-  batonPackages,
+  tenetkitPackages,
   verifyInstalledBatonPackages,
   type PackedBatonPackage,
 } from "./local-baton-package-verification"
 import { directoryDigest } from "../upstream/upstream-content-digest"
 
-export const batonReleasePackages = [
-  "a2a",
-  "ag-ui",
-  "core",
-  "foldkit",
-  "harness",
-  "mcp",
-  "memory",
-  "providers",
-  "repl",
-  "runtime",
-  "skills",
-  "test",
-  "transport",
-] as const
+export const tenetkitReleasePackages = ["tenetkit", "@tenetkit/pg", "@tenetkit/mysql"] as const
 
-type BatonReleasePackage = (typeof batonReleasePackages)[number]
-type BatonPackage = (typeof batonPackages)[number]
+type TenetkitReleasePackage = (typeof tenetkitReleasePackages)[number]
 
 type RootManifest = {
   readonly overrides?: Readonly<Record<string, string>>
@@ -60,16 +45,16 @@ const failure = (step: string, message: string) => new LocalBatonSmokeError({ st
 const UnknownJson = Schema.UnknownFromJsonString
 const encodeManifest = (manifest: RootManifest): string => Schema.encodeSync(UnknownJson)(manifest)
 
-const batonTarballNameImpl = (packageName: BatonPackage, version: string): string =>
-  `batonfx-${packageName}-${version}.tgz`
+const tenetkitTarballNameImpl = (packageName: string, version: string): string =>
+  `${packageName.replace("@tenetkit/", "tenetkit-")}-${version}.tgz`
 
-export const batonTarballName: {
-  (arg0: BatonPackage, arg1: string): string
-  (arg1: string): (arg0: BatonPackage) => string
-} = Function.dual(2, batonTarballNameImpl)
+export const tenetkitTarballName: {
+  (arg0: string, arg1: string): string
+  (arg1: string): (arg0: string) => string
+} = Function.dual(2, tenetkitTarballNameImpl)
 
-const batonReleaseTarballName = (packageName: BatonReleasePackage, version: string): string =>
-  `batonfx-${packageName}-${version}.tgz`
+const tenetkitReleaseTarballName = (packageName: TenetkitReleasePackage, version: string): string =>
+  tenetkitTarballNameImpl(packageName, version)
 
 const batonReleaseInventoryErrorImpl = (
   evidence: BatonReleaseEvidence,
@@ -78,11 +63,11 @@ const batonReleaseInventoryErrorImpl = (
 ): string | undefined => {
   if (evidence.schemaVersion !== 1)
     return `Expected Baton evidence schema version 1; received ${evidence.schemaVersion}`
-  const expectedPackages = batonReleasePackages
+  const expectedPackages = tenetkitReleasePackages
     .map((packageName) => ({
-      name: `@batonfx/${packageName}`,
+      name: packageName,
       version,
-      filename: batonReleaseTarballName(packageName, version),
+      filename: tenetkitReleaseTarballName(packageName, version),
     }))
     .toSorted((left, right) => left.name.localeCompare(right.name))
   const actualPackages = evidence.packages
@@ -103,11 +88,12 @@ export const batonReleaseInventoryError: {
 } = Function.dual(3, batonReleaseInventoryErrorImpl)
 
 export const catalogBatonVersion = (catalog: Readonly<Record<string, string>>): string => {
-  const versions = new Set(batonPackages.map((packageName) => catalog[`@batonfx/${packageName}`]))
+  const versions = new Set(tenetkitPackages.map((packageName) => catalog[packageName]))
   if (versions.size !== 1 || versions.has(undefined))
-    throw new Error("Rika must pin every Baton package to one exact version")
+    throw new Error("Rika must pin every TenetKit package to one exact version")
   const version = [...versions][0]!
-  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`Rika Baton catalog version is not exact semver: ${version}`)
+  if (!/^\d+\.\d+\.\d+$/.test(version))
+    throw new Error(`Rika TenetKit catalog version is not exact semver: ${version}`)
   return version
 }
 
@@ -117,9 +103,9 @@ const manifestWithLocalBatonTarballsImpl = (
   version: string,
 ): RootManifest => {
   const tarballs = Object.fromEntries(
-    batonPackages.map((packageName) => [
-      `@batonfx/${packageName}`,
-      `file:${releaseDirectory}/${batonTarballName(packageName, version)}`,
+    tenetkitPackages.map((packageName) => [
+      packageName,
+      `file:${releaseDirectory}/${tenetkitTarballName(packageName, version)}`,
     ]),
   )
   return {
@@ -248,9 +234,8 @@ const program = (options: { readonly batonRelease: string; readonly target?: str
 
       const packedPackages = new Map<string, PackedBatonPackage>()
       const packedPackageRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-local-baton-packages-" })
-      for (const packageName of batonPackages) {
-        const name = `@batonfx/${packageName}`
-        const filename = batonTarballName(packageName, version)
+      for (const name of tenetkitPackages) {
+        const filename = tenetkitTarballName(name, version)
         const item = evidence.packages.find((candidate) => candidate.name === name)
         if (
           item === undefined ||
@@ -317,10 +302,10 @@ const program = (options: { readonly batonRelease: string; readonly target?: str
       yield* run("bun", ["install", "--linker=isolated"], temporary, environment)
 
       const localLock = yield* fileSystem.readFileString(path.join(temporary, "bun.lock"))
-      if (localLock.includes("npmjs.org/@batonfx"))
-        return yield* failure("verify isolated install", "Local consumer resolved a Baton package from npm")
-      for (const packageName of batonPackages) {
-        const filename = batonTarballName(packageName, version)
+      if (localLock.includes("npmjs.org/tenetkit"))
+        return yield* failure("verify isolated install", "Local consumer resolved a TenetKit package from npm")
+      for (const packageName of tenetkitPackages) {
+        const filename = tenetkitTarballName(packageName, version)
         if (!localLock.includes(filename))
           return yield* failure("verify isolated install", `Local lock does not name ${filename}`)
       }
@@ -330,8 +315,7 @@ const program = (options: { readonly batonRelease: string; readonly target?: str
         packedPackages,
       })
       for (const installed of installedPackages) {
-        const packageName = installed.name.slice("@batonfx/".length) as BatonPackage
-        const filename = batonTarballName(packageName, version)
+        const filename = tenetkitTarballName(installed.name, version)
         yield* Effect.log(`Verified ${installed.name}@${version} from ${filename} at ${installed.directory}`)
       }
 

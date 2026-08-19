@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Schema } from "effect"
-import { HostBindingRegistry } from "@batonfx/repl"
-import { NestedOperation, ToolContext } from "@batonfx/core"
+import { HostBindingRegistry } from "tenetkit/repl"
+import { NestedOperation, ToolContext } from "tenetkit"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
 

@@ -1,10 +1,5 @@
 export const upstreamPackages: ReadonlyArray<{ readonly name: string; readonly directory: string }> = [
-  { name: "@batonfx/core", directory: "batonfx/packages/core" },
-  { name: "@batonfx/mcp", directory: "batonfx/packages/mcp" },
-  { name: "@batonfx/providers", directory: "batonfx/packages/providers" },
-  { name: "@batonfx/runtime", directory: "batonfx/packages/runtime" },
-  { name: "@batonfx/skills", directory: "batonfx/packages/skills" },
-  { name: "@batonfx/test", directory: "batonfx/packages/test" },
+  { name: "tenetkit", directory: "tenetkit/packages/tenetkit" },
 ]
 
 export const tarballDirectory = "artifacts/upstream"

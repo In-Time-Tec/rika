@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { HarnessEntry, HarnessState } from "@batonfx/harness"
+import { HarnessEntry, HarnessState } from "tenetkit/harness"
 import { Effect } from "effect"
 import * as SnapshotPin from "@rika/kernel/harness-snapshot-pin"
 import * as PromptSections from "@rika/kernel/harness-prompt-sections"
@@ -52,7 +52,7 @@ describe("harness snapshot pinning", () => {
       const pinned = SnapshotPin.pin(state([entry("a", "t", "c")]))
       const drifted = SnapshotPin.pin(state([entry("a", "t", "tampered")]))
       const failure = yield* Effect.flip(SnapshotPin.reconstruct(pinned.id, drifted.payload))
-      expect(failure._tag).toBe("@batonfx/harness/SnapshotMismatch")
+      expect(failure._tag).toBe("tenetkit/harness/SnapshotMismatch")
     }),
   )
 
@@ -60,7 +60,7 @@ describe("harness snapshot pinning", () => {
     Effect.gen(function* () {
       const pinned = SnapshotPin.pin(state([]))
       const failure = yield* Effect.flip(SnapshotPin.reconstruct(pinned.id, { nonsense: true }))
-      expect(failure._tag).toBe("@batonfx/harness/SnapshotInvalid")
+      expect(failure._tag).toBe("tenetkit/harness/SnapshotInvalid")
     }),
   )
 
