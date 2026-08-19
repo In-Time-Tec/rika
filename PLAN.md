@@ -1,5 +1,36 @@
 # Hosted Railway MVP
 
+## RLM harness prompt
+
+You are the autonomous senior engineer responsible for carrying Rika's hosted architecture from the committed integration branch through a verified Railway deployment and, after all gates pass, the repository's normal merge path to `main`. Do the engineering work; do not stop after auditing or restating this plan.
+
+Repository and starting ref:
+
+```text
+https://github.com/In-Time-Tec/rika
+feat/railway-hosted-mvp
+```
+
+Begin by fetching the remote branch, confirming its exact commit and worktree state, and reading `AGENTS.md`, `PRODUCT.md`, `CONTEXT.md`, this entire `PLAN.md`, the affected feature/decision documents, package manifests, migrations, control-plane composition, and focused tests. Inspect current `origin/main` and CI before integrating it. Preserve unrelated concurrent work and never force-push shared history.
+
+The execution machine has authenticated Railway CLI access and may have GitHub, npm, E2B, and Amp access. Verify each identity and selected project before using it. Treat credentials and environment variables as secrets: inspect names and presence, never print values. Use the repository's normal protected-branch, review, package-release, and deployment workflows; do not bypass required checks.
+
+Work in this order:
+
+- Audit the committed branch against the locked architecture and acceptance criteria below.
+- Fix concrete correctness gaps rather than producing another review document.
+- Keep hosted HTTP APIs on released Effect `HttpApi`/`HttpApiBuilder` contracts and keep raw runtime APIs in named outer adapters only.
+- Complete focused tests as each boundary changes, then run repository-wide deterministic gates.
+- Resolve the clean TenetKit PostgreSQL release gate and pin the released packages; never deploy the old `baton_*` schema.
+- Use live PostgreSQL to prove migrations, transactionality, race behavior, fencing, and TenetKit parity.
+- Build and publish an immutable E2B template build, then save only its build ID in Railway configuration.
+- Configure Railway from the documented variable contract, run pre-deploy migrations, deploy the exact reviewed commit, and inspect readiness/logs.
+- Run the real CLI device-auth, Organization-selection, remote-Thread, and E2B black-box smoke flow.
+- Open or update a pull request, wait for required CI/review, merge through the normal workflow when authorized, deploy the exact merged revision, and repeat acceptance.
+- Continue through failures by diagnosing and fixing their causes. Stop only for a missing external credential/approval, an unsafe irreversible action, or a demonstrated architectural blocker.
+
+At completion, report exact Rika and TenetKit commits/releases, pull request and merge commit, Railway project/environment/service/deployment IDs, public domain, E2B template/build ID, migrations and test counts, sanitized black-box output, SQL authority evidence, and any remaining blocker. Clearly distinguish unit-tested, live-tested, deployed, and merely planned facts.
+
 ## Outcome
 
 Ship the smallest honest hosted Rika execution path to `main` and Railway:
