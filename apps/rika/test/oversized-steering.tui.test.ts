@@ -39,7 +39,7 @@ const waitQueue = (
  * turn. A queued prompt carries no size bound of its own, so a long one — a pasted stack trace, a
  * file, a diff — always exceeded the composer's 4096-character convenience limit. Enforcing that
  * limit on delivery consumed the queued row and delivered nothing, so the steer vanished with no
- * pending entry, no settled entry, and no report. Baton bounds a steering prompt by the same
+ * pending entry, no settled entry, and no report. TenetKit bounds a steering prompt by the same
  * message limits as any other prompt, and the projection stopped enforcing this number when it
  * stopped throwing on oversized internal steers.
  */

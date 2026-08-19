@@ -13,9 +13,9 @@ const paths = [
   "memory.postGcHeapBytes",
   "memory.peakProcessTreeRssBytes",
   "memory.postGcProcessTreeRssBytes",
-  "batonSql.totalEvents",
-  "batonSql.eventJsonBytes",
-  "batonSql.operationResultBytes",
+  "tenetkitSql.totalEvents",
+  "tenetkitSql.eventJsonBytes",
+  "tenetkitSql.operationResultBytes",
   "databases.afterCheckpoint.total",
   "projection.commitProjectionCalls",
 ] as const
@@ -70,7 +70,7 @@ export const compare = (input: {
   const oldByCase = new Map(baseline.map((value) => [key(value), value]))
   const newByCase = new Map(candidate.map((value) => [key(value), value]))
   if (oldByCase.size !== cases.length || newByCase.size !== cases.length)
-    failures.push("comparison requires Baton aggregates for all three cases")
+    failures.push("comparison requires TenetKit aggregates for all three cases")
 
   for (const [caseName, current] of newByCase) {
     const old = oldByCase.get(caseName)
@@ -94,7 +94,7 @@ export const compare = (input: {
         failures.push(`${caseName}: provider did not emit exactly one finish`)
     }
     if (caseName !== "one") {
-      for (const path of ["batonSql.totalEvents", "projection.commitProjectionCalls"] as const) {
+      for (const path of ["tenetkitSql.totalEvents", "projection.commitProjectionCalls"] as const) {
         const oldValue = metric(old, path)
         const candidateValue = metric(current, path)
         if (oldValue === 0 && candidateValue === 0) continue
@@ -139,7 +139,7 @@ export const compare = (input: {
   })
   if (candidateGroups.length === cases.length) {
     const eventCounts = new Set(
-      candidateGroups.flatMap((group) => group.samples.map((sample) => sample.batonSql.totalEvents)),
+      candidateGroups.flatMap((group) => group.samples.map((sample) => sample.tenetkitSql.totalEvents)),
     )
     const projectionCounts = new Set(
       candidateGroups.flatMap((group) => group.samples.map((sample) => sample.projection.commitProjectionCalls)),
@@ -149,8 +149,8 @@ export const compare = (input: {
     const one = newByCase.get("one")!
     for (const group of candidateGroups) {
       for (const path of [
-        "batonSql.eventJsonBytes",
-        "batonSql.operationResultBytes",
+        "tenetkitSql.eventJsonBytes",
+        "tenetkitSql.operationResultBytes",
         "databases.afterCheckpoint.total",
         "memory.postGcHeapBytes",
         "memory.postGcProcessTreeRssBytes",

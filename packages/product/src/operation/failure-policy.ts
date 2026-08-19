@@ -48,8 +48,8 @@ const modelFailureMessages: Readonly<Record<ModelFailureCategory, string>> = {
 }
 
 /**
- * Present a Baton model-call failure from its structured category and
- * classification. `transient` means Baton retried and the same call could
+ * Present a TenetKit model-call failure from its structured category and
+ * classification. `transient` means TenetKit retried and the same call could
  * succeed later; `terminal` means an identical attempt fails identically.
  */
 export const modelFailurePresentation = (input: {

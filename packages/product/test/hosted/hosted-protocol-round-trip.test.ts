@@ -3,13 +3,13 @@ import { Schema } from "effect"
 import {
   AuditEventId,
   BetterAuthMemberId,
-  CheckpointId,
   ClientId,
   CommitCursor,
   CommandId,
   CredentialReferenceMetadata,
   DeviceId,
   EventId,
+  ExecutorAssignmentId,
   ExecutorInstanceId,
   FencingGeneration,
   IdempotencyKey,
@@ -20,12 +20,8 @@ import {
   ThreadId,
   Timestamp,
   WorkspaceId,
-} from "../../src/hosted/hosted-authority-model"
-import { ClientToControlPlane, ControlPlaneToClient } from "../../src/hosted/protocol/client-control-plane-protocol"
-import {
-  ControlPlaneToExecutor,
-  ExecutorToControlPlane,
-} from "../../src/hosted/protocol/executor-control-plane-protocol"
+} from "../../src/hosted/model"
+import { ClientRequest, ClientResponse } from "../../src/hosted/protocol/client-protocol"
 
 const codec = <S extends Schema.Constraint>(schema: S) =>
   schema as unknown as Schema.Codec<unknown, unknown, never, never>
@@ -41,6 +37,7 @@ const threadId = ThreadId.make("thread")
 const memberId = BetterAuthMemberId.make("member")
 const deviceId = DeviceId.make("device")
 const clientId = ClientId.make("client")
+const assignmentId = ExecutorAssignmentId.make("assignment")
 const executorInstanceId = ExecutorInstanceId.make("executor")
 const leaseId = LeaseId.make("lease")
 const generation = FencingGeneration.make("7")
@@ -86,8 +83,10 @@ const event = {
   threadId,
   eventId: EventId.make("event"),
   idempotencyKey: IdempotencyKey.make("event-key"),
+  assignmentId,
   executorInstanceId,
   assignmentGeneration: generation,
+  leaseEpoch: generation,
   sequence,
   commitCursor,
   commandSequence: sequence,
@@ -113,37 +112,6 @@ const presence = {
   status: "controlling" as const,
   lastSeenAt: now,
   expiresAt,
-}
-const executor = {
-  id: executorInstanceId,
-  organizationId,
-  executorKind: "e2b" as const,
-  deviceId: null,
-  status: "online" as const,
-  connectedAt: now,
-  lastSeenAt: now,
-}
-const assignment = {
-  organizationId,
-  threadId,
-  executorInstanceId,
-  executorKind: "e2b" as const,
-  leaseId,
-  generation,
-  acquiredAt: now,
-  renewedAt: now,
-  expiresAt,
-}
-const checkpoint = {
-  id: CheckpointId.make("checkpoint"),
-  organizationId,
-  threadId,
-  executorInstanceId,
-  assignmentGeneration: generation,
-  eventSequence: sequence,
-  batonCheckpointReference: "baton-checkpoint-reference",
-  metadata: { compressed: true },
-  createdAt: now,
 }
 
 describe("client control-plane protocol", () => {
@@ -206,7 +174,7 @@ describe("client control-plane protocol", () => {
         expiresAt,
       },
     ]
-    expect(values.map((value) => roundTrip(ClientToControlPlane, value))).toEqual(values)
+    expect(values.map((value) => roundTrip(ClientRequest, value))).toEqual(values)
   })
 
   it("round trips every control-plane response variant including terminal output broadcast", () => {
@@ -225,74 +193,7 @@ describe("client control-plane protocol", () => {
         details: { auditEventId: AuditEventId.make("audit") },
       },
     ]
-    expect(values.map((value) => roundTrip(ControlPlaneToClient, value))).toEqual(values)
-  })
-})
-
-describe("executor control-plane protocol", () => {
-  it("round trips every executor request variant", () => {
-    const values = [
-      { _tag: "RegisterExecutor", executor },
-      {
-        _tag: "AcquireAssignment",
-        organizationId,
-        threadId,
-        executorInstanceId,
-        executorKind: "e2b",
-        leaseId,
-        now,
-        expiresAt,
-      },
-      {
-        _tag: "RenewAssignment",
-        organizationId,
-        threadId,
-        executorInstanceId,
-        leaseId,
-        generation,
-        now,
-        expiresAt,
-      },
-      {
-        _tag: "AppendThreadEvent",
-        organizationId,
-        threadId,
-        eventId: event.eventId,
-        idempotencyKey: event.idempotencyKey,
-        executorInstanceId,
-        leaseId,
-        assignmentGeneration: generation,
-        commandSequence: sequence,
-        event: event.event,
-        createdAt: now,
-      },
-      {
-        _tag: "SaveCheckpoint",
-        checkpointId: checkpoint.id,
-        organizationId,
-        threadId,
-        executorInstanceId,
-        leaseId,
-        assignmentGeneration: generation,
-        eventSequence: sequence,
-        batonCheckpointReference: checkpoint.batonCheckpointReference,
-        metadata: checkpoint.metadata,
-        createdAt: now,
-      },
-    ]
-    expect(values.map((value) => roundTrip(ExecutorToControlPlane, value))).toEqual(values)
-  })
-
-  it("round trips every control-plane executor response variant", () => {
-    const values = [
-      { _tag: "ExecutorRegistered", executor },
-      { _tag: "AssignmentGranted", assignment },
-      { _tag: "AssignmentRenewed", assignment },
-      { _tag: "EventAppended", event },
-      { _tag: "CheckpointStored", checkpoint },
-      { _tag: "Rejected", reason: "stale fence", expectedGeneration: generation },
-    ]
-    expect(values.map((value) => roundTrip(ControlPlaneToExecutor, value))).toEqual(values)
+    expect(values.map((value) => roundTrip(ClientResponse, value))).toEqual(values)
   })
 })
 

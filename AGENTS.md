@@ -17,12 +17,12 @@ Rika is a local coding-agent CLI and OpenTUI app written in Effect TypeScript. R
 
 ## Boundaries
 
-- Baton owns durable execution and the agent loop; Rika owns product semantics and projections.
-- Use released Baton, Effect, and OpenTUI package exports. Never edit, import from, format, build, or test `repos/*`.
+- TenetKit owns durable execution and the agent loop; Rika owns product semantics and projections.
+- Use released TenetKit, Effect, and OpenTUI package exports. Never edit, import from, format, build, or test `repos/*`.
 - Use Effect services, schemas, streams, scopes, typed errors, platform APIs, and structured concurrency. Keep raw Promise or host APIs in a named outer adapter only when Effect has no equivalent.
 - Run Effects only at app, process, test-host, or framework boundaries. Keep pure computations pure.
 - Build CLI surfaces with `effect/unstable/cli`, use Effect SQL for Rika SQLite state, use WebSockets for Rika process transport, and keep OpenTUI imports in the TUI adapter.
-- Language-model provider SDKs are forbidden outside released Baton contracts. `@rika/coding-tools` may use web-research provider SDKs only when they preserve Effect interruption, retry, and resource semantics; otherwise use Effect HTTP adapters.
+- Language-model provider SDKs are forbidden outside released TenetKit contracts. `@rika/coding-tools` may use web-research provider SDKs only when they preserve Effect interruption, retry, and resource semantics; otherwise use Effect HTTP adapters.
 - Do not add Rivet, actors, web or IDE clients, remote runners, orbs, a local semantic code index, or ast-grep outline tools. External semantic code research is allowed through web-research providers.
 - Do not create catch-all `utils`, `helpers`, `common`, or `lib` modules. Do not put comments in code.
 
@@ -34,8 +34,8 @@ Rika is a local coding-agent CLI and OpenTUI app written in Effect TypeScript. R
 - `docs/decisions/<slug>.md` records only a lasting choice and why. `docs/tradeoffs/<slug>.md` records only a meaningful gain, cost, and rejected options.
 - Do not create documentation indexes, ledgers, status or evidence tables, numbered specs, decision-record metadata, plans, history sections, related-link sections, or Markdown meaning/structure validators.
 - `PLAN.md`, `TODO.md`, and `ISSUES.md` may track unfinished work but never define implemented product behavior.
-- The Baton native-runtime `PLAN.md` may record target interface changes and release acceptance for this clean-break migration.
-- A test-only Vitest alias may resolve Baton package imports to the Baton worktree before `0.15.0` is published. Production source must keep package-name imports. Remove the alias after Rika pins the released packages.
+- The TenetKit native-runtime `PLAN.md` may record target interface changes and release acceptance for this clean-break migration.
+- A test-only Vitest alias may resolve TenetKit package imports to the TenetKit worktree before `0.15.0` is published. Production source must keep package-name imports. Remove the alias after Rika pins the released packages.
 
 ## Scripts and verification
 

@@ -1,5 +1,6 @@
 export * from "./better-auth-runtime"
 export * from "./cli-device"
+export * from "./cli-device-directory"
 export * from "./config"
 export * from "./identity-directory"
 export * from "./mail"

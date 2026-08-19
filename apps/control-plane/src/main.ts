@@ -5,6 +5,7 @@ import {
   closePostgresPool,
   loadIdentityConfig,
   makeBetterAuthIdentityRuntime,
+  makePostgresCliDeviceDirectory,
   makePostgresIdentityDirectory,
   makePostgresPool,
   makeResendMailSender,
@@ -40,6 +41,7 @@ const program = Effect.scoped(
       dependencies: {
         identity,
         directory: makePostgresIdentityDirectory(pool),
+        devices: makePostgresCliDeviceDirectory(pool),
         production: config.production,
       },
     })

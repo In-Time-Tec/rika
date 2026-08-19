@@ -457,7 +457,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
                   last.checkpoint?.cursor !== inspection.cursor
                 )
                   return yield* TranscriptRepository.RepositoryError.make({
-                    message: `Turn ${turnId} terminal projection does not match Baton inspection at ${inspection.cursor}`,
+                    message: `Turn ${turnId} terminal projection does not match TenetKit inspection at ${inspection.cursor}`,
                   })
                 yield* Effect.forEach(pendingTerminal, commit, { discard: true })
                 pendingTerminal.length = 0
@@ -469,7 +469,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
                 stored?.projectorCheckpoint?.cursor !== inspection.cursor
               )
                 return yield* TranscriptRepository.RepositoryError.make({
-                  message: `Turn ${turnId} projection cursor does not match terminal Baton inspection at ${inspection.cursor}`,
+                  message: `Turn ${turnId} projection cursor does not match terminal TenetKit inspection at ${inspection.cursor}`,
                 })
               return { stored, inspection, hasUncommittedTerminal: pendingTerminal.length > 0 }
             }),

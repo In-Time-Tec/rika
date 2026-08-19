@@ -12,13 +12,7 @@
       "dependsOn": ["^build"]
     },
     "//#lint": {
-      "inputs": [
-        "package.json",
-        "apps/**/*.ts",
-        "packages/**/*.ts",
-        "scripts/**/*.ts",
-        "!**/dist/**"
-      ]
+      "inputs": ["package.json", "apps/**/*.ts", "packages/**/*.ts", "scripts/**/*.ts", "!**/dist/**"]
     },
     "//#test-unit": {
       "inputs": [

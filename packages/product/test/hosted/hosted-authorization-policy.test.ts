@@ -3,8 +3,8 @@ import {
   type AuthorizationAction,
   type AuthorizationSubject,
   isAuthorized,
-} from "../../src/hosted/hosted-authorization-policy"
-import { BetterAuthMemberId, type GrantRole } from "../../src/hosted/hosted-authority-model"
+} from "../../src/hosted/authorization"
+import { BetterAuthMemberId, type GrantRole } from "../../src/hosted/model"
 
 const memberId = BetterAuthMemberId.make("member")
 const creatorId = BetterAuthMemberId.make("creator")

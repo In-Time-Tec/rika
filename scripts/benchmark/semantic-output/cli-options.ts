@@ -4,10 +4,10 @@ import { Command, Flag } from "effect/unstable/cli"
 export interface Options {
   readonly command: "plan" | "setup" | "run" | "compare"
   readonly output: string
-  readonly candidateBatonRelease?: string
+  readonly candidateTenetKitRelease?: string
   readonly samples: number
   readonly baselineTag: "v0.5.3"
-  readonly baselineBatonVersion: "0.20.2"
+  readonly baselineTenetKitVersion: "0.20.2"
   readonly baseline?: string
   readonly candidate?: string
 }
@@ -19,7 +19,7 @@ const samples = Flag.integer("samples").pipe(
   Flag.withDefault(3),
 )
 const output = Flag.string("output")
-const baseline = { baselineTag: "v0.5.3", baselineBatonVersion: "0.20.2" } as const
+const baseline = { baselineTag: "v0.5.3", baselineTenetKitVersion: "0.20.2" } as const
 
 export const makeCommand = <E, R>(handler: Handler<E, R>) =>
   Command.make("semantic-output-benchmark").pipe(
@@ -27,12 +27,12 @@ export const makeCommand = <E, R>(handler: Handler<E, R>) =>
       Command.make("plan", { output, samples }, (options) => handler({ command: "plan", ...options, ...baseline })),
       Command.make(
         "setup",
-        { output, samples, candidateBatonRelease: Flag.string("candidate-baton-release") },
+        { output, samples, candidateTenetKitRelease: Flag.string("candidate-tenetkit-release") },
         (options) => handler({ command: "setup", ...options, ...baseline }),
       ),
       Command.make(
         "run",
-        { output, samples, candidateBatonRelease: Flag.string("candidate-baton-release") },
+        { output, samples, candidateTenetKitRelease: Flag.string("candidate-tenetkit-release") },
         (options) => handler({ command: "run", ...options, ...baseline }),
       ),
       Command.make(

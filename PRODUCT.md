@@ -10,7 +10,7 @@ Rika is for technical teams that prefer a CLI and TUI, need local development to
 
 - Keep organization, access, and shared Thread authority in the hosted control plane.
 - Keep local and remote execution as explicit first-class choices; never move work between them implicitly.
-- Run remote work only in isolated E2B workspaces while preserving Baton as execution authority.
+- Run remote work only in isolated E2B workspaces while preserving TenetKit as execution authority.
 - Let multiple authorized people inspect and control durable work without sharing host or provider credentials.
 - Make ongoing and completed agent work easy to inspect in the terminal.
 - Preserve durable work across process failure without duplicating execution authority.
@@ -22,6 +22,6 @@ Rika is for technical teams that prefer a CLI and TUI, need local development to
 
 ## Boundaries
 
-Rika owns identity integration, organizations, access, execution placement, workspace policy, configuration, projections, tools, extensions, product persistence, and terminal behavior. Baton owns durable execution and the agent loop. E2B supplies remote sandbox infrastructure without becoming product authority. OpenTUI stays behind the rendering adapter.
+Rika owns identity integration, organizations, access, execution placement, workspace policy, configuration, projections, tools, extensions, product persistence, and terminal behavior. TenetKit owns durable execution and the agent loop. E2B supplies remote sandbox infrastructure without becoming product authority. OpenTUI stays behind the rendering adapter.
 
 Rika is not a billing system, public agent SDK, web or IDE coding client, general sandbox platform, or social network. Local execution is not isolated from the developer's machine; remote isolation belongs to E2B. Rika does not copy another product's branding or protocol, support interchangeable remote providers, or own a local semantic code index or ast-grep outline subsystem.

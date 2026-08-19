@@ -10,7 +10,7 @@ import * as ServerKernel from "../src/server/composition/server-kernel-layer"
 /**
  * The composed kernel spawns a real Bun worker, so this is a process test rather than a unit one.
  *
- * Every layer of this surface can be correct while the product is dead: Baton mounts each binding
+ * Every layer of this surface can be correct while the product is dead: TenetKit mounts each binding
  * module as its own flat global, Rika assembles them into `rika`, and until a cell actually names
  * `rika` nothing proves the assembly ever ran. A cell is the only place that fact is observable.
  */

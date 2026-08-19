@@ -18,7 +18,7 @@
     "@effect/platform-bun": "catalog:",
     "@opentui/core": "catalog:",
     "tenetkit": "catalog:",
-    "@rika/baton-execution": "workspace:*",
+    "@rika/execution": "workspace:*",
     "@rika/kernel": "workspace:*",
     "@rika/product": "workspace:*",
     "@rika/configuration": "workspace:*",

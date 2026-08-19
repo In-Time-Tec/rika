@@ -75,7 +75,7 @@ test("shows the editing hint inline on the queued row being edited", () =>
       }
     }),
   ))
-test("keeps a steering row visible from local request through Baton acceptance", () =>
+test("keeps a steering row visible from local request through TenetKit acceptance", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))

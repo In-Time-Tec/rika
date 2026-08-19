@@ -1,14 +1,14 @@
 import { Context, Effect, Layer, Schema } from "effect"
 import type { PtyCreate, PtyInput, PtyReconnect, PtyResize, PtyTranscriptChunk } from "./protocol"
 
-export interface PtyRecord extends PtyCreate {
+export interface Record extends PtyCreate {
   readonly connected: boolean
   readonly cursor: number
   readonly transcript: ReadonlyArray<PtyTranscriptChunk>
   readonly revision: number
 }
 
-export interface PtyConnection {
+export interface Connection {
   readonly ptyId: string
   readonly connected: boolean
   readonly cursor: number
@@ -20,17 +20,17 @@ export class PtyError extends Schema.TaggedError<PtyError>()("PtyError", {
   message: Schema.String,
 }) {}
 
-export interface PtyRepositoryInterface {
-  readonly get: (ptyId: string) => Effect.Effect<PtyRecord | undefined, PtyError>
-  readonly insert: (record: PtyRecord) => Effect.Effect<PtyRecord, PtyError>
-  readonly update: (record: PtyRecord, expectedRevision: number) => Effect.Effect<PtyRecord, PtyError>
+export interface RepositoryInterface {
+  readonly get: (ptyId: string) => Effect.Effect<Record | undefined, PtyError>
+  readonly insert: (record: Record) => Effect.Effect<Record, PtyError>
+  readonly update: (record: Record, expectedRevision: number) => Effect.Effect<Record, PtyError>
 }
 
-export class PtyRepository extends Context.Service<PtyRepository, PtyRepositoryInterface>()(
-  "@rika/remote-execution/pty/PtyRepository",
+export class Repository extends Context.Service<Repository, RepositoryInterface>()(
+  "@rika/remote-execution/pty/Repository",
 ) {}
 
-export interface PtyDriverInterface {
+export interface DriverInterface {
   readonly create: (request: PtyCreate) => Effect.Effect<void, PtyError>
   readonly input: (request: PtyInput) => Effect.Effect<void, PtyError>
   readonly resize: (request: PtyResize) => Effect.Effect<void, PtyError>
@@ -38,50 +38,48 @@ export interface PtyDriverInterface {
   readonly reconnect: (ptyId: string) => Effect.Effect<void, PtyError>
 }
 
-export class PtyDriver extends Context.Service<PtyDriver, PtyDriverInterface>()(
-  "@rika/remote-execution/pty/PtyDriver",
-) {}
+export class Driver extends Context.Service<Driver, DriverInterface>()("@rika/remote-execution/pty/Driver") {}
 
 export interface Interface {
-  readonly create: (request: PtyCreate) => Effect.Effect<PtyConnection, PtyError>
+  readonly create: (request: PtyCreate) => Effect.Effect<Connection, PtyError>
   readonly input: (request: PtyInput) => Effect.Effect<void, PtyError>
-  readonly resize: (request: PtyResize) => Effect.Effect<PtyConnection, PtyError>
-  readonly disconnect: (ptyId: string) => Effect.Effect<PtyConnection, PtyError>
-  readonly reconnect: (request: PtyReconnect) => Effect.Effect<PtyConnection, PtyError>
+  readonly resize: (request: PtyResize) => Effect.Effect<Connection, PtyError>
+  readonly disconnect: (ptyId: string) => Effect.Effect<Connection, PtyError>
+  readonly reconnect: (request: PtyReconnect) => Effect.Effect<Connection, PtyError>
   readonly recordOutput: (ptyId: string, data: string) => Effect.Effect<PtyTranscriptChunk, PtyError>
 }
 
-export class PtyManager extends Context.Service<PtyManager, Interface>()("@rika/remote-execution/pty/PtyManager") {}
+export class Manager extends Context.Service<Manager, Interface>()("@rika/remote-execution/pty/Manager") {}
 
 const connection = (
-  record: PtyRecord,
+  record: Record,
   transcript: ReadonlyArray<PtyTranscriptChunk> = record.transcript,
-): PtyConnection => ({
+): Connection => ({
   ptyId: record.ptyId,
   connected: record.connected,
   cursor: record.cursor,
   transcript,
 })
 
-const sameCreate = (record: PtyRecord, request: PtyCreate) =>
+const sameCreate = (record: Record, request: PtyCreate) =>
   record.command === request.command &&
   record.cwd === request.cwd &&
   record.cols === request.cols &&
   record.rows === request.rows
 
-export const layer: Layer.Layer<PtyManager, never, PtyDriver | PtyRepository> = Layer.effect(
-  PtyManager,
+export const layer: Layer.Layer<Manager, never, Driver | Repository> = Layer.effect(
+  Manager,
   Effect.gen(function* () {
-    const repository = yield* PtyRepository
-    const driver = yield* PtyDriver
+    const repository = yield* Repository
+    const driver = yield* Driver
 
-    const load = Effect.fn("PtyManager.load")(function* (ptyId: string) {
+    const load = Effect.fn("Pty.load")(function* (ptyId: string) {
       const record = yield* repository.get(ptyId)
       if (record === undefined) return yield* PtyError.make({ kind: "missing", message: `PTY ${ptyId} does not exist` })
       return record
     })
 
-    const create = Effect.fn("PtyManager.create")(function* (request: PtyCreate) {
+    const create = Effect.fn("Pty.create")(function* (request: PtyCreate) {
       const existing = yield* repository.get(request.ptyId)
       if (existing !== undefined) {
         if (!sameCreate(existing, request))
@@ -102,14 +100,14 @@ export const layer: Layer.Layer<PtyManager, never, PtyDriver | PtyRepository> = 
       return connection(record)
     })
 
-    const input = Effect.fn("PtyManager.input")(function* (request: PtyInput) {
+    const input = Effect.fn("Pty.input")(function* (request: PtyInput) {
       const record = yield* load(request.ptyId)
       if (!record.connected)
         return yield* PtyError.make({ kind: "protocol", message: `PTY ${request.ptyId} is disconnected` })
       yield* driver.input(request)
     })
 
-    const resize = Effect.fn("PtyManager.resize")(function* (request: PtyResize) {
+    const resize = Effect.fn("Pty.resize")(function* (request: PtyResize) {
       const record = yield* load(request.ptyId)
       if (record.cols === request.cols && record.rows === request.rows) return connection(record)
       yield* driver.resize(request)
@@ -118,14 +116,14 @@ export const layer: Layer.Layer<PtyManager, never, PtyDriver | PtyRepository> = 
       )
     })
 
-    const disconnect = Effect.fn("PtyManager.disconnect")(function* (ptyId: string) {
+    const disconnect = Effect.fn("Pty.disconnect")(function* (ptyId: string) {
       const record = yield* load(ptyId)
       if (!record.connected) return connection(record)
       yield* driver.disconnect(ptyId)
       return connection(yield* repository.update({ ...record, connected: false }, record.revision))
     })
 
-    const reconnect = Effect.fn("PtyManager.reconnect")(function* (request: PtyReconnect) {
+    const reconnect = Effect.fn("Pty.reconnect")(function* (request: PtyReconnect) {
       const record = yield* load(request.ptyId)
       if (request.cursor > record.cursor)
         return yield* PtyError.make({ kind: "protocol", message: `PTY ${request.ptyId} cursor is ahead of transcript` })
@@ -140,7 +138,7 @@ export const layer: Layer.Layer<PtyManager, never, PtyDriver | PtyRepository> = 
       )
     })
 
-    const recordOutput = Effect.fn("PtyManager.recordOutput")(function* (ptyId: string, data: string) {
+    const recordOutput = Effect.fn("Pty.recordOutput")(function* (ptyId: string, data: string) {
       const record = yield* load(ptyId)
       const chunk = { cursor: record.cursor + 1, data }
       yield* repository.update(
@@ -150,6 +148,6 @@ export const layer: Layer.Layer<PtyManager, never, PtyDriver | PtyRepository> = 
       return chunk
     })
 
-    return PtyManager.of({ create, input, resize, disconnect, reconnect, recordOutput })
+    return Manager.of({ create, input, resize, disconnect, reconnect, recordOutput })
   }),
 )

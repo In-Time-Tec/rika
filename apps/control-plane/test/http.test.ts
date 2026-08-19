@@ -1,6 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
-import { IdentityDirectoryError, IdentityRuntimeError, type Account, type IdentityRuntime } from "@rika/identity"
+import { Effect, Schema } from "effect"
+import {
+  CliDeviceDirectoryError,
+  IdentityDirectoryError,
+  IdentityRuntimeError,
+  type Account,
+  type CliDeviceRegistration,
+  type CliDeviceDirectory,
+  type IdentityPrincipal,
+  type IdentityRuntime,
+} from "@rika/identity"
 import { handleRequest, type HttpDependencies } from "../src/http"
 
 const account: Account = {
@@ -28,12 +37,20 @@ const account: Account = {
 
 const runtime = (userId: string | undefined): IdentityRuntime => ({
   handle: () => Effect.succeed(new Response("delegated", { status: 204 })),
-  identify: () => Effect.succeed(userId),
+  identify: () => Effect.succeed(userId === undefined ? undefined : { userId }),
   protectedResourceMetadata: Effect.succeed({
-    resource: "https://control.example.com/api",
+    resource: "https://control.example.com/api/v1",
     dpop_bound_access_tokens_required: true,
   }),
 })
+
+const devices: CliDeviceDirectory = {
+  register: () => Effect.void,
+  discard: () => Effect.void,
+  authenticate: () => Effect.void.pipe(Effect.as(undefined as string | undefined)),
+  list: () => Effect.succeed([]),
+  revoke: () => Effect.succeed(false),
+}
 
 const dependencies = (
   options: {
@@ -47,6 +64,7 @@ const dependencies = (
     ready: options.ready === false ? Effect.fail(IdentityDirectoryError.make({ operation: "readiness" })) : Effect.void,
     account: () => Effect.succeed(options.account),
   },
+  devices,
   production: true,
 })
 
@@ -54,6 +72,23 @@ const request = (path: string, options?: RequestInit) => new Request(`https://co
 
 const response = (path: string, deps = dependencies(), options?: RequestInit) =>
   handleRequest({ request: request(path, options), dependencies: deps })
+
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+
+const cliRegistrationBody = {
+  reference_id: "cli-device:019d1a56-286d-7000-8000-000000000001",
+  token_endpoint_auth_method: "none",
+  grant_types: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"],
+  scope: "openid profile email offline_access account",
+  resource: "https://control.example.com/api/v1",
+  dpop_jkt: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ",
+  jwk: {
+    kty: "EC",
+    crv: "P-256",
+    x: "public-x",
+    y: "public-y",
+  },
+} as const
 
 describe("control-plane HTTP", () => {
   it.effect("serves liveness without consulting identity or PostgreSQL", () =>
@@ -68,6 +103,7 @@ describe("control-plane HTTP", () => {
           ready: Effect.fail(IdentityDirectoryError.make({ operation: "readiness" })),
           account: () => Effect.fail(IdentityDirectoryError.make({ operation: "account" })),
         },
+        devices,
         production: true,
       }
       const result = yield* response("/healthz", unavailable)
@@ -102,6 +138,100 @@ describe("control-plane HTTP", () => {
       })
       expect(result.status).toBe(204)
       expect(result.headers.get("x-content-type-options")).toBe("nosniff")
+    }),
+  )
+
+  it.effect("registers a CLI OAuth client and installation binding as one public operation", () =>
+    Effect.gen(function* () {
+      let delegated: Request | undefined
+      let registered: CliDeviceRegistration | undefined
+      const base = dependencies()
+      const result = yield* response(
+        "/api/v1/auth/cli/registrations",
+        {
+          ...base,
+          identity: {
+            ...base.identity,
+            handle: (forwardedRequest) => {
+              delegated = forwardedRequest
+              return Effect.succeed(
+                Response.json({ client_id: "client-1", token_endpoint_auth_method: "none" }, { status: 201 }),
+              )
+            },
+          },
+          devices: {
+            ...devices,
+            register: (input) => {
+              registered = input
+              return Effect.void
+            },
+          },
+        },
+        { method: "POST", body: encodeJson(cliRegistrationBody) },
+      )
+      expect(result.status).toBe(201)
+      expect(yield* Effect.promise(() => result.json())).toMatchObject({ client_id: "client-1" })
+      expect(delegated?.url).toBe("https://control.example.com/api/auth/oauth2/register")
+      expect(yield* Effect.promise(() => delegated!.json())).toEqual({
+        client_name: "Rika CLI",
+        application_type: "native",
+        token_endpoint_auth_method: "none",
+        grant_types: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"],
+        scope: "openid profile email offline_access account",
+        software_id: "rika-cli",
+        dpop_bound_access_tokens: true,
+        resources: ["https://control.example.com/api/v1"],
+      })
+      expect(registered).toEqual({
+        clientId: "client-1",
+        deviceId: "019d1a56-286d-7000-8000-000000000001",
+        publicJwk: cliRegistrationBody.jwk,
+        jwkThumbprint: cliRegistrationBody.dpop_jkt,
+      })
+    }),
+  )
+
+  it.effect("removes the OAuth client when its installation binding cannot be persisted", () =>
+    Effect.gen(function* () {
+      const discarded: Array<string> = []
+      const base = dependencies()
+      const result = yield* response(
+        "/api/v1/auth/cli/registrations",
+        {
+          ...base,
+          identity: {
+            ...base.identity,
+            handle: () => Effect.succeed(Response.json({ client_id: "client-2" }, { status: 201 })),
+          },
+          devices: {
+            ...devices,
+            register: () => Effect.fail(CliDeviceDirectoryError.make({ operation: "register CLI device" })),
+            discard: (clientId) => Effect.sync(() => void discarded.push(clientId)),
+          },
+        },
+        { method: "POST", body: encodeJson(cliRegistrationBody) },
+      )
+      expect(result.status).toBe(503)
+      expect(discarded).toEqual(["client-2"])
+    }),
+  )
+
+  it.effect("requires the verified OAuth client and DPoP key to match a registered installation", () =>
+    Effect.gen(function* () {
+      const principal: IdentityPrincipal = { userId: "user-1", clientId: "client-1", dpopJkt: "thumbprint-1" }
+      const base = dependencies({ account })
+      const withDevice = (authenticated: boolean): HttpDependencies => ({
+        ...base,
+        identity: { ...base.identity, identify: () => Effect.succeed(principal) },
+        devices: {
+          ...devices,
+          authenticate: () => Effect.succeed(authenticated ? "device-1" : undefined),
+        },
+      })
+      const accepted = yield* response("/api/v1/me/context", withDevice(true))
+      const rejected = yield* response("/api/v1/me/context", withDevice(false))
+      expect(accepted.status).toBe(200)
+      expect(rejected.status).toBe(401)
     }),
   )
 
@@ -208,10 +338,10 @@ describe("control-plane HTTP", () => {
 
   it.effect("publishes DPoP protected-resource metadata", () =>
     Effect.gen(function* () {
-      const result = yield* response("/.well-known/oauth-protected-resource/api")
+      const result = yield* response("/.well-known/oauth-protected-resource/api/v1")
       expect(result.status).toBe(200)
       expect(yield* Effect.promise(() => result.json())).toEqual({
-        resource: "https://control.example.com/api",
+        resource: "https://control.example.com/api/v1",
         dpop_bound_access_tokens_required: true,
       })
     }),

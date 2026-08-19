@@ -1,7 +1,14 @@
 CREATE TYPE rika_hosted_executor_kind AS ENUM ('local_device', 'e2b');
 CREATE TYPE rika_hosted_grant_role AS ENUM ('viewer', 'controller', 'operator', 'owner');
-CREATE TYPE rika_hosted_executor_status AS ENUM ('online', 'draining', 'offline');
 CREATE TYPE rika_hosted_presence_status AS ENUM ('viewing', 'controlling', 'away');
+CREATE TYPE rika_hosted_assignment_lifecycle AS ENUM (
+  'pending',
+  'provisioning',
+  'awaiting_bootstrap',
+  'active',
+  'paused',
+  'terminated'
+);
 
 CREATE TABLE rika_hosted_organization_counters (
   organization_id TEXT PRIMARY KEY,
@@ -125,46 +132,84 @@ CREATE INDEX rika_hosted_clients_active
   ON rika_hosted_clients (organization_id, member_id, expires_at)
   WHERE revoked_at IS NULL;
 
-CREATE TABLE rika_hosted_executor_instances (
+CREATE TABLE rika_hosted_executor_assignments (
   id TEXT PRIMARY KEY,
   organization_id TEXT NOT NULL,
+  thread_id TEXT NOT NULL,
   executor_kind rika_hosted_executor_kind NOT NULL,
-  device_id TEXT,
-  status rika_hosted_executor_status NOT NULL,
-  connected_at TIMESTAMPTZ NOT NULL,
-  last_seen_at TIMESTAMPTZ NOT NULL,
+  placement JSONB NOT NULL CHECK (
+    jsonb_typeof(placement) = 'object'
+    AND placement ->> '_tag' IN ('LocalDevicePlacement', 'E2BPlacement')
+  ),
+  checkout JSONB NOT NULL CHECK (
+    jsonb_typeof(checkout) = 'object'
+    AND length(checkout ->> 'repositoryId') > 0
+    AND length(checkout ->> 'installationId') > 0
+    AND length(checkout ->> 'owner') > 0
+    AND length(checkout ->> 'name') > 0
+    AND checkout ->> 'commitSha' ~* '^[a-f0-9]{40}$'
+  ),
+  generation BIGINT NOT NULL CHECK (generation >= 1),
+  revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  last_lease_epoch BIGINT NOT NULL DEFAULT 0 CHECK (last_lease_epoch >= 0),
+  lifecycle rika_hosted_assignment_lifecycle NOT NULL,
+  provider_instance_id TEXT,
+  bootstrap_digest TEXT,
+  bootstrap_expires_at TIMESTAMPTZ,
+  executor_instance_id TEXT,
+  process_incarnation TEXT,
+  session_digest TEXT,
+  lease_epoch BIGINT CHECK (lease_epoch >= 1),
+  lease_expires_at TIMESTAMPTZ,
+  cursor_sequence BIGINT NOT NULL DEFAULT 0 CHECK (cursor_sequence >= 0),
+  cursor_value TEXT NOT NULL DEFAULT '',
+  latest_checkpoint_id TEXT,
+  last_active_at TIMESTAMPTZ NOT NULL DEFAULT transaction_timestamp(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT transaction_timestamp(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT transaction_timestamp(),
+  UNIQUE (thread_id),
   UNIQUE (id, organization_id),
-  UNIQUE (id, organization_id, executor_kind),
-  FOREIGN KEY (device_id, organization_id)
-    REFERENCES rika_hosted_devices (id, organization_id) ON DELETE RESTRICT,
+  FOREIGN KEY (thread_id, organization_id, executor_kind)
+    REFERENCES rika_hosted_threads (id, organization_id, executor_kind) ON DELETE CASCADE,
   CHECK (
-    (executor_kind = 'local_device' AND device_id IS NOT NULL)
-    OR (executor_kind = 'e2b' AND device_id IS NULL)
+    (executor_kind = 'local_device' AND placement ->> '_tag' = 'LocalDevicePlacement')
+    OR (executor_kind = 'e2b' AND placement ->> '_tag' = 'E2BPlacement')
+  ),
+  CHECK (lease_epoch IS NULL OR last_lease_epoch >= lease_epoch),
+  CHECK (
+    (lifecycle = 'pending'
+      AND provider_instance_id IS NULL AND bootstrap_digest IS NULL AND bootstrap_expires_at IS NULL
+      AND executor_instance_id IS NULL AND process_incarnation IS NULL AND session_digest IS NULL
+      AND lease_epoch IS NULL AND lease_expires_at IS NULL)
+    OR (lifecycle = 'provisioning'
+      AND bootstrap_digest IS NOT NULL AND bootstrap_expires_at IS NOT NULL
+      AND executor_instance_id IS NULL AND process_incarnation IS NULL AND session_digest IS NULL
+      AND lease_epoch IS NULL AND lease_expires_at IS NULL)
+    OR (lifecycle = 'awaiting_bootstrap'
+      AND provider_instance_id IS NOT NULL AND bootstrap_digest IS NOT NULL AND bootstrap_expires_at IS NOT NULL
+      AND executor_instance_id IS NULL AND process_incarnation IS NULL AND session_digest IS NULL
+      AND lease_epoch IS NULL AND lease_expires_at IS NULL)
+    OR (lifecycle = 'active'
+      AND provider_instance_id IS NOT NULL AND bootstrap_digest IS NULL AND bootstrap_expires_at IS NULL
+      AND executor_instance_id IS NOT NULL AND process_incarnation IS NOT NULL AND session_digest IS NOT NULL
+      AND lease_epoch IS NOT NULL AND lease_expires_at IS NOT NULL)
+    OR (lifecycle = 'paused'
+      AND provider_instance_id IS NOT NULL AND bootstrap_digest IS NULL AND bootstrap_expires_at IS NULL
+      AND executor_instance_id IS NULL AND process_incarnation IS NULL AND session_digest IS NULL
+      AND lease_epoch IS NULL AND lease_expires_at IS NULL)
+    OR (lifecycle = 'terminated'
+      AND bootstrap_digest IS NULL AND bootstrap_expires_at IS NULL
+      AND executor_instance_id IS NULL AND process_incarnation IS NULL AND session_digest IS NULL
+      AND lease_epoch IS NULL AND lease_expires_at IS NULL)
   )
 );
 
-CREATE INDEX rika_hosted_executor_instances_available
-  ON rika_hosted_executor_instances (organization_id, executor_kind, status, last_seen_at);
-
-CREATE TABLE rika_hosted_executor_assignments (
-  organization_id TEXT NOT NULL,
-  thread_id TEXT PRIMARY KEY,
-  executor_instance_id TEXT NOT NULL,
-  executor_kind rika_hosted_executor_kind NOT NULL,
-  lease_id TEXT NOT NULL,
-  generation BIGINT NOT NULL CHECK (generation >= 1),
-  acquired_at TIMESTAMPTZ NOT NULL,
-  renewed_at TIMESTAMPTZ NOT NULL,
-  expires_at TIMESTAMPTZ NOT NULL,
-  FOREIGN KEY (thread_id, organization_id, executor_kind)
-    REFERENCES rika_hosted_threads (id, organization_id, executor_kind) ON DELETE CASCADE,
-  FOREIGN KEY (executor_instance_id, organization_id, executor_kind)
-    REFERENCES rika_hosted_executor_instances (id, organization_id, executor_kind) ON DELETE RESTRICT,
-  CHECK (expires_at > renewed_at)
-);
-
 CREATE INDEX rika_hosted_executor_assignments_expiry
-  ON rika_hosted_executor_assignments (expires_at, organization_id, thread_id);
+  ON rika_hosted_executor_assignments (lease_expires_at, organization_id, thread_id)
+  WHERE lifecycle = 'active';
+
+CREATE INDEX rika_hosted_executor_assignments_provider
+  ON rika_hosted_executor_assignments (executor_kind, lifecycle, provider_instance_id);
 
 CREATE TABLE rika_hosted_terminal_writer_leases (
   organization_id TEXT NOT NULL,
@@ -224,20 +269,22 @@ CREATE TABLE rika_hosted_thread_events (
   event_id TEXT NOT NULL,
   idempotency_key TEXT NOT NULL,
   executor_instance_id TEXT NOT NULL,
+  assignment_id TEXT NOT NULL,
   assignment_generation BIGINT NOT NULL CHECK (assignment_generation >= 1),
+  lease_epoch BIGINT NOT NULL CHECK (lease_epoch >= 1),
   sequence BIGINT NOT NULL CHECK (sequence >= 1),
   commit_cursor BIGINT NOT NULL CHECK (commit_cursor >= 1),
   command_sequence BIGINT,
   event JSONB NOT NULL CHECK (jsonb_typeof(event) = 'object'),
-  created_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT transaction_timestamp(),
   PRIMARY KEY (thread_id, event_id),
   UNIQUE (thread_id, idempotency_key),
   UNIQUE (thread_id, organization_id, sequence),
   UNIQUE (organization_id, commit_cursor),
   FOREIGN KEY (thread_id, organization_id)
     REFERENCES rika_hosted_threads (id, organization_id) ON DELETE CASCADE,
-  FOREIGN KEY (executor_instance_id, organization_id)
-    REFERENCES rika_hosted_executor_instances (id, organization_id) ON DELETE RESTRICT,
+  FOREIGN KEY (assignment_id, organization_id)
+    REFERENCES rika_hosted_executor_assignments (id, organization_id) ON DELETE RESTRICT,
   FOREIGN KEY (thread_id, organization_id, command_sequence)
     REFERENCES rika_hosted_thread_commands (thread_id, organization_id, sequence) ON DELETE RESTRICT
 );
@@ -304,21 +351,29 @@ CREATE TABLE rika_hosted_checkpoints (
   id TEXT PRIMARY KEY,
   organization_id TEXT NOT NULL,
   thread_id TEXT NOT NULL,
+  assignment_id TEXT NOT NULL,
   executor_instance_id TEXT NOT NULL,
   assignment_generation BIGINT NOT NULL CHECK (assignment_generation >= 1),
-  event_sequence BIGINT NOT NULL CHECK (event_sequence >= 0),
-  baton_checkpoint_reference TEXT NOT NULL CHECK (length(baton_checkpoint_reference) > 0),
-  metadata JSONB NOT NULL CHECK (jsonb_typeof(metadata) = 'object'),
-  created_at TIMESTAMPTZ NOT NULL,
-  UNIQUE (thread_id, executor_instance_id, assignment_generation, event_sequence),
+  lease_epoch BIGINT NOT NULL CHECK (lease_epoch >= 1),
+  object_key TEXT NOT NULL CHECK (length(object_key) > 0),
+  content_digest TEXT NOT NULL CHECK (content_digest ~ '^sha256:[a-f0-9]{64}$'),
+  size_bytes BIGINT NOT NULL CHECK (size_bytes > 0),
+  format TEXT NOT NULL CHECK (format = 'tar.zst'),
+  cursor_sequence BIGINT NOT NULL CHECK (cursor_sequence >= 0),
+  cursor_value TEXT NOT NULL,
+  metadata JSONB NOT NULL CHECK (
+    jsonb_typeof(metadata) = 'object'
+    AND metadata::text !~* '"(api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|private[_-]?key|authorization|cookie)"[[:space:]]*:'
+  ),
+  verified_at TIMESTAMPTZ NOT NULL DEFAULT transaction_timestamp(),
   FOREIGN KEY (thread_id, organization_id)
     REFERENCES rika_hosted_threads (id, organization_id) ON DELETE CASCADE,
-  FOREIGN KEY (executor_instance_id, organization_id)
-    REFERENCES rika_hosted_executor_instances (id, organization_id) ON DELETE RESTRICT
+  FOREIGN KEY (assignment_id, organization_id)
+    REFERENCES rika_hosted_executor_assignments (id, organization_id) ON DELETE RESTRICT
 );
 
 CREATE INDEX rika_hosted_checkpoints_latest
-  ON rika_hosted_checkpoints (organization_id, thread_id, event_sequence DESC, created_at DESC);
+  ON rika_hosted_checkpoints (organization_id, thread_id, cursor_sequence DESC, verified_at DESC);
 
 CREATE TABLE rika_hosted_audit_events (
   id TEXT PRIMARY KEY,
@@ -429,11 +484,14 @@ BEGIN
     FROM rika_hosted_executor_assignments assignment
     WHERE assignment.organization_id = NEW.organization_id
       AND assignment.thread_id = NEW.thread_id
+      AND assignment.id = NEW.assignment_id
       AND assignment.executor_instance_id = NEW.executor_instance_id
       AND assignment.generation = NEW.assignment_generation
-      AND assignment.expires_at > transaction_timestamp()
+      AND assignment.lease_epoch = NEW.lease_epoch
+      AND assignment.lifecycle = 'active'
+      AND assignment.lease_expires_at > transaction_timestamp()
   ) THEN
-    RAISE EXCEPTION 'stale executor fencing generation' USING ERRCODE = '55000';
+    RAISE EXCEPTION 'stale executor fence' USING ERRCODE = '55000';
   END IF;
   RETURN NEW;
 END;

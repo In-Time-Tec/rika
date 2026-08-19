@@ -21,9 +21,9 @@ describe("on-disk layout", () => {
     expect(dataPaths("/home/ada/").database).toBe(dataPaths("/home/ada").database)
   })
 
-  it("keeps the isolated Baton execution database under the profile root", () => {
+  it("keeps the isolated TenetKit execution database under the profile root", () => {
     const paths = dataPaths("/home/ada")
-    expect(paths.batonDatabase).toBe("/home/ada/.rika/baton.db")
+    expect(paths.tenetkitDatabase).toBe("/home/ada/.rika/tenetkit.db")
   })
 
   it("resolves host roots and explicit database precedence through one owner", () => {
@@ -32,23 +32,23 @@ describe("on-disk layout", () => {
         home: "/home/ada",
         hostDataRoot: "/host/data",
         productDatabase: "/explicit/product.db",
-        batonDatabase: "/explicit/baton.db",
+        tenetkitDatabase: "/explicit/tenetkit.db",
       }),
     ).toEqual({
       dataRoot: "/host/data",
       database: "/host/data/rika.db",
-      batonDatabase: "/host/data/baton.db",
+      tenetkitDatabase: "/host/data/tenetkit.db",
     })
     expect(
       resolveProfileDataPaths({
         home: "/home/ada",
         productDatabase: "/explicit/product.db",
-        batonDatabase: "/explicit/baton.db",
+        tenetkitDatabase: "/explicit/tenetkit.db",
       }),
     ).toEqual({
       dataRoot: "/home/ada/.rika",
       database: "/explicit/product.db",
-      batonDatabase: "/explicit/baton.db",
+      tenetkitDatabase: "/explicit/tenetkit.db",
     })
   })
 

@@ -120,7 +120,7 @@ const createOperationLayerImpl = (
       const kernelOptions = {
         workspace: workspaceRoot,
         home,
-        dataRoot: ServerRepository.dataRootOf(options.batonDatabase),
+        dataRoot: ServerRepository.dataRootOf(options.tenetkitDatabase),
         runtimeVersion: Bun.version,
         goalRepositoryLayer: goalRepositories,
         queryFactory,
@@ -129,7 +129,7 @@ const createOperationLayerImpl = (
       }
       /**
        * One pool for the Server, built here rather than inside an Agent environment or a cell.
-       * Baton builds a resolved Agent's environment once per Run, and a cell's own scope ends with
+       * TenetKit builds a resolved Agent's environment once per Run, and a cell's own scope ends with
        * that cell, so a pool owned by either would be released while later turns still needed it.
        * This scope is the Server's, which is the lifetime the pool actually has.
        */
@@ -140,7 +140,7 @@ const createOperationLayerImpl = (
         toolRuntimeLayer: kernelOptions.toolRuntimeLayer(workspaceRoot),
       })
       const backendLayer = configuredBackendLayer({
-        filename: options.batonDatabase,
+        filename: options.tenetkitDatabase,
         kernelPool,
         capabilities,
         credentialStore: ServerAuth.createProviderCredentialStoreLayer(options.database, options.profileIdentity),

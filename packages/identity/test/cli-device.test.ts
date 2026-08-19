@@ -7,7 +7,7 @@ import {
 
 const identity = {
   baseUrl: "https://control.example.com",
-  resource: "https://control.example.com/api",
+  resource: "https://control.example.com/api/v1",
 }
 
 describe("CLI device companion", () => {
@@ -24,7 +24,7 @@ describe("CLI device companion", () => {
         software_id: "rika-cli",
         software_version: "1.2.3",
         dpop_bound_access_tokens: true,
-        resources: ["https://control.example.com/api"],
+        resources: ["https://control.example.com/api/v1"],
       },
     })
   })

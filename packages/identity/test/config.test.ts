@@ -32,7 +32,7 @@ describe("IdentityConfig", () => {
       expect(config.production).toBe(true)
       expect(config.port).toBe(3000)
       expect(config.baseUrl).toBe("https://control.example.com")
-      expect(config.resource).toBe("https://control.example.com/api")
+      expect(config.resource).toBe("https://control.example.com/api/v1")
       expect(config.trustedOrigins).toEqual(["https://control.example.com", "https://console.example.com"])
       expect(Redacted.value(config.databaseUrl)).toBe(productionEnvironment.DATABASE_URL)
       expect(String(config.authSecret)).not.toContain(productionEnvironment.BETTER_AUTH_SECRET)

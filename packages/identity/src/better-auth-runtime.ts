@@ -11,9 +11,15 @@ export class IdentityRuntimeError extends Schema.TaggedError<IdentityRuntimeErro
   kind: Schema.Literals(["invalid", "unavailable"]),
 }) {}
 
+export interface IdentityPrincipal {
+  readonly userId: string
+  readonly clientId?: string
+  readonly dpopJkt?: string
+}
+
 export interface IdentityRuntime {
   readonly handle: (request: Request) => Effect.Effect<Response, IdentityRuntimeError>
-  readonly identify: (request: Request) => Effect.Effect<string | undefined, IdentityRuntimeError>
+  readonly identify: (request: Request) => Effect.Effect<IdentityPrincipal | undefined, IdentityRuntimeError>
   readonly protectedResourceMetadata: Effect.Effect<object, IdentityRuntimeError>
 }
 
@@ -135,13 +141,29 @@ export const makeBetterAuthIdentityRuntime = (input: {
               })
               .then((payload) => {
                 if (typeof payload.sub !== "string" || payload.sub.length === 0) throw new TypeError("missing subject")
-                return payload.sub
+                const clientId = typeof payload.client_id === "string" ? payload.client_id : undefined
+                const confirmation = payload.cnf
+                const dpopJkt =
+                  typeof confirmation === "object" &&
+                  confirmation !== null &&
+                  "jkt" in confirmation &&
+                  typeof confirmation.jkt === "string"
+                    ? confirmation.jkt
+                    : undefined
+                return {
+                  userId: payload.sub,
+                  ...(clientId === undefined ? {} : { clientId }),
+                  ...(dpopJkt === undefined ? {} : { dpopJkt }),
+                }
               }),
           catch: () => IdentityRuntimeError.make({ kind: "invalid" }),
         })
       }
       return Effect.tryPromise({
-        try: () => auth.api.getSession({ headers: request.headers }).then((session) => session?.user.id),
+        try: () =>
+          auth.api
+            .getSession({ headers: request.headers })
+            .then((session) => (session === null ? undefined : { userId: session.user.id })),
         catch: () => IdentityRuntimeError.make({ kind: "unavailable" }),
       })
     }),

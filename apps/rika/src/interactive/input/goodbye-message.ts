@@ -60,6 +60,6 @@ export const renderGoodbye = (input: GoodbyeInput): string => {
     return detail.length === 0 ? painted : `${painted}${" ".repeat(Math.max(1, detailColumn - glyph.length))}${detail}`
   })
   const trailer =
-    input.threadId === undefined || input.threadId.length === 0 ? "" : `\n\nrika threads continue ${input.threadId}`
+    input.threadId === undefined || input.threadId.length === 0 ? "" : `\n\nrika thread continue ${input.threadId}`
   return `\n${lines.join("\n")}${trailer}\n`
 }

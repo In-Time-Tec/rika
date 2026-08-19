@@ -7,7 +7,7 @@ import { model } from "./tui-app-model"
 const tuiTestTimeout = 90_000
 
 test(
-  "previews never persist: one durable commit per turn in rika.db and no preview frames in baton.db",
+  "previews never persist: one durable commit per turn in rika.db and no preview frames in tenetkit.db",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -26,7 +26,7 @@ test(
         yield* app.quit
 
         const rika = new Database(path.join(root, "rika.db"), { readonly: true })
-        const baton = new Database(path.join(root, "baton.db"), { readonly: true })
+        const tenetkit = new Database(path.join(root, "tenetkit.db"), { readonly: true })
         try {
           const unitRows = rika
             .query<{ readonly n: number }, []>("SELECT COUNT(*) AS n FROM rika_transcript_units")
@@ -48,21 +48,21 @@ test(
           // No preview fragment text ever reached the durable transcript.
           expect(unitTexts.some((text) => text.includes("preview") || text.includes("tentative"))).toBe(false)
 
-          const eventCount = baton
-            .query<{ readonly n: number }, []>("SELECT COUNT(*) AS n FROM baton_run_events")
+          const eventCount = tenetkit
+            .query<{ readonly n: number }, []>("SELECT COUNT(*) AS n FROM tenetkit_run_events")
             .get()!.n
-          const events = baton
-            .query<{ readonly event_json: string }, []>("SELECT event_json FROM baton_run_events")
+          const events = tenetkit
+            .query<{ readonly event_json: string }, []>("SELECT event_json FROM tenetkit_run_events")
             .all()
             .map((row) => row.event_json)
-          // Baton stored semantic events only: at least the committed response, and nothing that
+          // TenetKit stored semantic events only: at least the committed response, and nothing that
           // carries a raw model part (previews are memory-only).
           expect(eventCount).toBeGreaterThanOrEqual(1)
           expect(events.some((event) => event.includes("PERSISTENCE_ANSWER"))).toBe(true)
           expect(events.some((event) => event.includes("text-delta"))).toBe(false)
         } finally {
           rika.close()
-          baton.close()
+          tenetkit.close()
         }
       }),
     ),

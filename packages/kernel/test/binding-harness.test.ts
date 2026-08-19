@@ -51,7 +51,7 @@ describe("harness binding", () => {
     }),
   )
 
-  it.effect("rejects a mutation that omits baseSnapshot, which Baton types as optional", () =>
+  it.effect("rejects a mutation that omits baseSnapshot, which TenetKit types as optional", () =>
     Effect.gen(function* () {
       const mounted = yield* registry()
       const failure = yield* Effect.flip(

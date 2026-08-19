@@ -2,7 +2,7 @@
 
 This provider-neutral package owns protocol version 1 and executor-side runtime contracts shared by `local_device` and `e2b` targets. It has no provider lifecycle SDK and no control-plane persistence.
 
-The executor owns workspace cells, coding tools, child processes, PTYs, filesystem checkpoint staging, and its resumable protocol session. It never owns Baton RunStore or agent-loop authority and never receives Postgres, E2B controller, or GitHub App credentials. Baton remains the sole durable Run authority behind the product `ExecutionGateway`.
+The executor owns workspace cells, coding tools, child processes, PTYs, filesystem checkpoint staging, and its resumable protocol session. It never owns TenetKit RunStore or agent-loop authority and never receives Postgres, E2B controller, or GitHub App credentials. TenetKit remains the sole durable Run authority behind the product `ExecutionGateway`.
 
 Protocol messages carry a complete assignment fence: target, assignment, generation, executor, and provider instance. A provider instance ID is routing evidence only; every executor-originated control operation also requires a short-lived bootstrap or session credential. Reconnect resumes from the controller-acknowledged executor cursor. PTY output has its own append-only cursor.
 

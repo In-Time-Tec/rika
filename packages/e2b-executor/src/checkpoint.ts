@@ -1,19 +1,16 @@
 import { Context, Effect, Schema } from "effect"
 
-export interface CheckpointObjectInspection {
+export interface Inspection {
   readonly contentDigest: string
   readonly sizeBytes: number
 }
 
-export class CheckpointInspectionError extends Schema.TaggedError<CheckpointInspectionError>()(
-  "CheckpointInspectionError",
-  { message: Schema.String },
-) {}
+export class InspectionError extends Schema.TaggedError<InspectionError>()("InspectionError", {
+  message: Schema.String,
+}) {}
 
 export interface Interface {
-  readonly inspect: (objectKey: string) => Effect.Effect<CheckpointObjectInspection, CheckpointInspectionError>
+  readonly inspect: (objectKey: string) => Effect.Effect<Inspection, InspectionError>
 }
 
-export class CheckpointObjectInspector extends Context.Service<CheckpointObjectInspector, Interface>()(
-  "@rika/e2b-executor/checkpoint/CheckpointObjectInspector",
-) {}
+export class Inspector extends Context.Service<Inspector, Interface>()("@rika/e2b-executor/checkpoint/Inspector") {}

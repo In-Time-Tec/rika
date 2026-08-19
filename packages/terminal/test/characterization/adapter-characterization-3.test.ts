@@ -452,7 +452,7 @@ test("keeps wrapped nested shell continuation connectors subtle", () => {
       { ...subagentToolBlock, status: "running", detail: "Inspect the projection" },
       shell("child-a", `git status --short ${"packages/terminal ".repeat(8)}`, "clean"),
       {
-        ...shell("child-b", `bun run check ${"packages/baton-execution ".repeat(8)}`, "cancelled"),
+        ...shell("child-b", `bun run check ${"packages/execution ".repeat(8)}`, "cancelled"),
         status: "cancelled",
       },
       shell("child-c", "git diff --check", "clean"),

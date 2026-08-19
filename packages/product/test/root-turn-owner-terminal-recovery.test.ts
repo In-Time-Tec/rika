@@ -172,7 +172,7 @@ it.effect("falls back to the persisted running status when the backend run is un
   }),
 )
 
-it.effect("does not authorize a terminal result when Baton inspection is unavailable", () =>
+it.effect("does not authorize a terminal result when TenetKit inspection is unavailable", () =>
   Effect.gen(function* () {
     const completedTurn = { ...turn, status: "completed" as const }
     const projection: Projection = {
@@ -208,7 +208,7 @@ it.effect("does not authorize a terminal result when Baton inspection is unavail
   }),
 )
 
-it.effect("withholds an emitted terminal projection until matching Baton inspection succeeds", () =>
+it.effect("withholds an emitted terminal projection until matching TenetKit inspection succeeds", () =>
   Effect.gen(function* () {
     const completed: ExecutionProjection.Change = {
       _tag: "ProjectionSnapshot",
@@ -631,7 +631,7 @@ it.effect(
                 attempts += 1
                 if (attempts === 1) yield* Deferred.succeed(started, undefined)
                 failures += 1
-                return yield* Effect.die(new RangeError("Baton projector steering text exceeds 4096"))
+                return yield* Effect.die(new RangeError("TenetKit projector steering text exceeds 4096"))
               }),
             ),
         } as ExecutionGateway.Interface,

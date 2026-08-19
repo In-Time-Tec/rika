@@ -7,11 +7,11 @@ import {
   isSchemaChecksumMismatch,
 } from "../src/server/composition/server-runtime-recovery"
 
-test("recognises the Baton schema checksum mismatch in every shape it arrives", () => {
+test("recognises the TenetKit schema checksum mismatch in every shape it arrives", () => {
   expect(isSchemaChecksumMismatch({ _tag: "tenetkit/runtime/SchemaChecksumMismatch" })).toBe(true)
   expect(
     isSchemaChecksumMismatch({
-      message: 'StartTurnFailure: {"_tag":"tenetkit/runtime/SchemaChecksumMismatch","source":"/x/baton.db"}',
+      message: 'StartTurnFailure: {"_tag":"tenetkit/runtime/SchemaChecksumMismatch","source":"/x/tenetkit.db"}',
     }),
   ).toBe(true)
   expect(isSchemaChecksumMismatch('{"_tag":"tenetkit/runtime/SchemaChecksumMismatch"}')).toBe(true)
@@ -24,7 +24,7 @@ test("archives an incompatible runtime database and its sidecars so the next sta
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-runtime-archive-" })
-      const filename = `${directory}/baton.db`
+      const filename = `${directory}/tenetkit.db`
       yield* fileSystem.writeFileString(filename, "stale")
       yield* fileSystem.writeFileString(`${filename}-wal`, "stale-wal")
 
@@ -43,7 +43,7 @@ test("archives an incompatible runtime database and its sidecars so the next sta
 })
 
 test("names the archive from the runtime path and the observed time", () => {
-  expect(archivedRuntimeName("/x/baton.db", 42)).toBe("/x/baton.db.incompatible-42")
+  expect(archivedRuntimeName("/x/tenetkit.db", 42)).toBe("/x/tenetkit.db.incompatible-42")
 })
 
 test("archiving is safe when the sidecars were never created", () => {
@@ -51,7 +51,7 @@ test("archiving is safe when the sidecars were never created", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-runtime-archive-bare-" })
-      const filename = `${directory}/baton.db`
+      const filename = `${directory}/tenetkit.db`
       yield* fileSystem.writeFileString(filename, "only-main")
       const archived = yield* archiveIncompatibleRuntime(filename)
       expect(yield* fileSystem.readFileString(archived)).toBe("only-main")

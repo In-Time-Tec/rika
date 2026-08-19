@@ -90,12 +90,12 @@ test(
           }),
         )
 
-        const database = new Database(path.join(root, "baton.db"), { readonly: true })
+        const database = new Database(path.join(root, "tenetkit.db"), { readonly: true })
         const payloads = database
           .query<
             { payload_json: string },
             []
-          >("SELECT payload_json FROM baton_session_entries WHERE session_id = 'tui-thread-0' AND tag = 'ModelResponse'")
+          >("SELECT payload_json FROM tenetkit_session_entries WHERE session_id = 'tui-thread-0' AND tag = 'ModelResponse'")
           .all()
         database.close()
         expect(payloads).toHaveLength(1)
@@ -106,7 +106,7 @@ test(
         expect(payloads[0]?.payload_json).not.toContain(responseCanary)
 
         const databaseFiles = (yield* fileSystem.readDirectory(root)).filter(
-          (name) => name === "baton.db" || name.startsWith("baton.db-"),
+          (name) => name === "tenetkit.db" || name.startsWith("tenetkit.db-"),
         )
         expect(databaseFiles.length).toBeGreaterThan(0)
         const image = Buffer.concat(

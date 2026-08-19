@@ -1,6 +1,6 @@
 # PLAN: Prompt cache — 31% to >= 98% on every provider
 
-## Evidence (from `~/.rika/baton.db` usage telemetry, Aug 3-15)
+## Evidence (from `~/.rika/tenetkit.db` usage telemetry, Aug 3-15)
 
 - Overall input cache hit: **30.9%** (18.2M cacheRead / 59.0M input tokens).
 - Anthropic (claude-opus-5 + claude-fable-5): **3.1%** — 37.5M uncached input tokens, cacheWrite
@@ -15,9 +15,9 @@
 
 ## Root cause
 
-Baton (the agent loop that owns model calls) never places Anthropic `cache_control`
+TenetKit (the agent loop that owns model calls) never places Anthropic `cache_control`
 breakpoints. Anthropic only caches blocks you mark, so the entire conversation is re-sent and
-re-billed on every call. Nothing in `@batonfx/*` sets `options.anthropic.cacheControl`;
+re-billed on every call. Nothing in `@tenetkitfx/*` sets `options.anthropic.cacheControl`;
 `@effect/ai-anthropic` (4.0.0-beta.98) already lowers it for system messages and the last part
 of user/tool-result messages (not assistant messages or tools). Bedrock has the same gap with
 its own `cachePoint` plumbing that nothing sets. Secondary losses: system prompt is one blob
@@ -26,8 +26,8 @@ diagnostics; 5m default TTL with occasional expiry; compaction replaces the whol
 
 ## Aligned decisions
 
-In scope: Baton-owned fix (every consumer gets it, no per-user settings), provider matrix for
-Anthropic/OpenAI/OpenRouter/Bedrock, Baton prompt-prefix diagnostics, Rika stable system split,
+In scope: TenetKit-owned fix (every consumer gets it, no per-user settings), provider matrix for
+Anthropic/OpenAI/OpenRouter/Bedrock, TenetKit prompt-prefix diagnostics, Rika stable system split,
 unified stable prefix across agent profiles, adaptive TTL, tail-only compaction with seam
 breakpoint, per-purpose marking, byte-identical retry bodies, switchboard server-side
 normalization, and a **% cached** line in the Context & Usage preview.
@@ -46,13 +46,13 @@ display.
   Prefix-stability fixes: frozen dates, deterministic tool ordering, no per-repo schema fields,
   byte-drift fix for DB reloads. Compaction pinFirstUserTurn; optional 1h TTL.
 
-## Baton work (~/projects/batonfx)
+## TenetKit work (~/projects/tenetkitfx)
 
 ### B0 — dev setup (not currently wired)
 
-Baton sits at v0.26.2, exactly Rika's npm pin; both use effect 4.0.0-beta.98. Loop: change ->
+TenetKit sits at v0.26.2, exactly Rika's npm pin; both use effect 4.0.0-beta.98. Loop: change ->
 `bun run check` + `bun run test` -> bump every package manifest -> tag `vX.Y.Z` -> publish.yml
--> npm -> pin in Rika. Optional: test-only Vitest alias to the Baton worktree while iterating.
+-> npm -> pin in Rika. Optional: test-only Vitest alias to the TenetKit worktree while iterating.
 Note: the repo currently has uncommitted providers WIP; branch or land it first.
 
 ### B1 — cache breakpoint policy (the core fix)
@@ -73,7 +73,7 @@ derived at send time.
 
 `@effect/ai-anthropic` accepts Anthropic's top-level `cache_control` (automatic caching: the
 provider places the breakpoint at the last cacheable block and moves it forward, covering
-system + tools + history). Baton's Anthropic adapter spreads its config straight into the
+system + tools + history). TenetKit's Anthropic adapter spreads its config straight into the
 request body, so set `cache_control: { type: "ephemeral" }` as the adapter's default config
 (overridable). This caches tools, which beta.98 cannot mark per-message, and is the
 belt-and-suspenders under the explicit markers. Verify at implementation time that the
@@ -103,12 +103,12 @@ diagnostics comparison cases, TestClock TTL cases. Release as `v0.27.0`.
 
 ### R1 — pin and wire
 
-Pin the released Baton; pass `supplemental` through `baton-route.ts`; no per-user settings
-required — every consumer gets the policy from Baton defaults.
+Pin the released TenetKit; pass `supplemental` through `tenetkit-route.ts`; no per-user settings
+required — every consumer gets the policy from TenetKit defaults.
 
 ### R2 — stable system split
 
-`baton-route.ts` splits agent instructions: stable part (profile instructions + cell surface)
+`tenetkit-route.ts` splits agent instructions: stable part (profile instructions + cell surface)
 and dynamic part (harness supplement). Deterministic ordering inside the harness section (sort
 skills/memories). Stable block gets 1h, dynamic gets 5m.
 
@@ -116,14 +116,14 @@ skills/memories). Stable block gets 1h, dynamic gets 5m.
 
 Add one line to the Context & Usage preview (Ctrl+Y overlay, Session section): `% cached` =
 cacheRead / input total, from the usage projection that already carries
-uncached/cacheRead/cacheWrite per execution (`baton-usage-accounting` /
+uncached/cacheRead/cacheWrite per execution (`tenetkit-usage-accounting` /
 `execution-token-totals`). Nothing else — no alerts, no extra telemetry UI.
 
 ### R4 — adaptive TTL
 
 Thread-velocity policy: long tool loops keep the 5m conversation marker; threads that idle
 between calls (long cell runs, user pauses — production data showed a 7-minute gap) escalate
-the conversation boundary to 1h. Exposed as a Baton policy input, default auto, per-thread
+the conversation boundary to 1h. Exposed as a TenetKit policy input, default auto, per-thread
 override in settings.
 
 ### R5 — tail-only compaction with seam breakpoint
@@ -161,14 +161,14 @@ key shares one warm cache — cross-machine first-call hits, which opencode cann
 
 ## Provider matrix
 
-- Anthropic: Baton B1 explicit markers (stable system 1h + last user message 5m) + B2 automatic
+- Anthropic: TenetKit B1 explicit markers (stable system 1h + last user message 5m) + B2 automatic
   caching default. 4-breakpoint cap; 5m/1h buckets; verify minimum cacheable prefix thresholds.
 - OpenAI GPT-5.6: no markers (implicit + explicit breakpoints via `prompt_cache_breakpoint`,
   4 written per request, matches up to the latest 80); add `prompt_cache_key` per session for
   deterministic cache-machine routing (fixes terra 87.7% -> 95%+ and the sol/luna cold-handoff
-  gap) and `prompt_cache_options.ttl` 30m. Follow-up Baton/Rika wiring.
+  gap) and `prompt_cache_options.ttl` 30m. Follow-up TenetKit/Rika wiring.
 - OpenRouter: per-message `cache_control` for Anthropic models plus `session_id` per session
-  for provider sticky routing (Baton's OpenRouter config already accepts `session_id`).
+  for provider sticky routing (TenetKit's OpenRouter config already accepts `session_id`).
 - Amazon Bedrock: Converse `cachePoint` via the existing request-builder plumbing, same policy
   as B1, 4-point cap.
 - Deterministic/test: never mark.
@@ -185,10 +185,10 @@ key shares one warm cache — cross-machine first-call hits, which opencode cann
 
 ## Verification gates
 
-1. Baton unit + integration green; wire bodies carry the markers.
+1. TenetKit unit + integration green; wire bodies carry the markers.
 2. Rika `bun run check` + `bun run test` with the new pin.
 3. Live run through switchboard: first call writes, follow-on calls read >= 95%.
-4. Re-query `~/.rika/baton.db` after a few days: per-provider ratios per the targets; the
+4. Re-query `~/.rika/tenetkit.db` after a few days: per-provider ratios per the targets; the
    Context & Usage preview shows the % cached line.
 5. Compare against opencode claims (99.9% per-call within session, 97.6% first call cross-repo).
 
@@ -207,23 +207,21 @@ key shares one warm cache — cross-machine first-call hits, which opencode cann
 - Adaptive TTL escalation costs 2x writes; it must only engage when a thread demonstrably
   idles beyond 5m (R4 default auto).
 
-
 ## Execution status
 
-Shipped: Baton 0.27.0 (published to npm) with B1 cache breakpoint policy, per-purpose gating,
+Shipped: TenetKit 0.27.0 (published to npm) with B1 cache breakpoint policy, per-purpose gating,
 B4 supplemental system block, and tests; Anthropic automatic caching shipped as caller opt-in
 (resolvedConfig) pending live wire verification. Rika main pins 0.27.0: R1 pin, R2 stable system
 split (harness moves to the supplemental block), R3 % cached line in the Context & Usage preview,
-R7 purpose gating inherited from Baton. Baton release flow: tag v0.27.0 after the main/release
+R7 purpose gating inherited from TenetKit. TenetKit release flow: tag v0.27.0 after the main/release
 ancestry gate. Rika is on main at 0.5.34 awaiting the CI gate before tagging.
 
 Open follow-ups (documented in the repo plans): B2 default-on after live wire verification against
 Anthropic (switchboard was rate-limited during this pass), B3 prompt-prefix diagnostics events,
-R4 adaptive TTL (needs a Baton policy input), R5 tail-only compaction with seam breakpoint,
+R4 adaptive TTL (needs a TenetKit policy input), R5 tail-only compaction with seam breakpoint,
 R6 full cross-profile stable-prefix unification (per-profile split shipped; cross-profile ordering
 needs prompt-quality validation), R9 switchboard server-side normalization (separate infra),
-plus the live baton.db re-query gate after real sessions run on 0.27.0.
-
+plus the live tenetkit.db re-query gate after real sessions run on 0.27.0.
 
 ## Live wire verification (switchboard, 2026-08-16)
 
@@ -236,12 +234,11 @@ plus the live baton.db re-query gate after real sessions run on 0.27.0.
 - The switchboard appears to normalize system prefixes itself (a fresh system string still read the
   canonical ~1902-token prefix) — server-side normalization partially exists; revisit R9 accordingly.
 
-
 ## Execution status (final for this pass)
 
-Shipped and published: Baton 0.27.0 + 0.27.1 (npm) with cache breakpoint policy, per-purpose
+Shipped and published: TenetKit 0.27.0 + 0.27.1 (npm) with cache breakpoint policy, per-purpose
 gating, supplemental system block, Anthropic automatic caching opt-in, and adaptive idle-gap
-conversation escalation (0.27.1). Rika 0.5.35 + 0.5.36 (GitHub releases) with the Baton pin,
+conversation escalation (0.27.1). Rika 0.5.35 + 0.5.36 (GitHub releases) with the TenetKit pin,
 stable/dynamic system split, and the % cached line in the Context & Usage preview. Live wire
 verification through the switchboard: 99.5% continuation cache hit (3597 of 3613 tokens read);
 the automatic-caching field overrides explicit markers, so it stays opt-in. Both repos run
@@ -250,8 +247,7 @@ the automatic-caching field overrides explicit markers, so it stays opt-in. Both
 Open follow-ups (documented): B3 prompt-prefix diagnostics events, R5 tail-only compaction with
 seam breakpoint, R6 full cross-profile stable-prefix unification (per-profile split shipped),
 R9 switchboard normalization review (the gateway already appears to normalize system prefixes),
-plus the live baton.db re-query gate after real sessions run on 0.5.36.
-
+plus the live tenetkit.db re-query gate after real sessions run on 0.5.36.
 
 ## Live product verification (2026-08-16, real Rika 0.5.36 sessions through the switchboard)
 
@@ -267,14 +263,13 @@ plus the live baton.db re-query gate after real sessions run on 0.5.36.
   shipped escalation and 1h markers still take effect on direct Anthropic; through the gateway the
   5m conversation caching already carries the result, but a gateway ttl pass-through is worth a fix.
 
-
 ## 0.5.37 / 0.27.2 fixes
 
 - Cached percentage: the Context & Usage line divided aggregate thread cacheRead by the CURRENT
   context size (e.g. 2742% on warm threads). Now the state carries the aggregate input total and
   renders cacheRead / inputTotal.
 - Duplicate message rendering: the model preview lane cleared only when the Run ended, so a
-  committed message kept its tentative copy through tool loops. Baton now discards the published
+  committed message kept its tentative copy through tool loops. TenetKit now discards the published
   preview frame the moment its response commits (without closing the claim-wide sink), so the
   tentative unit retires when the committed unit appears.
 - Live telemetry after the fixes on the installed 0.5.37: 99.93% cached on Anthropic with 100.0%

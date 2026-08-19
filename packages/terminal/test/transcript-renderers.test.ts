@@ -25,7 +25,7 @@ describe("transcript renderers", () => {
 
   test("renders GFM tables as bounded terminal grids", () => {
     const rendered = renderMarkdown(
-      "| Layer | Owner |\n|---|---|\n| Durable execution | Baton |\n| Product state | Rika |",
+      "| Layer | Owner |\n|---|---|\n| Durable execution | TenetKit |\n| Product state | Rika |",
       48,
     )
     expect(rendered).toContain("╭")

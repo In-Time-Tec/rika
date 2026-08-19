@@ -4,9 +4,11 @@ import { Argument, Command, Flag } from "effect/unstable/cli"
 import { modeIds, type ModeId } from "@rika/configuration/behavior-mode"
 import { authCommand } from "../product/auth-command"
 import { configurationCommand } from "../product/configuration-command"
+import { credentialCommand } from "../product/credential-command"
 import { diagnosticsCommand } from "../product/diagnostics-command"
 import { extensionCommand } from "../product/extension-command"
 import { mcpCommand } from "../product/mcp-command"
+import { organizationCommand } from "../product/organization-command"
 import { skillCommand } from "../product/skill-command"
 import { threadCommand } from "../product/thread-command"
 import { toolCatalogCommand } from "../product/tool-catalog-command"
@@ -106,7 +108,9 @@ export const command = Command.make(
     Command.make("last", {}, () => dispatch({ _tag: "Thread", action: "last" })),
     Command.make("top", {}, () => dispatch({ _tag: "Thread", action: "top" })),
     configurationCommand,
+    organizationCommand,
     authCommand,
+    credentialCommand,
     diagnosticsCommand,
     toolCatalogCommand,
     skillCommand,

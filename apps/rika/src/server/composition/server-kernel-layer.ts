@@ -3,7 +3,7 @@ import type { Options } from "./server-kernel-options"
 import { discoverServers, discoverSkills, harnessStoreLayer, workspaceDigest } from "./server-kernel-harness"
 import { NestedOperation, Session, ToolContext } from "tenetkit"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as CellCallContext from "@rika/baton-execution/baton-cell-call-context"
+import * as CellContext from "@rika/execution/cell-context"
 import * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry"
 import * as McpRuntime from "@rika/extensions/mcp-runtime"
 import * as SkillFileSystem from "@rika/extensions/skill-file-system"
@@ -21,7 +21,7 @@ export type { Options } from "./server-kernel-options"
  * The services the mounted surface is closed over that are NOT per-call.
  *
  * ToolContext, NestedOperations, and Session are deliberately absent: they belong to one executing
- * cell and are supplied per request by `CellCallContext`, never captured here.
+ * cell and are supplied per request by `CellContext`, never captured here.
  */
 const staticBindingServices = (options: Options) => {
   const artifacts = ArtifactStore.layer(options.dataRoot)
@@ -41,7 +41,7 @@ const staticBindingServices = (options: Options) => {
  *
  * Every one of them is overridden per request by the context the executing cell captured, because
  * `HostBindingRegistry.invoke` now merges the per-call context over the build-time one. A binding
- * that reached these would be answering outside a cell, which `bindCalls` refuses instead.
+ * that reached these would be answering outside a cell, which `bind` refuses instead.
  */
 const mountingPlaceholders: Layer.Layer<
   ToolContext.ToolContext | NestedOperation.NestedOperations | Session.SessionStore
@@ -54,7 +54,7 @@ const mountingPlaceholders: Layer.Layer<
 export const layer = (
   options: Options,
 ): Layer.Layer<
-  KernelPool.KernelPool | KernelStateStore.KernelStateStore | CellCallContext.CellCallContext,
+  KernelPool.KernelPool | KernelStateStore.KernelStateStore | CellContext.Service,
   never,
   ChildProcessSpawner.ChildProcessSpawner
 > =>
@@ -106,12 +106,12 @@ export const layer = (
        * every cell would find nothing mounted. Composing the two exported halves explicitly makes
        * the surface a DEPENDENCY of the pool, which is the only order in which a cell can call it.
        */
-      const calls = CellCallContext.layer
+      const calls = CellContext.layer
       const registry = Layer.effect(
         HostBindingRegistry.HostBindingRegistry,
         Effect.map(
-          Effect.all([HostBindingRegistry.HostBindingRegistry, CellCallContext.CellCallContext]),
-          ([mounted, callContext]) => CellCallContext.bindCalls(mounted, callContext),
+          Effect.all([HostBindingRegistry.HostBindingRegistry, CellContext.Service]),
+          ([mounted, callContext]) => CellContext.bind(mounted, callContext),
         ),
       ).pipe(
         Layer.provide(

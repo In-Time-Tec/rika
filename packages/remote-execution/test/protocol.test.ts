@@ -1,33 +1,52 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { ExecutorHostMessage, FilesystemCheckpoint } from "../src/protocol"
+import { FilesystemCheckpoint, HostMessage } from "../src/protocol"
 
 const fence = {
   target: "e2b" as const,
   assignmentId: "assignment-1",
-  generation: 1,
+  assignmentGeneration: 1,
   instanceId: "sandbox-1",
   executorId: "executor-1",
+  processIncarnation: "process-1",
 }
 
 describe("executor protocol v1", () => {
   it.effect("accepts both execution targets and rejects every other protocol version", () =>
     Effect.gen(function* () {
-      const decode = Schema.decodeUnknownEffect(ExecutorHostMessage)
+      const decode = Schema.decodeUnknownEffect(HostMessage)
       for (const target of ["local_device", "e2b"] as const) {
         const message = yield* decode({
           _tag: "ExecutorHello",
-          hello: { version: 1, fence: { ...fence, target }, bootstrapToken: "bootstrap" },
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence: { ...fence, target },
+            templateBuildId: target === "e2b" ? "build-1" : null,
+            capabilities: { cells: true, checkpoints: true, pty: true },
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap",
+          },
         })
         expect(message._tag).toBe("ExecutorHello")
       }
       const rejected = yield* Effect.flip(
         decode({
           _tag: "ExecutorHello",
-          hello: { version: 2, fence, bootstrapToken: "bootstrap" },
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 2,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: true, pty: true },
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap",
+          },
         }),
       )
-      expect(String(rejected)).toContain("version")
+      expect(String(rejected)).toContain("Version")
     }),
   )
 

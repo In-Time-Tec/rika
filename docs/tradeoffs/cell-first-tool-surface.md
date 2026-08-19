@@ -1,6 +1,6 @@
 # A cell-first surface with native child control
 
-**Gain:** the provider sees one general capability schema instead of a per-role menu, so context is spent on the task rather than on declarations the model may never call. A cell composes: it can filter and partition Session history, Thread transcripts, and the continual harness locally and return only what it chose to print. The only native additions are Baton's blocking singleton and grouped child controls, which make recursive suspension restart-safe without restoring a JavaScript promise.
+**Gain:** the provider sees one general capability schema instead of a per-role menu, so context is spent on the task rather than on declarations the model may never call. A cell composes: it can filter and partition Session history, Thread transcripts, and the continual harness locally and return only what it chose to print. The only native additions are TenetKit's blocking singleton and grouped child controls, which make recursive suspension restart-safe without restoring a JavaScript promise.
 
 **Cost:** operation-level read, write, and shell permission categories cannot be security controls against arbitrary TypeScript, so they are deleted rather than left as misleading UI. The kernel runs with the local user's OS authority. Ordinary capabilities must be mounted as bindings, while recursive control remains a separate model action rather than code inside the persistent environment.
 

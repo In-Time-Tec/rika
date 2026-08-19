@@ -155,14 +155,22 @@ export const performanceEvaluation = Effect.gen(function* () {
       "milliseconds",
       "The synthetic workload does not read a persisted Thread.",
     ),
-    unsupported("thread.reconciled-run-events", "count", "Baton is not started by this deterministic renderer."),
-    unsupported("thread.reconciled-historical-tokens", "count", "Baton is not started by this deterministic renderer."),
+    unsupported("thread.reconciled-run-events", "count", "TenetKit is not started by this deterministic renderer."),
+    unsupported(
+      "thread.reconciled-historical-tokens",
+      "count",
+      "TenetKit is not started by this deterministic renderer.",
+    ),
     unsupported(
       "thread.current-selection-database-reads",
       "count",
       "Persistence is not started by this deterministic renderer.",
     ),
-    unsupported("thread.current-selection-run-reads", "count", "Baton is not started by this deterministic renderer."),
+    unsupported(
+      "thread.current-selection-run-reads",
+      "count",
+      "TenetKit is not started by this deterministic renderer.",
+    ),
     unsupported(
       "thread.current-selection-payload-bytes",
       "count",

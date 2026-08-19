@@ -1,29 +1,37 @@
 import { Crypto, Effect, Layer, Redacted } from "effect"
-import { AssignmentStore, AssignmentStoreError, type AssignmentRecord } from "../../src/assignment-store"
-import { CheckpointObjectInspector } from "../../src/checkpoint"
+import { type ExecutorAssignment } from "@rika/product/executor-assignment"
+import { ExecutorAssignments } from "@rika/product/executor-assignments"
+import { CheckpointId, ExecutorAssignmentId, OrganizationId, ThreadId } from "@rika/product/hosted-model"
+import { layer as assignmentLayer } from "@rika/product-store/memory-assignments"
+import { Inspector } from "../../src/checkpoint"
 import {
-  CheckoutCredentialBroker,
-  GitHubAppTokenSource,
+  Credentials,
+  InstallationTokens,
   layer as checkoutLayer,
-  type GitHubAppTokenSourceInterface,
+  type InstallationTokensInterface,
 } from "../../src/checkout"
-import * as Controller from "../../src/controller"
-import { E2BSandboxProvider, type SandboxCreateRequest, type SandboxInventoryEntry } from "../../src/provider"
+import {
+  Controller,
+  type ControllerError,
+  type Options,
+  layer as controllerLayer,
+} from "../../src/controller"
+import { Provider, type CreateRequest, type InventoryEntry } from "../../src/provider"
 
 const digest = (_algorithm: string, data: Uint8Array) =>
   Effect.promise(() => globalThis.crypto.subtle.digest("SHA-256", data).then((value) => new Uint8Array(value)))
 
 export interface FakeProviderState {
-  readonly creates: Array<SandboxCreateRequest>
+  readonly creates: Array<CreateRequest>
   readonly connects: Array<{ readonly sandboxId: string; readonly timeoutMillis: number }>
   readonly pauses: Array<string>
   readonly kills: Array<string>
   readonly touches: Array<{ readonly sandboxId: string; readonly timeoutMillis: number }>
-  inventory: Array<SandboxInventoryEntry>
+  readonly bootstraps: Array<{ readonly sandboxId: string; readonly credential: Redacted.Redacted<string> }>
+  inventory: Array<InventoryEntry>
 }
 
 export interface Harness {
-  readonly records: Map<string, AssignmentRecord>
   readonly provider: FakeProviderState
   readonly checkpointInspections: Array<string>
   checkpointInspection: { readonly contentDigest: string; readonly sizeBytes: number }
@@ -32,41 +40,20 @@ export interface Harness {
     readonly owner: string
     readonly repository: string
   }>
-  layer: Layer.Layer<Controller.E2BExecutionController, import("../../src/contract").E2BExecutionError>
+  layer: Layer.Layer<Controller | ExecutorAssignments, ControllerError>
 }
-
-const storeLayer = (records: Map<string, AssignmentRecord>) =>
-  Layer.succeed(
-    AssignmentStore,
-    AssignmentStore.of({
-      get: (assignmentId) => Effect.succeed(records.get(assignmentId)),
-      insert: (record) => {
-        if (records.has(record.assignmentId))
-          return Effect.fail(AssignmentStoreError.make({ kind: "conflict", message: "already exists" }))
-        records.set(record.assignmentId, record)
-        return Effect.succeed(record)
-      },
-      update: (record, expectedRevision) => {
-        const current = records.get(record.assignmentId)
-        if (current === undefined)
-          return Effect.fail(AssignmentStoreError.make({ kind: "missing", message: "missing" }))
-        if (current.revision !== expectedRevision)
-          return Effect.fail(AssignmentStoreError.make({ kind: "conflict", message: "stale revision" }))
-        const next = { ...record, revision: expectedRevision + 1 }
-        records.set(record.assignmentId, next)
-        return Effect.succeed(next)
-      },
-      list: Effect.sync(() => [...records.values()]),
-    }),
-  )
 
 const providerLayer = (state: FakeProviderState) =>
   Layer.succeed(
-    E2BSandboxProvider,
-    E2BSandboxProvider.of({
+    Provider,
+    Provider.of({
       create: (request) => {
         state.creates.push(request)
         return Effect.succeed({ sandboxId: `sandbox-${state.creates.length}`, state: "running" })
+      },
+      bootstrap: (request) => {
+        state.bootstraps.push(request)
+        return Effect.void
       },
       connect: (sandboxId, timeoutMillis) => {
         state.connects.push({ sandboxId, timeoutMillis })
@@ -99,26 +86,25 @@ const cryptoLayer = () => {
   )
 }
 
-export const makeHarness = (overrides: Partial<Controller.Options> = {}): Harness => {
-  const records = new Map<string, AssignmentRecord>()
+export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
   const provider: FakeProviderState = {
     creates: [],
     connects: [],
     pauses: [],
     kills: [],
     touches: [],
+    bootstraps: [],
     inventory: [],
   }
   const checkpointInspections: Array<string> = []
   const harness: Harness = {
-    records,
     provider,
     checkpointInspections,
     checkpointInspection: { contentDigest: `sha256:${"a".repeat(64)}`, sizeBytes: 42 },
     checkoutRequests: [],
     layer: undefined as never,
   }
-  const source: GitHubAppTokenSourceInterface = {
+  const source: InstallationTokensInterface = {
     issue: (request) => {
       harness.checkoutRequests.push(request)
       return Effect.map(
@@ -130,37 +116,58 @@ export const makeHarness = (overrides: Partial<Controller.Options> = {}): Harnes
       )
     },
   }
-  const broker: Layer.Layer<CheckoutCredentialBroker> = checkoutLayer.pipe(
-    Layer.provide(Layer.succeed(GitHubAppTokenSource, GitHubAppTokenSource.of(source))),
+  const broker: Layer.Layer<Credentials> = checkoutLayer.pipe(
+    Layer.provide(Layer.succeed(InstallationTokens, InstallationTokens.of(source))),
   )
   const inspector = Layer.succeed(
-    CheckpointObjectInspector,
-    CheckpointObjectInspector.of({
+    Inspector,
+    Inspector.of({
       inspect: (objectKey) => {
         checkpointInspections.push(objectKey)
         return Effect.succeed(harness.checkpointInspection)
       },
     }),
   )
-  const dependencies = Layer.mergeAll(storeLayer(records), providerLayer(provider), cryptoLayer(), broker, inspector)
-  harness.layer = Controller.layer({
+  const dependencies = Layer.mergeAll(providerLayer(provider), cryptoLayer(), broker, inspector)
+  const controller = controllerLayer({
+    appId: "rika",
+    deploymentId: "test",
     templateBuildId: "template-build-v1-immutable",
     controllerUrl: "wss://controller.example.test/executors",
     allowedEgress: ["controller.example.test", "github.com", "api.github.com"],
     ...overrides,
-  }).pipe(Layer.provide(dependencies))
+  }).pipe(Layer.provide(dependencies), Layer.provide(assignmentLayer))
+  harness.layer = Layer.merge(controller, assignmentLayer)
   return harness
 }
 
-export const assignmentRequest = {
-  assignmentId: "assignment-1",
-  workspaceId: "workspace-1",
-  repository: {
+export const assignmentInput = {
+  id: ExecutorAssignmentId.make("assignment-1"),
+  organizationId: OrganizationId.make("organization-1"),
+  threadId: ThreadId.make("thread-1"),
+  placement: {
+    _tag: "E2BPlacement" as const,
+    templateBuildId: "template-build-v1-immutable",
+    providerScope: "test",
+  },
+  checkout: {
+    repositoryId: "repository-1",
     owner: "In-Time-Tec",
     name: "rika",
     installationId: "installation-1",
-    ref: "refs/heads/main",
+    commitSha: "a".repeat(40),
   },
-} as const
+}
 
-export const controller = Effect.map(Controller.E2BExecutionController, (service) => service)
+export const createAssignment = Effect.fn("test.createAssignment")(function* () {
+  const repository = yield* ExecutorAssignments
+  return yield* repository.create(assignmentInput)
+})
+
+export const readAssignment = Effect.fn("test.readAssignment")(function* () {
+  const repository = yield* ExecutorAssignments
+  return (yield* repository.get(assignmentInput.id)) as ExecutorAssignment
+})
+
+export const checkpointId = CheckpointId.make("checkpoint-1")
+export const controller = Effect.map(Controller, (service) => service)

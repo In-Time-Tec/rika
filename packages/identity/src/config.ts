@@ -140,6 +140,6 @@ export const loadIdentityConfig = Effect.fn("IdentityConfig.load")(function* (en
     githubClientSecret: Redacted.make(yield* required(environment, "GITHUB_CLIENT_SECRET")),
     resendApiKey: Redacted.make(yield* required(environment, "RESEND_API_KEY")),
     emailFrom,
-    resource: `${baseUrl}/api`,
+    resource: `${baseUrl}/api/v1`,
   } satisfies IdentityConfig
 })

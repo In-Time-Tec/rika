@@ -26,7 +26,7 @@ describe("harness scope policy", () => {
     expect(() => ScopePolicy.scopeString("thread", { ...identity, thread: "" })).toThrow()
   })
 
-  it("scopes a subagent by the derived session Baton gives it", () => {
+  it("scopes a subagent by the derived session TenetKit gives it", () => {
     expect(ScopePolicy.scopeString("thread", { ...identity, thread: "child:run-abc:inv-1" })).toBe(
       "thread:child:run-abc:inv-1",
     )

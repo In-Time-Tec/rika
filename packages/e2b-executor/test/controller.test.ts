@@ -1,16 +1,17 @@
 import { describe, expect, it } from "@effect/vitest"
-import type { ExecutorAccess } from "@rika/remote-execution/protocol"
+import type { Access } from "@rika/remote-execution/protocol"
 import { Effect, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import * as Controller from "../src/controller"
-import { assignmentRequest, controller, makeHarness } from "./support/fakes"
+import { assignmentInput, controller, createAssignment, makeHarness, readAssignment } from "./support/fakes"
 import { provideLayer } from "./support/layer"
 
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const provision = Effect.fn("test.provision")(function* () {
   const service = yield* controller
-  return yield* service.assign(assignmentRequest)
+  const assignment = yield* createAssignment()
+  return yield* service.provision(assignment.id)
 })
 
 const authenticate = Effect.fn("test.authenticate")(function* (
@@ -18,47 +19,56 @@ const authenticate = Effect.fn("test.authenticate")(function* (
   generation: number,
 ) {
   const service = yield* controller
-  const request = harness.provider.creates[generation - 1]!
+  const request = harness.provider.bootstraps.findLast((bootstrap) => bootstrap.sandboxId === `sandbox-${generation}`)!
   const fence = {
     target: "e2b" as const,
-    assignmentId: assignmentRequest.assignmentId,
-    generation,
+    assignmentId: assignmentInput.id,
+    assignmentGeneration: generation,
     instanceId: `sandbox-${generation}`,
-    executorId: `${assignmentRequest.assignmentId}:g${generation}`,
+    executorId: `${assignmentInput.id}:g${generation}:process-${generation}`,
+    processIncarnation: `process-${generation}`,
   }
   const welcome = yield* service.hello({
-    version: 1,
+    minimumVersion: 1,
+    maximumVersion: 1,
     fence,
-    bootstrapToken: request.secrets.RIKA_EXECUTOR_BOOTSTRAP_TOKEN!,
+    templateBuildId: "template-build-v1-immutable",
+    capabilities: { cells: true, checkpoints: true, pty: true },
+    cursors: { command: 0, event: 0, pty: 0 },
+    latestCheckpointId: null,
+    bootstrapToken: request.credential,
   })
-  const access: ExecutorAccess = {
+  const access: Access = {
     version: 1,
     fence,
+    leaseEpoch: welcome.leaseEpoch,
     sessionToken: welcome.sessionToken,
   }
   return { welcome, access }
 })
 
-describe("E2BExecutionController", () => {
+describe("Controller", () => {
   it.effect("provisions an explicit assignment from one immutable build with scoped bootstrap identity", () => {
     const harness = makeHarness()
     return Effect.gen(function* () {
       const service = yield* controller
-      const first = yield* service.assign(assignmentRequest)
-      const second = yield* service.assign(assignmentRequest)
+      yield* createAssignment()
+      const first = yield* service.provision(assignmentInput.id)
+      const second = yield* service.provision(assignmentInput.id)
       expect(first).toEqual(second)
       expect(first).toMatchObject({
         assignmentId: "assignment-1",
-        workspaceId: "workspace-1",
+        threadId: "thread-1",
         generation: 1,
         templateBuildId: "template-build-v1-immutable",
         sandboxId: "sandbox-1",
-        state: "running",
+        state: "provisioning",
       })
       expect(harness.provider.creates).toHaveLength(1)
       expect(harness.provider.creates[0]).toMatchObject({
         templateBuildId: "template-build-v1-immutable",
         assignmentId: "assignment-1",
+        threadId: "thread-1",
         generation: 1,
         idleTimeoutMillis: Controller.IdleTimeoutMillis,
         environment: {
@@ -66,10 +76,11 @@ describe("E2BExecutionController", () => {
           RIKA_EXECUTOR_ID: "assignment-1:g1",
         },
       })
-      const bootstrap = harness.provider.creates[0]!.secrets.RIKA_EXECUTOR_BOOTSTRAP_TOKEN!
+      const bootstrap = harness.provider.bootstraps[0]!.credential
       expect(String(bootstrap)).toBe("<redacted:executor-bootstrap>")
       expect(json(first)).not.toContain(Redacted.value(bootstrap))
-      expect(harness.records.get("assignment-1")?.bootstrapDigest).not.toBe(Redacted.value(bootstrap))
+      expect((yield* readAssignment()).lifecycle).toMatchObject({ _tag: "AwaitingBootstrap" })
+      expect(json(yield* readAssignment())).not.toContain(Redacted.value(bootstrap))
     }).pipe(provideLayer(harness.layer))
   })
 
@@ -78,9 +89,11 @@ describe("E2BExecutionController", () => {
     return Effect.gen(function* () {
       const service = yield* controller
       yield* provision()
-      const { access } = yield* authenticate(harness, 1)
+      const first = yield* authenticate(harness, 1)
       expect((yield* service.pause({ assignmentId: "assignment-1", generation: 1 })).state).toBe("paused")
-      expect((yield* service.resume({ assignmentId: "assignment-1", generation: 1 })).state).toBe("running")
+      expect((yield* service.resume({ assignmentId: "assignment-1", generation: 1 })).state).toBe("provisioning")
+      expect((yield* Effect.flip(service.heartbeat({ version: 1, access: first.access, cursor: { sequence: 1, value: "stale" } }))).kind).toBe("fenced")
+      const { access } = yield* authenticate(harness, 1)
       const receipt = yield* service.heartbeat({
         version: 1,
         access,
@@ -104,20 +117,30 @@ describe("E2BExecutionController", () => {
     return Effect.gen(function* () {
       const service = yield* controller
       yield* provision()
-      const bootstrap = harness.provider.creates[0]!.secrets.RIKA_EXECUTOR_BOOTSTRAP_TOKEN!
+      const bootstrap = harness.provider.bootstraps[0]!.credential
       const fence = {
         target: "e2b" as const,
         assignmentId: "assignment-1",
-        generation: 1,
+        assignmentGeneration: 1,
         instanceId: "sandbox-1",
-        executorId: "assignment-1:g1",
+        executorId: "assignment-1:g1:process-1",
+        processIncarnation: "process-1",
+      }
+      const hello = {
+        minimumVersion: 1 as const,
+        maximumVersion: 1 as const,
+        fence,
+        templateBuildId: "template-build-v1-immutable",
+        capabilities: { cells: true, checkpoints: true, pty: true },
+        cursors: { command: 0, event: 0, pty: 0 },
+        latestCheckpointId: null,
       }
       expect(
-        (yield* Effect.flip(service.hello({ version: 1, fence, bootstrapToken: Redacted.make("wrong") }))).kind,
+        (yield* Effect.flip(service.hello({ ...hello, bootstrapToken: Redacted.make("wrong") }))).kind,
       ).toBe("authentication")
       const { welcome, access } = yield* authenticate(harness, 1)
       expect(String(welcome.sessionToken)).toBe("<redacted:executor-session>")
-      expect((yield* Effect.flip(service.hello({ version: 1, fence, bootstrapToken: bootstrap }))).kind).toBe(
+      expect((yield* Effect.flip(service.hello({ ...hello, bootstrapToken: bootstrap }))).kind).toBe(
         "authentication",
       )
       expect((yield* Effect.flip(service.reconnect({ ...access, sessionToken: Redacted.make("wrong") }))).kind).toBe(
@@ -127,7 +150,7 @@ describe("E2BExecutionController", () => {
     }).pipe(provideLayer(harness.layer))
   })
 
-  it.effect("fences stale replacement generations and reconnects idempotently from the durable executor cursor", () => {
+  it.effect("advances socket epochs, fences stale sockets, and restores the durable cursor after replacement", () => {
     const harness = makeHarness()
     return Effect.gen(function* () {
       const service = yield* controller
@@ -149,11 +172,11 @@ describe("E2BExecutionController", () => {
       ).toBe("protocol")
       yield* TestClock.adjust("2 minutes")
       const reconnected = yield* service.reconnect(first.access)
-      const duplicate = yield* service.reconnect(first.access)
       expect(reconnected.cursor).toEqual({ sequence: 4, value: "executor:4" })
-      expect(duplicate).toEqual(reconnected)
+      expect(reconnected.leaseEpoch).toBe(first.access.leaseEpoch + 1)
+      expect((yield* Effect.flip(service.reconnect(first.access))).kind).toBe("fenced")
       const replacement = yield* service.replace({ assignmentId: "assignment-1", generation: 1 })
-      expect(replacement).toMatchObject({ generation: 2, sandboxId: "sandbox-2", state: "running" })
+      expect(replacement).toMatchObject({ generation: 2, sandboxId: "sandbox-2", state: "provisioning" })
       expect(harness.provider.kills).toContain("sandbox-1")
       expect((yield* Effect.flip(service.reconnect(first.access))).kind).toBe("fenced")
       expect((yield* authenticate(harness, 2)).welcome.cursor).toEqual({ sequence: 4, value: "executor:4" })
@@ -182,7 +205,7 @@ describe("E2BExecutionController", () => {
       }
       const verified = yield* service.checkpoint(access, staged)
       expect(yield* service.checkpoint(access, staged)).toEqual(verified)
-      expect(harness.checkpointInspections).toEqual([staged.objectKey])
+      expect(harness.checkpointInspections).toEqual([staged.objectKey, staged.objectKey])
       harness.checkpointInspection = { ...harness.checkpointInspection, sizeBytes: 41 }
       expect(
         (yield* Effect.flip(
@@ -206,13 +229,13 @@ describe("E2BExecutionController", () => {
         sandboxId: "sandbox-1",
         state: "running",
         templateBuildId: "template-build-v1-immutable",
-        metadata: { "rika.managed": "e2b-executor" },
+        metadata: { "rika.managed": "e2b-executor", "rika.app-id": "rika", "rika.deployment-id": "test" },
       },
       {
         sandboxId: "sandbox-orphan",
         state: "paused",
         templateBuildId: "template-build-v1-immutable",
-        metadata: { "rika.managed": "e2b-executor" },
+        metadata: { "rika.managed": "e2b-executor", "rika.app-id": "rika", "rika.deployment-id": "test" },
       },
     ]
     return Effect.gen(function* () {

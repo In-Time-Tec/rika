@@ -5,15 +5,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./assignment-store": "./src/assignment-store.ts",
     "./checkpoint": "./src/checkpoint.ts",
     "./checkout": "./src/checkout.ts",
-    "./contract": "./src/contract.ts",
     "./controller": "./src/controller.ts",
-    "./e2b-provider": "./src/e2b-provider.ts",
     "./provider": "./src/provider.ts"
   },
   "dependencies": {
+    "@rika/product": "workspace:*",
     "@rika/remote-execution": "workspace:*",
     "e2b": "2.41.0",
     "effect": "catalog:"
@@ -21,6 +19,7 @@
   "devDependencies": {
     "@effect/platform-bun": "catalog:",
     "@effect/vitest": "catalog:",
+    "@rika/product-store": "workspace:*",
     "@types/bun": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

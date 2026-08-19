@@ -2,7 +2,7 @@
 
 This package is the E2B-only control-plane adapter. It owns explicit assignment, immutable template build selection, short-lived bootstrap and lease credentials, E2B lifecycle calls, verified filesystem checkpoint metadata, GitHub App installation-token brokering, and managed-orphan cleanup.
 
-It does not implement the product `ExecutionGateway`, Baton RunStore, an agent loop, workspace tools, processes, or PTYs. Application composition must keep `ExecutionGateway` as the product boundary and Baton as the sole durable Run authority. Executors receive neither Postgres credentials nor E2B/GitHub App controller credentials.
+It does not implement the product `ExecutionGateway`, TenetKit RunStore, an agent loop, workspace tools, processes, or PTYs. Application composition must keep `ExecutionGateway` as the product boundary and TenetKit as the sole durable Run authority. Executors receive neither Postgres credentials nor E2B/GitHub App controller credentials.
 
 E2B idle pause uses `keepMemory: false`. Because the E2B SDK cannot combine filesystem-only pause with transparent inbound auto-resume, assignment demand resumes explicitly through `connect()`. The executor session is restored from its persisted filesystem state and reconnects from the acknowledged protocol cursor.
 
@@ -12,7 +12,7 @@ Run the credentialed lifecycle validation only after building the immutable temp
 
 ```sh
 E2B_API_KEY=... E2B_TEMPLATE_BUILD_ID=... \
-  bun run packages/e2b-executor/test/e2b-provider.live.ts
+  bun run packages/e2b-executor/test/provider.live.ts
 ```
 
 Root integration must install `e2b@2.41.0`, link `@rika/remote-execution`, and regenerate `bun.lock` in a separate integration change.

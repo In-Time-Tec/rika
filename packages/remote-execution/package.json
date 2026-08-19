@@ -5,8 +5,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./executor-host": "./src/executor-host.ts",
-    "./executor-runtime": "./src/executor-runtime.ts",
+    "./host": "./src/host.ts",
+    "./runtime": "./src/runtime.ts",
+    "./operations": "./src/operations.ts",
     "./protocol": "./src/protocol.ts",
     "./pty": "./src/pty.ts"
   },

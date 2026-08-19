@@ -7,7 +7,7 @@ import { nested, NestedOperationFailed, operation, type Requirements } from "./n
 export const name = "mcp"
 
 /**
- * Shaped like Baton's HostBindingNotFound so an unknown server or tool reaches the cell as tagged
+ * Shaped like TenetKit's HostBindingNotFound so an unknown server or tool reaches the cell as tagged
  * data. The bootstrap Proxy over `rika.mcp.<server>.<tool>` resolves names lazily, so this is the
  * only thing standing between a typo and `undefined is not a function`.
  */

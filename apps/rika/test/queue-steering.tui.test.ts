@@ -190,7 +190,7 @@ test(
 )
 
 test(
-  "replays a terminal Baton run to settle steering accepted before product recovery",
+  "replays a terminal TenetKit run to settle steering accepted before product recovery",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -298,7 +298,7 @@ test(
                   Effect.flatMap(({ status }) => {
                     if (status === "completed") return Effect.void
                     if (status === "failed" || status === "cancelled" || status === "unavailable" || remaining <= 0)
-                      return Effect.die(`seeded Baton run settled as ${status}`)
+                      return Effect.die(`seeded TenetKit run settled as ${status}`)
                     return Effect.sleep("10 millis").pipe(Effect.andThen(waitForCompletion(remaining - 10)))
                   }),
                   Effect.orDie,

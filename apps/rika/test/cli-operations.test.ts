@@ -333,7 +333,7 @@ it.effect(
 )
 
 it.effect(
-  "threads create and list round-trip through the product database",
+  "thread new and list round-trip through the product database",
   () =>
     withServices(
       Effect.gen(function* () {
@@ -342,14 +342,14 @@ it.effect(
           Effect.gen(function* () {
             const cli = yield* openCli(operationLayer(context))
             const first = yield* Schema.decodeUnknownEffect(ThreadJson)(
-              jsonOutput(expectSuccess(yield* cli.invoke(["threads", "create"]))),
+              jsonOutput(expectSuccess(yield* cli.invoke(["thread", "new"]))),
             )
             const second = yield* Schema.decodeUnknownEffect(ThreadJson)(
-              jsonOutput(expectSuccess(yield* cli.invoke(["threads", "create"]))),
+              jsonOutput(expectSuccess(yield* cli.invoke(["thread", "new"]))),
             )
             expect(second.id).not.toBe(first.id)
             const listed = yield* Schema.decodeUnknownEffect(ThreadsJson)(
-              jsonOutput(expectSuccess(yield* cli.invoke(["threads", "list"]))),
+              jsonOutput(expectSuccess(yield* cli.invoke(["thread", "list"]))),
             )
             expect(listed.map((thread) => thread.id).toSorted()).toEqual([first.id, second.id].toSorted())
             return [first.id, second.id]
@@ -359,7 +359,7 @@ it.effect(
           Effect.gen(function* () {
             const cli = yield* openCli(operationLayer(context))
             return yield* Schema.decodeUnknownEffect(ThreadsJson)(
-              jsonOutput(expectSuccess(yield* cli.invoke(["threads", "list"]))),
+              jsonOutput(expectSuccess(yield* cli.invoke(["thread", "list"]))),
             )
           }),
         )

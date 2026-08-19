@@ -1,6 +1,6 @@
 # Rika
 
-Rika is a collaborative coding-agent CLI and terminal application. Every Turn runs as a durable execution that survives client and executor restarts. Local execution remains the default, while an explicitly remote Thread runs in an isolated E2B workspace. Hosted identity, access, Threads, and Baton execution authority live in PostgreSQL.
+Rika is a collaborative coding-agent CLI and terminal application. Every Turn runs as a durable execution that survives client and executor restarts. Local execution remains the default, while an explicitly remote Thread runs in an isolated E2B workspace. Hosted identity, access, Threads, and TenetKit execution authority live in PostgreSQL.
 
 ## Install
 

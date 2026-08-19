@@ -32,7 +32,7 @@ it.effect("skill MCP configuration is composed only from activated skill resourc
   }).pipe(provideLayer(BunServices.layer)),
 )
 
-it.effect("runtime discovers and calls through a deterministic Baton MCP tool source", () => {
+it.effect("runtime discovers and calls through a deterministic TenetKit MCP tool source", () => {
   const source = McpToolSource.McpToolSource.of({
     server: "docs",
     tools: Effect.succeed([

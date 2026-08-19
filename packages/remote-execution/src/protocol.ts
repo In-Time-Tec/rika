@@ -7,76 +7,126 @@ const Timestamp = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 const ByteLength = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 const Dimension = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(10_000))
 const Sha256 = Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/))
+const LeaseEpoch = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 
 export const ProtocolVersion = Schema.Literal(1)
 export type ProtocolVersion = typeof ProtocolVersion.Type
 
-export const ExecutorTarget = Schema.Literals(["local_device", "e2b"])
-export type ExecutorTarget = typeof ExecutorTarget.Type
+export const Target = Schema.Literals(["local_device", "e2b"])
+export type Target = typeof Target.Type
 
-export const ExecutorCursor = Schema.Struct({
+export const Cursor = Schema.Struct({
   sequence: Sequence,
   value: Schema.String,
 })
-export type ExecutorCursor = typeof ExecutorCursor.Type
+export type Cursor = typeof Cursor.Type
 
-export const EmptyExecutorCursor: ExecutorCursor = { sequence: 0, value: "" }
+export const emptyCursor: Cursor = { sequence: 0, value: "" }
 
-export const ExecutorFence = Schema.Struct({
-  target: ExecutorTarget,
+export const Frame = Schema.Struct({
+  protocolVersion: ProtocolVersion,
+  messageId: Identifier,
   assignmentId: Identifier,
-  generation: Generation,
+  assignmentGeneration: Generation,
+  leaseEpoch: LeaseEpoch,
+  directionalSequence: Sequence,
+  acknowledgement: Sequence,
+  kind: Identifier,
+  body: Schema.Unknown,
+})
+export type Frame = typeof Frame.Type
+
+export const OperationFence = Schema.Struct({
+  operationKey: Identifier,
+  attempt: Generation,
+})
+export type OperationFence = typeof OperationFence.Type
+
+export const TerminalOutcome = Schema.Literals(["accepted", "unknown"])
+export type TerminalOutcome = typeof TerminalOutcome.Type
+
+export const PtyGap = Schema.Struct({
+  fromCursor: Sequence,
+  toCursor: Sequence,
+})
+export type PtyGap = typeof PtyGap.Type
+
+export const Fence = Schema.Struct({
+  target: Target,
+  assignmentId: Identifier,
+  assignmentGeneration: Generation,
   instanceId: Identifier,
   executorId: Identifier,
+  processIncarnation: Identifier,
 })
-export type ExecutorFence = typeof ExecutorFence.Type
+export type Fence = typeof Fence.Type
 
-export const ExecutorHelloWire = Schema.Struct({
-  version: ProtocolVersion,
-  fence: ExecutorFence,
+export const Capabilities = Schema.Struct({
+  cells: Schema.Boolean,
+  checkpoints: Schema.Boolean,
+  pty: Schema.Boolean,
+})
+export type Capabilities = typeof Capabilities.Type
+
+export const ResumeCursors = Schema.Struct({
+  command: Sequence,
+  event: Sequence,
+  pty: Sequence,
+})
+export type ResumeCursors = typeof ResumeCursors.Type
+
+export const HelloWire = Schema.Struct({
+  minimumVersion: ProtocolVersion,
+  maximumVersion: ProtocolVersion,
+  fence: Fence,
+  templateBuildId: Schema.NullOr(Identifier),
+  capabilities: Capabilities,
+  cursors: ResumeCursors,
+  latestCheckpointId: Schema.NullOr(Identifier),
   bootstrapToken: Identifier,
 })
-export type ExecutorHelloWire = typeof ExecutorHelloWire.Type
+export type HelloWire = typeof HelloWire.Type
 
-export interface ExecutorHello extends Omit<ExecutorHelloWire, "bootstrapToken"> {
+export interface Hello extends Omit<HelloWire, "bootstrapToken"> {
   readonly bootstrapToken: Redacted.Redacted<string>
 }
 
-export const redactExecutorHello = (hello: ExecutorHelloWire): ExecutorHello => ({
+export const redactHello = (hello: HelloWire): Hello => ({
   ...hello,
   bootstrapToken: Redacted.make(hello.bootstrapToken, { label: "executor-bootstrap" }),
 })
 
-export const ExecutorAccessWire = Schema.Struct({
+export const AccessWire = Schema.Struct({
   version: ProtocolVersion,
-  fence: ExecutorFence,
+  fence: Fence,
+  leaseEpoch: LeaseEpoch,
   sessionToken: Identifier,
 })
-export type ExecutorAccessWire = typeof ExecutorAccessWire.Type
+export type AccessWire = typeof AccessWire.Type
 
-export interface ExecutorAccess extends Omit<ExecutorAccessWire, "sessionToken"> {
+export interface Access extends Omit<AccessWire, "sessionToken"> {
   readonly sessionToken: Redacted.Redacted<string>
 }
 
-export const redactExecutorAccess = (access: ExecutorAccessWire): ExecutorAccess => ({
+export const redactAccess = (access: AccessWire): Access => ({
   ...access,
   sessionToken: Redacted.make(access.sessionToken, { label: "executor-session" }),
 })
 
-export const ExecutorHeartbeatWire = Schema.Struct({
+export const HeartbeatWire = Schema.Struct({
   version: ProtocolVersion,
-  access: ExecutorAccessWire,
-  cursor: ExecutorCursor,
+  access: AccessWire,
+  cursor: Cursor,
 })
-export type ExecutorHeartbeatWire = typeof ExecutorHeartbeatWire.Type
+export type HeartbeatWire = typeof HeartbeatWire.Type
 
-export interface ExecutorHeartbeat extends Omit<ExecutorHeartbeatWire, "access"> {
-  readonly access: ExecutorAccess
+export interface Heartbeat extends Omit<HeartbeatWire, "access"> {
+  readonly access: Access
 }
 
-export const redactExecutorHeartbeat = (heartbeat: ExecutorHeartbeatWire): ExecutorHeartbeat => ({
+export const redactHeartbeat = (heartbeat: HeartbeatWire): Heartbeat => ({
   ...heartbeat,
-  access: redactExecutorAccess(heartbeat.access),
+  access: redactAccess(heartbeat.access),
 })
 
 export const FilesystemCheckpoint = Schema.Struct({
@@ -86,7 +136,7 @@ export const FilesystemCheckpoint = Schema.Struct({
   contentDigest: Sha256,
   sizeBytes: ByteLength,
   format: Schema.Literal("tar.zst"),
-  cursor: ExecutorCursor,
+  cursor: Cursor,
 })
 export type FilesystemCheckpoint = typeof FilesystemCheckpoint.Type
 
@@ -114,43 +164,47 @@ export const PtyTranscriptChunk = Schema.Struct({
 })
 export type PtyTranscriptChunk = typeof PtyTranscriptChunk.Type
 
-export const ExecutorWelcomeWire = Schema.Struct({
+export const WelcomeWire = Schema.Struct({
   version: ProtocolVersion,
-  fence: ExecutorFence,
+  fence: Fence,
+  leaseEpoch: LeaseEpoch,
   sessionToken: Identifier,
   leaseExpiresAt: Timestamp,
   heartbeatIntervalMillis: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
-  cursor: ExecutorCursor,
+  cursor: Cursor,
 })
-export type ExecutorWelcomeWire = typeof ExecutorWelcomeWire.Type
+export type WelcomeWire = typeof WelcomeWire.Type
 
-export const ExecutorReconnectWelcomeWire = Schema.Struct({
+export const ReconnectWelcomeWire = Schema.Struct({
   version: ProtocolVersion,
-  fence: ExecutorFence,
+  fence: Fence,
+  leaseEpoch: LeaseEpoch,
   leaseExpiresAt: Timestamp,
   heartbeatIntervalMillis: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
-  cursor: ExecutorCursor,
+  cursor: Cursor,
 })
-export type ExecutorReconnectWelcomeWire = typeof ExecutorReconnectWelcomeWire.Type
+export type ReconnectWelcomeWire = typeof ReconnectWelcomeWire.Type
 
-export const LeaseReceiptWire = Schema.Struct({
+export const ReceiptWire = Schema.Struct({
   version: ProtocolVersion,
-  fence: ExecutorFence,
+  fence: Fence,
+  leaseEpoch: LeaseEpoch,
   leaseExpiresAt: Timestamp,
-  cursor: ExecutorCursor,
+  cursor: Cursor,
 })
-export type LeaseReceiptWire = typeof LeaseReceiptWire.Type
+export type ReceiptWire = typeof ReceiptWire.Type
 
-export const ExecutorSessionWire = Schema.Struct({
+export const SessionWire = Schema.Struct({
   version: ProtocolVersion,
-  fence: ExecutorFence,
+  fence: Fence,
+  leaseEpoch: LeaseEpoch,
   sessionToken: Identifier,
   heartbeatIntervalMillis: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
-  cursor: ExecutorCursor,
+  cursor: Cursor,
 })
-export type ExecutorSessionWire = typeof ExecutorSessionWire.Type
+export type SessionWire = typeof SessionWire.Type
 
-export const CheckoutCredentialWire = Schema.Struct({
+export const CredentialWire = Schema.Struct({
   requestId: Identifier,
   repositoryUrl: Identifier,
   username: Schema.Literal("x-access-token"),
@@ -158,34 +212,34 @@ export const CheckoutCredentialWire = Schema.Struct({
   expiresAt: Timestamp,
 })
 
-export const ExecutorHostMessage = Schema.Union([
-  Schema.TaggedStruct("ExecutorHello", { hello: ExecutorHelloWire }),
-  Schema.TaggedStruct("ExecutorReconnect", { access: ExecutorAccessWire }),
-  Schema.TaggedStruct("ExecutorHeartbeat", { heartbeat: ExecutorHeartbeatWire }),
-  Schema.TaggedStruct("CheckpointStaged", { access: ExecutorAccessWire, checkpoint: FilesystemCheckpoint }),
-  Schema.TaggedStruct("CheckoutRequested", { requestId: Identifier, access: ExecutorAccessWire }),
-  Schema.TaggedStruct("PtyOpened", { access: ExecutorAccessWire, pty: PtyCreate }),
-  Schema.TaggedStruct("PtyOutput", { access: ExecutorAccessWire, ptyId: Identifier, chunk: PtyTranscriptChunk }),
-  Schema.TaggedStruct("PtyDisconnected", { access: ExecutorAccessWire, ptyId: Identifier, cursor: Sequence }),
+export const HostMessage = Schema.Union([
+  Schema.TaggedStruct("ExecutorHello", { hello: HelloWire }),
+  Schema.TaggedStruct("ExecutorReconnect", { access: AccessWire }),
+  Schema.TaggedStruct("ExecutorHeartbeat", { heartbeat: HeartbeatWire }),
+  Schema.TaggedStruct("CheckpointStaged", { access: AccessWire, checkpoint: FilesystemCheckpoint }),
+  Schema.TaggedStruct("CheckoutRequested", { requestId: Identifier, access: AccessWire }),
+  Schema.TaggedStruct("PtyOpened", { access: AccessWire, pty: PtyCreate }),
+  Schema.TaggedStruct("PtyOutput", { access: AccessWire, ptyId: Identifier, chunk: PtyTranscriptChunk }),
+  Schema.TaggedStruct("PtyDisconnected", { access: AccessWire, ptyId: Identifier, cursor: Sequence }),
 ])
-export type ExecutorHostMessage = typeof ExecutorHostMessage.Type
+export type HostMessage = typeof HostMessage.Type
 
-export const ExecutorControllerMessage = Schema.Union([
-  Schema.TaggedStruct("ExecutorWelcome", { welcome: ExecutorWelcomeWire }),
-  Schema.TaggedStruct("ExecutorReconnected", { welcome: ExecutorReconnectWelcomeWire }),
-  Schema.TaggedStruct("LeaseReceipt", { receipt: LeaseReceiptWire }),
+export const ControllerMessage = Schema.Union([
+  Schema.TaggedStruct("ExecutorWelcome", { welcome: WelcomeWire }),
+  Schema.TaggedStruct("ExecutorReconnected", { welcome: ReconnectWelcomeWire }),
+  Schema.TaggedStruct("LeaseReceipt", { receipt: ReceiptWire }),
   Schema.TaggedStruct("CheckpointAccepted", { checkpointId: Identifier, contentDigest: Sha256 }),
-  Schema.TaggedStruct("CheckoutCredential", { credential: CheckoutCredentialWire }),
-  Schema.TaggedStruct("PtyCreate", { fence: ExecutorFence, request: PtyCreate }),
-  Schema.TaggedStruct("PtyInput", { fence: ExecutorFence, request: PtyInput }),
-  Schema.TaggedStruct("PtyResize", { fence: ExecutorFence, request: PtyResize }),
-  Schema.TaggedStruct("PtyDisconnect", { fence: ExecutorFence, ptyId: Identifier }),
-  Schema.TaggedStruct("PtyReconnect", { fence: ExecutorFence, request: PtyReconnect }),
-  Schema.TaggedStruct("Fenced", { fence: ExecutorFence, message: Schema.String }),
+  Schema.TaggedStruct("CheckoutCredential", { credential: CredentialWire }),
+  Schema.TaggedStruct("PtyCreate", { fence: Fence, request: PtyCreate }),
+  Schema.TaggedStruct("PtyInput", { fence: Fence, request: PtyInput }),
+  Schema.TaggedStruct("PtyResize", { fence: Fence, request: PtyResize }),
+  Schema.TaggedStruct("PtyDisconnect", { fence: Fence, ptyId: Identifier }),
+  Schema.TaggedStruct("PtyReconnect", { fence: Fence, request: PtyReconnect }),
+  Schema.TaggedStruct("Fenced", { fence: Fence, message: Schema.String }),
 ])
-export type ExecutorControllerMessage = typeof ExecutorControllerMessage.Type
+export type ControllerMessage = typeof ControllerMessage.Type
 
-export class ExecutorProtocolError extends Schema.TaggedError<ExecutorProtocolError>()("ExecutorProtocolError", {
+export class ProtocolError extends Schema.TaggedError<ProtocolError>()("ProtocolError", {
   kind: Schema.Literals(["authentication", "cursor", "fenced", "phase", "protocol"]),
   message: Schema.String,
 }) {}

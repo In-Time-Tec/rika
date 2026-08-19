@@ -114,7 +114,7 @@ export const start = () => {
       hostDataRoot: Config.option(Config.string("RIKA_INTERNAL_SERVER_DATA_ROOT")),
       home: Config.option(Config.string("HOME")),
       database: Config.option(Config.string("RIKA_DATABASE")),
-      batonDatabase: Config.option(Config.string("RIKA_BATON_DATABASE")),
+      tenetkitDatabase: Config.option(Config.string("RIKA_TENETKIT_DATABASE")),
       visual: Config.option(Config.string("VISUAL")),
       editor: Config.option(Config.string("EDITOR")),
       testModelResponse: Config.option(Config.string("RIKA_TEST_MODEL_RESPONSE")),
@@ -133,7 +133,7 @@ export const start = () => {
     home,
     hostDataRoot,
     productDatabase: environment.database._tag === "Some" ? environment.database.value : undefined,
-    batonDatabase: environment.batonDatabase._tag === "Some" ? environment.batonDatabase.value : undefined,
+    tenetkitDatabase: environment.tenetkitDatabase._tag === "Some" ? environment.tenetkitDatabase.value : undefined,
   })
   const database = paths.database
   const globalLayout = globalPaths(home)
@@ -152,7 +152,7 @@ export const start = () => {
       recoveryAbandon: environment.recoveryAbandon,
     },
     database,
-    batonDatabase: paths.batonDatabase,
+    tenetkitDatabase: paths.tenetkitDatabase,
     profileIdentity,
     globalConfig,
     workspaceConfig,

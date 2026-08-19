@@ -75,7 +75,7 @@ const resultBytes = (database: Database, table: string): number => {
 export const sqlAccounting = (filename: string): SqlAccounting => {
   const database = new Database(filename, { readonly: true, create: false })
   try {
-    if (!tableExists(database, "baton_run_events"))
+    if (!tableExists(database, "tenetkit_run_events"))
       return {
         totalEvents: 0,
         eventsByTag: {},
@@ -84,7 +84,7 @@ export const sqlAccounting = (filename: string): SqlAccounting => {
         modelPartEvents: 0,
         modelResponseCommittedEvents: 0,
       }
-    const rows = database.query("SELECT event_json FROM baton_run_events ORDER BY run_id, sequence").all() as Array<{
+    const rows = database.query("SELECT event_json FROM tenetkit_run_events ORDER BY run_id, sequence").all() as Array<{
       readonly event_json: string
     }>
     const eventsByTag: Record<string, number> = {}
@@ -100,7 +100,7 @@ export const sqlAccounting = (filename: string): SqlAccounting => {
       eventsByTag,
       eventJsonBytes,
       operationResultBytes:
-        resultBytes(database, "baton_run_operations") + resultBytes(database, "baton_program_operations"),
+        resultBytes(database, "tenetkit_run_operations") + resultBytes(database, "tenetkit_program_operations"),
       modelPartEvents: eventsByTag.ModelPart ?? 0,
       modelResponseCommittedEvents: eventsByTag.ModelResponseCommitted ?? 0,
     }

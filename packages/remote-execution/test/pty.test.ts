@@ -1,14 +1,14 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
-import { PtyDriver, PtyError, PtyManager, PtyRepository, layer as ptyLayer, type PtyRecord } from "../src/pty"
+import { Driver, Manager, PtyError, Repository, layer as ptyLayer, type Record } from "../src/pty"
 import { provideLayer } from "./support/layer"
 
 const harness = () => {
-  const records = new Map<string, PtyRecord>()
+  const records = new Map<string, Record>()
   const calls: Array<string> = []
   const repository = Layer.succeed(
-    PtyRepository,
-    PtyRepository.of({
+    Repository,
+    Repository.of({
       get: (ptyId) => Effect.succeed(records.get(ptyId)),
       insert: (record) => {
         if (records.has(record.ptyId)) return Effect.fail(PtyError.make({ kind: "conflict", message: "exists" }))
@@ -26,8 +26,8 @@ const harness = () => {
     }),
   )
   const driver = Layer.succeed(
-    PtyDriver,
-    PtyDriver.of({
+    Driver,
+    Driver.of({
       create: (request) => Effect.sync(() => calls.push(`create:${request.ptyId}`)),
       input: (request) => Effect.sync(() => calls.push(`input:${request.data}`)),
       resize: (request) => Effect.sync(() => calls.push(`resize:${request.cols}x${request.rows}`)),
@@ -40,11 +40,11 @@ const harness = () => {
 
 const create = { ptyId: "pty-1", command: "bun test", cwd: "/workspace", cols: 80, rows: 24 } as const
 
-describe("PtyManager", () => {
+describe("PTY manager", () => {
   it.effect("creates idempotently and preserves the process across disconnect and cursor reconnect", () => {
     const test = harness()
     return Effect.gen(function* () {
-      const pty = yield* PtyManager
+      const pty = yield* Manager
       expect(yield* pty.create(create)).toMatchObject({ ptyId: "pty-1", connected: true, cursor: 0 })
       expect(yield* pty.create(create)).toMatchObject({ ptyId: "pty-1", connected: true, cursor: 0 })
       yield* pty.input({ ptyId: "pty-1", data: "a" })
@@ -73,7 +73,7 @@ describe("PtyManager", () => {
   it.effect("rejects conflicting create and transcript cursors ahead of durable output", () => {
     const test = harness()
     return Effect.gen(function* () {
-      const pty = yield* PtyManager
+      const pty = yield* Manager
       yield* pty.create(create)
       expect((yield* Effect.flip(pty.create({ ...create, command: "bash" }))).kind).toBe("conflict")
       expect((yield* Effect.flip(pty.reconnect({ ptyId: "pty-1", cursor: 1 }))).kind).toBe("protocol")
