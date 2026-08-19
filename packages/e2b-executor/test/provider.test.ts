@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { SandboxInfo, SandboxOpts } from "e2b"
 import { Effect, Redacted } from "effect"
-import { makeWithSdk, type Sdk } from "../src/provider"
+import { makeWithSdk, type Sdk, testing } from "../src/provider"
 
 const request = {
   appId: "rika",
@@ -66,6 +66,7 @@ describe("Provider", () => {
   it.effect("maps every lifecycle operation and redacts controller and bootstrap secrets from failures", () => {
     const calls: Array<string> = []
     let bootstrapUrl = ""
+    let bootstrapApiKey = ""
     const sdk: Sdk = {
       create: () => Promise.reject(new Error("e2b-controller-secret bootstrap-secret")),
       connect: (sandboxId) => {
@@ -87,6 +88,7 @@ describe("Provider", () => {
       list: () => ({ hasNext: false, nextItems: () => Promise.resolve([]) }),
       bootstrap: (input) => {
         bootstrapUrl = input.url
+        bootstrapApiKey = input.apiKey
         return Promise.resolve()
       },
     }
@@ -98,6 +100,11 @@ describe("Provider", () => {
       expect(yield* provider.connect("sandbox", 900_000)).toEqual({ sandboxId: "sandbox", state: "running" })
       yield* provider.bootstrap({ sandboxId: "sandbox", credential: Redacted.make("bootstrap-secret") })
       expect(bootstrapUrl).toBe("https://7070-sandbox.e2b.app/.rika/bootstrap")
+      expect(bootstrapApiKey).toBe("e2b-controller-secret")
+      expect(testing.bootstrapHeaders("sandbox-traffic-secret")).toEqual({
+        "content-type": "application/json",
+        "e2b-traffic-access-token": "sandbox-traffic-secret",
+      })
       expect(yield* provider.pauseFilesystem("sandbox")).toBe(true)
       yield* provider.touch("sandbox", 900_000)
       expect(yield* provider.kill("sandbox")).toBe(true)

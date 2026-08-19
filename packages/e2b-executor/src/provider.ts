@@ -83,6 +83,11 @@ export interface Options {
   readonly requestTimeoutMillis?: number
 }
 
+const bootstrapHeaders = (trafficAccessToken: string) => ({
+  "content-type": "application/json",
+  "e2b-traffic-access-token": trafficAccessToken,
+})
+
 const liveSdk: Sdk = {
   create: (templateBuildId, options) => Sandbox.create(templateBuildId, options),
   connect: (sandboxId, options) => Sandbox.connect(sandboxId, options),
@@ -90,21 +95,25 @@ const liveSdk: Sdk = {
   kill: (sandboxId, options) => Sandbox.kill(sandboxId, options),
   setTimeout: (sandboxId, timeoutMillis, options) => Sandbox.setTimeout(sandboxId, timeoutMillis, options),
   list: (options) => Sandbox.list(options),
-  bootstrap: ({ body, apiKey, url }) =>
-    Bun.fetch(url, {
+  bootstrap: async ({ sandboxId, body, apiKey, url }) => {
+    const sandbox = await Sandbox.connect(sandboxId, { apiKey })
+    if (sandbox.trafficAccessToken === undefined) {
+      throw new Error("secure sandbox did not provide a traffic access token")
+    }
+    const response = await Bun.fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-e2b-traffic-access-token": apiKey },
+      headers: bootstrapHeaders(sandbox.trafficAccessToken),
       body,
-    }).then((response) => {
-      if (!response.ok) throw new Error(`bootstrap endpoint returned ${response.status}`)
-    }),
+    })
+    if (!response.ok) throw new Error(`bootstrap endpoint returned ${response.status}`)
+  },
 }
 
 const managedMetadata = { "rika.managed": "e2b-executor" } as const
 const bootstrapUrl = (sandboxId: string, domain = "e2b.app") =>
   `https://7070-${sandboxId}.${domain}/.rika/bootstrap`
 
-export const testing = { bootstrapUrl } as const
+export const testing = { bootstrapHeaders, bootstrapUrl } as const
 
 const makeProvider = (options: Options, sdk: Sdk): Interface => {
   const apiKey = Redacted.value(options.apiKey)
