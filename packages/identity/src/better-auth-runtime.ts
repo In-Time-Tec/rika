@@ -28,6 +28,12 @@ const snakeCase = (value: string) => value.replace(/([a-z0-9])([A-Z])/g, "$1_$2"
 const snakeCaseFields = (fields: ReadonlyArray<string>) =>
   Object.fromEntries(fields.map((field) => [field, snakeCase(field)]))
 
+export const identityOAuthResourceContract = (config: Pick<IdentityConfig, "baseUrl" | "resource">) => ({
+  resource: config.resource,
+  issuer: `${config.baseUrl}/api/auth`,
+  jwksUrl: `${config.baseUrl}/api/auth/jwks`,
+})
+
 const snakeCasePlugin = (plugin: BetterAuthPlugin): BetterAuthPlugin => {
   if (plugin.schema === undefined) return plugin
   return {
@@ -56,6 +62,7 @@ export const makeBetterAuthIdentityRuntime = (input: {
   readonly mail: MailSender
 }): IdentityRuntime => {
   const { config, mail, pool } = input
+  const oauthResource = identityOAuthResourceContract(config)
   const sendMail = (message: Parameters<MailSender["send"]>[0]) => Effect.runPromise(mail.send(message))
   const provider = oauthProvider({
     loginPage: "/login",
@@ -183,8 +190,9 @@ export const makeBetterAuthIdentityRuntime = (input: {
           try: () =>
             resource
               .verifyAccessTokenRequest(request, {
-                verifyOptions: { audience: config.resource },
+                verifyOptions: { audience: oauthResource.resource, issuer: oauthResource.issuer },
                 requiredScopes: ["account"],
+                jwksUrl: oauthResource.jwksUrl,
               })
               .then((payload) => {
                 if (typeof payload.sub !== "string" || payload.sub.length === 0) throw new TypeError("missing subject")
@@ -217,7 +225,8 @@ export const makeBetterAuthIdentityRuntime = (input: {
     protectedResourceMetadata: Effect.tryPromise({
       try: () =>
         resource.getProtectedResourceMetadata({
-          resource: config.resource,
+          resource: oauthResource.resource,
+          authorization_servers: [oauthResource.issuer],
           scopes_supported: ["account"],
           dpop_bound_access_tokens_required: true,
         }),
