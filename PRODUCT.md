@@ -8,7 +8,7 @@ Rika is for technical teams that prefer a CLI and TUI, need local development to
 
 ## Direction
 
-- Keep organization, access, and shared Thread authority in the hosted control plane.
+- Keep organization, access, and shared Thread authority in the hosted API.
 - Keep local and remote execution as explicit first-class choices; never move work between them implicitly.
 - Run remote work only in isolated E2B workspaces while preserving TenetKit as execution authority.
 - Let multiple authorized people inspect and control durable work without sharing host or provider credentials.

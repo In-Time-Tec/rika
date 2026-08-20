@@ -5,7 +5,7 @@ import { identityMigrations } from "../src/migrations"
 describe("identity migrations", () => {
   it.effect("contains the reviewed Better Auth 1.7.1 PostgreSQL schema", () =>
     Effect.gen(function* () {
-      expect(identityMigrations).toHaveLength(2)
+      expect(identityMigrations).toHaveLength(3)
       const migration = identityMigrations[0]
       expect(migration?.id).toBe("identity/0001_better_auth_1_7_1")
       expect(migration?.checksum).toBe("c07ac178826ea802f00c94f35fbc9b1fad12bbf5efa9a53500f4dc203446df38")
@@ -50,6 +50,18 @@ describe("identity migrations", () => {
       expect(sql).toContain("public_jwk JSONB NOT NULL")
       expect(sql).toContain("jwk_thumbprint TEXT NOT NULL UNIQUE")
       expect(sql).toContain("revoked_at TIMESTAMPTZ")
+    }),
+  )
+
+  it.effect("aligns Better Auth string arrays with the PostgreSQL adapter", () =>
+    Effect.gen(function* () {
+      const migration = identityMigrations[2]
+      expect(migration?.id).toBe("identity/0003_better_auth_postgres_contract")
+      expect(migration?.checksum).toBe("b4a8657e50c0fae5bb58c3be0617853a308130f095d8a7e2f587282bacc592bb")
+
+      const sql = yield* Effect.promise(() => Bun.file(migration?.url ?? "").text())
+      expect(sql.match(/TYPE jsonb/g)).toHaveLength(18)
+      expect(sql).toContain(`ALTER COLUMN "client_credentials_scopes" SET DEFAULT '[]'::jsonb`)
     }),
   )
 })

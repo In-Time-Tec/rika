@@ -7,10 +7,11 @@ import * as Socket from "effect/unstable/socket/Socket"
 import { CellError, Cells, State as CellState, layer as cellsLayer, type State as CellStateValue } from "./cells"
 import { Runtime, layer as runtimeLayer } from "./runtime"
 import {
-  ControllerMessage,
-  type ControllerMessage as IncomingMessage,
+  ApiMessage,
+  type ApiMessage as IncomingMessage,
+  ExecutorBootstrapWire,
   type Fence,
-  HostMessage,
+  ExecutorMessage,
   SessionWire,
   Target,
 } from "./protocol"
@@ -18,7 +19,7 @@ import {
 interface Config {
   readonly fence: Fence
   readonly templateBuildId: string | null
-  readonly controllerUrl: string
+  readonly apiUrl: string
   readonly bootstrapToken: Redacted.Redacted<string>
   readonly workspace: string
   readonly stateDirectory: string
@@ -32,17 +33,23 @@ interface Identity {
   readonly instanceId: string
   readonly executorId: string
   readonly templateBuildId: string | null
-  readonly controllerUrl: string
+  readonly apiUrl: string
   readonly workspace: string
   readonly stateDirectory: string
+}
+
+interface Bootstrap {
+  readonly credential: Redacted.Redacted<string>
+  readonly identity: Identity
 }
 
 export class HostError extends Schema.TaggedError<HostError>()("HostError", {
   message: Schema.String,
 }) {}
 
-const decodeControllerMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(ControllerMessage))
-const encodeHostMessage = Schema.encodeSync(Schema.fromJsonString(HostMessage))
+const decodeApiMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(ApiMessage))
+const decodeBootstrap = Schema.decodeUnknownEffect(ExecutorBootstrapWire)
+const encodeExecutorMessage = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
 const decodeCellState = Schema.decodeUnknownEffect(Schema.fromJsonString(CellState))
 const encodeCellState = Schema.encodeEffect(Schema.fromJsonString(CellState))
 const decodeSession = Schema.decodeUnknownEffect(Schema.fromJsonString(SessionWire))
@@ -52,6 +59,13 @@ const cellStateDirectory = `${executorStateDirectory}/cells`
 const directoryMode = 0o700
 const fileMode = 0o600
 const maximumOutputLength = 1_000_000
+const sandboxIdPath = "/run/e2b/.E2B_SANDBOX_ID"
+
+const sandboxInstanceId = () =>
+  Bun.file(sandboxIdPath)
+    .text()
+    .then((value) => value.trim())
+    .catch(() => Bun.env.E2B_SANDBOX_ID ?? "")
 
 const required = (name: string) => {
   const value = Bun.env[name]
@@ -78,7 +92,7 @@ const executorIdentity = Effect.gen(function* () {
     instanceId: target === "e2b" ? yield* required("E2B_SANDBOX_ID") : yield* required("RIKA_EXECUTOR_INSTANCE_ID"),
     executorId: yield* required("RIKA_EXECUTOR_ID"),
     templateBuildId: target === "e2b" ? yield* required("RIKA_EXECUTOR_TEMPLATE_BUILD_ID") : null,
-    controllerUrl: yield* required("RIKA_EXECUTOR_CONTROLLER_URL"),
+    apiUrl: yield* required("RIKA_EXECUTOR_API_URL"),
     workspace: yield* required("RIKA_EXECUTOR_WORKSPACE"),
     stateDirectory: Bun.env.RIKA_EXECUTOR_STATE_DIRECTORY || executorStateDirectory,
   } satisfies Identity
@@ -110,7 +124,7 @@ const configuration = (identity: Identity, bootstrapToken: Redacted.Redacted<str
         processIncarnation,
       },
       templateBuildId: identity.templateBuildId,
-      controllerUrl: identity.controllerUrl,
+      apiUrl: identity.apiUrl,
       bootstrapToken,
       workspace: identity.workspace,
       stateDirectory: identity.stateDirectory,
@@ -216,7 +230,7 @@ const sameAccess = (
   left.fence.executorId === right.fence.executorId &&
   left.fence.processIncarnation === right.fence.processIncarnation
 
-const consumeController = (
+const consumeApi = (
   incoming: Queue.Queue<IncomingMessage>,
   writer: (chunk: string) => Effect.Effect<void, Socket.SocketError>,
   store: SessionStore,
@@ -246,7 +260,7 @@ const consumeController = (
             _tag: "DomainFailure" as const,
             failure: { kind: "fenced", message: "Cell request has a stale executor fence" },
           }
-      yield* writer(encodeHostMessage({ _tag: "CellResult", operationKey: message.request.operationKey, response }))
+      yield* writer(encodeExecutorMessage({ _tag: "CellResult", operationKey: message.request.operationKey, response }))
     }
   }).pipe(Effect.forever)
 
@@ -256,12 +270,12 @@ const connect = Effect.fn("Host.connect")(function* (
   connected: Effect.Effect<void> = Effect.void,
 ) {
   const runtime = yield* Runtime
-  const socket = yield* Socket.makeWebSocket(config.controllerUrl)
+  const socket = yield* Socket.makeWebSocket(config.apiUrl)
   const writer = yield* socket.writer
   const incoming = yield* Queue.make<IncomingMessage>()
   const reader = yield* socket
     .runString((frame) =>
-      decodeControllerMessage(frame).pipe(
+      decodeApiMessage(frame).pipe(
         Effect.mapError(() => HostError.make({ message: "Controller sent an invalid executor frame" })),
         Effect.flatMap((message) => Queue.offer(incoming, message)),
       ),
@@ -270,7 +284,7 @@ const connect = Effect.fn("Host.connect")(function* (
   const opening = !(yield* runtime.hasSession)
     ? { _tag: "ExecutorHello" as const, hello: yield* runtime.hello }
     : { _tag: "ExecutorReconnect" as const, access: yield* runtime.reconnect }
-  yield* writer(encodeHostMessage(opening))
+  yield* writer(encodeExecutorMessage(opening))
   yield* waitForWelcome(incoming, store)
   yield* connected
   const session = yield* runtime.persistedSession
@@ -279,7 +293,7 @@ const connect = Effect.fn("Host.connect")(function* (
       Effect.gen(function* () {
         const cursor = yield* runtime.cursor
         const frame = yield* runtime.heartbeat(cursor)
-        yield* writer(encodeHostMessage({ _tag: "ExecutorHeartbeat", heartbeat: frame }))
+        yield* writer(encodeExecutorMessage({ _tag: "ExecutorHeartbeat", heartbeat: frame }))
       }),
     ),
     Effect.forever,
@@ -290,37 +304,62 @@ const connect = Effect.fn("Host.connect")(function* (
     Fiber.join(reader).pipe(
       Effect.mapError(() => HostError.make({ message: "Executor controller connection closed" })),
     ),
-    consumeController(incoming, writer, store),
+    consumeApi(incoming, writer, store),
   )
 })
 
-const receiveBootstrap = Effect.callback<Redacted.Redacted<string>, HostError>((resume) => {
+const receiveBootstrap = Effect.callback<Bootstrap, HostError>((resume) => {
   let consumed = false
   const server = Bun.serve({
-    hostname: "127.0.0.1",
+    hostname: "0.0.0.0",
     port: 7070,
     fetch: (request) => {
       const path = new URL(request.url).pathname
       if (path === "/health") return new Response("ready")
       if (path !== "/.rika/bootstrap" || request.method !== "POST" || consumed)
         return new Response("not found", { status: 404 })
-      return request.json().then((input) => {
-        const body = input as { readonly credential?: unknown }
-        if (typeof body.credential !== "string" || body.credential.length === 0)
-          return new Response("invalid", { status: 400 })
-        consumed = true
-        Effect.runFork(
-          Effect.sleep("10 millis").pipe(
-            Effect.andThen(Effect.promise(() => server.stop(false))),
-            Effect.andThen(
-              Effect.sync(() =>
-                resume(Effect.succeed(Redacted.make(body.credential as string, { label: "executor-bootstrap" }))),
+      return request
+        .json()
+        .then((input) =>
+          Promise.all([
+            Effect.runPromise(
+              decodeBootstrap(input).pipe(
+                Effect.match({
+                  onFailure: () => undefined,
+                  onSuccess: (value) => value,
+                }),
               ),
             ),
-          ),
+            sandboxInstanceId(),
+          ]),
         )
-        return new Response("accepted", { status: 202 })
-      })
+        .then(([body, instanceId]) => {
+          if (body === undefined || instanceId.length === 0 || body.identity.instanceId !== instanceId)
+            return new Response("invalid", { status: 400 })
+          if (consumed) return new Response("not found", { status: 404 })
+          consumed = true
+          const identity: Identity = {
+            ...body.identity,
+            stateDirectory: executorStateDirectory,
+          }
+          Effect.runFork(
+            Effect.sleep("10 millis").pipe(
+              Effect.andThen(Effect.promise(() => server.stop(true))),
+              Effect.andThen(
+                Effect.sync(() =>
+                  resume(
+                    Effect.succeed({
+                      credential: Redacted.make(body.credential, { label: "executor-bootstrap" }),
+                      identity,
+                    }),
+                  ),
+                ),
+              ),
+            ),
+          )
+          return new Response("accepted", { status: 202 })
+        })
+        .catch(() => new Response("invalid", { status: 400 }))
     },
   })
   return Effect.promise(() => server.stop(true))
@@ -332,7 +371,7 @@ const executeCell = (workspace: string, code: string) =>
   Effect.acquireUseRelease(
     Effect.try({
       try: () =>
-        Bun.spawn(["sudo", "-n", "-u", "rika-workspace", "--", "/bin/sh", "-lc", code], {
+        Bun.spawn(["sudo", "-n", "-H", "-u", "rika-workspace", "--", "/bin/sh", "-c", code], {
           cwd: workspace,
           env: {
             HOME: "/home/rika-workspace",
@@ -369,11 +408,11 @@ const executeCell = (workspace: string, code: string) =>
 
 const host = Effect.scoped(
   Effect.gen(function* () {
-    const identity = yield* executorIdentity
-    const store = yield* sessionStore(identity.stateDirectory)
+    const environmentIdentity = yield* executorIdentity
+    const store = yield* sessionStore(environmentIdentity.stateDirectory)
     const persisted = yield* store.load
     const matchingSession =
-      Option.isSome(persisted) && restores(identity, persisted.value) ? persisted.value : undefined
+      Option.isSome(persisted) && restores(environmentIdentity, persisted.value) ? persisted.value : undefined
     const crypto = yield* Crypto.Crypto
     const fileSystem = yield* FileSystem.FileSystem
     const statePath = Effect.fn("Host.cellStatePath")(function* (operationKey: string) {
@@ -411,6 +450,7 @@ const host = Effect.scoped(
       )
     })
     const run = (
+      identity: Identity,
       bootstrapToken: Redacted.Redacted<string>,
       restoredSession: SessionWire | undefined,
       connected: Effect.Effect<void> = Effect.void,
@@ -446,12 +486,21 @@ const host = Effect.scoped(
       })
     const monitor = (
       running: Fiber.Fiber<never, HostError>,
-    ): Effect.Effect<never, HostError, Crypto.Crypto | FileSystem.FileSystem | Socket.WebSocketConstructor | import("effect").Scope.Scope> =>
+    ): Effect.Effect<
+      never,
+      HostError,
+      Crypto.Crypto | FileSystem.FileSystem | Socket.WebSocketConstructor | import("effect").Scope.Scope
+    > =>
       Effect.gen(function* () {
         const replacement = yield* Effect.scoped(receiveBootstrap)
         const admitted = yield* Deferred.make<void>()
         const candidate = yield* Effect.forkScoped(
-          run(replacement, undefined, Deferred.succeed(admitted, undefined).pipe(Effect.asVoid)),
+          run(
+            replacement.identity,
+            replacement.credential,
+            undefined,
+            Deferred.succeed(admitted, undefined).pipe(Effect.asVoid),
+          ),
         )
         const accepted = yield* Deferred.await(admitted).pipe(Effect.timeoutOption("30 seconds"))
         if (Option.isNone(accepted)) {
@@ -462,25 +511,38 @@ const host = Effect.scoped(
         return yield* monitor(candidate)
       })
     const supervise = (
+      identity: Identity,
       bootstrapToken: Redacted.Redacted<string>,
       restoredSession: SessionWire | undefined,
-    ): Effect.Effect<never, HostError, Crypto.Crypto | FileSystem.FileSystem | Socket.WebSocketConstructor | import("effect").Scope.Scope> =>
+    ): Effect.Effect<
+      never,
+      HostError,
+      Crypto.Crypto | FileSystem.FileSystem | Socket.WebSocketConstructor | import("effect").Scope.Scope
+    > =>
       Effect.gen(function* () {
-        const running = yield* Effect.forkScoped(run(bootstrapToken, restoredSession))
+        const running = yield* Effect.forkScoped(run(identity, bootstrapToken, restoredSession))
         return yield* monitor(running)
       })
     if (matchingSession === undefined) {
-      const bootstrapToken = yield* Effect.scoped(receiveBootstrap)
-      return yield* supervise(bootstrapToken, undefined)
+      const bootstrap = yield* Effect.scoped(receiveBootstrap)
+      return yield* supervise(bootstrap.identity, bootstrap.credential, undefined)
     }
     const selected = yield* Deferred.make<"bootstrap" | "reconnect">()
     const fresh = yield* Effect.forkScoped(
       Effect.scoped(receiveBootstrap).pipe(
-        Effect.flatMap((token) => run(token, undefined, Deferred.succeed(selected, "bootstrap").pipe(Effect.asVoid))),
+        Effect.flatMap((bootstrap) =>
+          run(
+            bootstrap.identity,
+            bootstrap.credential,
+            undefined,
+            Deferred.succeed(selected, "bootstrap").pipe(Effect.asVoid),
+          ),
+        ),
       ),
     )
     const restored = yield* Effect.forkScoped(
       run(
+        environmentIdentity,
         Redacted.make("", { label: "executor-bootstrap-not-required" }),
         matchingSession,
         Deferred.succeed(selected, "reconnect").pipe(Effect.asVoid),

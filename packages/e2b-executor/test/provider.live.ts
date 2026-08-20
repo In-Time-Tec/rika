@@ -20,7 +20,7 @@ const program = Effect.gen(function* () {
   const templateId = yield* required("E2B_TEMPLATE_ID")
   const templateBuildId = yield* required("E2B_TEMPLATE_BUILD_ID")
   const provider = make({ apiKey })
-  const sandbox = yield* provider.create({
+  const create = provider.create({
     appId: "rika",
     deploymentId: "live-validation",
     templateId,
@@ -36,23 +36,33 @@ const program = Effect.gen(function* () {
       RIKA_EXECUTOR_GENERATION: "1",
       RIKA_EXECUTOR_ID: "live-validation:g1",
       RIKA_EXECUTOR_TEMPLATE_BUILD_ID: templateBuildId,
-      RIKA_EXECUTOR_CONTROLLER_URL: "wss://controller.invalid/executors",
+      RIKA_EXECUTOR_API_URL: "wss://api.invalid/executors",
     },
   })
-  yield* provider.bootstrap({
-    sandboxId: sandbox.sandboxId,
-    credential: Redacted.make("live-validation-bootstrap"),
-  })
   return yield* Effect.acquireUseRelease(
-    Effect.succeed(sandbox),
-    (active) =>
+    create,
+    (sandbox) =>
       Effect.gen(function* () {
-        yield* provider.touch(active.sandboxId, 900_000)
-        yield* provider.pauseFilesystem(active.sandboxId)
-        yield* provider.connect(active.sandboxId, 900_000)
-        yield* Console.log(json({ sandboxId: active.sandboxId, status: "filesystem-pause-resume-validated" }))
+        yield* provider.bootstrap({
+          sandboxId: sandbox.sandboxId,
+          credential: Redacted.make("live-validation-bootstrap"),
+          identity: {
+            target: "e2b",
+            assignmentId: "live-validation",
+            assignmentGeneration: 1,
+            instanceId: sandbox.sandboxId,
+            executorId: "live-validation:g1",
+            templateBuildId,
+            apiUrl: "wss://api.invalid/executors",
+            workspace: "/workspace",
+          },
+        })
+        yield* provider.touch(sandbox.sandboxId, 900_000)
+        yield* provider.pauseFilesystem(sandbox.sandboxId)
+        yield* provider.connect(sandbox.sandboxId, 900_000)
+        yield* Console.log(json({ sandboxId: sandbox.sandboxId, status: "filesystem-pause-resume-validated" }))
       }),
-    (active) => provider.kill(active.sandboxId).pipe(Effect.ignore),
+    (sandbox) => provider.kill(sandbox.sandboxId).pipe(Effect.ignore),
   )
 })
 

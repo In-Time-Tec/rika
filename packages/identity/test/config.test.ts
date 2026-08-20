@@ -5,9 +5,9 @@ import { IdentityConfigError, loadIdentityConfig, type Environment } from "../sr
 const productionEnvironment = {
   NODE_ENV: "production",
   PORT: "3000",
-  BETTER_AUTH_URL: "https://control.example.com",
+  BETTER_AUTH_URL: "https://api.example.com",
   BETTER_AUTH_SECRET: "abcdefghijklmnoPQRSTUVWXYZ0123456789",
-  BETTER_AUTH_TRUSTED_ORIGINS: "https://control.example.com, https://console.example.com",
+  BETTER_AUTH_TRUSTED_ORIGINS: "https://api.example.com, https://console.example.com",
   DATABASE_URL: "postgresql://user:password@database.example.com:5432/rika",
   DATABASE_SSL: "verify-full",
   GITHUB_CLIENT_ID: "github-client",
@@ -31,9 +31,9 @@ describe("IdentityConfig", () => {
       const config = yield* loadIdentityConfig(productionEnvironment)
       expect(config.production).toBe(true)
       expect(config.port).toBe(3000)
-      expect(config.baseUrl).toBe("https://control.example.com")
-      expect(config.resource).toBe("https://control.example.com/api/v1")
-      expect(config.trustedOrigins).toEqual(["https://control.example.com", "https://console.example.com"])
+      expect(config.baseUrl).toBe("https://api.example.com")
+      expect(config.resource).toBe("https://api.example.com/api/v1")
+      expect(config.trustedOrigins).toEqual(["https://api.example.com", "https://console.example.com"])
       expect(Redacted.value(config.databaseUrl)).toBe(productionEnvironment.DATABASE_URL)
       expect(String(config.authSecret)).not.toContain(productionEnvironment.BETTER_AUTH_SECRET)
     }),
@@ -41,7 +41,7 @@ describe("IdentityConfig", () => {
 
   it.effect("rejects insecure production origins", () =>
     Effect.gen(function* () {
-      const error = yield* configFailure({ ...productionEnvironment, BETTER_AUTH_URL: "http://control.example.com" })
+      const error = yield* configFailure({ ...productionEnvironment, BETTER_AUTH_URL: "http://api.example.com" })
       expect(error.message).toContain("https:")
     }),
   )

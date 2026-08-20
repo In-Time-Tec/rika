@@ -1,6 +1,6 @@
 # Provider connection configuration
 
-The first-class model providers are `openai`, `anthropic`, `openrouter`, and `bedrock`. Model routes and non-secret provider settings may be defined locally or by the hosted control plane. HTTP providers accept a non-secret `baseUrl` and `apiKeyEnv`. A Workspace HTTP provider entry replaces the matching global entry as a unit, with omitted fields falling back to that provider's built-in connection. Bedrock's non-secret identity fields merge by scope.
+The first-class model providers are `openai`, `anthropic`, `openrouter`, and `bedrock`. Model routes and non-secret provider settings may be defined locally or by the hosted API. HTTP providers accept a non-secret `baseUrl` and `apiKeyEnv`. A Workspace HTTP provider entry replaces the matching global entry as a unit, with omitted fields falling back to that provider's built-in connection. Bedrock's non-secret identity fields merge by scope.
 
 OpenAI additionally accepts `api: "responses"` or `api: "chat-completions"`. Responses is the default and uses TenetKit's OpenAI Responses adapter. Chat Completions uses TenetKit's compatible adapter. `baseUrl` must be an absolute HTTP or HTTPS URL without query parameters, fragments, or embedded credentials, and `apiKeyEnv` must name an uppercase environment variable. Literal keys, tokens, protocol strings, and custom provider IDs are rejected.
 

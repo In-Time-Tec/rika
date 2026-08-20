@@ -11,7 +11,7 @@ https://github.com/In-Time-Tec/rika
 feat/railway-hosted-mvp
 ```
 
-Begin by fetching the remote branch, confirming its exact commit and worktree state, and reading `AGENTS.md`, `PRODUCT.md`, `CONTEXT.md`, this entire `PLAN.md`, the affected feature/decision documents, package manifests, migrations, control-plane composition, and focused tests. Inspect current `origin/main` and CI before integrating it. Preserve unrelated concurrent work and never force-push shared history.
+Begin by fetching the remote branch, confirming its exact commit and worktree state, and reading `AGENTS.md`, `PRODUCT.md`, `CONTEXT.md`, this entire `PLAN.md`, the affected feature/decision documents, package manifests, migrations, API composition, and focused tests. Inspect current `origin/main` and CI before integrating it. Preserve unrelated concurrent work and never force-push shared history.
 
 The execution machine has authenticated Railway CLI access and may have GitHub, npm, E2B, and Amp access. Verify each identity and selected project before using it. Treat credentials and environment variables as secrets: inspect names and presence, never print values. Use the repository's normal protected-branch, review, package-release, and deployment workflows; do not bypass required checks.
 
@@ -37,7 +37,7 @@ Ship the smallest honest hosted Rika execution path to `main` and Railway:
 
 ```text
 authenticated CLI
-  -> Railway HTTPS control plane
+  -> Railway HTTPS API
   -> PostgreSQL command and assignment authority
   -> E2B sandbox over outbound authenticated WSS
   -> one fenced workspace operation
@@ -58,14 +58,14 @@ This first deployed slice proves identity, PostgreSQL authority, immutable remot
 
 ## Locked architecture
 
-- Railway runs the Bun/Effect HTTPS and WSS control plane.
+- Railway runs separate Caddy proxy, Bun web, and Bun/Effect API services. Caddy is the only public HTTPS/WSS ingress; web and API use private Railway DNS.
 - PostgreSQL is authoritative for identity-linked product state, Threads, commands, events, assignments, leases, fencing, and TenetKit Runs.
 - Better Auth owns users, sessions, OAuth grants, organizations, memberships, invitations, and CLI device authorization.
 - E2B is the only remote execution provider.
 - A Thread's executor kind is immutable: `local_device` or `e2b`.
 - `rika thread new` stays local. `rika thread new --remote` explicitly creates E2B placement.
 - Executors connect outbound, receive only assignment-scoped credentials, and never receive PostgreSQL credentials.
-- The control plane owns Run and command authority. Executors own workspace effects only.
+- The API owns Run and command authority. Executors own workspace effects only.
 - No Rivet Actors are introduced.
 - Cloudflare remains deferred.
 - No automatic local/E2B migration or fallback is allowed.
@@ -75,7 +75,7 @@ This first deployed slice proves identity, PostgreSQL authority, immutable remot
 
 ## Starting point
 
-The integration branch is `feat/railway-hosted-mvp`, based on `origin/feat/hosted-control-plane` at `1252d58b`.
+The integration branch is `feat/railway-hosted-mvp`, based on the hosted foundation commit `1252d58b`.
 
 The branch contains these implemented seams:
 
@@ -138,12 +138,19 @@ The TUI exposes separate **New local thread** and **New remote thread** actions.
 ### End-state topology
 
 ```text
-                         HTTPS + resumable WSS
-CLI / TUI / web  ──────────────────────────────────────┐
-                                                       ▼
+CLI / TUI / browser ── HTTPS + WSS ──► Railway Caddy proxy
+                                          │
+                         browser routes ──┼── API routes, OAuth, executor WSS
+                                          │
+                                          ▼
+                               ┌──────────────────────┐
+                               │ Railway web         │
+                               │ browser pages only  │
+                               └──────────────────────┘
+                                          │ private account lookup
+                                          ▼
                                ┌──────────────────────────────────┐
-                               │ Railway Rika control plane       │
-                               │                                  │
+                               │ Railway Rika API                 │
                                │ Better Auth + Organizations      │
                                │ Projects + sharing + presence    │
                                │ Thread commands + public events  │
@@ -151,7 +158,6 @@ CLI / TUI / web  ─────────────────────
                                │ assignment leases + fencing      │
                                │ E2B lifecycle reconciliation     │
                                └───────────────┬──────────────────┘
-                                               │
                                                ▼
                                       ┌──────────────────┐
                                       │ PostgreSQL       │
@@ -169,7 +175,7 @@ CLI / TUI / web  ─────────────────────
 └──────────────────────────┘                       └──────────────────────────┘
 ```
 
-Every CLI and TUI connects to the hosted control plane. A local background process is a Local Executor, not another authoritative Rika Server. Railway replicas are disposable; process-local connection maps are delivery optimizations only. PostgreSQL remains authoritative when no client, executor, or control-plane replica is connected.
+Every CLI and TUI connects to the hosted API through the public proxy. A local background process is a Local Executor, not another authoritative Rika Server. Railway replicas are disposable; process-local connection maps are delivery optimizations only. PostgreSQL remains authoritative when no client, executor, or API replica is connected.
 
 ### Authority boundaries
 
@@ -184,7 +190,7 @@ Better Auth owns:
 - Organization invitations.
 - Coarse Organization roles.
 
-Rika control plane owns:
+Rika API owns:
 
 - Projects and Project grants.
 - Workspaces and opaque local workspace bindings.
@@ -294,7 +300,7 @@ Login flow:
 - Display the client, user code, exact requested resource, requested scopes, active Organization, and approving account before consent.
 - Poll according to the device interval and handle authorization-pending, slow-down, denial, and expiration as typed outcomes.
 - Bind device-code, access-token, and refresh-token use to the installation proof key using DPoP.
-- Bind access tokens to the exact control-plane resource/origin.
+- Bind access tokens to the exact API resource/origin.
 - Rotate refresh tokens and reject replay.
 - Store refresh credentials only in macOS Keychain, Windows Credential Manager, or Linux Secret Service.
 - Store server origin, device ID, and selected Organization/Project only as non-secret profile configuration.
@@ -344,7 +350,7 @@ Every admitted command carries:
 - Durable commit cursor.
 - Schema-versioned command payload.
 
-The control plane locks or atomically advances the Thread command sequence, validates current authority, persists the command, and only then makes it deliverable. Replaying the same ID and body returns the original admission. Reusing an ID or idempotency key with different content is a conflict.
+The API locks or atomically advances the Thread command sequence, validates current authority, persists the command, and only then makes it deliverable. Replaying the same ID and body returns the original admission. Reusing an ID or idempotency key with different content is a conflict.
 
 Every executor or TenetKit-derived public event carries:
 
@@ -393,7 +399,7 @@ Persist terminal session metadata, ordered input receipts, output chunks, exit s
 
 ### Executor assignment and fencing
 
-The control plane owns desired lifecycle and grants an executor only a renewable, fenced capability.
+The API owns desired lifecycle and grants an executor only a renewable, fenced capability.
 
 An assignment includes:
 
@@ -419,7 +425,7 @@ Protocol behavior:
 - Replacement increments generation before new work is accepted.
 - Old generations are fenced even if the old sandbox or process is still reachable.
 
-Executor operation keys are stable across control-plane retry. The executor durably records accepted/running/completed or accepted/unknown outcomes and never blindly repeats a non-replayable side effect after an ambiguous crash.
+Executor operation keys are stable across API retry. The executor durably records accepted/running/completed or accepted/unknown outcomes and never blindly repeats a non-replayable side effect after an ambiguous crash.
 
 ### E2B lifecycle
 
@@ -459,7 +465,7 @@ No secret-bearing value may enter the E2B template, global environment, provider
 
 GitHub social identity does not authorize repository access. Use a GitHub App installation owned by or approved for the Organization.
 
-The control plane stores installation and repository metadata, not long-lived installation access tokens. For checkout or fetch:
+The API stores installation and repository metadata, not long-lived installation access tokens. For checkout or fetch:
 
 - Verify current Organization, Project, Thread, repository, and assignment authority.
 - Mint a short-lived installation token restricted to the required repository and operation.
@@ -484,7 +490,7 @@ Model credentials are not Rika login credentials and have one explicit scope: `l
 - Bind one immutable credential profile reference and authentication kind when admitting a Run so later configuration changes do not silently change replay identity.
 - Rotation creates a new revision; revocation prevents new Runs and follows an explicit policy for already-admitted Runs.
 
-Model-generated code executes as the separate workspace user. It must not share a process or inherited environment with the credential-bearing control-plane model adapter or checkout helper.
+Model-generated code executes as the separate workspace user. It must not share a process or inherited environment with the credential-bearing API model adapter or checkout helper.
 
 ### PostgreSQL model
 
@@ -553,7 +559,7 @@ Every protocol is versioned and schema-decoded before use. Never trust assignmen
 
 ### Deployment and failure behavior
 
-Railway hosts at least one stateless control-plane service and PostgreSQL. Start with one steady-state application replica while WSS session routing is process-local. Add cross-replica dispatch ownership before scaling replicas horizontally.
+Railway hosts at least one stateless API service and PostgreSQL. Start with one steady-state application replica while WSS session routing is process-local. Add cross-replica dispatch ownership before scaling replicas horizontally.
 
 Deployments:
 
@@ -566,7 +572,7 @@ Deployments:
 
 Readiness requires compatible Better Auth, Rika product, and TenetKit schemas plus the services required to authenticate, authorize, admit, and claim work. Liveness does not imply readiness.
 
-Back up PostgreSQL and checkpoint object storage. Exercise restore. Provider inventory reconciliation must run after control-plane outage. Logs and metrics include request/command IDs, Organization and resource IDs where safe, assignment generation, lease epoch, cursor lag, E2B lifecycle, and typed failure categories, but never secret payloads.
+Back up PostgreSQL and checkpoint object storage. Exercise restore. Provider inventory reconciliation must run after API outage. Logs and metrics include request/command IDs, Organization and resource IDs where safe, assignment generation, lease epoch, cursor lag, E2B lifecycle, and typed failure categories, but never secret payloads.
 
 ### Original staged delivery
 
@@ -576,12 +582,12 @@ The original plan is incremental but Organizations, multiplayer, and local-versu
 
 - Update product vocabulary and ownership boundaries.
 - Settle tenant ancestry, resource roles, immutable placement, secret ownership, repository policy, retention, and recovery policy.
-- Define Effect Schemas for client/control-plane and executor/control-plane protocols.
+- Define Effect Schemas for client/API and executor/API protocols.
 - Delete local-single-owner assumptions such as “TUI quit cancels work.”
 
 **Railway identity foundation**
 
-- Deploy Bun/Effect control plane and PostgreSQL.
+- Deploy Bun/Effect API and PostgreSQL.
 - Add Better Auth email/password, verification, reset, GitHub login/linking, Organizations, memberships, invitations, OAuth Provider, and Device Authorization.
 - Add browser pages and CLI login/status/logout/org commands.
 - Add DPoP-bound per-installation public clients and secure credential storage.
@@ -618,7 +624,7 @@ The original plan is incremental but Organizations, multiplayer, and local-versu
 - Run TenetKit's PostgreSQL worker in Railway.
 - Bind immutable execution placement to every root and descendant Run.
 - Dispatch only workspace effects to the fenced executor through stable operation keys.
-- Keep model credentials and model calls in the authorized control-plane boundary.
+- Keep model credentials and model calls in the authorized API boundary.
 - Project TenetKit Run events into shared Thread views without duplicating Run truth.
 
 **Operational hardening**
@@ -687,9 +693,9 @@ Before deploying Rika:
 
 Do not deploy by aliasing to a TenetKit worktree, vendoring package internals, patching `node_modules`, or accepting `baton_*` tables temporarily.
 
-## Complete the Rika control-plane composition
+## Complete the Rika API composition
 
-The deployed smoke slice must remain one coherent Effect application composition root in `apps/control-plane/src/main.ts`.
+The deployed smoke slice must remain one coherent Effect application composition root in `apps/api/src/main.ts`.
 
 Required services:
 
@@ -778,7 +784,7 @@ RIKA_EXECUTOR_ASSIGNMENT_ID
 RIKA_EXECUTOR_GENERATION
 RIKA_EXECUTOR_ID
 RIKA_EXECUTOR_TEMPLATE_BUILD_ID
-RIKA_EXECUTOR_CONTROLLER_URL
+RIKA_EXECUTOR_API_URL
 RIKA_EXECUTOR_WORKSPACE
 RIKA_CHECKPOINT_OBJECT_PREFIX
 ```
@@ -795,8 +801,12 @@ Create or select:
 
 - One Railway project/environment for the MVP.
 - One PostgreSQL service.
-- One control-plane service built from the root `Dockerfile` and `railway.json`.
-- One steady-state application replica for the initial in-memory WSS routing slice.
+- One public Caddy proxy service built from `apps/proxy/Dockerfile` and `apps/proxy/railway.json`.
+- One private web service built from `apps/web/Dockerfile` and `apps/web/railway.json`.
+- One private API service built from `apps/api/Dockerfile` and `apps/api/railway.json`.
+- One steady-state API replica for the initial in-memory WSS routing slice.
+
+Keep the Railway source root directory unset for all three application services so every Docker build uses the repository root as its context. Set each service's absolute Railway Config File setting to `/apps/api/railway.json`, `/apps/web/railway.json`, or `/apps/proxy/railway.json`, respectively. The service setting selects one config; it does not change the build context.
 
 Configure these variables through Railway references or secret variables:
 
@@ -804,9 +814,9 @@ Configure these variables through Railway references or secret variables:
 NODE_ENV=production
 DATABASE_URL=<private PostgreSQL reference>
 DATABASE_SSL=disable
-BETTER_AUTH_URL=https://<public control-plane-domain>
+BETTER_AUTH_URL=https://<public-proxy-domain>
 BETTER_AUTH_SECRET=<high-entropy secret>
-BETTER_AUTH_TRUSTED_ORIGINS=https://<public control-plane-domain>
+BETTER_AUTH_TRUSTED_ORIGINS=https://<public-proxy-domain>
 GITHUB_CLIENT_ID=<social-login OAuth app id>
 GITHUB_CLIENT_SECRET=<social-login OAuth secret>
 RESEND_API_KEY=<mail provider secret>
@@ -814,11 +824,13 @@ EMAIL_FROM=<verified sender>
 E2B_API_KEY=<E2B secret>
 E2B_APP_ID=<stable Rika application id>
 E2B_DEPLOYMENT_ID=<stable Railway environment/deployment scope>
+E2B_TEMPLATE_ID=<commit-qualified executor template id>
 E2B_TEMPLATE_BUILD_ID=<immutable executor template build id>
-RIKA_EXECUTOR_CONTROLLER_URL=wss://<public control-plane-domain>/api/v1/executors
+RIKA_EXECUTOR_API_URL=wss://<public-proxy-domain>/api/v1/executors
+RIKA_PROXY_PUBLIC_DOMAIN=<proxy Railway public-domain reference>
 ```
 
-Railway supplies `PORT`. Do not hard-code it.
+Set `PORT=3000` on API, web, and proxy. Set web `API_DOMAIN` and proxy `API_DOMAIN`/`WEB_DOMAIN` through private-domain references; their matching upstream ports are `3000`.
 
 Before promotion:
 
@@ -833,7 +845,7 @@ After deployment:
 - Read Railway build, migration, deployment, and application logs without exposing secrets.
 - Confirm `/healthz` and `/readyz` over the public HTTPS domain.
 - Confirm the executor WSS URL upgrades successfully and rejects malformed or unauthenticated frames.
-- Confirm the Railway control plane can provision the immutable E2B template.
+- Confirm the Railway API can provision the immutable E2B template.
 - Confirm the E2B host connects, authenticates once, renews its lease, and receives one operation.
 
 ## Black-box acceptance
@@ -875,12 +887,12 @@ Capture sanitized command output, relevant SQL counts, Railway deployment identi
 Run focused checks while iterating:
 
 ```sh
-bun run --cwd apps/control-plane lint
-bun run --cwd apps/control-plane typecheck
-bun run --cwd apps/control-plane build
+bun run --cwd apps/api lint
+bun run --cwd apps/api typecheck
+bun run --cwd apps/api build
 bun --bun vitest run --project unit \
-  apps/control-plane/test/http.test.ts \
-  apps/control-plane/test/executor-gateway.test.ts
+  apps/api/test/http.test.ts \
+  apps/api/test/executor-gateway.test.ts
 
 bun run --cwd apps/rika lint
 bun run --cwd apps/rika typecheck

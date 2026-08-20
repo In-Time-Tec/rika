@@ -45,7 +45,7 @@ rika-dev --version
 
 ## Configuration
 
-Global settings live at `~/.config/rika/settings.json`. A workspace can override them with `.rika/settings.json`. Credentials stay out of JSON: local credentials use the operating-system credential store, while hosted user and Organization credentials are encrypted by the control plane and are never returned by read APIs. A provider override names the environment variable that supplies its API key. Mode names and routes are configurable, and direct provider/model routes do not require aliases.
+Global settings live at `~/.config/rika/settings.json`. A workspace can override them with `.rika/settings.json`. Credentials stay out of JSON: local credentials use the operating-system credential store, while hosted user and Organization credentials are encrypted by the API and are never returned by read APIs. A provider override names the environment variable that supplies its API key. Mode names and routes are configurable, and direct provider/model routes do not require aliases.
 
 ```json
 {

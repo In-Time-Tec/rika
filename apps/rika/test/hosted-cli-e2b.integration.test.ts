@@ -4,7 +4,7 @@ import { expect, it } from "@effect/vitest"
 import type { Account, CliDeviceDirectory, IdentityDirectory, IdentityRuntime } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import * as HostedPostgres from "@rika/product-store/postgres-layer"
-import { HostMessage, type CellResponse, type ControllerMessage } from "@rika/remote-execution/protocol"
+import { ExecutorMessage, type CellResponse, type ApiMessage } from "@rika/remote-execution/protocol"
 import { Context, Effect, Layer, Option, Random, Redacted, Ref, Schema } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
@@ -17,22 +17,29 @@ import { layer as controllerLayer } from "../../../packages/e2b-executor/src/con
 import { Credentials, CredentialError } from "../../../packages/e2b-executor/src/checkout"
 import { Inspector, InspectionError } from "../../../packages/e2b-executor/src/checkpoint"
 import { Provider, type BootstrapRequest, type CreateRequest } from "../../../packages/e2b-executor/src/provider"
-import { type Gateway, type Socket } from "../../control-plane/src/executor-gateway"
-import { Executor, service as executorService } from "../../control-plane/src/executor"
-import { HostedProduct, layer as hostedProductLayer } from "../../control-plane/src/hosted-product"
-import { makeControlPlaneApiHandler } from "../../control-plane/src/api"
-import type { HttpDependencies } from "../../control-plane/src/http"
+import { type Gateway, type Socket } from "../../api/src/executor-gateway"
+import { Executor, service as executorService } from "../../api/src/executor"
+import { HostedProduct, layer as hostedProductLayer } from "../../api/src/hosted-product"
+import { makeRikaApiHandler } from "../../api/src/api"
+import type { HttpDependencies } from "../../api/src/http"
 import * as HostedCommand from "../src/command/root/hosted-command-dispatch"
 import { run } from "../src/command/root/rika-command"
 import * as HostedCli from "../src/hosted/hosted-cli"
 import * as HostedHttp from "../src/hosted/hosted-http"
-import { Browser, CredentialStore, Http, ProfileStore, type Credential, type PrivateJwk } from "../src/hosted/hosted-contract"
+import {
+  Browser,
+  CredentialStore,
+  Http,
+  ProfileStore,
+  type Credential,
+  type PrivateJwk,
+} from "../src/hosted/hosted-contract"
 import { generate } from "../src/hosted/hosted-dpop"
 import { Service as ProductService } from "@rika/product/product-operation-service"
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined
-const encodeHostMessage = Schema.encodeSync(Schema.fromJsonString(HostMessage))
+const encodeExecutorMessage = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
 const organizationId = "organization-cli-e2b"
 const memberId = "member-cli-e2b"
 const deviceId = "device-cli-e2b"
@@ -74,7 +81,11 @@ const migrate = (url: string) =>
 
 const webRequest = (request: HttpClientRequest.HttpClientRequest) => {
   const body = request.body._tag === "Uint8Array" ? request.body.body : undefined
-  return new Request(request.url, { method: request.method, headers: request.headers, ...(body === undefined ? {} : { body }) })
+  return new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    ...(body === undefined ? {} : { body }),
+  })
 }
 
 const unusedHttpClient = HttpClient.make(() => Effect.die("The integration test did not install its HTTP client"))
@@ -92,23 +103,32 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
       try {
         migrated = yield* migrate(url)
         yield* Effect.promise(() =>
-          migrated!.query(`INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-            VALUES ($1, 'Rika User', 'rika@example.test', true, now(), now())`, [account.user.id]),
+          migrated!.query(
+            `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
+            VALUES ($1, 'Rika User', 'rika@example.test', true, now(), now())`,
+            [account.user.id],
+          ),
         )
         yield* Effect.promise(() =>
-          migrated!.query(`INSERT INTO "organization" (id, name, slug, created_at)
-            VALUES ($1, 'Rika', 'rika-cli-e2b', now())`, [organizationId]),
+          migrated!.query(
+            `INSERT INTO "organization" (id, name, slug, created_at)
+            VALUES ($1, 'Rika', 'rika-cli-e2b', now())`,
+            [organizationId],
+          ),
         )
         yield* Effect.promise(() =>
-          migrated!.query(`INSERT INTO member (id, organization_id, user_id, role, created_at)
-            VALUES ($1, $2, $3, 'owner', now())`, [memberId, organizationId, account.user.id]),
+          migrated!.query(
+            `INSERT INTO member (id, organization_id, user_id, role, created_at)
+            VALUES ($1, $2, $3, 'owner', now())`,
+            [memberId, organizationId, account.user.id],
+          ),
         )
         let gateway: Gateway | undefined
         const runFork = Effect.runForkWith(yield* Effect.context<never>())
         let helloAccepted = 0
         const creates: Array<CreateRequest> = []
         const bootstraps: Array<BootstrapRequest> = []
-        const operations: Array<Extract<ControllerMessage, { readonly _tag: "CellExecute" }>> = []
+        const operations: Array<Extract<ApiMessage, { readonly _tag: "CellExecute" }>> = []
         const closes: Array<{ readonly code: number | undefined; readonly reason: string | undefined }> = []
         const response: CellResponse = {
           _tag: "Success",
@@ -116,14 +136,14 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
         }
         const socket: Socket = {
           send: (frame) => {
-            const message = JSON.parse(frame) as ControllerMessage
+            const message = JSON.parse(frame) as ApiMessage
             if (message._tag === "ExecutorWelcome") helloAccepted += 1
             if (message._tag === "CellExecute") {
               operations.push(message)
               runFork(
                 gateway!.receive(
                   socket,
-                  encodeHostMessage({ _tag: "CellResult", operationKey: message.request.operationKey, response }),
+                  encodeExecutorMessage({ _tag: "CellResult", operationKey: message.request.operationKey, response }),
                 ),
               )
             }
@@ -143,7 +163,7 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
                 runFork(
                   gateway!.receive(
                     socket,
-                    encodeHostMessage({
+                    encodeExecutorMessage({
                       _tag: "ExecutorHello",
                       hello: {
                         minimumVersion: 1,
@@ -178,8 +198,8 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
           deploymentId: "integration-test",
           templateId: "ar7-template-alias",
           templateBuildId: "template-build-v1-immutable",
-          controllerUrl: "wss://control.example.test/api/v1/executors",
-          allowedEgress: ["control.example.test", "github.com", "api.github.com"],
+          apiUrl: "wss://api.example.test/api/v1/executors",
+          allowedEgress: ["api.example.test", "github.com", "api.github.com"],
         }).pipe(
           Layer.provide(
             Layer.mergeAll(
@@ -242,7 +262,7 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
           execution: { check: Effect.die("unused") },
           production: false,
         }
-        const api = makeControlPlaneApiHandler(dependencies)
+        const api = makeRikaApiHandler(dependencies)
         let operationRetry: Parameters<typeof api.handler>[0] | undefined
         const client = HttpClient.make((request) =>
           Effect.promise(() => {
@@ -273,7 +293,7 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
             ProfileStore.of({
               load: Effect.succeed(
                 Option.some({
-                  origin: "https://control.example.test",
+                  origin: "https://api.example.test",
                   organization: organizationId,
                   deviceId,
                   clientId,
@@ -288,7 +308,10 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
               load: () =>
                 Effect.succeed(
                   Option.some(
-                    credential ?? { refreshToken: Redacted.make("refresh-token"), privateJwk: privateJwk as PrivateJwk },
+                    credential ?? {
+                      refreshToken: Redacted.make("refresh-token"),
+                      privateJwk: privateJwk as PrivateJwk,
+                    },
                   ),
                 ),
               save: (_origin, _device, value) =>
@@ -327,8 +350,12 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
         const [thread, assignment, commands, events] = yield* Effect.promise(() =>
           Promise.all([
             migrated!.query(`SELECT executor_kind FROM rika_hosted_threads WHERE id = $1`, [connection.threadId]),
-            migrated!.query(`SELECT id, thread_id FROM rika_hosted_executor_assignments WHERE thread_id = $1`, [connection.threadId]),
-            migrated!.query(`SELECT idempotency_key FROM rika_hosted_thread_commands WHERE thread_id = $1`, [connection.threadId]),
+            migrated!.query(`SELECT id, thread_id FROM rika_hosted_executor_assignments WHERE thread_id = $1`, [
+              connection.threadId,
+            ]),
+            migrated!.query(`SELECT idempotency_key FROM rika_hosted_thread_commands WHERE thread_id = $1`, [
+              connection.threadId,
+            ]),
             migrated!.query(`SELECT event FROM rika_hosted_thread_events WHERE thread_id = $1`, [connection.threadId]),
           ]),
         )

@@ -14,7 +14,7 @@ const requireLocal = (selected: "local" | "user" | "organization") =>
     : Effect.fail(
         ProductOperation.OperationUnavailable.make({
           operation: "Credential",
-          message: `${selected} provider credential storage belongs to the hosted control plane and is not available locally`,
+          message: `${selected} provider credential storage belongs to the hosted API and is not available locally`,
         }),
       )
 

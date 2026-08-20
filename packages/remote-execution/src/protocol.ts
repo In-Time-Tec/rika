@@ -15,6 +15,24 @@ export type ProtocolVersion = typeof ProtocolVersion.Type
 export const Target = Schema.Literals(["local_device", "e2b"])
 export type Target = typeof Target.Type
 
+export const ExecutorBootstrapIdentity = Schema.Struct({
+  target: Schema.Literal("e2b"),
+  assignmentId: Identifier,
+  assignmentGeneration: Generation,
+  instanceId: Identifier,
+  executorId: Identifier,
+  templateBuildId: Identifier,
+  apiUrl: Identifier,
+  workspace: Identifier,
+})
+export type ExecutorBootstrapIdentity = typeof ExecutorBootstrapIdentity.Type
+
+export const ExecutorBootstrapWire = Schema.Struct({
+  credential: Identifier,
+  identity: ExecutorBootstrapIdentity,
+})
+export type ExecutorBootstrapWire = typeof ExecutorBootstrapWire.Type
+
 export const Cursor = Schema.Struct({
   sequence: Sequence,
   value: Schema.String,
@@ -234,7 +252,7 @@ export const CredentialWire = Schema.Struct({
   expiresAt: Timestamp,
 })
 
-export const HostMessage = Schema.Union([
+export const ExecutorMessage = Schema.Union([
   Schema.TaggedStruct("ExecutorHello", { hello: HelloWire }),
   Schema.TaggedStruct("ExecutorReconnect", { access: AccessWire }),
   Schema.TaggedStruct("ExecutorHeartbeat", { heartbeat: HeartbeatWire }),
@@ -245,9 +263,9 @@ export const HostMessage = Schema.Union([
   Schema.TaggedStruct("PtyDisconnected", { access: AccessWire, ptyId: Identifier, cursor: Sequence }),
   Schema.TaggedStruct("CellResult", { operationKey: Identifier, response: CellResponse }),
 ])
-export type HostMessage = typeof HostMessage.Type
+export type ExecutorMessage = typeof ExecutorMessage.Type
 
-export const ControllerMessage = Schema.Union([
+export const ApiMessage = Schema.Union([
   Schema.TaggedStruct("ExecutorWelcome", { welcome: WelcomeWire }),
   Schema.TaggedStruct("ExecutorReconnected", { welcome: ReconnectWelcomeWire }),
   Schema.TaggedStruct("LeaseReceipt", { receipt: ReceiptWire }),
@@ -261,7 +279,7 @@ export const ControllerMessage = Schema.Union([
   Schema.TaggedStruct("CellExecute", { request: CellRequest }),
   Schema.TaggedStruct("Fenced", { fence: Fence, message: Schema.String }),
 ])
-export type ControllerMessage = typeof ControllerMessage.Type
+export type ApiMessage = typeof ApiMessage.Type
 
 export class ProtocolError extends Schema.TaggedError<ProtocolError>()("ProtocolError", {
   kind: Schema.Literals(["authentication", "cursor", "fenced", "phase", "protocol"]),

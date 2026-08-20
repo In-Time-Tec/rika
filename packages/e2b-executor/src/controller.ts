@@ -98,7 +98,7 @@ export interface Options {
   readonly deploymentId: string
   readonly templateId: string
   readonly templateBuildId: string
-  readonly controllerUrl: string
+  readonly apiUrl: string
   readonly allowedEgress: ReadonlyArray<string>
   readonly idleTimeoutMillis?: number
   readonly heartbeatIntervalMillis?: number
@@ -259,12 +259,29 @@ export const layer = (
             RIKA_EXECUTOR_GENERATION: assignment.generation,
             RIKA_EXECUTOR_ID: `${assignment.id}:g${assignment.generation}`,
             RIKA_EXECUTOR_TEMPLATE_BUILD_ID: placement.templateBuildId,
-            RIKA_EXECUTOR_CONTROLLER_URL: options.controllerUrl,
+            RIKA_EXECUTOR_API_URL: options.apiUrl,
             RIKA_EXECUTOR_WORKSPACE: "/workspace",
             RIKA_CHECKPOINT_OBJECT_PREFIX: `assignments/${assignment.id}/g${assignment.generation}/`,
           },
         }
         return request
+      })
+
+      const bootstrapIdentity = Effect.fn("Controller.bootstrapIdentity")(function* (
+        assignment: ExecutorAssignment,
+        instanceId: string,
+      ) {
+        const placement = yield* e2bPlacement(assignment)
+        return {
+          target: "e2b" as const,
+          assignmentId: assignment.id,
+          assignmentGeneration: number(assignment.generation),
+          instanceId,
+          executorId: `${assignment.id}:g${assignment.generation}`,
+          templateBuildId: placement.templateBuildId,
+          apiUrl: options.apiUrl,
+          workspace: "/workspace",
+        }
       })
 
       const matchesGeneration = (
@@ -320,7 +337,13 @@ export const layer = (
               existingProviderId === null ? provider.kill(sandbox.sandboxId).pipe(Effect.ignore) : Effect.void,
             ),
           )
-        yield* provider.bootstrap({ sandboxId: sandbox.sandboxId, credential }).pipe(Effect.mapError(providerFailure))
+        yield* provider
+          .bootstrap({
+            sandboxId: sandbox.sandboxId,
+            credential,
+            identity: yield* bootstrapIdentity(provisioning, sandbox.sandboxId),
+          })
+          .pipe(Effect.mapError(providerFailure))
         return publicAssignment(bound)
       })
 

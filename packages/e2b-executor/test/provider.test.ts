@@ -1,7 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { SandboxInfo, SandboxOpts } from "e2b"
-import { Effect, Redacted } from "effect"
+import { Effect, Redacted, Schema } from "effect"
 import { makeWithSdk, type Sdk, testing } from "../src/provider"
+
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 const request = {
   appId: "rika",
@@ -12,12 +14,23 @@ const request = {
   threadId: "thread-1",
   generation: 3,
   idleTimeoutMillis: 900_000,
-  allowedEgress: ["controller.example.test", "github.com"],
+  allowedEgress: ["api.example.test", "github.com"],
   environment: {
     RIKA_EXECUTOR_ASSIGNMENT_ID: "assignment-1",
     RIKA_EXECUTOR_TEMPLATE_BUILD_ID: "7d0-build-receipt",
   },
 } as const
+
+const bootstrapIdentity = (sandboxId: string) => ({
+  target: "e2b" as const,
+  assignmentId: "assignment-1",
+  assignmentGeneration: 3,
+  instanceId: sandboxId,
+  executorId: "assignment-1:g3",
+  templateBuildId: request.templateBuildId,
+  apiUrl: "wss://api.example.test/api/v1/executors",
+  workspace: "/workspace",
+})
 
 const sandboxInfo = (sandboxId: string, state: "running" | "paused"): SandboxInfo =>
   ({
@@ -64,7 +77,7 @@ describe("Provider", () => {
         lifecycle: { onTimeout: { action: "pause", keepMemory: false }, autoResume: false },
         network: {
           allowPublicTraffic: false,
-          allowOut: ["controller.example.test", "github.com"],
+          allowOut: ["api.example.test", "github.com"],
           denyOut: ["0.0.0.0/0"],
         },
         metadata: {
@@ -142,10 +155,62 @@ describe("Provider", () => {
     })
   })
 
+  it.effect("waits for the secure traffic token and bootstrap port before sending the credential once", () => {
+    let connects = 0
+    let probes = 0
+    let posts = 0
+    let postBody: RequestInit["body"]
+    const headers: Array<RequestInit["headers"]> = []
+    return Effect.promise(() =>
+      testing
+        .bootstrapSandbox(
+          {
+            sandboxId: "sandbox",
+            body: '{"credential":"bootstrap-secret"}',
+            connection: { apiKey: "e2b-controller-secret", requestTimeoutMs: 1_000 },
+            url: "https://7070-sandbox.e2b.app/.rika/bootstrap",
+          },
+          {
+            now: () => 1,
+            sleep: () => Promise.resolve(),
+            connect: () =>
+              Promise.resolve({
+                sandboxId: "sandbox",
+                ...(connects++ === 0 ? {} : { trafficAccessToken: "sandbox-traffic-secret" }),
+              }),
+            fetch: (input, init) => {
+              headers.push(init?.headers)
+              if (init?.method === "POST") {
+                posts++
+                postBody = init.body
+                return Promise.resolve(new Response("accepted", { status: 202 }))
+              }
+              probes++
+              expect(new URL(input).pathname).toBe("/health")
+              return Promise.resolve(
+                new Response(probes === 1 ? "starting" : "ready", { status: probes === 1 ? 502 : 200 }),
+              )
+            },
+          },
+        )
+        .then(() => {
+          expect(connects).toBe(2)
+          expect(probes).toBe(2)
+          expect(posts).toBe(1)
+          expect(postBody).toBe('{"credential":"bootstrap-secret"}')
+          expect(headers.at(-1)).toEqual({
+            "content-type": "application/json",
+            "e2b-traffic-access-token": "sandbox-traffic-secret",
+          })
+        }),
+    )
+  })
+
   it.effect("maps every lifecycle operation and redacts controller and bootstrap secrets from failures", () => {
     const calls: Array<string> = []
     let bootstrapUrl = ""
     let bootstrapApiKey = ""
+    let bootstrapBody = ""
     const sdk: Sdk = {
       ...attestationSdk,
       templateTags: () => Promise.reject(new Error("e2b-controller-secret bootstrap-secret")),
@@ -170,6 +235,7 @@ describe("Provider", () => {
       bootstrap: (input) => {
         bootstrapUrl = input.url
         bootstrapApiKey = input.connection.apiKey ?? ""
+        bootstrapBody = input.body
         return Promise.resolve()
       },
     }
@@ -179,9 +245,17 @@ describe("Provider", () => {
       expect(failed.message).not.toContain("e2b-controller-secret")
       expect(failed.message).not.toContain("bootstrap-secret")
       expect(yield* provider.connect("sandbox", 900_000)).toEqual({ sandboxId: "sandbox", state: "running" })
-      yield* provider.bootstrap({ sandboxId: "sandbox", credential: Redacted.make("bootstrap-secret") })
+      yield* provider.bootstrap({
+        sandboxId: "sandbox",
+        credential: Redacted.make("bootstrap-secret"),
+        identity: bootstrapIdentity("sandbox"),
+      })
       expect(bootstrapUrl).toBe("https://7070-sandbox.e2b.app/.rika/bootstrap")
       expect(bootstrapApiKey).toBe("e2b-controller-secret")
+      expect(decodeJson(bootstrapBody)).toEqual({
+        credential: "bootstrap-secret",
+        identity: bootstrapIdentity("sandbox"),
+      })
       expect(testing.bootstrapHeaders("sandbox-traffic-secret")).toEqual({
         "content-type": "application/json",
         "e2b-traffic-access-token": "sandbox-traffic-secret",

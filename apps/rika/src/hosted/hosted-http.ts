@@ -29,7 +29,7 @@ const DeviceAuthorizationWire = Schema.Struct({
 })
 const TokenWire = Schema.Struct({
   access_token: Schema.String,
-  refresh_token: Schema.String,
+  refresh_token: Schema.optionalKey(Schema.String),
   expires_in: Schema.Int,
   token_type: Schema.optionalKey(Schema.String),
 })
@@ -42,12 +42,20 @@ const DevicesWire = Schema.Union([Schema.Array(CliDevice), Schema.Struct({ devic
 const failure = (kind: HostedError["kind"], message: string) => HostedError.make({ kind, message })
 const resource = (origin: string) => `${origin}/api/v1`
 
-const tokensFrom = (wire: typeof TokenWire.Type): Effect.Effect<TokenSet, HostedError> => {
-  if (wire.expires_in <= 0 || (wire.token_type !== undefined && wire.token_type.toLowerCase() !== "dpop"))
+const tokensFrom = (
+  wire: typeof TokenWire.Type,
+  previousRefreshToken?: string,
+): Effect.Effect<TokenSet, HostedError> => {
+  const refreshToken = wire.refresh_token ?? previousRefreshToken
+  if (
+    refreshToken === undefined ||
+    wire.expires_in <= 0 ||
+    (wire.token_type !== undefined && wire.token_type.toLowerCase() !== "dpop")
+  )
     return Effect.fail(failure("protocol", "Hosted token response was not a valid DPoP token response"))
   return Effect.succeed({
     accessToken: wire.access_token,
-    refreshToken: wire.refresh_token,
+    refreshToken,
     expiresIn: wire.expires_in,
   })
 }
@@ -107,10 +115,11 @@ export const layer = Layer.effect(
     const tokenResponse = Effect.fn("HostedHttp.tokenResponse")(function* (
       response: HttpClientResponse.HttpClientResponse,
       action: string,
+      previousRefreshToken?: string,
     ) {
       if (response.status >= 200 && response.status < 300)
         return yield* decode(response, TokenWire, `${action} returned an invalid response`).pipe(
-          Effect.flatMap(tokensFrom),
+          Effect.flatMap((wire) => tokensFrom(wire, previousRefreshToken)),
         )
       const oauth = yield* decode(response, OAuthErrorWire, `${action} failed`).pipe(Effect.option)
       if (Option.isSome(oauth) && (oauth.value.error === "invalid_grant" || oauth.value.error === "invalid_token"))
@@ -258,7 +267,7 @@ export const layer = Layer.effect(
           privateJwk,
         ).pipe(
           Effect.flatMap(execute),
-          Effect.flatMap((response) => tokenResponse(response, "Hosted token refresh")),
+          Effect.flatMap((response) => tokenResponse(response, "Hosted token refresh", Redacted.value(refreshToken))),
         )
       },
       context: (origin, session) => {
