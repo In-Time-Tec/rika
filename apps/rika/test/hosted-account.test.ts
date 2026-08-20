@@ -1,20 +1,16 @@
-import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { Cause, Clock, Context, Effect, Exit, Fiber, Layer, Option, Redacted, Ref } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
-import type { ForegroundLocalExecutorSnapshot } from "@rika/remote-execution/foreground"
 import { expect, it } from "@effect/vitest"
-import { prepareLocalExecutor, logout, logoutAll, pollDeviceAuthorization, status } from "../src/hosted/hosted-account"
+import { logout, logoutAll, pollDeviceAuthorization, status } from "../src/hosted/hosted-account"
 import { layer as credentialLayer, type SecretVault } from "../src/hosted/hosted-credential-store"
 import {
   CredentialStore,
   HostedError,
   Http,
-  LocalExecutorReceiptStore,
   ProfileStore,
   type Credential,
   type DevicePoll,
   type HttpInterface,
-  type LocalExecutorAdmission,
   type PrivateJwk,
   type Profile,
 } from "../src/hosted/hosted-contract"
@@ -43,8 +39,6 @@ const unusedHttp: HttpInterface = {
   devices: () => Effect.die("unused"),
   revokeDevice: () => Effect.die("unused"),
   revokeAllDevices: () => Effect.die("unused"),
-  createLocalConnection: () => Effect.die("unused"),
-  admitLocalExecutor: () => Effect.die("unused"),
   createRemoteConnection: () => Effect.die("unused"),
   runThread: () => Effect.die("unused"),
 }
@@ -255,103 +249,4 @@ it.effect("treats logout as idempotent before a profile exists", () =>
     yield* logoutAll().pipe(Effect.provide(context))
     expect(yield* TestConsole.logLines.pipe(Effect.provide(context))).toEqual(["Not logged in", "Not logged in"])
   }),
-)
-
-const localSnapshot: ForegroundLocalExecutorSnapshot = {
-  version: 1,
-  workspaceIdentity: "workspace-1",
-  executorUrl: "wss://hosted.example.test/api/v1/local-executors",
-  access: {
-    version: 1,
-    fence: {
-      target: "local_device",
-      assignmentId: "thread-1",
-      assignmentGeneration: 1,
-      instanceId: "device-1",
-      executorId: "executor-1",
-      processIncarnation: "process-1",
-    },
-    leaseEpoch: 1,
-    sessionToken: "session-1",
-  },
-  leaseExpiresAt: 10_000,
-  heartbeatIntervalMillis: 5_000,
-  cursor: { sequence: 0, value: "" },
-  receipts: [],
-}
-
-const localExecutorContext = (input: {
-  readonly snapshot: Option.Option<ForegroundLocalExecutorSnapshot>
-  readonly admissions: Ref.Ref<number>
-}) =>
-  Layer.build(
-    Layer.mergeAll(
-      BunCrypto.layer,
-      Layer.succeed(ProfileStore, ProfileStore.of({ load: Effect.succeed(Option.some(profile)), save: () => Effect.void })),
-      Layer.succeed(
-        CredentialStore,
-        CredentialStore.of({
-          load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })),
-          save: () => Effect.void,
-          remove: () => Effect.succeed(true),
-        }),
-      ),
-      Layer.succeed(
-        LocalExecutorReceiptStore,
-        LocalExecutorReceiptStore.of({
-          load: () => Effect.succeed(input.snapshot),
-          save: () => Effect.void,
-          remove: () => Effect.succeed(true),
-        }),
-      ),
-      Layer.succeed(
-        Http,
-        Http.of({
-          ...unusedHttp,
-          refresh: () => Effect.succeed({ accessToken: "access", refreshToken: "refresh-2", expiresIn: 600 }),
-          admitLocalExecutor: () =>
-            Ref.update(input.admissions, (value) => value + 1).pipe(
-              Effect.as<LocalExecutorAdmission>({
-                admissionId: "admission-1",
-                ticket: "ticket-1",
-                expiresAt: 60_000,
-                executorUrl: "wss://hosted.example.test/api/v1/local-executors",
-                workspaceIdentity: "workspace-new",
-              }),
-            ),
-        }),
-      ),
-    ),
-  )
-
-it.effect("resumes an unexpired local executor receipt without requesting a new admission", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const admissions = yield* Ref.make(0)
-      const context = yield* localExecutorContext({ snapshot: Option.some(localSnapshot), admissions })
-      const prepared = yield* prepareLocalExecutor("thread-1").pipe(Effect.provide(context))
-      expect(prepared).toMatchObject({ threadId: "thread-1", resume: localSnapshot })
-      expect("admission" in prepared).toBe(false)
-      expect(yield* Ref.get(admissions)).toBe(0)
-    }),
-  ),
-)
-
-it.effect("requests a fresh admission when the persisted local executor lease expired", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const admissions = yield* Ref.make(0)
-      const context = yield* localExecutorContext({
-        snapshot: Option.some({ ...localSnapshot, leaseExpiresAt: 0 }),
-        admissions,
-      })
-      const prepared = yield* prepareLocalExecutor("thread-1").pipe(Effect.provide(context))
-      expect(prepared).toMatchObject({
-        threadId: "thread-1",
-        admission: { admissionId: "admission-1", workspaceIdentity: "workspace-new" },
-      })
-      expect("resume" in prepared).toBe(false)
-      expect(yield* Ref.get(admissions)).toBe(1)
-    }),
-  ),
 )

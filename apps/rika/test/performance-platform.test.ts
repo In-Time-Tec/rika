@@ -1,0 +1,50 @@
+import { describe, expect, test } from "vitest"
+import { matchesRole, roleRuntimes } from "../src/platform/performance-platform"
+import { serverProcessRole } from "../src/private-runtime-role"
+
+describe("performance role runtime resolution", () => {
+  test("locates source role entrypoints from the performance source directory", () => {
+    const runtimes = roleRuntimes({
+      packaged: false,
+      executable: "/usr/bin/bun",
+      sourceDirectory: "/repo/apps/rika/src",
+    })
+    expect(runtimes.interactive).toEqual({
+      executable: "/usr/bin/bun",
+      arguments: ["/repo/apps/rika/src/interactive-main.ts"],
+      evidencePath: "/repo/apps/rika/src/interactive-main.ts",
+    })
+    expect(runtimes.server).toEqual({
+      executable: "/usr/bin/bun",
+      arguments: ["/repo/apps/rika/src/client-main.ts", serverProcessRole],
+      evidencePath: "/repo/apps/rika/src/client-main.ts",
+    })
+  })
+
+  test("locates packaged roles in the single launcher executable", () => {
+    const runtimes = roleRuntimes({
+      packaged: true,
+      executable: "/install/bin/.rika-performance",
+      sourceDirectory: "/install/bin",
+    })
+    expect(runtimes.interactive.executable).toBe("/install/bin/.rika-interactive")
+    expect(runtimes.server).toEqual({
+      executable: "/install/bin/rika",
+      arguments: [serverProcessRole],
+      evidencePath: "/install/bin/rika",
+    })
+    expect(runtimes.launcher.executable).toBe("/install/bin/rika")
+  })
+
+  test("detects the private server role separately from its client launcher", () => {
+    const runtimes = roleRuntimes({
+      packaged: true,
+      executable: "/install/bin/.rika-performance",
+      sourceDirectory: "/install/bin",
+    })
+    expect(matchesRole({ command: "/install/bin/rika", runtime: runtimes.launcher })).toBe(true)
+    expect(matchesRole({ command: `/install/bin/rika ${serverProcessRole}`, runtime: runtimes.launcher })).toBe(false)
+    expect(matchesRole({ command: `/install/bin/rika ${serverProcessRole}`, runtime: runtimes.server })).toBe(true)
+    expect(matchesRole({ command: "/install/bin/rika", runtime: runtimes.server })).toBe(false)
+  })
+})

@@ -61,16 +61,6 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
           return Effect.succeed(
             response(request, { threadId: "thread-1", url: "https://hosted.example.test/threads/thread-1" }),
           )
-        if (path === "/api/v1/threads/local_thread-1/local-executor-admissions")
-          return Effect.succeed(
-            response(request, {
-              admissionId: "admission-1",
-              ticket: "memory-only-ticket",
-              expiresAt: 1_800_000_000_000,
-              executorUrl: "wss://hosted.example.test/api/v1/local-executors",
-              workspaceIdentity: "workspace-opaque-1",
-            }),
-          )
         if (path === "/api/v1/threads/e2b_thread-1/operations")
           return Effect.succeed(response(request, { output: "done" }))
         return Effect.succeed(response(request, {}))
@@ -103,11 +93,6 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
       expect((yield* http.invite(origin, "org-1", "new@example.test", session)).id).toBe("invite-1")
       yield* http.revokeDevice(origin, "device-1", session)
       yield* http.revokeAllDevices(origin, session)
-      expect((yield* http.createLocalConnection(origin, "org-1", session)).threadId).toBe("thread-1")
-      expect(
-        (yield* http.admitLocalExecutor(origin, "org-1", "local_thread-1", "opaque-random-fingerprint", session))
-          .workspaceIdentity,
-      ).toBe("workspace-opaque-1")
       expect((yield* http.createRemoteConnection(origin, "org-1", "project-1", session)).threadId).toBe("thread-1")
       expect(
         (yield* http.runThread(origin, "org-1", threadId, { prompt: ["hello"], mode: "low" }, "operation-1", session))
@@ -124,20 +109,15 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
         "/api/v1/auth/cli/devices/device-1/revoke",
         "/api/v1/auth/cli/devices/revoke-all",
         "/api/v1/connections",
-        "/api/v1/threads/local_thread-1/local-executor-admissions",
-        "/api/v1/connections",
         "/api/v1/threads/e2b_thread-1/operations",
       ])
       for (const request of requests.slice(1)) expect(request.headers.dpop).toEqual(expect.any(String))
       expect(requests[4]?.headers.authorization).toBe("DPoP access")
       expect(bodyText(requests[0]!)).toContain('"reference_id":"cli-device:device-1"')
       expect(bodyText(requests[8]!)).toBe("")
-      expect(bodyText(requests[9]!)).toBe('{"placement":"local","organization_id":"org-1"}')
-      expect(bodyText(requests[10]!)).toBe('{"organization_id":"org-1","workspace_fingerprint":"opaque-random-fingerprint"}')
-      expect(bodyText(requests[10]!)).not.toContain(process.cwd())
-      expect(bodyText(requests[11]!)).toContain('"placement":"e2b"')
-      expect(requests[12]?.headers["idempotency-key"]).toBe("operation-1")
-      expect(bodyText(requests[12]!)).toBe('{"kind":"run","organization_id":"org-1","prompt":["hello"],"mode":"low"}')
+      expect(bodyText(requests[9]!)).toContain('"placement":"e2b"')
+      expect(requests[10]?.headers["idempotency-key"]).toBe("operation-1")
+      expect(bodyText(requests[10]!)).toBe('{"kind":"run","organization_id":"org-1","prompt":["hello"],"mode":"low"}')
     }),
   ),
 )

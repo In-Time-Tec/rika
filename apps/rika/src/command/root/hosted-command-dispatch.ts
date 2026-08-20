@@ -1,5 +1,6 @@
+import * as ProductOperation from "@rika/product/product-operation"
 import { Context, Effect } from "effect"
-import { HostedError, type RunRequest } from "../../hosted/hosted-contract"
+import type { RunRequest } from "../../hosted/hosted-contract"
 
 export type Input =
   | {
@@ -16,22 +17,20 @@ export type Input =
   | { readonly _tag: "Organization"; readonly action: "use"; readonly organization: string }
   | { readonly _tag: "Organization"; readonly action: "invite"; readonly email: string }
   | { readonly _tag: "RemoteThread"; readonly action: "new" }
-  | { readonly _tag: "LocalThread"; readonly action: "new" }
-  | { readonly _tag: "LocalForeground"; readonly threadId?: string | undefined; readonly workspace?: string | undefined }
   | { readonly _tag: "RemoteRun"; readonly threadId: string; readonly request: RunRequest }
 
 export interface Interface {
   readonly run: (
     input: Input,
-  ) => Effect.Effect<void, HostedError>
+  ) => Effect.Effect<void, ProductOperation.InvalidInput | ProductOperation.OperationUnavailable>
 }
 
 export const Service = Context.Reference<Interface>("@rika/cli/command/HostedCommandService", {
   defaultValue: () => ({
-    run: (_input) =>
+    run: (input) =>
       Effect.fail(
-        HostedError.make({
-          kind: "network",
+        ProductOperation.OperationUnavailable.make({
+          operation: input._tag,
           message: "Hosted commands are unavailable in this process",
         }),
       ),
