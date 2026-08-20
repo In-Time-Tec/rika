@@ -1,6 +1,6 @@
 # Rika Product
 
-Rika is a collaborative coding agent for organizations working in local repositories and isolated remote workspaces. It combines a clear terminal interface with durable Threads, parallel agent work, restart-safe execution, and shared control. The goal is to make substantial coding work understandable while it runs, recoverable when an executor stops, and accessible to the people an organization trusts.
+Rika is a collaborative coding agent for people and organizations working in local repositories and isolated remote workspaces. It combines a clear terminal interface with durable Threads, parallel agent work, restart-safe execution, and shared control. The goal is to make substantial coding work understandable while it runs, recoverable when an executor stops, and accessible to the people an owner trusts.
 
 ## Audience
 
@@ -8,7 +8,7 @@ Rika is for technical teams that prefer a CLI and TUI, need local development to
 
 ## Direction
 
-- Keep organization, access, and shared Thread authority in the hosted API.
+- Keep account, ownership, access, and shared Thread authority in the hosted API.
 - Keep local and remote execution as explicit first-class choices; never move work between them implicitly.
 - Run remote work only in isolated E2B workspaces while preserving TenetKit as execution authority.
 - Let multiple authorized people inspect and control durable work without sharing host or provider credentials.

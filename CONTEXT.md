@@ -2,10 +2,13 @@
 
 ## Vocabulary
 
-- **Organization:** the top-level identity and access boundary for people and Projects.
-- **Project:** an Organization-owned collaboration and access boundary for Threads.
-- **Workspace:** the directory tree an Executor exposes to one Thread. A local Workspace belongs to one registered device; a remote Workspace belongs to one E2B sandbox lineage.
-- **Thread:** a durable Organization-owned conversation and work record in one Workspace with one immutable execution kind.
+- **Hosted Owner:** the resource boundary for hosted state, represented by either a user's Personal Owner or an Organization Owner.
+- **Personal Owner:** the mandatory Hosted Owner for one user.
+- **Organization Owner:** an optional Hosted Owner backed by a Better Auth Organization and its memberships.
+- **Project:** an optional Hosted Owner-scoped collaboration and repository boundary for Threads.
+- **Workspace Identity:** an opaque hosted identity that an assigned Executor maps to its machine-local directory tree. A path, E2B sandbox identifier, or provider snapshot is never Workspace Identity.
+- **Workspace:** the directory tree an Executor exposes for one Workspace Identity. A local Workspace belongs to one registered device; a remote Workspace belongs to one E2B sandbox lineage.
+- **Thread:** a durable Hosted Owner-scoped conversation and work record in one Workspace with one immutable execution kind.
 - **Turn:** one human- or Agent-authored instruction and its top-level Execution.
 - **Model Turn:** one TenetKit model call plus the tool calls emitted by that call. One Rika Turn may contain one or more Model Turns.
 - **Pending Turn:** a durable instruction waiting for its own Execution while another Turn is active.
@@ -30,15 +33,15 @@
 - **Remote Executor:** an Executor in an E2B sandbox. It exists only for a Thread explicitly created as remote.
 - **Execution Kind:** the immutable `local-device` or `e2b` placement selected when a Thread is created.
 - **Executor Generation:** the monotonically increasing fencing value for one Thread assignment. An Executor from an older generation cannot mutate authoritative state.
-- **Client:** one authenticated CLI or TUI installation acting for a member.
+- **Client:** one authenticated CLI or TUI installation acting for a user, and optionally through an Organization membership.
 - **Controller Lease:** the renewable single-writer right to send terminal input. Transcript and terminal output remain readable by every authorized collaborator.
 - **Rika Server:** the hosted API process. The local background process is a Local Executor, not a second Server.
 - **Profile:** a named local configuration identity and canonical data root, not a Mode.
 
 ## Ownership
 
-- **Better Auth** owns users, sign-in identities, sessions, OAuth grants, Organizations, memberships, and invitations.
-- **Rika API** owns Projects, Thread and Project grants, Clients, Threads, Turns, execution placement, command order, executor leases and fencing, shared projections, presence, terminal-control leases, audit records, model routing, and encrypted provider credential use.
+- **Better Auth** owns users, sign-in identities, sessions, OAuth grants, Organizations, memberships, and invitations. Organization membership is optional.
+- **Rika API** owns Hosted Owners, Projects, Thread and Project grants, Clients, Threads, Turns, execution placement, command order, executor leases and fencing, shared projections, presence, terminal-control leases, audit records, model routing, and encrypted provider credential use.
 - **Rika Web** owns browser page rendering only and depends on the API for authenticated account state.
 - **Rika Proxy** owns public route selection and transport forwarding only.
 - **Rika Executors** own Workspace access, kernels, coding tools, Workspace extensions, and executor-private operation receipts.
@@ -46,5 +49,6 @@
 - **PostgreSQL** is authoritative for hosted Rika product state and stores TenetKit's authority in TenetKit-owned tables through its released PostgreSQL runtime. Executors never receive direct database authority.
 - **E2B** owns remote sandbox lifecycle and isolation. An E2B sandbox identifier or snapshot is never identity or product authority.
 - **OpenTUI** renders the terminal only through the TUI adapter.
+- **TUI** owns presentation, local selection, and control input only. It never owns product state, Runs, Workspace side effects, or executor lifecycle, and disconnecting it never cancels hosted work.
 
 Do not call a Thread a session, chat, or Agent in product contracts, a Child Run an actor, a Thread Projection canonical execution state, an E2B sandbox a Thread, or the kernel namespace durable state.
