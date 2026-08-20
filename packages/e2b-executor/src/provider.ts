@@ -58,6 +58,7 @@ export class Provider extends Context.Service<Provider, Interface>()("@rika/e2b-
 
 export interface SdkHandle {
   readonly sandboxId: string
+  readonly trafficAccessToken?: string
 }
 
 export interface Paginator {
@@ -105,6 +106,73 @@ const bootstrapHeaders = (trafficAccessToken: string) => ({
   "e2b-traffic-access-token": trafficAccessToken,
 })
 
+interface BootstrapTransport {
+  readonly connect: (sandboxId: string, options: SandboxConnectOpts) => Promise<SdkHandle>
+  readonly fetch: (input: string | URL, init?: RequestInit) => Promise<Response>
+  readonly sleep: (milliseconds: number) => Promise<void>
+  readonly now: () => number
+}
+
+const liveBootstrapTransport: BootstrapTransport = {
+  connect: (sandboxId, options) => Sandbox.connect(sandboxId, options),
+  fetch: (input, init) => Bun.fetch(input, init),
+  sleep: (milliseconds) => Bun.sleep(milliseconds),
+  now: () => performance.now(),
+}
+
+const bootstrapSandbox = (
+  { sandboxId, body, connection, url }: Parameters<Sdk["bootstrap"]>[0],
+  transport: BootstrapTransport = liveBootstrapTransport,
+) => {
+  const timeoutMillis = connection.requestTimeoutMs ?? 30_000
+  const deadline = transport.now() + timeoutMillis
+  const delay = <A>(remaining: number, next: () => Promise<A>): Promise<A> =>
+    transport.sleep(Math.min(250, remaining)).then(next)
+  const connect = (): Promise<SdkHandle> => {
+    const remaining = deadline - transport.now()
+    if (remaining <= 0) return Promise.reject(new Error("secure sandbox traffic access did not become ready"))
+    return transport
+      .connect(sandboxId, {
+        ...connection,
+        requestTimeoutMs: Math.max(1, Math.min(2_000, remaining)),
+      })
+      .then(
+        (sandbox) => (sandbox.trafficAccessToken === undefined ? delay(remaining, connect) : sandbox),
+        () => delay(remaining, connect),
+      )
+  }
+  return connect().then((sandbox) => {
+    if (sandbox.trafficAccessToken === undefined)
+      throw new Error("secure sandbox did not provide a traffic access token")
+    const headers = bootstrapHeaders(sandbox.trafficAccessToken)
+    const retry = (): Promise<void> => {
+      const remaining = deadline - transport.now()
+      if (remaining <= 0) return Promise.reject(new Error("bootstrap endpoint did not become ready"))
+      return transport
+        .fetch(new URL("/health", url), {
+          headers,
+          signal: AbortSignal.timeout(Math.max(1, Math.min(2_000, remaining))),
+        })
+        .then(
+          (response) => (response.ok ? undefined : response.text().then(() => delay(remaining, retry))),
+          () => delay(remaining, retry),
+        )
+    }
+    return retry()
+      .then(() =>
+        transport.fetch(url, {
+          method: "POST",
+          headers,
+          body,
+          signal: AbortSignal.timeout(Math.max(1, deadline - transport.now())),
+        }),
+      )
+      .then((response) => {
+        if (!response.ok) throw new Error(`bootstrap endpoint returned ${response.status}`)
+      })
+  })
+}
+
 const liveSdk: Sdk = {
   templateTags: (templateId, options) => Template.getTags(templateId, options),
   buildStatus: (templateId, buildId, options) =>
@@ -120,44 +188,13 @@ const liveSdk: Sdk = {
   kill: (sandboxId, options) => Sandbox.kill(sandboxId, options),
   setTimeout: (sandboxId, timeoutMillis, options) => Sandbox.setTimeout(sandboxId, timeoutMillis, options),
   list: (options) => Sandbox.list(options),
-  bootstrap: ({ sandboxId, body, connection, url }) =>
-    Sandbox.connect(sandboxId, connection).then((sandbox) => {
-      if (sandbox.trafficAccessToken === undefined)
-        throw new Error("secure sandbox did not provide a traffic access token")
-      const timeoutMillis = connection.requestTimeoutMs ?? 30_000
-      const deadline = performance.now() + timeoutMillis
-      const headers = bootstrapHeaders(sandbox.trafficAccessToken)
-      const retry = (): Promise<void> => {
-        const remaining = deadline - performance.now()
-        if (remaining <= 0) return Promise.reject(new Error("bootstrap endpoint did not become ready"))
-        return Bun.fetch(new URL("/health", url), {
-          headers,
-          signal: AbortSignal.timeout(Math.max(1, Math.min(2_000, remaining))),
-        }).then(
-          (response) =>
-            response.ok ? undefined : response.text().then(() => Bun.sleep(Math.min(250, remaining)).then(retry)),
-          () => Bun.sleep(Math.min(250, remaining)).then(retry),
-        )
-      }
-      return retry()
-        .then(() =>
-          Bun.fetch(url, {
-            method: "POST",
-            headers,
-            body,
-            signal: AbortSignal.timeout(Math.max(1, deadline - performance.now())),
-          }),
-        )
-        .then((response) => {
-          if (!response.ok) throw new Error(`bootstrap endpoint returned ${response.status}`)
-        })
-    }),
+  bootstrap: (request) => bootstrapSandbox(request),
 }
 
 const managedMetadata = { "rika.managed": "e2b-executor" } as const
 const bootstrapUrl = (sandboxId: string, domain = "e2b.app") => `https://7070-${sandboxId}.${domain}/.rika/bootstrap`
 
-export const testing = { bootstrapHeaders, bootstrapUrl } as const
+export const testing = { bootstrapHeaders, bootstrapSandbox, bootstrapUrl } as const
 
 const makeProvider = (options: Options, sdk: Sdk): Interface => {
   const apiKey = Redacted.value(options.apiKey)

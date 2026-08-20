@@ -142,6 +142,57 @@ describe("Provider", () => {
     })
   })
 
+  it.effect("waits for the secure traffic token and bootstrap port before sending the credential once", () => {
+    let connects = 0
+    let probes = 0
+    let posts = 0
+    let postBody: RequestInit["body"]
+    const headers: Array<RequestInit["headers"]> = []
+    return Effect.promise(() =>
+      testing
+        .bootstrapSandbox(
+          {
+            sandboxId: "sandbox",
+            body: '{"credential":"bootstrap-secret"}',
+            connection: { apiKey: "e2b-controller-secret", requestTimeoutMs: 1_000 },
+            url: "https://7070-sandbox.e2b.app/.rika/bootstrap",
+          },
+          {
+            now: () => 1,
+            sleep: () => Promise.resolve(),
+            connect: () =>
+              Promise.resolve({
+                sandboxId: "sandbox",
+                ...(connects++ === 0 ? {} : { trafficAccessToken: "sandbox-traffic-secret" }),
+              }),
+            fetch: (input, init) => {
+              headers.push(init?.headers)
+              if (init?.method === "POST") {
+                posts++
+                postBody = init.body
+                return Promise.resolve(new Response("accepted", { status: 202 }))
+              }
+              probes++
+              expect(new URL(input).pathname).toBe("/health")
+              return Promise.resolve(
+                new Response(probes === 1 ? "starting" : "ready", { status: probes === 1 ? 502 : 200 }),
+              )
+            },
+          },
+        )
+        .then(() => {
+          expect(connects).toBe(2)
+          expect(probes).toBe(2)
+          expect(posts).toBe(1)
+          expect(postBody).toBe('{"credential":"bootstrap-secret"}')
+          expect(headers.at(-1)).toEqual({
+            "content-type": "application/json",
+            "e2b-traffic-access-token": "sandbox-traffic-secret",
+          })
+        }),
+    )
+  })
+
   it.effect("maps every lifecycle operation and redacts controller and bootstrap secrets from failures", () => {
     const calls: Array<string> = []
     let bootstrapUrl = ""
