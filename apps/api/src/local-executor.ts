@@ -270,7 +270,7 @@ export const layer = Layer.effect(
             return {
               admissionId,
               ticket: Redacted.value(ticket),
-              expiresAt: number(expiry.expiresAt),
+              expiresAt: Math.floor(number(expiry.expiresAt)),
               executorUrl: input.executorUrl,
               workspaceIdentity: input.workspaceFingerprint,
             }
