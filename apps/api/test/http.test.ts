@@ -559,64 +559,22 @@ describe("api HTTP", () => {
     }),
   )
 
-  it.effect("serves accessible public identity pages", () =>
+  it.effect("returns secured JSON 404 responses for web pages and assets", () =>
     Effect.gen(function* () {
-      for (const path of ["/login", "/signup", "/verify-email", "/forgot-password", "/reset-password"]) {
-        const result = yield* response(path)
-        const body = yield* Effect.promise(() => result.text())
-        expect(result.status).toBe(200)
-        expect(body).toContain('<html lang="en">')
-        expect(body).toContain('role="status"')
-        expect(body).toContain("<h1>")
-      }
-    }),
-  )
-
-  it.effect("preserves invitation redirects through login and signup", () =>
-    Effect.gen(function* () {
-      const invitation = yield* response("/invitations/invitation-1")
-      expect(invitation.status).toBe(303)
-      expect(invitation.headers.get("location")).toBe("/login?redirect=%2Finvitations%2Finvitation-1")
-
-      const login = yield* response("/login?redirect=%2Finvitations%2Finvitation-1")
-      const body = yield* Effect.promise(() => login.text())
-      expect(body).toContain('data-redirect="/invitations/invitation-1"')
-      expect(body).toContain("/signup?redirect=%2Finvitations%2Finvitation-1")
-    }),
-  )
-
-  it.effect("rejects cross-origin authentication redirects", () =>
-    Effect.gen(function* () {
-      const result = yield* response("/login?redirect=%2F%5C%5Cexample.net")
-      const body = yield* Effect.promise(() => result.text())
-      expect(result.status).toBe(200)
-      expect(body).toContain('data-redirect="/"')
-      expect(body).not.toContain("example.net")
-    }),
-  )
-
-  it.effect("preserves the verification callback", () =>
-    Effect.gen(function* () {
-      const result = yield* response("/verify-email?token=verification-token&callbackURL=%2Finvitations%2Finvitation-1")
-      expect(result.status).toBe(303)
-      expect(result.headers.get("location")).toBe(
-        "/api/auth/verify-email?token=verification-token&callbackURL=%2Finvitations%2Finvitation-1",
-      )
-    }),
-  )
-
-  it.effect("serves authenticated organization, invitation, and device pages", () =>
-    Effect.gen(function* () {
-      const authenticated = dependencies({ userId: "user-1", account })
       for (const path of [
-        "/organizations/new",
-        "/invitations/invitation-1",
-        "/device",
-        "/device/approve?user_code=ABCD-EFGH",
+        "/",
+        "/login",
+        "/signup",
+        "/verify-email",
+        "/forgot-password",
+        "/reset-password",
+        "/assets/web.css",
       ]) {
-        const result = yield* response(path, authenticated)
-        expect(result.status).toBe(200)
-        expect(yield* Effect.promise(() => result.text())).toContain("<h1>")
+        const result = yield* response(path)
+        expect(result.status).toBe(404)
+        expect(result.headers.get("content-type")).toBe("application/json; charset=utf-8")
+        expect(result.headers.get("x-content-type-options")).toBe("nosniff")
+        expect(yield* Effect.promise(() => result.json())).toEqual({ message: "Not found" })
       }
     }),
   )
@@ -627,10 +585,7 @@ describe("api HTTP", () => {
         userId: "user-1",
         account: { ...account, memberships: [] },
       })
-      const page = yield* response("/device", withoutOrganization)
       const api = yield* response("/api/auth/device/approve", withoutOrganization, { method: "POST" })
-      expect(page.status).toBe(303)
-      expect(page.headers.get("location")).toContain("/organizations/new")
       expect(api.status).toBe(403)
     }),
   )

@@ -1,0 +1,69 @@
+{
+	admin off
+	persist_config off
+	auto_https off
+	log {
+		output stdout
+		format json
+	}
+	servers {
+		trusted_proxies static private_ranges
+		trusted_proxies_strict
+	}
+}
+
+:{$PORT:3000} {
+	log {
+		output stdout
+		format json
+	}
+
+	@proxyHealth path /_healthz
+	handle @proxyHealth {
+		respond "ok" 200
+	}
+
+	@executor path /api/v1/executors
+	handle @executor {
+		reverse_proxy {
+			dynamic a {
+				name {$API_DOMAIN}
+				port {$API_PORT}
+				refresh 1s
+				dial_timeout 2s
+				versions ipv4 ipv6
+			}
+			lb_retries 0
+			header_up Host {upstream_hostport}
+		}
+	}
+
+	@api path /api/* /healthz /readyz /.well-known/oauth-authorization-server/api/auth /.well-known/oauth-protected-resource/api/v1
+	handle @api {
+		reverse_proxy {
+			dynamic a {
+				name {$API_DOMAIN}
+				port {$API_PORT}
+				refresh 1s
+				dial_timeout 2s
+				versions ipv4 ipv6
+			}
+			lb_retries 0
+			header_up Host {upstream_hostport}
+		}
+	}
+
+	handle {
+		reverse_proxy {
+			dynamic a {
+				name {$WEB_DOMAIN}
+				port {$WEB_PORT}
+				refresh 1s
+				dial_timeout 2s
+				versions ipv4 ipv6
+			}
+			lb_retries 0
+			header_up Host {upstream_hostport}
+		}
+	}
+}

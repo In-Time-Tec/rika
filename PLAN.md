@@ -58,7 +58,7 @@ This first deployed slice proves identity, PostgreSQL authority, immutable remot
 
 ## Locked architecture
 
-- Railway runs the Bun/Effect HTTPS and WSS API.
+- Railway runs separate Caddy proxy, Bun web, and Bun/Effect API services. Caddy is the only public HTTPS/WSS ingress; web and API use private Railway DNS.
 - PostgreSQL is authoritative for identity-linked product state, Threads, commands, events, assignments, leases, fencing, and TenetKit Runs.
 - Better Auth owns users, sessions, OAuth grants, organizations, memberships, invitations, and CLI device authorization.
 - E2B is the only remote execution provider.
@@ -138,12 +138,19 @@ The TUI exposes separate **New local thread** and **New remote thread** actions.
 ### End-state topology
 
 ```text
-                         HTTPS + resumable WSS
-CLI / TUI / web  ──────────────────────────────────────┐
-                                                       ▼
+CLI / TUI / browser ── HTTPS + WSS ──► Railway Caddy proxy
+                                          │
+                         browser routes ──┼── API routes, OAuth, executor WSS
+                                          │
+                                          ▼
+                               ┌──────────────────────┐
+                               │ Railway web         │
+                               │ browser pages only  │
+                               └──────────────────────┘
+                                          │ private account lookup
+                                          ▼
                                ┌──────────────────────────────────┐
-                               │ Railway Rika API       │
-                               │                                  │
+                               │ Railway Rika API                 │
                                │ Better Auth + Organizations      │
                                │ Projects + sharing + presence    │
                                │ Thread commands + public events  │
@@ -151,7 +158,6 @@ CLI / TUI / web  ─────────────────────
                                │ assignment leases + fencing      │
                                │ E2B lifecycle reconciliation     │
                                └───────────────┬──────────────────┘
-                                               │
                                                ▼
                                       ┌──────────────────┐
                                       │ PostgreSQL       │
@@ -169,7 +175,7 @@ CLI / TUI / web  ─────────────────────
 └──────────────────────────┘                       └──────────────────────────┘
 ```
 
-Every CLI and TUI connects to the hosted API. A local background process is a Local Executor, not another authoritative Rika Server. Railway replicas are disposable; process-local connection maps are delivery optimizations only. PostgreSQL remains authoritative when no client, executor, or API replica is connected.
+Every CLI and TUI connects to the hosted API through the public proxy. A local background process is a Local Executor, not another authoritative Rika Server. Railway replicas are disposable; process-local connection maps are delivery optimizations only. PostgreSQL remains authoritative when no client, executor, or API replica is connected.
 
 ### Authority boundaries
 
@@ -795,8 +801,10 @@ Create or select:
 
 - One Railway project/environment for the MVP.
 - One PostgreSQL service.
-- One API service built from the root `Dockerfile` and `railway.json`.
-- One steady-state application replica for the initial in-memory WSS routing slice.
+- One public Caddy proxy service built from `apps/proxy/Dockerfile` and `apps/proxy/railway.json`.
+- One private web service built from `apps/web/Dockerfile` and `apps/web/railway.json`.
+- One private API service built from `apps/api/Dockerfile` and `apps/api/railway.json`.
+- One steady-state API replica for the initial in-memory WSS routing slice.
 
 Configure these variables through Railway references or secret variables:
 
@@ -804,9 +812,9 @@ Configure these variables through Railway references or secret variables:
 NODE_ENV=production
 DATABASE_URL=<private PostgreSQL reference>
 DATABASE_SSL=disable
-BETTER_AUTH_URL=https://<public-api-domain>
+BETTER_AUTH_URL=https://<public-proxy-domain>
 BETTER_AUTH_SECRET=<high-entropy secret>
-BETTER_AUTH_TRUSTED_ORIGINS=https://<public-api-domain>
+BETTER_AUTH_TRUSTED_ORIGINS=https://<public-proxy-domain>
 GITHUB_CLIENT_ID=<social-login OAuth app id>
 GITHUB_CLIENT_SECRET=<social-login OAuth secret>
 RESEND_API_KEY=<mail provider secret>
@@ -814,11 +822,13 @@ EMAIL_FROM=<verified sender>
 E2B_API_KEY=<E2B secret>
 E2B_APP_ID=<stable Rika application id>
 E2B_DEPLOYMENT_ID=<stable Railway environment/deployment scope>
+E2B_TEMPLATE_ID=<commit-qualified executor template id>
 E2B_TEMPLATE_BUILD_ID=<immutable executor template build id>
-RIKA_EXECUTOR_API_URL=wss://<public-api-domain>/api/v1/executors
+RIKA_EXECUTOR_API_URL=wss://<public-proxy-domain>/api/v1/executors
+RIKA_PROXY_PUBLIC_DOMAIN=<proxy Railway public-domain reference>
 ```
 
-Railway supplies `PORT`. Do not hard-code it.
+Set `PORT=3000` on API, web, and proxy. Set web `API_DOMAIN` and proxy `API_DOMAIN`/`WEB_DOMAIN` through private-domain references; their matching upstream ports are `3000`.
 
 Before promotion:
 

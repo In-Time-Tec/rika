@@ -1,7 +1,7 @@
-# Railway hosts the API
+# Railway hosts the Rika services
 
-Rika runs one Bun and Effect API on Railway with PostgreSQL as its hosted authority. Production follows `main`. Pull requests receive isolated Railway environments derived from production and those environments are removed when their pull requests close.
+Rika runs three application services in each Railway environment. Caddy is the only public ingress. It sends `/api/*`, health/readiness, OAuth metadata, and executor WebSockets to the private Bun and Effect API, and sends browser routes to the private Bun web service. PostgreSQL remains the hosted authority. Production follows `main`; pull requests receive isolated environments containing the complete topology and are removed when their pull requests close.
 
-Railway matches the long-lived HTTP and WebSocket process, managed PostgreSQL, deployment, and preview-environment model without introducing an actor runtime into TenetKit's execution ownership. The API remains portable application code rather than a collection of provider-specific actors.
+The split keeps browser rendering out of the API process without changing the same-origin public contract. Better Auth callbacks, DPoP resources, CLI requests, browser requests, and executor WebSockets all use the proxy origin. The API reconstructs that configured public origin rather than trusting forwarded headers. Railway private DNS is the only path from proxy to web or API.
 
-Cloudflare is not the first production target because its runtime and connection model would require a separate adaptation before the hosted authority is proven. Rivet Actors are not part of the design because a second durable actor authority would overlap PostgreSQL, executor leases, and TenetKit Runs.
+Railway matches the long-lived HTTP and WebSocket process, managed PostgreSQL, deployment, and preview-environment model without introducing an actor runtime into TenetKit's execution ownership. Cloudflare is deferred because its runtime and connection model require another adaptation. Rivet Actors remain excluded because a second durable actor authority would overlap PostgreSQL, executor leases, and TenetKit Runs.

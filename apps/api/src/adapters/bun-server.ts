@@ -2,7 +2,7 @@ import { Effect } from "effect"
 import type { IdentityConfig } from "@rika/identity"
 import type { Gateway, Socket } from "../executor-gateway"
 import { isRikaApiPath, makeRikaApiHandler } from "../api"
-import { makeWebRequestHandler, secureResponse, type HttpDependencies } from "../http"
+import { makeSupplementalApiRequestHandler, secureResponse, type HttpDependencies } from "../http"
 
 export const canonicalPublicRequest = (input: { readonly request: Request; readonly baseUrl: string }): Request => {
   const incoming = new URL(input.request.url)
@@ -75,7 +75,7 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
           idleWaiters.delete(resolve)
         })
       })
-      const web = makeWebRequestHandler(input.dependencies)
+      const supplementalApi = makeSupplementalApiRequestHandler(input.dependencies)
       const server = Bun.serve<Session>({
         hostname: "0.0.0.0",
         port: input.config.port,
@@ -90,7 +90,7 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
           const publicRequest = canonicalPublicRequest({ request, baseUrl: input.config.baseUrl })
           if (isRikaApiPath(pathname))
             return track(api.handler(publicRequest).then(secureResponse(input.dependencies.production)))
-          return track(Promise.resolve(web(publicRequest)))
+          return track(Promise.resolve(supplementalApi(publicRequest)))
         },
         websocket: {
           open: (socket) => {

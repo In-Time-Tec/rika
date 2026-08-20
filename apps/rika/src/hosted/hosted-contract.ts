@@ -1,6 +1,6 @@
 import { Context, Effect, Option, Redacted, Schema } from "effect"
 
-export const defaultOrigin = "https://api-rika.up.railway.app"
+export const defaultOrigin = "https://rika-app.up.railway.app"
 export const scopes = "openid profile email offline_access account"
 
 export class HostedError extends Schema.TaggedError<HostedError>()("HostedError", {

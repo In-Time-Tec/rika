@@ -22,7 +22,9 @@
 - **Continual Harness:** the scoped, versioned memories, skills, subagent specs, and prompt notes an Execution is pinned to.
 - **Goal:** one durable per-Thread objective with a status, an optional budget, and accumulated usage.
 - **Thread Projection:** disposable Rika read state derived from product metadata and TenetKit Run events. It is not execution truth.
-- **API:** the hosted Rika service that owns identity integration, Organizations, Projects, Thread access, command order, executor assignment, and shared projections.
+- **API:** the private hosted Rika service that owns identity integration, Organizations, Projects, Thread access, command order, executor assignment, and shared projections.
+- **Web:** the private hosted service that renders browser identity and account pages. It calls the API and owns no identity, product, or execution authority.
+- **Proxy:** the only public hosted ingress. It routes same-origin browser, API, OAuth, health, and executor traffic to private services and owns no product authority.
 - **Executor:** the process that owns one Workspace's filesystem, kernels, tools, and processes while it holds a fenced assignment. It does not own Thread or TenetKit authority.
 - **Local Executor:** an Executor on a registered user device. It is selected by default for a new Thread and never becomes remote implicitly.
 - **Remote Executor:** an Executor in an E2B sandbox. It exists only for a Thread explicitly created as remote.
@@ -37,6 +39,8 @@
 
 - **Better Auth** owns users, sign-in identities, sessions, OAuth grants, Organizations, memberships, and invitations.
 - **Rika API** owns Projects, Thread and Project grants, Clients, Threads, Turns, execution placement, command order, executor leases and fencing, shared projections, presence, terminal-control leases, audit records, model routing, and encrypted provider credential use.
+- **Rika Web** owns browser page rendering only and depends on the API for authenticated account state.
+- **Rika Proxy** owns public route selection and transport forwarding only.
 - **Rika Executors** own Workspace access, kernels, coding tools, Workspace extensions, and executor-private operation receipts.
 - **TenetKit** owns durable Runs, children, cancellation, replay, model turns, tool-call protocol, nested durable operations, the cell tool and kernel pool, harness state and refinement, steering, compaction, skills integration, and Run events.
 - **PostgreSQL** is authoritative for hosted Rika product state and stores TenetKit's authority in TenetKit-owned tables through its released PostgreSQL runtime. Executors never receive direct database authority.

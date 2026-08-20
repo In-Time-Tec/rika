@@ -18,6 +18,7 @@ import * as RemoteCells from "@rika/execution/remote-cells"
 import { serveApi } from "./adapters/bun-server"
 import { config as executorConfig, Executor, layer as executorLayer, service as executorService } from "./executor"
 import { HostedProduct, postgres as hostedProductPostgres } from "./hosted-product"
+import { runtimeEnvironment } from "./runtime-environment"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -34,7 +35,8 @@ const provideLayerScoped =
 
 const program = Effect.scoped(
   Effect.gen(function* () {
-    const config = yield* loadIdentityConfig(Bun.env)
+    const environment = runtimeEnvironment(Bun.env)
+    const config = yield* loadIdentityConfig(environment)
     const httpClient = yield* HttpClient.HttpClient
     const pool = makePostgresPool(config)
     yield* Effect.addFinalizer(() => closePostgresPool(pool).pipe(Effect.ignore))
@@ -48,7 +50,7 @@ const program = Effect.scoped(
       ssl: config.databaseSsl === "disable" ? false : { rejectUnauthorized: config.databaseSsl === "verify-full" },
       maxConnections: 10,
     }
-    const executorOptions = executorConfig(Bun.env)
+    const executorOptions = executorConfig(environment)
     const product = Context.get(
       yield* Layer.build(
         hostedProductPostgres({

@@ -10,21 +10,6 @@ import type {
 import type { HostedProductService } from "./hosted-product"
 import type { Runtime as Executor } from "./executor"
 import type { ReadinessInterface as ExecutionReadiness } from "@rika/execution/postgres"
-import {
-  accountPage,
-  consentPage,
-  deviceApprovalPage,
-  devicePage,
-  forgotPasswordPage,
-  invitationPage,
-  loginPage,
-  newOrganizationPage,
-  resetPasswordPage,
-  signupPage,
-  verifyEmailPage,
-  webScript,
-  webStyles,
-} from "./web-pages"
 
 export interface HttpDependencies {
   readonly identity: IdentityRuntime
@@ -77,13 +62,6 @@ const secured = (response: Response, production: boolean) => {
 
 export const secureResponse = (production: boolean) => (response: Response) => secured(response, production)
 
-const html = (body: string, production: boolean, status = 200) => {
-  const headers = securityHeaders(production)
-  headers.set("content-type", "text/html; charset=utf-8")
-  headers.set("cache-control", "no-store")
-  return new Response(body, { status, headers })
-}
-
 const json = (body: unknown, production: boolean, status = 200, extraHeaders?: Headers) => {
   const headers = securityHeaders(production)
   headers.set("content-type", "application/json; charset=utf-8")
@@ -100,14 +78,6 @@ const redirect = (location: string, production: boolean) => {
 }
 
 const currentPath = (url: URL) => `${url.pathname}${url.search}`
-
-const safePath = (value: string | null, requestUrl: URL, fallback = "/") => {
-  if (value === null || !value.startsWith("/")) return fallback
-  const destination = new URL(value, requestUrl.origin)
-  return destination.origin === requestUrl.origin
-    ? `${destination.pathname}${destination.search}${destination.hash}`
-    : fallback
-}
 
 const loginRedirect = (url: URL, production: boolean) =>
   redirect(`/login?redirect=${encodeURIComponent(currentPath(url))}`, production)
@@ -187,21 +157,6 @@ const accessFailure = (
   )
 }
 
-const protectedPage = Effect.fn("ApiHttp.protectedPage")(function* (
-  request: Request,
-  url: URL,
-  dependencies: HttpDependencies,
-  render: (account: Account) => string,
-  organizationRequired: boolean,
-) {
-  const access = yield* accountAccess(request, dependencies)
-  if (access._tag === "anonymous" || access._tag === "invalid") return loginRedirect(url, dependencies.production)
-  if (access._tag === "unavailable") return html("<h1>Service unavailable</h1>", dependencies.production, 503)
-  if (organizationRequired && access.account.memberships.length === 0)
-    return organizationRedirect(url, dependencies.production)
-  return html(render(access.account), dependencies.production)
-})
-
 const routeRequest = Effect.fn("ApiHttp.route")(function* (request: Request, dependencies: HttpDependencies) {
   const url = new URL(request.url)
   const { pathname } = url
@@ -220,20 +175,6 @@ const routeRequest = Effect.fn("ApiHttp.route")(function* (request: Request, dep
     return request.method === "HEAD"
       ? new Response(null, { status: response.status, headers: response.headers })
       : response
-  }
-
-  if (pathname === "/assets/api.css" && request.method === "GET") {
-    const response = new Response(webStyles, {
-      headers: { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=3600" },
-    })
-    return secured(response, dependencies.production)
-  }
-
-  if (pathname === "/assets/api.js" && request.method === "GET") {
-    const response = new Response(webScript, {
-      headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=3600" },
-    })
-    return secured(response, dependencies.production)
   }
 
   if (pathname === "/api/account") {
@@ -364,72 +305,7 @@ const routeRequest = Effect.fn("ApiHttp.route")(function* (request: Request, dep
     )
   }
 
-  if (request.method !== "GET") return json({ message: "Not found" }, dependencies.production, 404)
-
-  const destination = safePath(url.searchParams.get("redirect"), url)
-  if (pathname === "/login") return html(loginPage(destination), dependencies.production)
-  if (pathname === "/signup") return html(signupPage(destination), dependencies.production)
-  if (pathname === "/verify-email") {
-    const token = url.searchParams.get("token")
-    const callbackURL = safePath(url.searchParams.get("callbackURL"), url, "/organizations/new")
-    return token === null
-      ? html(verifyEmailPage(), dependencies.production)
-      : redirect(
-          `/api/auth/verify-email?token=${encodeURIComponent(token)}&callbackURL=${encodeURIComponent(callbackURL)}`,
-          dependencies.production,
-        )
-  }
-  if (pathname === "/forgot-password") return html(forgotPasswordPage(), dependencies.production)
-  if (pathname === "/reset-password")
-    return html(
-      resetPasswordPage({
-        token: url.searchParams.get("token") ?? "",
-        error: url.searchParams.get("error") ?? "",
-      }),
-      dependencies.production,
-    )
-
-  if (pathname === "/organizations/new")
-    return yield* protectedPage(request, url, dependencies, () => newOrganizationPage(destination), false)
-
-  const invitation = /^\/invitations\/([^/]+)$/.exec(pathname)
-  if (invitation?.[1] !== undefined)
-    return yield* protectedPage(
-      request,
-      url,
-      dependencies,
-      () => invitationPage({ id: decodeURIComponent(invitation[1] as string), redirect: destination }),
-      false,
-    )
-
-  if (pathname === "/device") {
-    const userCode = url.searchParams.get("user_code") ?? ""
-    return yield* protectedPage(request, url, dependencies, () => devicePage({ userCode, redirect: destination }), true)
-  }
-
-  if (pathname === "/device/approve") {
-    const userCode = url.searchParams.get("user_code") ?? ""
-    return yield* protectedPage(
-      request,
-      url,
-      dependencies,
-      () => deviceApprovalPage({ userCode, redirect: destination }),
-      true,
-    )
-  }
-
-  if (pathname === "/consent")
-    return yield* protectedPage(
-      request,
-      url,
-      dependencies,
-      () => consentPage({ query: url.searchParams, redirect: destination }),
-      true,
-    )
-
-  if (pathname === "/") return yield* protectedPage(request, url, dependencies, () => accountPage(), true)
-
-  return html("<h1>Not found</h1>", dependencies.production, 404)
+  return json({ message: "Not found" }, dependencies.production, 404)
 })
 
 export const handleRequest = (input: { readonly request: Request; readonly dependencies: HttpDependencies }) =>
@@ -439,5 +315,5 @@ export const handleRequest = (input: { readonly request: Request; readonly depen
     ),
   )
 
-export const makeWebRequestHandler = (dependencies: HttpDependencies) => (request: Request) =>
+export const makeSupplementalApiRequestHandler = (dependencies: HttpDependencies) => (request: Request) =>
   Effect.runPromise(handleRequest({ request, dependencies }))
