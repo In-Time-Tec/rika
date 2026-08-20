@@ -9,6 +9,7 @@ import {
   type SandboxPauseOpts,
 } from "e2b"
 import { Context, Effect, Layer, Redacted, Schema } from "effect"
+import type { ExecutorBootstrapIdentity } from "@rika/remote-execution/protocol"
 
 export interface CreateRequest {
   readonly appId: string
@@ -26,6 +27,7 @@ export interface CreateRequest {
 export interface BootstrapRequest {
   readonly sandboxId: string
   readonly credential: Redacted.Redacted<string>
+  readonly identity: ExecutorBootstrapIdentity
 }
 
 export interface Handle {
@@ -281,7 +283,7 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
       sdk.bootstrap({
         sandboxId: request.sandboxId,
         connection,
-        body: JSON.stringify({ credential }),
+        body: JSON.stringify({ credential, identity: request.identity }),
         url: bootstrapUrl(request.sandboxId, options.domain),
       }),
     )

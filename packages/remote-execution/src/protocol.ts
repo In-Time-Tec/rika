@@ -15,6 +15,24 @@ export type ProtocolVersion = typeof ProtocolVersion.Type
 export const Target = Schema.Literals(["local_device", "e2b"])
 export type Target = typeof Target.Type
 
+export const ExecutorBootstrapIdentity = Schema.Struct({
+  target: Schema.Literal("e2b"),
+  assignmentId: Identifier,
+  assignmentGeneration: Generation,
+  instanceId: Identifier,
+  executorId: Identifier,
+  templateBuildId: Identifier,
+  apiUrl: Identifier,
+  workspace: Identifier,
+})
+export type ExecutorBootstrapIdentity = typeof ExecutorBootstrapIdentity.Type
+
+export const ExecutorBootstrapWire = Schema.Struct({
+  credential: Identifier,
+  identity: ExecutorBootstrapIdentity,
+})
+export type ExecutorBootstrapWire = typeof ExecutorBootstrapWire.Type
+
 export const Cursor = Schema.Struct({
   sequence: Sequence,
   value: Schema.String,

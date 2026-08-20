@@ -11,7 +11,13 @@ import {
   type InstallationTokensInterface,
 } from "../../src/checkout"
 import { Controller, type ControllerError, type Options, layer as controllerLayer } from "../../src/controller"
-import { Provider, ProviderError, type CreateRequest, type InventoryEntry } from "../../src/provider"
+import {
+  Provider,
+  ProviderError,
+  type BootstrapRequest,
+  type CreateRequest,
+  type InventoryEntry,
+} from "../../src/provider"
 
 const digest = (_algorithm: string, data: Uint8Array) =>
   Effect.promise(() => globalThis.crypto.subtle.digest("SHA-256", data).then((value) => new Uint8Array(value)))
@@ -22,7 +28,7 @@ export interface FakeProviderState {
   readonly pauses: Array<string>
   readonly kills: Array<string>
   readonly touches: Array<{ readonly sandboxId: string; readonly timeoutMillis: number }>
-  readonly bootstraps: Array<{ readonly sandboxId: string; readonly credential: Redacted.Redacted<string> }>
+  readonly bootstraps: Array<BootstrapRequest>
   createFailure: boolean
   pauseFailure: boolean
   inventory: Array<InventoryEntry>

@@ -42,6 +42,16 @@ const program = Effect.gen(function* () {
   yield* provider.bootstrap({
     sandboxId: sandbox.sandboxId,
     credential: Redacted.make("live-validation-bootstrap"),
+    identity: {
+      target: "e2b",
+      assignmentId: "live-validation",
+      assignmentGeneration: 1,
+      instanceId: sandbox.sandboxId,
+      executorId: "live-validation:g1",
+      templateBuildId,
+      apiUrl: "wss://api.invalid/executors",
+      workspace: "/workspace",
+    },
   })
   return yield* Effect.acquireUseRelease(
     Effect.succeed(sandbox),

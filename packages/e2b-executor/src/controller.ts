@@ -267,6 +267,23 @@ export const layer = (
         return request
       })
 
+      const bootstrapIdentity = Effect.fn("Controller.bootstrapIdentity")(function* (
+        assignment: ExecutorAssignment,
+        instanceId: string,
+      ) {
+        const placement = yield* e2bPlacement(assignment)
+        return {
+          target: "e2b" as const,
+          assignmentId: assignment.id,
+          assignmentGeneration: number(assignment.generation),
+          instanceId,
+          executorId: `${assignment.id}:g${assignment.generation}`,
+          templateBuildId: placement.templateBuildId,
+          apiUrl: options.apiUrl,
+          workspace: "/workspace",
+        }
+      })
+
       const matchesGeneration = (
         assignment: ExecutorAssignment,
         templateId: string,
@@ -320,7 +337,13 @@ export const layer = (
               existingProviderId === null ? provider.kill(sandbox.sandboxId).pipe(Effect.ignore) : Effect.void,
             ),
           )
-        yield* provider.bootstrap({ sandboxId: sandbox.sandboxId, credential }).pipe(Effect.mapError(providerFailure))
+        yield* provider
+          .bootstrap({
+            sandboxId: sandbox.sandboxId,
+            credential,
+            identity: yield* bootstrapIdentity(provisioning, sandbox.sandboxId),
+          })
+          .pipe(Effect.mapError(providerFailure))
         return publicAssignment(bound)
       })
 

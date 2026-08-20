@@ -90,7 +90,18 @@ describe("Controller", () => {
         "RIKA_EXECUTOR_TEMPLATE_BUILD_ID",
         "RIKA_EXECUTOR_WORKSPACE",
       ])
-      const bootstrap = harness.provider.bootstraps[0]!.credential
+      const bootstrapRequest = harness.provider.bootstraps[0]!
+      expect(bootstrapRequest.identity).toEqual({
+        target: "e2b",
+        assignmentId: "assignment-1",
+        assignmentGeneration: 1,
+        instanceId: "sandbox-1",
+        executorId: "assignment-1:g1",
+        templateBuildId: "template-build-v1-immutable",
+        apiUrl: "wss://api.example.test/executors",
+        workspace: "/workspace",
+      })
+      const bootstrap = bootstrapRequest.credential
       expect(String(bootstrap)).toBe("<redacted:executor-bootstrap>")
       expect(json(first)).not.toContain(Redacted.value(bootstrap))
       expect((yield* readAssignment()).lifecycle).toMatchObject({ _tag: "AwaitingBootstrap" })

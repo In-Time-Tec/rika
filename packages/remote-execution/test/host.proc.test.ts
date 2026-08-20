@@ -1,21 +1,126 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 
 const packageRoot = new URL("..", import.meta.url).pathname
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 const bootstrapProof = `
 import { Effect, Redacted } from "effect"
 import { testing } from "./src/host.ts"
 const received = Effect.runPromise(testing.receiveBootstrap)
 await Bun.sleep(20)
-const response = await Bun.fetch("http://127.0.0.1:7070/.rika/bootstrap", {
+const malformed = await Bun.fetch("http://127.0.0.1:7070/.rika/bootstrap", {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify({ credential: "one-time-bootstrap" }),
+  body: "{",
 })
-const body = await response.text()
-const credential = Redacted.value(await received)
-console.log(JSON.stringify({ status: response.status, body, credential }))
+const invalid = await Bun.fetch("http://127.0.0.1:7070/.rika/bootstrap", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ credential: "must-not-be-consumed" }),
+})
+const valid = (credential) => ({
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    credential,
+    identity: {
+      target: "e2b",
+      assignmentId: "assignment-1",
+      assignmentGeneration: 1,
+      instanceId: "sandbox-1",
+      executorId: "assignment-1:g1",
+      templateBuildId: "build-1",
+      apiUrl: "wss://api.example.test/api/v1/executors",
+      workspace: "/workspace",
+    },
+  }),
+})
+const responses = await Promise.all([
+  Bun.fetch("http://127.0.0.1:7070/.rika/bootstrap", valid("bootstrap-a")),
+  Bun.fetch("http://127.0.0.1:7070/.rika/bootstrap", valid("bootstrap-b")),
+])
+const accepted = responses.find((response) => response.status === 202)
+const body = await accepted.text()
+const bootstrap = await received
+const credential = Redacted.value(bootstrap.credential)
+console.log(
+  JSON.stringify({
+    malformedStatus: malformed.status,
+    invalidStatus: invalid.status,
+    statuses: responses.map((response) => response.status).sort(),
+    body,
+    credential,
+    identity: bootstrap.identity,
+  }),
+)
+`
+
+const bootstrapIdentityProof = `
+let resolveMessage
+const message = new Promise((resolve) => { resolveMessage = resolve })
+const server = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  fetch: (request, bunServer) =>
+    bunServer.upgrade(request) ? undefined : new Response("upgrade required", { status: 426 }),
+  websocket: {
+    message: (_socket, frame) => resolveMessage(String(frame)),
+  },
+})
+const stateDirectory = "/tmp/rika-bootstrap-identity-" + process.pid
+const host = Bun.spawn(["bun", "run", "./src/host.ts"], {
+  cwd: process.cwd(),
+  env: {
+    ...process.env,
+    E2B_SANDBOX_ID: "sandbox-from-bootstrap",
+    RIKA_EXECUTOR_TARGET: "e2b",
+    RIKA_EXECUTOR_ASSIGNMENT_ID: "template-readiness",
+    RIKA_EXECUTOR_GENERATION: "1",
+    RIKA_EXECUTOR_ID: "template-readiness:g1",
+    RIKA_EXECUTOR_TEMPLATE_BUILD_ID: "template-readiness",
+    RIKA_EXECUTOR_API_URL: "ws://127.0.0.1:1",
+    RIKA_EXECUTOR_WORKSPACE: "/workspace",
+    RIKA_EXECUTOR_STATE_DIRECTORY: stateDirectory,
+  },
+  stdout: "ignore",
+  stderr: "ignore",
+})
+try {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {
+      const health = await Bun.fetch("http://127.0.0.1:7070/health")
+      if (health.ok) break
+    } catch {}
+    await Bun.sleep(10)
+  }
+  const response = await Bun.fetch("http://127.0.0.1:7070/.rika/bootstrap", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      credential: "one-time-bootstrap",
+      identity: {
+        target: "e2b",
+        assignmentId: "assignment-from-bootstrap",
+        assignmentGeneration: 7,
+        instanceId: "sandbox-from-bootstrap",
+        executorId: "executor-from-bootstrap",
+        templateBuildId: "build-from-bootstrap",
+        apiUrl: "ws://127.0.0.1:" + server.port + "/executors",
+        workspace: "/workspace",
+      },
+    }),
+  })
+  const frame = await Promise.race([
+    message,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("executor hello timed out")), 3000)),
+  ])
+  console.log(JSON.stringify({ status: response.status, frame: JSON.parse(frame) }))
+} finally {
+  host.kill()
+  server.stop(true)
+  await (await import("node:fs/promises")).rm(stateDirectory, { recursive: true, force: true })
+}
 `
 
 describe("executor host process", () => {
@@ -24,25 +129,79 @@ describe("executor host process", () => {
       Effect.sync(() =>
         Bun.spawn(["bun", "-e", bootstrapProof], {
           cwd: packageRoot,
+          env: { ...process.env, E2B_SANDBOX_ID: "sandbox-1" },
           stdout: "pipe",
           stderr: "pipe",
         }),
       ),
       (child) =>
         Effect.promise(() =>
-          Promise.all([
-            child.exited,
-            new Response(child.stdout).text(),
-            new Response(child.stderr).text(),
-          ]),
+          Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]),
         ).pipe(
           Effect.tap(([exitCode, stdout, stderr]) =>
             Effect.sync(() => {
               expect(stderr).toBe("")
               expect(exitCode).toBe(0)
-              expect(stdout).toBe(
-                '{"status":202,"body":"accepted","credential":"one-time-bootstrap"}\n',
-              )
+              expect(decodeJson(stdout)).toEqual({
+                malformedStatus: 400,
+                invalidStatus: 400,
+                statuses: [202, 404],
+                body: "accepted",
+                credential: expect.stringMatching(/^bootstrap-[ab]$/),
+                identity: {
+                  target: "e2b",
+                  assignmentId: "assignment-1",
+                  assignmentGeneration: 1,
+                  instanceId: "sandbox-1",
+                  executorId: "assignment-1:g1",
+                  templateBuildId: "build-1",
+                  apiUrl: "wss://api.example.test/api/v1/executors",
+                  workspace: "/workspace",
+                  stateDirectory: "/var/lib/rika-executor",
+                },
+              })
+            }),
+          ),
+          Effect.timeout("5 seconds"),
+        ),
+      (child) => Effect.sync(() => child.kill()).pipe(Effect.ignore),
+    ),
+  )
+
+  it.effect("uses the secured bootstrap identity instead of baked template readiness values", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() =>
+        Bun.spawn(["bun", "-e", bootstrapIdentityProof], {
+          cwd: packageRoot,
+          stdout: "pipe",
+          stderr: "pipe",
+        }),
+      ),
+      (child) =>
+        Effect.promise(() =>
+          Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]),
+        ).pipe(
+          Effect.tap(([exitCode, stdout, stderr]) =>
+            Effect.sync(() => {
+              expect(stderr).toBe("")
+              expect(exitCode).toBe(0)
+              expect(decodeJson(stdout)).toMatchObject({
+                status: 202,
+                frame: {
+                  _tag: "ExecutorHello",
+                  hello: {
+                    fence: {
+                      target: "e2b",
+                      assignmentId: "assignment-from-bootstrap",
+                      assignmentGeneration: 7,
+                      instanceId: "sandbox-from-bootstrap",
+                      executorId: expect.stringMatching(/^executor-from-bootstrap:/),
+                    },
+                    templateBuildId: "build-from-bootstrap",
+                    bootstrapToken: "one-time-bootstrap",
+                  },
+                },
+              })
             }),
           ),
           Effect.timeout("5 seconds"),

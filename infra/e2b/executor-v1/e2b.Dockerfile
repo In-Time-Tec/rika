@@ -25,8 +25,8 @@ RUN chmod 0555 /opt/rika/start.sh \
 
 # E2B executes the start command once while validating the template without
 # assignment environment. These non-secret, non-authoritative defaults let the
-# host expose loopback readiness and wait for bootstrap. Runtime provisioning
-# overrides every value with the exact assignment fence.
+# host expose readiness and wait for bootstrap. The secured one-time bootstrap,
+# not Sandbox.create environment propagation, supplies the authoritative fence.
 ENV RIKA_EXECUTOR_TARGET=e2b \
   RIKA_EXECUTOR_ASSIGNMENT_ID=template-readiness \
   RIKA_EXECUTOR_GENERATION=1 \
