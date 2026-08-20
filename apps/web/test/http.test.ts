@@ -85,6 +85,14 @@ describe("web HTTP", () => {
     }),
   )
 
+  it.effect("preserves the device code as a DOM dataset property", () =>
+    Effect.gen(function* () {
+      const result = yield* response("/device/approve?user_code=ABCD1234", { _tag: "account", account })
+      expect(result.status).toBe(200)
+      expect(yield* Effect.promise(() => result.text())).toContain('data-user-code="ABCD1234"')
+    }),
+  )
+
   it.effect("passes only the cookie and request signal to the account gateway", () =>
     Effect.gen(function* () {
       let received: { readonly cookie: string | undefined; readonly signal: AbortSignal } | undefined

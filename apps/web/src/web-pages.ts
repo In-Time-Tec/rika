@@ -6,9 +6,11 @@ const escapeHtml = (value: string) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;")
 
+const dataAttribute = (name: string) => name.replaceAll(/([A-Z])/g, "-$1").toLowerCase()
+
 const layout = (title: string, page: string, content: string, attributes: Readonly<Record<string, string>> = {}) => {
   const bodyAttributes = Object.entries({ page, ...attributes })
-    .map(([name, value]) => ` data-${escapeHtml(name)}="${escapeHtml(value)}"`)
+    .map(([name, value]) => ` data-${escapeHtml(dataAttribute(name))}="${escapeHtml(value)}"`)
     .join("")
   return `<!doctype html>
 <html lang="en">
