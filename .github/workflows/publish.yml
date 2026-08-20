@@ -211,8 +211,8 @@ jobs:
         run: |
           directory="$(mktemp -d)"
           tar -xzf "$ARCHIVE" -C "$directory"
-          file "$directory"/rika-*/bin/rika "$directory"/rika-*/bin/.rika-interactive "$directory"/rika-*/bin/.rika-server "$directory"/rika-*/bin/.rika-performance
-          for executable in "$directory"/rika-*/bin/rika "$directory"/rika-*/bin/.rika-interactive "$directory"/rika-*/bin/.rika-server "$directory"/rika-*/bin/.rika-performance; do
+          file "$directory"/rika-*/bin/rika "$directory"/rika-*/bin/.rika-interactive "$directory"/rika-*/bin/.rika-performance
+          for executable in "$directory"/rika-*/bin/rika "$directory"/rika-*/bin/.rika-interactive "$directory"/rika-*/bin/.rika-performance; do
             case "$EXPECTED_ARCHITECTURE" in
               x86_64) file "$executable" | grep -Eq 'x86[-_ ]64|x86_64' ;;
               arm64|aarch64) file "$executable" | grep -Eq 'arm64|aarch64|ARM aarch64' ;;
@@ -337,7 +337,6 @@ jobs:
           for archive in artifacts/npm/cli-*/*.tgz; do
             tar -tzf "$archive" | grep -qx 'package/bin/rika'
             tar -tzf "$archive" | grep -qx 'package/bin/.rika-interactive'
-            tar -tzf "$archive" | grep -qx 'package/bin/.rika-server'
             tar -tzf "$archive" | grep -qx 'package/bin/.rika-performance'
           done
       - name: Dry-run publish

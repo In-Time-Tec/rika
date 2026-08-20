@@ -1,5 +1,5 @@
 import { Data, Effect, FileSystem, Function, Path } from "effect"
-import { type PerformanceRole, type RoleObservation, roleRuntimes } from "./performance-platform"
+import { matchesRole, type PerformanceRole, type RoleObservation, roleRuntimes } from "./performance-platform"
 
 export interface PsRow {
   readonly pid: number
@@ -114,12 +114,8 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
       unsupportedReason: "Process-tree RSS and CPU sampling currently requires Darwin ps and script PTY semantics.",
     }
   const launcher = runtimes.launcher
-  const matchesRole = (row: PsRow, role: PerformanceRole) => {
-    const runtime = runtimes[role]
-    if (!packaged) return row.command.includes(runtime.evidencePath)
-    const executable = row.command.split(/\s+/, 1)[0] ?? ""
-    return path.basename(executable) === path.basename(runtime.executable)
-  }
+  const processMatchesRole = (row: PsRow, role: PerformanceRole) =>
+    matchesRole({ command: row.command, runtime: runtimes[role] })
   const baselinePids = new Set((yield* readProcessRows).map((row) => row.pid))
   return yield* Effect.acquireUseRelease(
     Effect.sync(() => {
@@ -157,11 +153,15 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
         for (let attempt = 0; attempt <= 40; attempt += 1) {
           const readyRows = descendants(yield* readProcessRows, child.pid).filter((row) => !baselinePids.has(row.pid))
           for (const row of readyRows)
-            if (matchesRole(row, "launcher") || matchesRole(row, "interactive") || matchesRole(row, "server"))
+            if (
+              processMatchesRole(row, "launcher") ||
+              processMatchesRole(row, "interactive") ||
+              processMatchesRole(row, "server")
+            )
               ownedPids.add(row.pid)
           const ready =
-            readyRows.some((row) => matchesRole(row, "interactive") && row.rss > 1024) &&
-            readyRows.some((row) => matchesRole(row, "server") && row.rss > 1024)
+            readyRows.some((row) => processMatchesRole(row, "interactive") && row.rss > 1024) &&
+            readyRows.some((row) => processMatchesRole(row, "server") && row.rss > 1024)
           if (ready || attempt === 40) break
           yield* Effect.sleep("250 millis")
         }
@@ -183,8 +183,8 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
           const currentTree = descendants(currentRows, child.pid).filter((row) => !baselinePids.has(row.pid))
           let total = 0
           for (const name of ["launcher", "interactive", "server"] as const) {
-            const before = previousTree.find((row) => matchesRole(row, name))
-            const after = currentTree.find((row) => matchesRole(row, name))
+            const before = previousTree.find((row) => processMatchesRole(row, name))
+            const after = currentTree.find((row) => processMatchesRole(row, name))
             if (after !== undefined) ownedPids.add(after.pid)
             if (before?.pid !== after?.pid) stableRoles = false
             const value =
@@ -198,9 +198,9 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
           previousRows = currentRows
         }
         const tree = descendants(currentRows, child.pid).filter((row) => !baselinePids.has(row.pid))
-        const launcherRow = tree.find((row) => matchesRole(row, "launcher"))
-        const interactiveRow = tree.find((row) => matchesRole(row, "interactive"))
-        const serverRow = tree.find((row) => matchesRole(row, "server"))
+        const launcherRow = tree.find((row) => processMatchesRole(row, "launcher"))
+        const interactiveRow = tree.find((row) => processMatchesRole(row, "interactive"))
+        const serverRow = tree.find((row) => processMatchesRole(row, "server"))
         for (const row of [launcherRow, interactiveRow, serverRow]) if (row !== undefined) ownedPids.add(row.pid)
         const role = (name: PerformanceRole, row: PsRow, executable: string): RoleObservation => ({
           role: name,

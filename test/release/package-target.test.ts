@@ -114,23 +114,19 @@ describe("release target construction", () => {
     )
   })
 
-  test("keeps the full public client graph out of the server, SQL, model, and TUI runtimes", async () => {
+  test("keeps the public client executable as the private server role owner without loading the TUI", async () => {
     const graph = await sourceGraph("client-main.ts")
+    const source = await readFile(
+      join(fileURLToPath(new URL("../..", import.meta.url)), "apps/rika/src/client-main.ts"),
+      "utf8",
+    )
     const files = [...graph.files].join("\n")
     const external = [...graph.external].join("\n")
-    for (const forbidden of [
-      "/transport/host/server-host-transport.ts",
-      "/apps/rika/src/main.ts",
-      "/product-database.ts",
-      "/packages/product-store/src/thread-repository.ts",
-      "/packages/product-store/src/turn-repository.ts",
-      "/packages/product-store/src/transcript-repository.ts",
-      "/execution-backend.ts",
-      "/packages/terminal/",
-    ])
-      expect(files).not.toContain(forbidden)
-    for (const forbidden of ["tenetkit/ai", "@opentui/", "@ff-labs/"]) expect(external).not.toContain(forbidden)
-    expect(files).toContain("/product-operation-service.ts")
+    expect(source).toContain("isServerProcessRole(process.argv.slice(2))")
+    expect(source).toContain("startServer()")
+    for (const forbidden of ["/packages/terminal/"]) expect(files).not.toContain(forbidden)
+    for (const forbidden of ["@opentui/"]) expect(external).not.toContain(forbidden)
+    expect(files).toContain("/transport/host/server-host-transport.ts")
     expect(files).toContain("/transport/client/server-client-transport.ts")
   })
 

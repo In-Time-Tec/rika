@@ -96,7 +96,7 @@ test("publishes npm packages built from the same attested archives", () => {
   expect(commands("npm")).toContain("package/bin/rika")
   expect(commands("npm")).toContain("package/bin/.rika-performance")
   expect(commands("npm")).toContain("package/bin/.rika-interactive")
-  expect(commands("npm")).toContain("package/bin/.rika-server")
+  expect(commands("npm")).not.toContain("package/bin/.rika-server")
 
   const npmCommands = commands("npm")
   expect(npmCommands.indexOf("--dry-run")).toBeGreaterThan(-1)

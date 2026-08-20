@@ -1,4 +1,5 @@
 import { Config, Effect, Option, Path } from "effect"
+import { serverProcessRuntime } from "../private-runtime-role"
 
 export interface RuntimeLaunch {
   readonly executable: string
@@ -11,16 +12,24 @@ export const privateRuntime = Effect.fn("ClientProcess.privateRuntime")(function
   const testExecutable = yield* Config.option(Config.string("RIKA_TEST_RUNTIME_EXECUTABLE"))
   if (Option.isSome(testExecutable))
     return { executable: testExecutable.value, prefixArguments: [], replaceProcess: false }
-  const entrypoint = role === "interactive" ? "interactive-main.ts" : "server-main.ts"
+  if (role === "server") {
+    const runtime = serverProcessRuntime({
+      packaged: import.meta.path.startsWith("/$bunfs/"),
+      executable: process.execPath,
+      packagedEntrypoint: path.join(path.dirname(process.execPath), "rika"),
+      sourceEntrypoint: path.join(import.meta.dir, "..", "client-main.ts"),
+    })
+    return { executable: runtime.executable, prefixArguments: runtime.arguments, replaceProcess: false }
+  }
   return import.meta.path.startsWith("/$bunfs/")
     ? {
-        executable: path.join(path.dirname(process.execPath), `.rika-${role}`),
+        executable: path.join(path.dirname(process.execPath), ".rika-interactive"),
         prefixArguments: [],
-        replaceProcess: role === "interactive",
+        replaceProcess: true,
       }
     : {
         executable: process.execPath,
-        prefixArguments: [path.join(import.meta.dir, "..", entrypoint)],
+        prefixArguments: [path.join(import.meta.dir, "..", "interactive-main.ts")],
         replaceProcess: false,
       }
 })
