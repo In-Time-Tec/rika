@@ -121,20 +121,37 @@ const liveSdk: Sdk = {
   setTimeout: (sandboxId, timeoutMillis, options) => Sandbox.setTimeout(sandboxId, timeoutMillis, options),
   list: (options) => Sandbox.list(options),
   bootstrap: ({ sandboxId, body, connection, url }) =>
-    Sandbox.connect(sandboxId, connection)
-      .then((sandbox) => {
-        if (sandbox.trafficAccessToken === undefined)
-          throw new Error("secure sandbox did not provide a traffic access token")
-        return Bun.fetch(url, {
-          method: "POST",
-          headers: bootstrapHeaders(sandbox.trafficAccessToken),
-          body,
-          signal: AbortSignal.timeout(connection.requestTimeoutMs ?? 30_000),
+    Sandbox.connect(sandboxId, connection).then((sandbox) => {
+      if (sandbox.trafficAccessToken === undefined)
+        throw new Error("secure sandbox did not provide a traffic access token")
+      const timeoutMillis = connection.requestTimeoutMs ?? 30_000
+      const deadline = performance.now() + timeoutMillis
+      const headers = bootstrapHeaders(sandbox.trafficAccessToken)
+      const retry = (): Promise<void> => {
+        const remaining = deadline - performance.now()
+        if (remaining <= 0) return Promise.reject(new Error("bootstrap endpoint did not become ready"))
+        return Bun.fetch(new URL("/health", url), {
+          headers,
+          signal: AbortSignal.timeout(Math.max(1, Math.min(2_000, remaining))),
+        }).then(
+          (response) =>
+            response.ok ? undefined : response.text().then(() => Bun.sleep(Math.min(250, remaining)).then(retry)),
+          () => Bun.sleep(Math.min(250, remaining)).then(retry),
+        )
+      }
+      return retry()
+        .then(() =>
+          Bun.fetch(url, {
+            method: "POST",
+            headers,
+            body,
+            signal: AbortSignal.timeout(Math.max(1, deadline - performance.now())),
+          }),
+        )
+        .then((response) => {
+          if (!response.ok) throw new Error(`bootstrap endpoint returned ${response.status}`)
         })
-      })
-      .then((response) => {
-        if (!response.ok) throw new Error(`bootstrap endpoint returned ${response.status}`)
-      }),
+    }),
 }
 
 const managedMetadata = { "rika.managed": "e2b-executor" } as const
