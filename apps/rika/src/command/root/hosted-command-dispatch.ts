@@ -14,6 +14,7 @@ export type Input =
   | { readonly _tag: "Auth"; readonly action: "devices" }
   | { readonly _tag: "Auth"; readonly action: "revoke-device"; readonly device?: string | undefined }
   | { readonly _tag: "Organization"; readonly action: "list" }
+  | { readonly _tag: "Organization"; readonly action: "personal" }
   | { readonly _tag: "Organization"; readonly action: "use"; readonly organization: string }
   | { readonly _tag: "Organization"; readonly action: "invite"; readonly email: string }
   | { readonly _tag: "RemoteThread"; readonly action: "new" }

@@ -1,9 +1,21 @@
+import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { Cause, Clock, Context, Effect, Exit, Fiber, Layer, Option, Redacted, Ref } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
-import { logout, logoutAll, pollDeviceAuthorization, status } from "../src/hosted/hosted-account"
+import {
+  createRemoteThread,
+  listOrganizations,
+  login,
+  logout,
+  logoutAll,
+  pollDeviceAuthorization,
+  status,
+  useOrganization,
+  usePersonalOwner,
+} from "../src/hosted/hosted-account"
 import { layer as credentialLayer, type SecretVault } from "../src/hosted/hosted-credential-store"
 import {
+  Browser,
   CredentialStore,
   HostedError,
   Http,
@@ -20,7 +32,7 @@ const profile: Profile = {
   origin: "https://hosted.example.test",
   deviceId: "device-1",
   clientId: "client-1",
-  organization: "org-1",
+  owner: { kind: "organization", organizationId: "org-1" },
 }
 const authorization = {
   deviceCode: "device-secret",
@@ -42,6 +54,57 @@ const unusedHttp: HttpInterface = {
   createRemoteConnection: () => Effect.die("unused"),
   runThread: () => Effect.die("unused"),
 }
+
+it.effect("defaults a first login with zero organizations to Personal", () =>
+  Effect.gen(function* () {
+    const savedProfile = yield* Ref.make<Option.Option<Profile>>(Option.none())
+    const savedCredential = yield* Ref.make<Option.Option<Credential>>(Option.none())
+    const context = yield* Layer.build(
+      Layer.mergeAll(
+        BunCrypto.layer,
+        Layer.succeed(
+          ProfileStore,
+          ProfileStore.of({
+            load: Effect.succeed(Option.none()),
+            save: (value) => Ref.set(savedProfile, Option.some(value)),
+          }),
+        ),
+        Layer.succeed(
+          CredentialStore,
+          CredentialStore.of({
+            load: () => Effect.succeed(Option.none()),
+            save: (_origin, _device, value) => Ref.set(savedCredential, Option.some(value)),
+            remove: () => Effect.succeed(false),
+          }),
+        ),
+        Layer.succeed(
+          Http,
+          Http.of({
+            ...unusedHttp,
+            register: () => Effect.succeed({ clientId: "client-personal" }),
+            startDeviceAuthorization: () => Effect.succeed({ ...authorization, interval: 0 }),
+            pollDeviceAuthorization: () =>
+              Effect.succeed({
+                _tag: "Complete",
+                tokens: { accessToken: "access", refreshToken: "refresh", expiresIn: 600 },
+              }),
+            context: () =>
+              Effect.succeed({ account: { id: "user-1", email: "dev@example.test" }, organizations: [] }),
+          }),
+        ),
+        Layer.succeed(Browser, Browser.of({ open: () => Effect.die("unused") })),
+        TestConsole.layer,
+      ),
+    )
+    yield* login({ server: profile.origin, noOpen: true }).pipe(Effect.provide(context))
+    expect(Option.getOrThrow(yield* Ref.get(savedProfile))).toMatchObject({
+      origin: profile.origin,
+      clientId: "client-personal",
+      owner: { kind: "personal" },
+    })
+    expect(Option.isSome(yield* Ref.get(savedCredential))).toBe(true)
+  }),
+)
 
 it.effect("polls pending and network failures, applies RFC slow_down, and completes", () =>
   Effect.gen(function* () {
@@ -248,5 +311,98 @@ it.effect("treats logout as idempotent before a profile exists", () =>
     yield* logout().pipe(Effect.provide(context))
     yield* logoutAll().pipe(Effect.provide(context))
     expect(yield* TestConsole.logLines.pipe(Effect.provide(context))).toEqual(["Not logged in", "Not logged in"])
+  }),
+)
+
+it.effect("lists Personal, switches owners, clears projects, and returns to Personal", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const current = yield* Ref.make<Profile>({ ...profile, owner: { kind: "personal" }, project: "project-1" })
+      const context = yield* Layer.build(
+        Layer.mergeAll(
+          Layer.succeed(
+            ProfileStore,
+            ProfileStore.of({
+              load: Ref.get(current).pipe(Effect.map(Option.some)),
+              save: (value) => Ref.set(current, value),
+            }),
+          ),
+          Layer.succeed(
+            CredentialStore,
+            CredentialStore.of({
+              load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })),
+              save: () => Effect.void,
+              remove: () => Effect.succeed(true),
+            }),
+          ),
+          Layer.succeed(
+            Http,
+            Http.of({
+              ...unusedHttp,
+              refresh: () => Effect.succeed({ accessToken: "access", refreshToken: "refresh", expiresIn: 600 }),
+              context: () =>
+                Effect.succeed({
+                  account: { id: "user-1", email: "dev@example.test" },
+                  organizations: [{ id: "org-1", slug: "engineering", name: "Engineering" }],
+                }),
+            }),
+          ),
+          TestConsole.layer,
+        ),
+      )
+      yield* listOrganizations().pipe(Effect.provide(context))
+      expect(yield* TestConsole.logLines.pipe(Effect.provide(context))).toEqual([
+        "* Personal",
+        "  Engineering (engineering)",
+      ])
+      yield* useOrganization("engineering").pipe(Effect.provide(context))
+      expect(yield* Ref.get(current)).toEqual({ ...profile, owner: { kind: "organization", organizationId: "org-1" } })
+      yield* usePersonalOwner().pipe(Effect.provide(context))
+      expect(yield* Ref.get(current)).toEqual({ ...profile, owner: { kind: "personal" } })
+    }),
+  ),
+)
+
+it.effect("creates for Personal with zero organizations and fails closed for a stale organization", () =>
+  Effect.gen(function* () {
+    const current = yield* Ref.make<Profile>({ ...profile, owner: { kind: "personal" } })
+    const created = yield* Ref.make(0)
+    const context = yield* Layer.build(
+      Layer.mergeAll(
+        Layer.succeed(
+          ProfileStore,
+          ProfileStore.of({
+            load: Ref.get(current).pipe(Effect.map(Option.some)),
+            save: (value) => Ref.set(current, value),
+          }),
+        ),
+        Layer.succeed(
+          CredentialStore,
+          CredentialStore.of({
+            load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })),
+            save: () => Effect.void,
+            remove: () => Effect.succeed(true),
+          }),
+        ),
+        Layer.succeed(
+          Http,
+          Http.of({
+            ...unusedHttp,
+            refresh: () => Effect.succeed({ accessToken: "access", refreshToken: "refresh", expiresIn: 600 }),
+            context: () => Effect.succeed({ account: { id: "user-1", email: "dev@example.test" }, organizations: [] }),
+            createRemoteConnection: (_origin, owner) => {
+              expect(owner).toEqual({ kind: "personal" })
+              return Ref.update(created, (value) => value + 1).pipe(Effect.as({ threadId: "e2b_thread-1" }))
+            },
+          }),
+        ),
+        TestConsole.layer,
+      ),
+    )
+    yield* createRemoteThread().pipe(Effect.provide(context))
+    yield* Ref.set(current, { ...profile, owner: { kind: "organization", organizationId: "revoked" } })
+    const error = yield* Effect.flip(createRemoteThread().pipe(Effect.provide(context)))
+    expect(error.message).toContain("rika org personal")
+    expect(yield* Ref.get(created)).toBe(1)
   }),
 )

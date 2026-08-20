@@ -93,10 +93,19 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
       expect((yield* http.invite(origin, "org-1", "new@example.test", session)).id).toBe("invite-1")
       yield* http.revokeDevice(origin, "device-1", session)
       yield* http.revokeAllDevices(origin, session)
-      expect((yield* http.createRemoteConnection(origin, "org-1", "project-1", session)).threadId).toBe("thread-1")
       expect(
-        (yield* http.runThread(origin, "org-1", threadId, { prompt: ["hello"], mode: "low" }, "operation-1", session))
-          .output,
+        (yield* http.createRemoteConnection(
+          origin,
+          { kind: "organization", organizationId: "org-1" },
+          "project-1",
+          session,
+        )).threadId,
+      ).toBe("thread-1")
+      expect((yield* http.createRemoteConnection(origin, { kind: "personal" }, undefined, session)).threadId).toBe(
+        "thread-1",
+      )
+      expect(
+        (yield* http.runThread(origin, threadId, { prompt: ["hello"], mode: "low" }, "operation-1", session)).output,
       ).toBe("done")
       expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
         "/api/v1/auth/cli/registrations",
@@ -109,15 +118,19 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
         "/api/v1/auth/cli/devices/device-1/revoke",
         "/api/v1/auth/cli/devices/revoke-all",
         "/api/v1/connections",
+        "/api/v1/connections",
         "/api/v1/threads/e2b_thread-1/operations",
       ])
       for (const request of requests.slice(1)) expect(request.headers.dpop).toEqual(expect.any(String))
       expect(requests[4]?.headers.authorization).toBe("DPoP access")
       expect(bodyText(requests[0]!)).toContain('"reference_id":"cli-device:device-1"')
       expect(bodyText(requests[8]!)).toBe("")
-      expect(bodyText(requests[9]!)).toContain('"placement":"e2b"')
-      expect(requests[10]?.headers["idempotency-key"]).toBe("operation-1")
-      expect(bodyText(requests[10]!)).toBe('{"kind":"run","organization_id":"org-1","prompt":["hello"],"mode":"low"}')
+      expect(bodyText(requests[9]!)).toBe(
+        '{"placement":"e2b","owner":{"kind":"organization","organization_id":"org-1"},"project_id":"project-1"}',
+      )
+      expect(bodyText(requests[10]!)).toBe('{"placement":"e2b","owner":{"kind":"personal"}}')
+      expect(requests[11]?.headers["idempotency-key"]).toBe("operation-1")
+      expect(bodyText(requests[11]!)).toBe('{"kind":"run","prompt":["hello"],"mode":"low"}')
     }),
   ),
 )

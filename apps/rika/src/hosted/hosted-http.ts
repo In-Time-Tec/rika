@@ -305,7 +305,7 @@ export const layer = Layer.effect(
         const url = `${origin}/api/v1/auth/cli/devices/revoke-all`
         return authenticatedEmpty("POST", url, HttpClientRequest.post(url), session, "All CLI device revocation")
       },
-      createRemoteConnection: (origin, organization, project, session) => {
+      createRemoteConnection: (origin, owner, project, session) => {
         const url = `${origin}/api/v1/connections`
         return authenticatedJson(
           "POST",
@@ -313,7 +313,10 @@ export const layer = Layer.effect(
           HttpClientRequest.post(url).pipe(
             HttpClientRequest.bodyJsonUnsafe({
               placement: "e2b",
-              organization_id: organization,
+              owner:
+                owner.kind === "personal"
+                  ? { kind: "personal" }
+                  : { kind: "organization", organization_id: owner.organizationId },
               ...(project === undefined ? {} : { project_id: project }),
             }),
           ),
@@ -322,14 +325,14 @@ export const layer = Layer.effect(
           "Remote connection creation",
         )
       },
-      runThread: (origin, organization, threadId, request, idempotencyKey, session) => {
+      runThread: (origin, threadId, request, idempotencyKey, session) => {
         const url = `${origin}/api/v1/threads/${encodeURIComponent(threadId)}/operations`
         return authenticatedJson(
           "POST",
           url,
           HttpClientRequest.post(url).pipe(
             HttpClientRequest.setHeader("idempotency-key", idempotencyKey),
-            HttpClientRequest.bodyJsonUnsafe({ kind: "run", organization_id: organization, ...request }),
+            HttpClientRequest.bodyJsonUnsafe({ kind: "run", ...request }),
           ),
           session,
           RunResult,

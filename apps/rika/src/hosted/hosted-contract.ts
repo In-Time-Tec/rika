@@ -82,11 +82,23 @@ export const Organization = Schema.Struct({
 })
 export type Organization = typeof Organization.Type
 
+export const OwnerSelection = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("personal") }),
+  Schema.Struct({ kind: Schema.Literal("organization"), organizationId: Schema.String }),
+])
+export type OwnerSelection = typeof OwnerSelection.Type
+
+const ProjectOwner = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("personal"), userId: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("organization"), organizationId: Schema.String }),
+])
+
 export const Project = Schema.Struct({
   id: Schema.String,
+  ownerId: Schema.String,
+  owner: ProjectOwner,
   slug: Schema.String,
   name: Schema.String,
-  organizationId: Schema.String,
 })
 export type Project = typeof Project.Type
 
@@ -168,13 +180,12 @@ export interface HttpInterface {
   readonly revokeAllDevices: (origin: string, session: Session) => Effect.Effect<void, HostedError>
   readonly createRemoteConnection: (
     origin: string,
-    organization: string,
+    owner: OwnerSelection,
     project: string | undefined,
     session: Session,
   ) => Effect.Effect<RemoteConnection, HostedError>
   readonly runThread: (
     origin: string,
-    organization: string,
     threadId: HostedThreadId,
     request: RunRequest,
     idempotencyKey: string,
@@ -198,7 +209,7 @@ export interface Profile {
   readonly origin: string
   readonly deviceId: string
   readonly clientId: string
-  readonly organization?: string | undefined
+  readonly owner: OwnerSelection
   readonly project?: string | undefined
 }
 

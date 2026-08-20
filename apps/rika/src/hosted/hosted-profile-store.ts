@@ -2,11 +2,14 @@ import { Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { HostedError, ProfileStore, type Profile } from "./hosted-contract"
 
 const ProfileDisk = Schema.Struct({
-  formatVersion: Schema.Literal(2),
+  formatVersion: Schema.Literal(3),
   origin: Schema.String,
   deviceId: Schema.String,
   clientId: Schema.String,
-  organization: Schema.optionalKey(Schema.String),
+  owner: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("personal") }),
+    Schema.Struct({ kind: Schema.Literal("organization"), organizationId: Schema.String }),
+  ]),
   project: Schema.optionalKey(Schema.String),
 })
 
@@ -34,17 +37,17 @@ export const layer = (options: { readonly home: string; readonly filename?: stri
           origin: profile.origin,
           deviceId: profile.deviceId,
           clientId: profile.clientId,
-          ...(profile.organization === undefined ? {} : { organization: profile.organization }),
+          owner: profile.owner,
           ...(profile.project === undefined ? {} : { project: profile.project }),
         })
       })
       const save = Effect.fn("HostedProfileStore.save")(function* (profile: Profile) {
         const text = yield* Schema.encodeEffect(Schema.fromJsonString(ProfileDisk))({
-          formatVersion: 2,
+          formatVersion: 3,
           origin: profile.origin,
           deviceId: profile.deviceId,
           clientId: profile.clientId,
-          ...(profile.organization === undefined ? {} : { organization: profile.organization }),
+          owner: profile.owner,
           ...(profile.project === undefined ? {} : { project: profile.project }),
         }).pipe(Effect.mapError(() => failure("Hosted profile could not be encoded")))
         const parent = path.dirname(target)

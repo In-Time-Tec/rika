@@ -37,12 +37,11 @@ import {
 } from "../src/hosted/hosted-contract"
 import { generate } from "../src/hosted/hosted-dpop"
 import { Service as ProductService } from "@rika/product/product-operation-service"
+import { BetterAuthUserId } from "@rika/product/hosted-model"
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined
 const encodeExecutorMessage = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
-const organizationId = "organization-cli-e2b"
-const memberId = "member-cli-e2b"
 const deviceId = "device-cli-e2b"
 const clientId = "client-cli-e2b"
 
@@ -54,14 +53,7 @@ const account: Account = {
     emailVerified: true,
     image: null,
   },
-  memberships: [
-    {
-      id: memberId,
-      role: "owner",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      organization: { id: organizationId, name: "Rika", slug: "rika", logo: null },
-    },
-  ],
+  memberships: [],
 }
 
 const migrate = (url: string) =>
@@ -108,20 +100,6 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
             `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
             VALUES ($1, 'Rika User', 'rika@example.test', true, now(), now())`,
             [account.user.id],
-          ),
-        )
-        yield* Effect.promise(() =>
-          migrated!.query(
-            `INSERT INTO "organization" (id, name, slug, created_at)
-            VALUES ($1, 'Rika', 'rika-cli-e2b', now())`,
-            [organizationId],
-          ),
-        )
-        yield* Effect.promise(() =>
-          migrated!.query(
-            `INSERT INTO member (id, organization_id, user_id, role, created_at)
-            VALUES ($1, $2, $3, 'owner', now())`,
-            [memberId, organizationId, account.user.id],
           ),
         )
         let gateway: Gateway | undefined
@@ -239,7 +217,8 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
         )
         yield* TestClock.setTime(Number(databaseTime.rows[0]!.millis))
         const connection = yield* product.createConnection({
-          authority: { organizationId, memberId, deviceId, clientId, dpopJkt: "dpop-thumbprint" },
+          principal: { userId: account.user.id, deviceId, clientId, dpopJkt: "dpop-thumbprint" },
+          owner: { _tag: "PersonalOwner", userId: BetterAuthUserId.make(account.user.id) },
           placement: "e2b",
         })
         let credential: Credential | undefined
@@ -299,7 +278,7 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
               load: Effect.succeed(
                 Option.some({
                   origin: "https://api.example.test",
-                  organization: organizationId,
+                  owner: { kind: "personal" },
                   deviceId,
                   clientId,
                 }),

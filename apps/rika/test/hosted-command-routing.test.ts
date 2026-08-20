@@ -38,6 +38,7 @@ it.effect("routes hosted execution without calling the local server operation", 
       yield* invoke(["auth", "revoke-device"])
       yield* invoke(["auth", "revoke-device", "device-2"])
       yield* invoke(["org", "list"])
+      yield* invoke(["org", "personal"])
       yield* invoke(["org", "use", "engineering"])
       yield* invoke(["org", "invite", "dev@example.test"])
       yield* invoke(["thread", "new"])
@@ -67,6 +68,7 @@ it.effect("routes hosted execution without calling the local server operation", 
         { _tag: "Auth", action: "revoke-device" },
         { _tag: "Auth", action: "revoke-device", device: "device-2" },
         { _tag: "Organization", action: "list" },
+        { _tag: "Organization", action: "personal" },
         { _tag: "Organization", action: "use", organization: "engineering" },
         { _tag: "Organization", action: "invite", email: "dev@example.test" },
         { _tag: "RemoteThread", action: "new" },

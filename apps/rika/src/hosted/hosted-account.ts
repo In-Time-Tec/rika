@@ -10,6 +10,7 @@ import {
   type DeviceAuthorization,
   type PrivateJwk,
   type Profile,
+  type IdentityContext,
   type Session,
   type TokenSet,
 } from "./hosted-contract"
@@ -119,6 +120,18 @@ const json = (value: unknown) =>
     Effect.mapError(() => failure("protocol", "Hosted output could not be encoded")),
   )
 
+const validOwner = (profile: Profile, identity: IdentityContext) => {
+  if (profile.owner.kind === "personal") return true
+  const organizationId = profile.owner.organizationId
+  return identity.organizations.some((organization) => organization.id === organizationId)
+}
+
+const staleOwner = () =>
+  failure(
+    "invalid-input",
+    "Selected organization is no longer available; run rika org personal or rika org use <organization>",
+  )
+
 export const login = Effect.fn("HostedAccount.login")(function* (input: {
   readonly server?: string | undefined
   readonly noOpen: boolean
@@ -151,12 +164,8 @@ export const login = Effect.fn("HostedAccount.login")(function* (input: {
     origin,
     deviceId,
     clientId,
-    ...(previous !== undefined && previous.origin === origin && previous.organization !== undefined
-      ? { organization: previous.organization }
-      : {}),
-    ...(previous !== undefined && previous.origin === origin && previous.project !== undefined
-      ? { project: previous.project }
-      : {}),
+    owner: previous !== undefined && previous.origin === origin ? previous.owner : { kind: "personal" },
+    ...(previous !== undefined && previous.origin === origin ? { project: previous.project } : {}),
   }
   const authorization = yield* http.startDeviceAuthorization(origin, clientId, privateJwk)
   const issuedAt = yield* Clock.currentTimeMillis
@@ -168,7 +177,10 @@ export const login = Effect.fn("HostedAccount.login")(function* (input: {
       .pipe(Effect.catch((error) => Console.error(`${error.message}; continue with the URL above`)))
   const tokens = yield* pollDeviceAuthorization(nextProfile, privateJwk, authorization, issuedAt)
   const identity = yield* http.context(origin, sessionFrom(tokens, privateJwk))
-  yield* profiles.save(nextProfile)
+  const selected = validOwner(nextProfile, identity)
+    ? nextProfile
+    : { ...nextProfile, owner: { kind: "personal" as const }, project: undefined }
+  yield* profiles.save(selected)
   yield* credentials.save(origin, deviceId, credentialFrom(tokens, privateJwk))
   yield* Console.log(`Logged in as ${identity.account.email}`)
 })
@@ -199,15 +211,15 @@ export const status = Effect.fn("HostedAccount.status")(function* (asJson: boole
         origin: loaded.value.origin,
         deviceId: loaded.value.deviceId,
         account: identity.account,
-        ...(loaded.value.organization === undefined ? {} : { organization: loaded.value.organization }),
+        owner: loaded.value.owner,
         ...(loaded.value.project === undefined ? {} : { project: loaded.value.project }),
       }),
     )
     return
   }
   yield* Console.log(
-    `Logged in as ${identity.account.email}\nOrigin: ${loaded.value.origin}${
-      loaded.value.organization === undefined ? "" : `\nOrganization: ${loaded.value.organization}`
+    `Logged in as ${identity.account.email}\nOrigin: ${loaded.value.origin}\nOwner: ${
+      loaded.value.owner.kind === "personal" ? "Personal" : `Organization ${loaded.value.owner.organizationId}`
     }${loaded.value.project === undefined ? "" : `\nProject: ${loaded.value.project}`}`,
   )
 })
@@ -285,14 +297,18 @@ export const listOrganizations = Effect.fn("HostedAccount.listOrganizations")(fu
   const profile = yield* selectedProfile()
   const http = yield* Http
   const identity = yield* authenticated(profile, (session) => http.context(profile.origin, session))
-  if (identity.organizations.length === 0) {
-    yield* Console.log("No organizations")
-    return
-  }
+  yield* Console.log(`${profile.owner.kind === "personal" ? "*" : " "} Personal`)
   for (const organization of identity.organizations)
     yield* Console.log(
-      `${profile.organization === organization.id ? "*" : " "} ${organization.name} (${organization.slug})`,
+      `${profile.owner.kind === "organization" && profile.owner.organizationId === organization.id ? "*" : " "} ${organization.name} (${organization.slug})`,
     )
+})
+
+export const usePersonalOwner = Effect.fn("HostedAccount.usePersonalOwner")(function* () {
+  const profile = yield* selectedProfile()
+  const profiles = yield* ProfileStore
+  yield* profiles.save({ ...profile, owner: { kind: "personal" }, project: undefined })
+  yield* Console.log("Using Personal")
 })
 
 export const useOrganization = Effect.fn("HostedAccount.useOrganization")(function* (requested: string) {
@@ -309,7 +325,11 @@ export const useOrganization = Effect.fn("HostedAccount.useOrganization")(functi
       "invalid-input",
       matches.length === 0 ? `Organization ${requested} was not found` : `Organization ${requested} is ambiguous`,
     )
-  yield* profiles.save({ ...profile, organization: matches[0]!.id, project: undefined })
+  yield* profiles.save({
+    ...profile,
+    owner: { kind: "organization", organizationId: matches[0]!.id },
+    project: undefined,
+  })
   yield* Console.log(`Using organization ${matches[0]!.name}`)
 })
 
@@ -318,20 +338,23 @@ export const invite = Effect.fn("HostedAccount.invite")(function* (rawEmail: str
     Effect.mapError(() => failure("invalid-input", "Invitation email is invalid")),
   )
   const profile = yield* selectedProfile()
-  if (profile.organization === undefined) return yield* failure("invalid-input", "Run rika org use first")
+  if (profile.owner.kind !== "organization") return yield* failure("invalid-input", "Run rika org use first")
+  const organizationId = profile.owner.organizationId
   const http = yield* Http
   const invitation = yield* authenticated(profile, (session) =>
-    http.invite(profile.origin, profile.organization!, email, session),
+    http.invite(profile.origin, organizationId, email, session),
   )
   yield* Console.log(`Invited ${invitation.email}`)
 })
 
 export const createRemoteThread = Effect.fn("HostedAccount.createRemoteThread")(function* () {
   const profile = yield* selectedProfile()
-  if (profile.organization === undefined) return yield* failure("invalid-input", "Run rika org use first")
   const http = yield* Http
   const connection = yield* authenticated(profile, (session) =>
-    http.createRemoteConnection(profile.origin, profile.organization!, profile.project, session),
+    http.context(profile.origin, session).pipe(
+      Effect.filterOrFail((identity) => validOwner(profile, identity), staleOwner),
+      Effect.flatMap(() => http.createRemoteConnection(profile.origin, profile.owner, profile.project, session)),
+    ),
   )
   yield* Console.log(
     `Created remote E2B thread ${connection.threadId}${connection.url === undefined ? "" : `\n${connection.url}`}`,
@@ -340,14 +363,13 @@ export const createRemoteThread = Effect.fn("HostedAccount.createRemoteThread")(
 
 export const runThread = Effect.fn("HostedAccount.runThread")(function* (threadId: string, request: RunRequest) {
   const profile = yield* selectedProfile()
-  if (profile.organization === undefined) return yield* failure("invalid-input", "Run rika org use first")
   const crypto = yield* Crypto.Crypto
   const http = yield* Http
   const key = yield* crypto.randomUUIDv4.pipe(
     Effect.mapError(() => failure("host", "Could not create a hosted operation identifier")),
   )
   const result = yield* authenticated(profile, (session) =>
-    http.runThread(profile.origin, profile.organization!, threadId, request, key, session),
+    http.runThread(profile.origin, threadId, request, key, session),
   )
   yield* Console.log(result.output)
 })

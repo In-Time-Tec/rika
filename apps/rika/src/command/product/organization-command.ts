@@ -5,6 +5,7 @@ export const organizationCommand = Command.make("org").pipe(
   Command.withDescription("Manage hosted Rika organizations"),
   Command.withSubcommands([
     Command.make("list", {}, () => dispatch({ _tag: "Organization", action: "list" })),
+    Command.make("personal", {}, () => dispatch({ _tag: "Organization", action: "personal" })),
     Command.make("use", { organization: Argument.string("organization") }, ({ organization }) =>
       dispatch({ _tag: "Organization", action: "use", organization }),
     ),

@@ -25,6 +25,7 @@ const operation = (input: Input) => {
   }
   if (input._tag === "Organization") {
     if (input.action === "list") return HostedAccount.listOrganizations()
+    if (input.action === "personal") return HostedAccount.usePersonalOwner()
     if (input.action === "use") return HostedAccount.useOrganization(input.organization)
     return HostedAccount.invite(input.email)
   }
