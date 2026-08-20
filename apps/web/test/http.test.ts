@@ -105,6 +105,7 @@ describe("web HTTP", () => {
       expect(result.status).toBe(200)
       expect(received?.cookie).toBe("session=secret")
       expect(received?.signal).toBe(input.signal)
+      expect(Object.keys(received ?? {}).sort()).toEqual(["cookie", "signal"])
     }),
   )
 
@@ -121,9 +122,13 @@ describe("API account gateway", () => {
   it.effect("forwards only a Cookie header to the API", () =>
     Effect.gen(function* () {
       let forwardedCookie: string | undefined
+      let forwardedAuthorization: string | undefined
+      let forwardedHeaderNames: ReadonlyArray<string> = []
       const client = HttpClient.make((outgoing) =>
         Effect.sync(() => {
           forwardedCookie = outgoing.headers.cookie
+          forwardedAuthorization = outgoing.headers.authorization
+          forwardedHeaderNames = Object.keys(outgoing.headers)
           return HttpClientResponse.fromWeb(outgoing, Response.json(account))
         }),
       )
@@ -134,6 +139,8 @@ describe("API account gateway", () => {
       })
       expect(result).toEqual({ _tag: "account", account })
       expect(forwardedCookie).toBe("session=secret")
+      expect(forwardedAuthorization).toBeUndefined()
+      expect(forwardedHeaderNames.filter((name) => !["b3", "traceparent"].includes(name))).toEqual(["cookie"])
     }),
   )
 

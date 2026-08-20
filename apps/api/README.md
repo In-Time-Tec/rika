@@ -6,7 +6,7 @@ The API owns no browser pages. The separate `@rika/web` service renders those pa
 
 ## Deploy to Railway
 
-Railway builds `apps/api/Dockerfile` through `apps/api/railway.json`, runs `migrate` only for this service, and promotes a release after `GET /readyz` succeeds. The configured overlap keeps the healthy release serving while its replacement becomes ready and then drains the old process after `SIGTERM`.
+Railway selects `/apps/api/railway.json` through this service's Railway Config File setting while leaving its source root directory unset. The repository-root build context then builds `apps/api/Dockerfile`, runs `migrate` only for this service, and promotes a release after `GET /readyz` succeeds. The configured overlap keeps the healthy release serving while its replacement becomes ready and then drains the old process after `SIGTERM`.
 
 Railway terminates public TLS at the proxy edge. Caddy forwards API traffic over private DNS. At the Bun adapter boundary, the API reconstructs the request URL from the configured public proxy origin rather than trusting `Host` or `X-Forwarded-*`. This keeps DPoP `htu`, dynamic-registration resources, and Better Auth callbacks on one canonical HTTPS origin.
 

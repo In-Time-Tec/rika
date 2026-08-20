@@ -806,6 +806,8 @@ Create or select:
 - One private API service built from `apps/api/Dockerfile` and `apps/api/railway.json`.
 - One steady-state API replica for the initial in-memory WSS routing slice.
 
+Keep the Railway source root directory unset for all three application services so every Docker build uses the repository root as its context. Set each service's absolute Railway Config File setting to `/apps/api/railway.json`, `/apps/web/railway.json`, or `/apps/proxy/railway.json`, respectively. The service setting selects one config; it does not change the build context.
+
 Configure these variables through Railway references or secret variables:
 
 ```text
