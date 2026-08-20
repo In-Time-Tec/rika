@@ -12,15 +12,21 @@ const headers = entries
   .join("\n")
 
 describe("package archive contract", () => {
-  test("accepts exactly INSTALL and one executable", () => {
-    expect(entries.map(({ name }) => name)).toEqual([`${root}/`, `${root}/INSTALL`, `${root}/bin/`, `${root}/bin/rika`])
+  test("accepts the launcher and interactive runtime", () => {
+    expect(entries.map(({ name }) => name)).toEqual([
+      `${root}/`,
+      `${root}/INSTALL`,
+      `${root}/bin/`,
+      `${root}/bin/rika`,
+      `${root}/bin/.rika-interactive`,
+    ])
     expect(() => validatePackageArchive(root, names, headers)).not.toThrow()
   })
 
   test.each([
     ["missing executable", names.replace(`${root}/bin/rika\n`, ""), headers],
     [
-      "private runtime",
+      "unexpected private runtime",
       names + `${root}/bin/.rika-performance\n`,
       headers + `\n-rwxr-xr-x user/group 1 2026-07-22 00:00 ${root}/bin/.rika-performance`,
     ],
