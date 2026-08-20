@@ -129,6 +129,7 @@ const liveSdk: Sdk = {
           method: "POST",
           headers: bootstrapHeaders(sandbox.trafficAccessToken),
           body,
+          signal: AbortSignal.timeout(connection.requestTimeoutMs ?? 30_000),
         })
       })
       .then((response) => {

@@ -297,7 +297,7 @@ const connect = Effect.fn("Host.connect")(function* (
 const receiveBootstrap = Effect.callback<Redacted.Redacted<string>, HostError>((resume) => {
   let consumed = false
   const server = Bun.serve({
-    hostname: "127.0.0.1",
+    hostname: "0.0.0.0",
     port: 7070,
     fetch: (request) => {
       const path = new URL(request.url).pathname
