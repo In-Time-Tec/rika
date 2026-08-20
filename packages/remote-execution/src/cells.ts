@@ -1,4 +1,5 @@
 import { Context, Deferred, Effect, Layer, Ref, Schema } from "effect"
+import type { Executor } from "@rika/kernel/executor-runtime"
 import { CellResponse, type CellRequest, type CellResponse as CellResponseValue } from "./protocol"
 
 export class CellError extends Schema.TaggedError<CellError>()("CellError", {
@@ -6,11 +7,10 @@ export class CellError extends Schema.TaggedError<CellError>()("CellError", {
   message: Schema.String,
 }) {}
 
-export interface Options {
+export interface Options extends Executor<CellRequest, CellResponse, CellError> {
   readonly workspace: string
   readonly read: (operationKey: string) => Effect.Effect<State | undefined, CellError>
   readonly write: (operationKey: string, state: State) => Effect.Effect<void, CellError>
-  readonly execute: (request: CellRequest) => Effect.Effect<CellResponse, CellError>
 }
 
 export interface Interface {

@@ -25,6 +25,7 @@
     "./edits-binding": "./src/binding/edits-binding.ts",
     "./artifact-store": "./src/binding/artifact-store.ts",
     "./kernel-bootstrap": "./src/kernel-bootstrap.ts",
+    "./executor-runtime": "./src/executor-runtime.ts",
     "./kernel-composition": "./src/kernel-composition.ts",
     "./kernel-profile-registration": "./src/kernel-profile-registration.ts",
     "./kernel-state-store-file-system": "./src/kernel-state-store-file-system.ts"

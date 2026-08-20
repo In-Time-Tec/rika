@@ -9,7 +9,6 @@
     "./route": "./src/route.ts",
     "./postgres": "./src/postgres.ts",
     "./remote-cells": "./src/remote-cells.ts",
-    "./cell-context": "./src/cell-context.ts",
     "./scripted-model": "./src/scripted-model.ts",
     "./test-harness": "./src/test-harness.ts"
   },

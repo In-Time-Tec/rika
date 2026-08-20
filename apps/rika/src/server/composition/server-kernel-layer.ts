@@ -1,14 +1,13 @@
-import { HostBindingRegistry, KernelStateStore, type KernelPool } from "tenetkit/repl"
+import { KernelStateStore, type KernelPool } from "tenetkit/repl"
 import type { Options } from "./server-kernel-options"
 import { discoverServers, discoverSkills, harnessStoreLayer, workspaceDigest } from "./server-kernel-harness"
-import { NestedOperation, Session, ToolContext } from "tenetkit"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as CellContext from "@rika/execution/cell-context"
 import * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry"
 import * as McpRuntime from "@rika/extensions/mcp-runtime"
 import * as SkillFileSystem from "@rika/extensions/skill-file-system"
 import * as ArtifactStore from "@rika/kernel/artifact-store"
 import * as KernelComposition from "@rika/kernel/kernel-composition"
+import * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import * as GoalService from "@rika/product/goal-service"
 import { Effect, FileSystem, Function, Layer, Path, Scope } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
@@ -37,24 +36,13 @@ const staticBindingServices = (options: Options) => {
 }
 
 /**
- * Placeholders for the three per-call services, present only so the surface can be MOUNTED.
- *
- * Every one of them is overridden per request by the context the executing cell captured, because
- * `HostBindingRegistry.invoke` now merges the per-call context over the build-time one. A binding
- * that reached these would be answering outside a cell, which `bind` refuses instead.
- */
-const mountingPlaceholders: Layer.Layer<
-  ToolContext.ToolContext | NestedOperation.NestedOperations | Session.SessionStore
-> = Layer.mergeAll(ToolContext.layerDefault, NestedOperation.layerDirect, Session.layerMemory)
-
-/**
  * The Server-scoped kernel: one pool of Bun kernels, one per Session, plus the `rika.*` surface
  * every cell calls, answered under the identity of the cell that raised the request.
  */
 export const layer = (
   options: Options,
 ): Layer.Layer<
-  KernelPool.KernelPool | KernelStateStore.KernelStateStore | CellContext.Service,
+  KernelPool.KernelPool | KernelStateStore.KernelStateStore | ExecutorRuntime.CellContext,
   never,
   ChildProcessSpawner.ChildProcessSpawner
 > =>
@@ -100,37 +88,10 @@ export const layer = (
           importable: true,
         })),
       }
-      /**
-       * `KernelComposition.layer` merges the pool and the surface as siblings, and the pool reads
-       * the registry out of its own build context, so a sibling registry is invisible to it and
-       * every cell would find nothing mounted. Composing the two exported halves explicitly makes
-       * the surface a DEPENDENCY of the pool, which is the only order in which a cell can call it.
-       */
-      const calls = CellContext.layer
-      const registry = Layer.effect(
-        HostBindingRegistry.HostBindingRegistry,
-        Effect.map(
-          Effect.all([HostBindingRegistry.HostBindingRegistry, CellContext.Service]),
-          ([mounted, callContext]) => CellContext.bind(mounted, callContext),
-        ),
-      ).pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            KernelComposition.bindings({ ...kernelOptions, trustMode }).pipe(
-              Layer.provide(staticBindingServices(options)),
-              Layer.provide(mountingPlaceholders),
-              Layer.provide(BunServices.layer),
-              Layer.orDie,
-            ),
-            calls,
-          ),
-        ),
-      )
-      const composed = KernelComposition.pool(kernelOptions).pipe(
-        Layer.provide(registry),
-        Layer.provide(BunServices.layer),
-      )
-      return Layer.mergeAll(composed, calls)
+      return ExecutorRuntime.layer({
+        ...kernelOptions,
+        bindingServices: staticBindingServices(options),
+      }).pipe(Layer.provide(BunServices.layer))
     }),
   ).pipe(Layer.provide(SkillFileSystem.fileSystemLayer), Layer.provide(BunServices.layer))
 

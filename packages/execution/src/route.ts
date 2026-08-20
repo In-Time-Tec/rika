@@ -13,7 +13,7 @@ import { ModelRoute } from "tenetkit/ai"
 import { Errors, ExecutableRegistration, ExecutableResolver } from "tenetkit/runtime"
 import type { HarnessState } from "tenetkit/harness"
 import { Cell, CellTool, KernelPool, type KernelProfile } from "tenetkit/repl"
-import * as CellContext from "./cell-context"
+import * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import * as BindingModules from "@rika/kernel/binding-modules"
 import * as HarnessPromptSections from "@rika/kernel/harness-prompt-sections"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
@@ -38,7 +38,7 @@ export interface KernelOptions {
   readonly trustMode?: KernelProfile.TrustMode
 }
 
-export type LocalCellServices = KernelPool.KernelPool | CellContext.Service
+export type LocalCellServices = KernelPool.KernelPool | ExecutorRuntime.CellContext
 
 export interface LocalCellRoute {
   readonly _tag: "Local"
@@ -350,7 +350,7 @@ const cellExecutor = (
       execute: (request) => {
         if (!CellTool.route.matches(request)) return unsupportedCellTool(request.call.name)
         return Effect.scoped(
-          Context.get(services, CellContext.Service)
+          Context.get(services, ExecutorRuntime.CellContext)
             .enter(request.sessionId)
             .pipe(
               Effect.andThen(

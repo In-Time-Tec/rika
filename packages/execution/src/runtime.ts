@@ -2,7 +2,7 @@ import { ModelRegistry } from "tenetkit"
 import type { HarnessState } from "tenetkit/harness"
 import { KernelPool, KernelStateStore } from "tenetkit/repl"
 import type * as ExecutionPins from "@rika/kernel/execution-pins"
-import type * as CellContext from "./cell-context"
+import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import { Approval, Run, RunTree, Runtime } from "tenetkit/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
@@ -38,7 +38,7 @@ const derivedKernelOptions = (filename: string): KernelOptions => {
 }
 
 /** The kernel a cell runs in, plus the seam that answers its host requests. */
-export type KernelPoolServices = KernelPool.KernelPool | CellContext.Service
+export type KernelPoolServices = KernelPool.KernelPool | ExecutorRuntime.CellContext
 
 export interface LocalCells extends LocalCellResolver {
   readonly built: Effect.Effect<
@@ -571,10 +571,9 @@ export const layerHosted = (
         ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
       })
       const execution = Layer.effectContext(make(options, credentialStore)).pipe(Layer.provide(apiPostgres))
-      const readiness = Layer.effect(
-        Postgres.Readiness,
-        Effect.map(Postgres.Readiness, Postgres.Readiness.of),
-      ).pipe(Layer.provide(apiPostgres))
+      const readiness = Layer.effect(Postgres.Readiness, Effect.map(Postgres.Readiness, Postgres.Readiness.of)).pipe(
+        Layer.provide(apiPostgres),
+      )
       return Layer.merge(execution, readiness).pipe(
         Layer.catchCause((cause) =>
           Layer.effectContext(

@@ -2,7 +2,7 @@ import { expect, it } from "@effect/vitest"
 import { NestedOperation, ToolContext } from "tenetkit"
 import type { HostBindingRegistry } from "tenetkit/repl"
 import { Context, Effect, Layer, Schema } from "effect"
-import * as CellContext from "../src/cell-context"
+import * as ExecutorRuntime from "../src/executor-runtime"
 
 const toolContext = (sessionId: string, operationKey: string): ToolContext.Interface =>
   ToolContext.ToolContext.of({
@@ -36,8 +36,8 @@ const request = (sessionId: string): HostBindingRegistry.Request => ({
 it.effect("answers each Session's binding request under that Session's own cell identity", () =>
   Effect.gen(function* () {
     const observed: Array<string> = []
-    const calls = Context.get(yield* Layer.build(CellContext.layer), CellContext.Service)
-    const bound = CellContext.bind(observingRegistry(observed), calls)
+    const calls = Context.get(yield* Layer.build(ExecutorRuntime.cellContextLayer), ExecutorRuntime.CellContext)
+    const bound = ExecutorRuntime.bind(observingRegistry(observed), calls)
     // Two Sessions each enter with their own identity, exactly as two concurrent cells would.
     yield* Effect.scoped(
       calls
@@ -62,8 +62,8 @@ it.effect("answers each Session's binding request under that Session's own cell 
 it.effect("never answers one Session's request under another Session's identity", () =>
   Effect.gen(function* () {
     const observed: Array<string> = []
-    const calls = Context.get(yield* Layer.build(CellContext.layer), CellContext.Service)
-    const bound = CellContext.bind(observingRegistry(observed), calls)
+    const calls = Context.get(yield* Layer.build(ExecutorRuntime.cellContextLayer), ExecutorRuntime.CellContext)
+    const bound = ExecutorRuntime.bind(observingRegistry(observed), calls)
     yield* Effect.scoped(
       calls.enter("session-a").pipe(
         Effect.andThen(
@@ -80,8 +80,8 @@ it.effect("never answers one Session's request under another Session's identity"
 it.effect("refuses a binding request raised outside any executing cell", () =>
   Effect.gen(function* () {
     const observed: Array<string> = []
-    const calls = Context.get(yield* Layer.build(CellContext.layer), CellContext.Service)
-    const bound = CellContext.bind(observingRegistry(observed), calls)
+    const calls = Context.get(yield* Layer.build(ExecutorRuntime.cellContextLayer), ExecutorRuntime.CellContext)
+    const bound = ExecutorRuntime.bind(observingRegistry(observed), calls)
     const response = yield* bound.invoke(request("session-a"))
     expect(response._tag).toBe("Failure")
     if (response._tag === "Failure")
@@ -93,8 +93,8 @@ it.effect("refuses a binding request raised outside any executing cell", () =>
 it.effect("releases a Session's identity when its cell completes", () =>
   Effect.gen(function* () {
     const observed: Array<string> = []
-    const calls = Context.get(yield* Layer.build(CellContext.layer), CellContext.Service)
-    const bound = CellContext.bind(observingRegistry(observed), calls)
+    const calls = Context.get(yield* Layer.build(ExecutorRuntime.cellContextLayer), ExecutorRuntime.CellContext)
+    const bound = ExecutorRuntime.bind(observingRegistry(observed), calls)
     yield* Effect.scoped(
       calls
         .enter("session-a")
@@ -126,8 +126,8 @@ it.effect("carries the cell's nested-operation journal and Session store to the 
             )
         }),
     }
-    const calls = Context.get(yield* Layer.build(CellContext.layer), CellContext.Service)
-    const bound = CellContext.bind(registry, calls)
+    const calls = Context.get(yield* Layer.build(ExecutorRuntime.cellContextLayer), ExecutorRuntime.CellContext)
+    const bound = ExecutorRuntime.bind(registry, calls)
     const journal = NestedOperation.NestedOperations.of({
       run: (input, effect) => {
         kinds.push(input.kind)

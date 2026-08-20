@@ -6,7 +6,7 @@ import { Context, Effect, Fiber, Layer } from "effect"
 import { TestClock } from "effect/testing"
 import { Response } from "effect/unstable/ai"
 import { configure } from "../src/route"
-import * as CellContext from "../src/cell-context"
+import * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import * as RemoteCells from "../src/remote-cells"
 
 const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const
@@ -74,7 +74,7 @@ it.effect("routes an admitted cell call through the kernel pool the host supplie
       kernel,
       cell: {
         _tag: "Local",
-        services: yield* Layer.build(Layer.merge(pool, CellContext.layer)),
+        services: yield* Layer.build(Layer.merge(pool, ExecutorRuntime.cellContextLayer)),
       },
     })
     const environment = executorFor(configured, "rika-root")
@@ -104,7 +104,7 @@ it.effect("keeps the pool alive for a second cell rather than releasing it with 
       kernel,
       cell: {
         _tag: "Local",
-        services: yield* Layer.build(Layer.merge(pool, CellContext.layer)),
+        services: yield* Layer.build(Layer.merge(pool, ExecutorRuntime.cellContextLayer)),
       },
     })
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
@@ -139,7 +139,7 @@ it.effect("uses the per-call tool context of each cell rather than one bound at 
       kernel,
       cell: {
         _tag: "Local",
-        services: yield* Layer.build(Layer.merge(pool, CellContext.layer)),
+        services: yield* Layer.build(Layer.merge(pool, ExecutorRuntime.cellContextLayer)),
       },
     })
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
@@ -319,7 +319,7 @@ it.effect("refuses any tool name other than the one advertised cell tool", () =>
       kernel,
       cell: {
         _tag: "Local",
-        services: yield* Layer.build(Layer.merge(pool, CellContext.layer)),
+        services: yield* Layer.build(Layer.merge(pool, ExecutorRuntime.cellContextLayer)),
       },
     })
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
@@ -379,7 +379,7 @@ it.effect("names an async deadline and keeps the next cell healthy", () =>
       kernel: { ...kernel, limits: { ...profile.limits, cellDeadlineMillis: deadlineMillis } },
       cell: {
         _tag: "Local",
-        services: yield* Layer.build(Layer.merge(pool, CellContext.layer)),
+        services: yield* Layer.build(Layer.merge(pool, ExecutorRuntime.cellContextLayer)),
       },
     })
     const context = yield* Layer.build(executorFor(configured, "rika-root"))

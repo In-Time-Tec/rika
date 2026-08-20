@@ -300,6 +300,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@effect/platform-bun": "catalog:",
+        "@rika/kernel": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
