@@ -53,6 +53,7 @@ test(
             env: {
               HOME: home,
               RIKA_DATABASE: `${dataRoot}/rika.db`,
+              RIKA_INTERNAL_SERVER_HOST: "1",
               RIKA_INTERNAL_SERVER_DATA_ROOT: dataRoot,
               RIKA_INTERNAL_SERVER_PROFILE: "default",
               RIKA_INTERNAL_SERVER_GRACE: "60000",
