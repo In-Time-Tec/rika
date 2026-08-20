@@ -23,6 +23,33 @@ export interface IdentityRuntime {
   readonly protectedResourceMetadata: Effect.Effect<object, IdentityRuntimeError>
 }
 
+const snakeCase = (value: string) => value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase()
+
+const snakeCaseFields = (fields: ReadonlyArray<string>) =>
+  Object.fromEntries(fields.map((field) => [field, snakeCase(field)]))
+
+const snakeCasePlugin = (plugin: BetterAuthPlugin): BetterAuthPlugin => {
+  if (plugin.schema === undefined) return plugin
+  return {
+    ...plugin,
+    schema: Object.fromEntries(
+      Object.entries(plugin.schema).map(([model, table]) => [
+        model,
+        {
+          ...table,
+          modelName: snakeCase(table.modelName ?? model),
+          fields: Object.fromEntries(
+            Object.entries(table.fields).map(([field, attributes]) => [
+              field,
+              { ...attributes, fieldName: snakeCase(attributes.fieldName ?? field) },
+            ]),
+          ),
+        },
+      ]),
+    ),
+  }
+}
+
 export const makeBetterAuthIdentityRuntime = (input: {
   readonly config: IdentityConfig
   readonly pool: Pool
@@ -68,6 +95,25 @@ export const makeBetterAuthIdentityRuntime = (input: {
     secret: Redacted.value(config.authSecret),
     database: pool,
     trustedOrigins: [...config.trustedOrigins],
+    user: { fields: snakeCaseFields(["emailVerified", "createdAt", "updatedAt"]) },
+    session: {
+      fields: snakeCaseFields(["expiresAt", "createdAt", "updatedAt", "ipAddress", "userAgent", "userId"]),
+    },
+    account: {
+      fields: snakeCaseFields([
+        "accountId",
+        "providerId",
+        "userId",
+        "accessToken",
+        "refreshToken",
+        "idToken",
+        "accessTokenExpiresAt",
+        "refreshTokenExpiresAt",
+        "createdAt",
+        "updatedAt",
+      ]),
+    },
+    verification: { fields: snakeCaseFields(["expiresAt", "createdAt", "updatedAt"]) },
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
@@ -94,31 +140,32 @@ export const makeBetterAuthIdentityRuntime = (input: {
     },
     advanced: {
       useSecureCookies: config.production,
-      database: {
-        generateId: "uuid",
-      },
     },
     plugins: [
-      organization({
-        creatorRole: "owner",
-        requireEmailVerificationOnInvitation: true,
-        sendInvitationEmail: (data) =>
-          sendMail(
-            invitationEmail({
-              to: data.email,
-              inviter: data.inviter.user.name,
-              organization: data.organization.name,
-              url: `${config.baseUrl}/invitations/${encodeURIComponent(data.id)}`,
-            }),
-          ),
-      }),
-      jwt(),
-      provider,
-      oauthDeviceAuthorization({
-        verificationUri: `${config.baseUrl}/device`,
-        expiresIn: "10m",
-        interval: "5s",
-      }),
+      snakeCasePlugin(
+        organization({
+          creatorRole: "owner",
+          requireEmailVerificationOnInvitation: true,
+          sendInvitationEmail: (data) =>
+            sendMail(
+              invitationEmail({
+                to: data.email,
+                inviter: data.inviter.user.name,
+                organization: data.organization.name,
+                url: `${config.baseUrl}/invitations/${encodeURIComponent(data.id)}`,
+              }),
+            ),
+        }),
+      ),
+      snakeCasePlugin(jwt()),
+      snakeCasePlugin(provider),
+      snakeCasePlugin(
+        oauthDeviceAuthorization({
+          verificationUri: `${config.baseUrl}/device`,
+          expiresIn: "10m",
+          interval: "5s",
+        }),
+      ),
     ],
   })
   const resource = oauthProviderResourceClient(auth).getActions()
