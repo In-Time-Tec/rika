@@ -7,6 +7,13 @@ Rika is a local coding-agent CLI and OpenTUI app written in Effect TypeScript. R
 - Start with `rg -n "<capability-or-symbol>" apps packages` to find the likely owner.
 - Open that owner and its matching tests before expanding to neighboring files.
 
+## Agent state
+
+- Every agent keeps all run-specific state under `.agents/state/<run>/`, including plans, TODO queues, notes, handoffs, and temporary investigation records.
+- `.agents/state/` is Git-ignored local state. Never force-add or commit anything beneath it.
+- Use a distinct child directory for each run or workstream so concurrent agents do not overwrite one another.
+- Durable product behavior, source code, tests, and repository documentation stay in their normal tracked locations; `.agents/state/` never becomes a source of implemented truth.
+
 ## GREENFIELD PROJECT — BREAKING CHANGES ARE WELCOME!!!
 
 - THIS PROJECT HAS NO USERS!!! IT IS GREENFIELD!!!
