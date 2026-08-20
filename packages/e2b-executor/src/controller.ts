@@ -269,6 +269,7 @@ export const layer = (
 
       const matchesGeneration = (
         assignment: ExecutorAssignment,
+        templateId: string,
         templateBuildId: string,
         metadata: Readonly<Record<string, string>>,
       ) =>
@@ -277,12 +278,13 @@ export const layer = (
         metadata["rika.assignment-id"] === assignment.id &&
         metadata["rika.generation"] === assignment.generation &&
         assignment.placement._tag === "E2BPlacement" &&
+        templateId === options.templateId &&
         templateBuildId === assignment.placement.templateBuildId
 
       const reconcileCreate = Effect.fn("Controller.reconcileCreate")(function* (assignment: ExecutorAssignment) {
         const inventory = yield* provider.inventory.pipe(Effect.mapError(providerFailure))
         const matches = inventory.filter((entry) =>
-          matchesGeneration(assignment, entry.templateBuildId, entry.metadata),
+          matchesGeneration(assignment, entry.templateId, entry.templateBuildId, entry.metadata),
         )
         if (matches.length === 0) return yield* failure("provider", "create outcome is unknown and no sandbox exists")
         const [adopt, ...duplicates] = [...matches].sort((left, right) => left.sandboxId.localeCompare(right.sandboxId))
@@ -334,9 +336,7 @@ export const layer = (
         return yield* createAndBootstrap(provisioning, credential)
       })
 
-      const resumeAssignment = Effect.fn("Controller.resumeAssignment")(function* (
-        assignment: ExecutorAssignment,
-      ) {
+      const resumeAssignment = Effect.fn("Controller.resumeAssignment")(function* (assignment: ExecutorAssignment) {
         const credential = yield* issueSecret("executor-bootstrap")
         const provisioning = yield* assignments
           .resume({
@@ -392,7 +392,9 @@ export const layer = (
       const pause = Effect.fn("Controller.pause")(function* (key: AssignmentKey) {
         const assignment = yield* current(key)
         if (assignment.lifecycle._tag === "Paused") {
-          yield* provider.pauseFilesystem(assignment.lifecycle.providerInstanceId).pipe(Effect.mapError(providerFailure))
+          yield* provider
+            .pauseFilesystem(assignment.lifecycle.providerInstanceId)
+            .pipe(Effect.mapError(providerFailure))
           return publicAssignment(assignment)
         }
         if (assignment.lifecycle._tag !== "Active")

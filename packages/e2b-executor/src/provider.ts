@@ -1,6 +1,7 @@
 import {
   ALL_TRAFFIC,
   Sandbox,
+  Template,
   type SandboxConnectOpts,
   type SandboxInfo,
   type SandboxListOpts,
@@ -33,6 +34,7 @@ export interface Handle {
 }
 
 export interface InventoryEntry extends Handle {
+  readonly templateId: string
   readonly templateBuildId: string
   readonly metadata: Readonly<Record<string, string>>
 }
@@ -64,7 +66,21 @@ export interface Paginator {
 }
 
 export interface Sdk {
+  readonly templateTags: (
+    templateId: string,
+    options: SandboxConnectOpts,
+  ) => Promise<ReadonlyArray<{ readonly tag: string; readonly buildId: string }>>
+  readonly buildStatus: (
+    templateId: string,
+    buildId: string,
+    options: SandboxConnectOpts,
+  ) => Promise<{
+    readonly templateId: string
+    readonly buildId: string
+    readonly status: "building" | "waiting" | "ready" | "error"
+  }>
   readonly create: (templateId: string, options: SandboxOpts) => Promise<SdkHandle>
+  readonly getInfo: (sandboxId: string, options: SandboxConnectOpts) => Promise<SandboxInfo>
   readonly connect: (sandboxId: string, options: SandboxConnectOpts) => Promise<SdkHandle>
   readonly pause: (sandboxId: string, options: SandboxPauseOpts) => Promise<boolean>
   readonly kill: (sandboxId: string, options: SandboxConnectOpts) => Promise<boolean>
@@ -90,7 +106,15 @@ const bootstrapHeaders = (trafficAccessToken: string) => ({
 })
 
 const liveSdk: Sdk = {
+  templateTags: (templateId, options) => Template.getTags(templateId, options),
+  buildStatus: (templateId, buildId, options) =>
+    Template.getBuildStatus({ templateId, buildId }, options).then((status) => ({
+      templateId: status.templateID,
+      buildId: status.buildID,
+      status: status.status,
+    })),
   create: (templateId, options) => Sandbox.create(templateId, options),
+  getInfo: (sandboxId, options) => Sandbox.getInfo(sandboxId, options),
   connect: (sandboxId, options) => Sandbox.connect(sandboxId, options),
   pause: (sandboxId, options) => Sandbox.pause(sandboxId, options),
   kill: (sandboxId, options) => Sandbox.kill(sandboxId, options),
@@ -113,8 +137,7 @@ const liveSdk: Sdk = {
 }
 
 const managedMetadata = { "rika.managed": "e2b-executor" } as const
-const bootstrapUrl = (sandboxId: string, domain = "e2b.app") =>
-  `https://7070-${sandboxId}.${domain}/.rika/bootstrap`
+const bootstrapUrl = (sandboxId: string, domain = "e2b.app") => `https://7070-${sandboxId}.${domain}/.rika/bootstrap`
 
 export const testing = { bootstrapHeaders, bootstrapUrl } as const
 
@@ -131,7 +154,33 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
       catch: () => ProviderError.make({ operation, message: `E2B ${operation} failed` }),
     })
 
+  const attestTemplateBuild = Effect.fn("Provider.attestTemplateBuild")(function* (request: {
+    readonly operation: "create" | "inventory"
+    readonly templateId: string
+    readonly templateBuildId: string
+  }) {
+    const [tags, status] = yield* Effect.all(
+      [
+        attempt(request.operation, () => sdk.templateTags(request.templateId, connection)),
+        attempt(request.operation, () => sdk.buildStatus(request.templateId, request.templateBuildId, connection)),
+      ],
+      { concurrency: 2 },
+    )
+    const defaultTag = tags.find((tag) => tag.tag === "default")
+    if (
+      defaultTag?.buildId !== request.templateBuildId ||
+      status.templateId !== request.templateId ||
+      status.buildId !== request.templateBuildId ||
+      status.status !== "ready"
+    )
+      return yield* ProviderError.make({
+        operation: request.operation,
+        message: "E2B template build attestation failed",
+      })
+  })
+
   const create = Effect.fn("Provider.create")(function* (request: CreateRequest) {
+    yield* attestTemplateBuild({ ...request, operation: "create" })
     const sandbox = yield* attempt("create", () =>
       sdk.create(request.templateId, {
         ...connection,
@@ -156,6 +205,18 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
         envs: request.environment,
       }),
     )
+    yield* Effect.all([
+      attestTemplateBuild({ ...request, operation: "create" }),
+      attempt("create", () => sdk.getInfo(sandbox.sandboxId, connection)).pipe(
+        Effect.flatMap((info) =>
+          info.templateId === request.templateId
+            ? Effect.void
+            : Effect.fail(
+                ProviderError.make({ operation: "create", message: "E2B sandbox template attestation failed" }),
+              ),
+        ),
+      ),
+    ]).pipe(Effect.tapError(() => attempt("kill", () => sdk.kill(sandbox.sandboxId, connection)).pipe(Effect.ignore)))
     return { sandboxId: sandbox.sandboxId, state: "running" as const }
   })
 
@@ -191,12 +252,28 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
     })
     const entries: Array<SandboxInfo> = []
     while (paginator.hasNext) entries.push(...(yield* attempt("inventory", () => paginator.nextItems())))
-    return entries.flatMap((entry) => {
+    const managed = entries.flatMap((entry) => {
       const templateBuildId = entry.metadata["rika.template-build-id"]
       return templateBuildId === undefined
         ? []
-        : [{ sandboxId: entry.sandboxId, state: entry.state, templateBuildId, metadata: entry.metadata }]
+        : [
+            {
+              sandboxId: entry.sandboxId,
+              state: entry.state,
+              templateId: entry.templateId,
+              templateBuildId,
+              metadata: entry.metadata,
+            },
+          ]
     })
+    const selections = Array.from(
+      new Map(managed.map((entry) => [`${entry.templateId}:${entry.templateBuildId}`, entry])).values(),
+    )
+    yield* Effect.forEach(selections, (entry) => attestTemplateBuild({ ...entry, operation: "inventory" }), {
+      concurrency: 4,
+      discard: true,
+    })
+    return managed
   })
 
   return Provider.of({ create, bootstrap, connect, pauseFilesystem, kill, touch, inventory })
