@@ -31,7 +31,7 @@
 				port {$API_PORT}
 				refresh 1s
 				dial_timeout 2s
-				versions ipv4 ipv6
+				versions ipv4
 			}
 			lb_retries 0
 			header_up Host {upstream_hostport}
@@ -46,7 +46,7 @@
 				port {$API_PORT}
 				refresh 1s
 				dial_timeout 2s
-				versions ipv4 ipv6
+				versions ipv4
 			}
 			lb_retries 0
 			header_up Host {upstream_hostport}
@@ -60,7 +60,7 @@
 				port {$WEB_PORT}
 				refresh 1s
 				dial_timeout 2s
-				versions ipv4 ipv6
+				versions ipv4
 			}
 			lb_retries 0
 			header_up Host {upstream_hostport}
