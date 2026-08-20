@@ -39,6 +39,6 @@ const startClient = () => {
 }
 
 if (import.meta.main) {
-  if (isServerProcessLaunch()) startServer()
+  if (Effect.runSync(isServerProcessLaunch)) startServer()
   else startClient()
 }

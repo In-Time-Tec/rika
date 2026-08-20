@@ -20,6 +20,7 @@ import { Provider, type BootstrapRequest, type CreateRequest } from "../../../pa
 import { type Gateway, type Socket } from "../../api/src/executor-gateway"
 import { Executor, service as executorService } from "../../api/src/executor"
 import { HostedProduct, layer as hostedProductLayer } from "../../api/src/hosted-product"
+import { layer as localExecutorLayer } from "../../api/src/local-executor"
 import { makeRikaApiHandler } from "../../api/src/api"
 import type { HttpDependencies } from "../../api/src/http"
 import * as HostedCommand from "../src/command/root/hosted-command-dispatch"
@@ -222,7 +223,11 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
           templateBuildId: "template-build-v1-immutable",
           providerScope: "integration-test",
         }).pipe(Layer.provide(shared))
-        const executorLayer = executorService.pipe(Layer.provide(controller), Layer.provide(shared))
+        const executorLayer = executorService.pipe(
+          Layer.provide(controller),
+          Layer.provideMerge(localExecutorLayer.pipe(Layer.provide(shared))),
+          Layer.provide(shared),
+        )
         const context = yield* Layer.build(Layer.merge(productLayer, executorLayer).pipe(Layer.provideMerge(shared)))
         const product = Context.get(context, HostedProduct)
         const executor = Context.get(context, Executor)

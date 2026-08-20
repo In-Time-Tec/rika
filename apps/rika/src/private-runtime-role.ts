@@ -1,3 +1,5 @@
+import { Config, Effect, Option } from "effect"
+
 export const serverProcessRole = "--internal-local-executor"
 
 export interface ServerProcessRuntime {
@@ -15,7 +17,7 @@ export const serverProcessRuntime = (input: {
     ? { executable: input.packagedEntrypoint, arguments: [serverProcessRole] }
     : { executable: input.executable, arguments: [input.sourceEntrypoint, serverProcessRole] }
 
-export const isServerProcessRole = (argv: ReadonlyArray<string>): boolean =>
-  argv.length === 1 && argv[0] === serverProcessRole
-
-export const isServerProcessLaunch = (): boolean => isServerProcessRole(process.argv.slice(2))
+export const isServerProcessLaunch = Config.option(Config.string("RIKA_INTERNAL_SERVER_HOST")).pipe(
+  Effect.map((value) => Option.contains(value, "1")),
+  Effect.orDie,
+)
