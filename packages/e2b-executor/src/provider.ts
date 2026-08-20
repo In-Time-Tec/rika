@@ -182,7 +182,7 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
   const create = Effect.fn("Provider.create")(function* (request: CreateRequest) {
     yield* attestTemplateBuild({ ...request, operation: "create" })
     const sandbox = yield* attempt("create", () =>
-      sdk.create(request.templateId, {
+      sdk.create(`${request.templateId}:${request.templateBuildId}`, {
         ...connection,
         timeoutMs: request.idleTimeoutMillis,
         secure: true,
