@@ -215,7 +215,7 @@ describe("Operation thread actions", () => {
     }),
   )
 
-  it.effect("forks terminal recorded shells with their canonical transcript and no Baton Run", () =>
+  it.effect("forks terminal recorded shells with their canonical transcript and no TenetKit Run", () =>
     Effect.gen(function* () {
       const source = thread("shell-source")
       const repository = yield* ThreadRepository.makeMemory([source])

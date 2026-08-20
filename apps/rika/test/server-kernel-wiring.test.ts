@@ -2,8 +2,8 @@ import { expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { ToolContext, ToolExecutor } from "tenetkit"
 import { CellTool, KernelPool, KernelProfile, TestKernel } from "tenetkit/repl"
-import * as CellCallContext from "@rika/baton-execution/baton-cell-call-context"
-import { configure } from "@rika/baton-execution/baton-route"
+import * as CellContext from "@rika/execution/cell-context"
+import { configure } from "@rika/execution/route"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Context, Effect, FileSystem, Function, Layer } from "effect"
@@ -72,7 +72,7 @@ it.effect("mounts the rika surface as a dependency of the pool, so a cell can re
     const built = yield* Layer.build(layer)
     // Both halves are present: the pool a cell runs in, and the per-call identity seam.
     expect(Context.get(built, KernelPool.KernelPool)).toBeDefined()
-    expect(Context.get(built, CellCallContext.CellCallContext)).toBeDefined()
+    expect(Context.get(built, CellContext.Service)).toBeDefined()
   }).pipe(provideLayer(BunServices.layer)),
 )
 
@@ -113,13 +113,13 @@ it.effect("routes an admitted cell through the pool the composition root supplie
           return { _tag: "Value", value: `evaluated:${request.code}` }
         },
       }),
-      CellCallContext.layer,
+      CellContext.layer,
     )
     const configured = yield* configure({
       executionRoute: testExecutionRoute(),
       workspace: "/workspace",
       kernel,
-      kernelPool: yield* Layer.build(pool),
+      cell: { _tag: "Local", services: yield* Layer.build(pool) },
     })
     const entry = configured.resolverEntries.find(({ agent }) => agent.name === "rika-root")!
     const environment = entry.agent.open((_agent, agentEnvironment) => agentEnvironment)

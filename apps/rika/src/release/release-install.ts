@@ -59,10 +59,9 @@ export const installLayout = Effect.fn("ReleaseInstall.layout")(function* (execu
     interactive: path.join(installRoot, "bin", ".rika-interactive"),
     server: path.join(installRoot, "bin", ".rika-server"),
   }
-  const present = yield* Effect.all(
-    [fileSystem.exists(layout.binary), fileSystem.exists(layout.interactive), fileSystem.exists(layout.server)],
-    { concurrency: 2 },
-  ).pipe(Effect.mapError(platformFailure("inspect the current install")))
+  const present = yield* Effect.all([fileSystem.exists(layout.binary), fileSystem.exists(layout.interactive)], {
+    concurrency: 2,
+  }).pipe(Effect.mapError(platformFailure("inspect the current install")))
   if (present.includes(false))
     return yield* failWith(
       "unmanaged-install",
@@ -101,7 +100,6 @@ export const publishInstall = Effect.fn("ReleaseInstall.publish")(function* (opt
     [
       fileSystem.exists(path.join(payload, "bin", "rika")),
       fileSystem.exists(path.join(payload, "bin", ".rika-interactive")),
-      fileSystem.exists(path.join(payload, "bin", ".rika-server")),
     ],
     { concurrency: 2 },
   ).pipe(Effect.mapError(platformFailure(`inspect ${options.archiveFile}`)))

@@ -4,6 +4,7 @@ import * as Operation from "@rika/product/product-operation-service"
 import * as ServerHandshake from "@rika/product/server-service-handshake"
 import * as ServerService from "@rika/product/server-service"
 import { Config, Console, Context, Crypto, Effect, FileSystem, Layer, Option, Path, Schema, Stdio } from "effect"
+import { HttpClient } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Command } from "effect/unstable/cli"
 import { command, version } from "../command/root/rika-command"
@@ -13,6 +14,7 @@ import { spawn as spawnServer } from "../server/process/server-process-spawn"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
 import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
 import { inheritedEnvironment, privateRuntime } from "./private-runtime-launch"
+import * as HostedCommand from "../command/root/hosted-command-dispatch"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -172,6 +174,34 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
     }),
   )
 
+const hostedCommandLayer = Layer.effect(
+  HostedCommand.Service,
+  Effect.gen(function* () {
+    const platform = yield* Effect.context<
+      | Crypto.Crypto
+      | FileSystem.FileSystem
+      | Path.Path
+      | ChildProcessSpawner.ChildProcessSpawner
+      | HttpClient.HttpClient
+    >()
+    return HostedCommand.Service.of({
+      run: (input) =>
+        Effect.gen(function* () {
+          const home = yield* Config.string("HOME").pipe(Effect.orElseSucceed(() => process.cwd()))
+          const hosted = yield* Effect.tryPromise({
+            try: () => import("../hosted/hosted-cli"),
+            catch: () =>
+              ProductOperation.OperationUnavailable.make({
+                operation: input._tag,
+                message: "Hosted account support could not be loaded",
+              }),
+          })
+          return yield* provideLayerScoped(hosted.liveLayer(home))(hosted.run(input))
+        }).pipe(Effect.provide(platform)),
+    })
+  }),
+)
+
 export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<string>) {
   const program = (
     argv === undefined ? Command.run(command, { version }) : Command.runWith(command, { version })(argv)
@@ -188,7 +218,9 @@ export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<s
       "rika.version": version,
     }),
   )
-  return yield* program.pipe(provideLayerScoped(dispatcherLayer(argv).pipe(Layer.provide(serverLayer))))
+  return yield* program.pipe(
+    provideLayerScoped(Layer.merge(dispatcherLayer(argv).pipe(Layer.provide(serverLayer)), hostedCommandLayer)),
+  )
 })
 
 export const isInteractiveClientLaunch = (): boolean => interactiveClientLaunch

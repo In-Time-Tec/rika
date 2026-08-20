@@ -28,8 +28,8 @@ const execute = (options: WorkerOptions) =>
     process.chdir(isolation.cwd)
     if (Bun.env.HOME !== isolation.home || Bun.env.TMPDIR !== isolation.temporary)
       throw new Error("worker HOME and TMPDIR must be set by the orchestrator before startup")
-    if (Bun.env.RIKA_BATON_DATABASE !== isolation.batonDatabase)
-      throw new Error("worker Baton database environment does not match its explicit database")
+    if (Bun.env.RIKA_TENETKIT_DATABASE !== isolation.tenetkitDatabase)
+      throw new Error("worker TenetKit database environment does not match its explicit database")
 
     const responseUsage = Response.Usage.make({
       inputTokens: { total: 7, uncached: 7, cacheRead: 0, cacheWrite: 0 },
@@ -96,7 +96,7 @@ const execute = (options: WorkerOptions) =>
     )
     const resolver = ExecutableResolver.makeStatic([{ executable, agent: Agent.close(agent, model) }])
     const runtimeLayer = Runtime.layerSqlite({
-      filename: isolation.batonDatabase,
+      filename: isolation.tenetkitDatabase,
       resolver,
       addresses: [],
       subscriberQueueCapacity: 1_024,
@@ -157,9 +157,9 @@ const execute = (options: WorkerOptions) =>
       )
 
     if (result.outcome?._tag !== "Succeeded" || !("text" in result.outcome.result))
-      throw new Error(`Baton Run did not succeed with text: ${encodeJson(result.outcome)}`)
+      throw new Error(`TenetKit Run did not succeed with text: ${encodeJson(result.outcome)}`)
     const text = result.outcome.result.text
-    const batonSql = sqlAccounting(isolation.batonDatabase)
+    const tenetkitSql = sqlAccounting(isolation.tenetkitDatabase)
     const identityFile = options.identity
     const identity = decodeJson(HostFiles.read(identityFile)) as Record<string, unknown>
     const resolvedCore = import.meta.resolve("tenetkit")
@@ -179,7 +179,7 @@ const execute = (options: WorkerOptions) =>
     const output: Sample = {
       schemaVersion: 1,
       source,
-      mode: "baton",
+      mode: "tenetkit",
       case: caseName,
       sample: sampleNumber,
       warmup,
@@ -188,8 +188,8 @@ const execute = (options: WorkerOptions) =>
         sha256: new Bun.CryptoHasher("sha256").update(text).digest("hex"),
       },
       correctness: {
-        durableModelParts: batonSql.modelPartEvents,
-        modelResponsesCommitted: batonSql.modelResponseCommittedEvents,
+        durableModelParts: tenetkitSql.modelPartEvents,
+        modelResponsesCommitted: tenetkitSql.modelResponseCommittedEvents,
         terminalFinishes,
       },
       timing: {
@@ -213,9 +213,9 @@ const execute = (options: WorkerOptions) =>
           detail: "Bun.gc(true) supplies full GC but Bun exposes no portable allocator purge operation.",
         },
       },
-      batonSql,
+      tenetkitSql,
       projection: { commitProjectionCalls: 0 },
-      databases: fullEvidence(isolation.batonDatabase),
+      databases: fullEvidence(isolation.tenetkitDatabase),
       identity: {
         ...identity,
         firstResponseKind,

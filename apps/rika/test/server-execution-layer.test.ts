@@ -4,7 +4,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Context, Effect, FileSystem, Layer, Random } from "effect"
 import { configuredBackendLayer } from "../src/server/composition/server-execution-layer"
 
-it.effect("constructs the composed backend without initializing Baton", () =>
+it.effect("constructs the composed backend without initializing TenetKit", () =>
   Effect.gen(function* () {
     const filename = `/tmp/rika-server-composition-${yield* Random.nextInt}.db`
     const backend = configuredBackendLayer({ filename })

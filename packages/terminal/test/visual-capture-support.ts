@@ -127,7 +127,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
         entries: [
           {
             role: "assistant",
-            text: "# Styled Markdown\n\n**bold** and *emphasis* with `inline code`.\n\n| Layer | Owner |\n|---|---|\n| Durable execution | Baton |\n| Product state | Rika |\n\n> muted quote\n\n```ts\nconst answer = 42\n```",
+            text: "# Styled Markdown\n\n**bold** and *emphasis* with `inline code`.\n\n| Layer | Owner |\n|---|---|\n| Durable execution | TenetKit |\n| Product state | Rika |\n\n> muted quote\n\n```ts\nconst answer = 42\n```",
           },
         ],
       },

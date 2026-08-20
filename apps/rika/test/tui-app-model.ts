@@ -1,4 +1,4 @@
-export { step as model, laneExecutionRoute, makeLaneModels } from "@rika/baton-execution/baton-test-harness"
+export { step as model, laneExecutionRoute, makeLaneModels } from "@rika/execution/test-harness"
 export type {
   Lane,
   LaneModels,
@@ -6,4 +6,4 @@ export type {
   Profile,
   ProviderHttpEnvelopeCounts,
   Step,
-} from "@rika/baton-execution/baton-test-harness"
+} from "@rika/execution/test-harness"

@@ -25,7 +25,9 @@ test(
               fileSystem.readFile(path.join(actual, name)),
               fileSystem.readFile(path.join(approved, name)),
             ]).pipe(
-              Effect.tap(([actualFile, approvedFile]) => Effect.sync(() => expect(actualFile).toEqual(approvedFile))),
+              Effect.tap(([actualFile, approvedFile]) =>
+                Effect.sync(() => expect(actualFile, name).toEqual(approvedFile)),
+              ),
             ),
           )
           const frames = yield* Effect.forEach(

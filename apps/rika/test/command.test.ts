@@ -149,6 +149,16 @@ it.effect("renders client help without creating the configured data root", () =>
           },
         })
         yield* runClient(["--help"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
+        yield* runClient(["auth", "--help"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
+        yield* runClient(["credential", "--help"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
+        yield* runClient(["org", "--help"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
+        yield* runClient(["thread", "new", "--help"]).pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, provider),
+        )
+        yield* runClient(["auth", "status", "--json"]).pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, provider),
+        )
+        expect((yield* TestConsole.logLines).join("\n")).toContain('{"authenticated":false}')
         expect(yield* fileSystem.exists(dataRoot)).toBe(false)
       }),
     ),
@@ -235,16 +245,16 @@ it.effect("rejects stream input without stream output", () =>
   }),
 )
 
-it.effect("exposes only the openai account provider name", () =>
+it.effect("exposes only the supported model credential providers", () =>
   Effect.gen(function* () {
-    yield* failsWithoutDispatch(["auth", "login", "chatgpt"])
-    yield* failsWithoutDispatch(["auth", "status", "codex"])
+    yield* failsWithoutDispatch(["credential", "set", "chatgpt"])
+    yield* failsWithoutDispatch(["credential", "list", "codex"])
   }),
 )
 
 it.effect("normalizes optional thread-list values", () =>
   Effect.gen(function* () {
-    expect(yield* capture(["threads", "list", "--limit", "5"])).toEqual([{ _tag: "Thread", action: "list", limit: 5 }])
+    expect(yield* capture(["thread", "list", "--limit", "5"])).toEqual([{ _tag: "Thread", action: "list", limit: 5 }])
   }),
 )
 
@@ -301,31 +311,31 @@ it.effect("rejects an invalid interactive workspace before dispatch", () =>
 it.effect("dispatches every thread operation", () =>
   Effect.gen(function* () {
     const cases: ReadonlyArray<readonly [ReadonlyArray<string>, Input]> = [
-      [["threads", "create"], { _tag: "Thread", action: "new" }],
-      [["threads", "continue", "--last"], { _tag: "Interactive", prompt: [], last: true, ephemeral: false }],
-      [["threads", "continue", "a"], { _tag: "Interactive", prompt: [], threadId: "a", ephemeral: false }],
-      [["threads", "list", "--include-archived"], { _tag: "Thread", action: "list", includeArchived: true }],
-      [["threads", "list"], { _tag: "Thread", action: "list" }],
-      [["threads", "search", "hello"], { _tag: "Thread", action: "search", query: ["hello"] }],
+      [["thread", "new"], { _tag: "Thread", action: "new" }],
+      [["thread", "continue", "--last"], { _tag: "Interactive", prompt: [], last: true, ephemeral: false }],
+      [["thread", "continue", "a"], { _tag: "Interactive", prompt: [], threadId: "a", ephemeral: false }],
+      [["thread", "list", "--include-archived"], { _tag: "Thread", action: "list", includeArchived: true }],
+      [["thread", "list"], { _tag: "Thread", action: "list" }],
+      [["thread", "search", "hello"], { _tag: "Thread", action: "search", query: ["hello"] }],
       [
-        ["threads", "search", "hello", "world", "--include-archived", "--limit", "2"],
+        ["thread", "search", "hello", "world", "--include-archived", "--limit", "2"],
         { _tag: "Thread", action: "search", query: ["hello", "world"], includeArchived: true, limit: 2 },
       ],
-      [["threads", "rename", "a", "Title"], { _tag: "Thread", action: "rename", threadId: "a", title: "Title" }],
+      [["thread", "rename", "a", "Title"], { _tag: "Thread", action: "rename", threadId: "a", title: "Title" }],
       [
-        ["threads", "label", "a", "one", "two"],
+        ["thread", "label", "a", "one", "two"],
         { _tag: "Thread", action: "label", threadId: "a", labels: ["one", "two"] },
       ],
-      [["threads", "pin", "a"], { _tag: "Thread", action: "pin", threadId: "a" }],
-      [["threads", "archive", "a"], { _tag: "Thread", action: "archive", threadId: "a" }],
-      [["threads", "unarchive", "a"], { _tag: "Thread", action: "unarchive", threadId: "a" }],
-      [["threads", "delete", "a"], { _tag: "Thread", action: "delete", threadId: "a" }],
-      [["threads", "usage", "a"], { _tag: "Thread", action: "usage", threadId: "a" }],
-      [["threads", "fork", "a"], { _tag: "Thread", action: "fork", threadId: "a" }],
-      [["threads", "fork", "a", "--at-turn", "t"], { _tag: "Thread", action: "fork", threadId: "a", atTurn: "t" }],
-      [["threads", "export", "a"], { _tag: "Thread", action: "export", threadId: "a", format: "json" }],
+      [["thread", "pin", "a"], { _tag: "Thread", action: "pin", threadId: "a" }],
+      [["thread", "archive", "a"], { _tag: "Thread", action: "archive", threadId: "a" }],
+      [["thread", "unarchive", "a"], { _tag: "Thread", action: "unarchive", threadId: "a" }],
+      [["thread", "delete", "a"], { _tag: "Thread", action: "delete", threadId: "a" }],
+      [["thread", "usage", "a"], { _tag: "Thread", action: "usage", threadId: "a" }],
+      [["thread", "fork", "a"], { _tag: "Thread", action: "fork", threadId: "a" }],
+      [["thread", "fork", "a", "--at-turn", "t"], { _tag: "Thread", action: "fork", threadId: "a", atTurn: "t" }],
+      [["thread", "export", "a"], { _tag: "Thread", action: "export", threadId: "a", format: "json" }],
       [
-        ["threads", "export", "a", "--format", "markdown"],
+        ["thread", "export", "a", "--format", "markdown"],
         { _tag: "Thread", action: "export", threadId: "a", format: "markdown" },
       ],
       [["last"], { _tag: "Thread", action: "last" }],
@@ -337,20 +347,20 @@ it.effect("dispatches every thread operation", () =>
 
 it.effect("rejects invalid thread relationships", () =>
   Effect.gen(function* () {
-    yield* failsWithoutDispatch(["threads", "continue"])
-    yield* failsWithoutDispatch(["threads", "continue", "--last", "a"])
-    yield* failsWithoutDispatch(["threads", "continue", "a", "b"])
-    yield* failsWithoutDispatch(["threads", "search"])
-    yield* failsWithoutDispatch(["threads", "label", "a"])
-    yield* failsWithoutDispatch(["threads", "rename"])
-    yield* failsWithoutDispatch(["threads", "pin"])
-    yield* failsWithoutDispatch(["threads", "archive"])
-    yield* failsWithoutDispatch(["threads", "unarchive"])
-    yield* failsWithoutDispatch(["threads", "delete"])
-    yield* failsWithoutDispatch(["threads", "usage"])
-    yield* failsWithoutDispatch(["threads", "fork"])
-    yield* failsWithoutDispatch(["threads", "export"])
-    yield* failsWithoutDispatch(["threads", "export", "a", "--format", "xml"])
+    yield* failsWithoutDispatch(["thread", "continue"])
+    yield* failsWithoutDispatch(["thread", "continue", "--last", "a"])
+    yield* failsWithoutDispatch(["thread", "continue", "a", "b"])
+    yield* failsWithoutDispatch(["thread", "search"])
+    yield* failsWithoutDispatch(["thread", "label", "a"])
+    yield* failsWithoutDispatch(["thread", "rename"])
+    yield* failsWithoutDispatch(["thread", "pin"])
+    yield* failsWithoutDispatch(["thread", "archive"])
+    yield* failsWithoutDispatch(["thread", "unarchive"])
+    yield* failsWithoutDispatch(["thread", "delete"])
+    yield* failsWithoutDispatch(["thread", "usage"])
+    yield* failsWithoutDispatch(["thread", "fork"])
+    yield* failsWithoutDispatch(["thread", "export"])
+    yield* failsWithoutDispatch(["thread", "export", "a", "--format", "xml"])
   }),
 )
 
@@ -360,13 +370,13 @@ it.effect("dispatches catalog, extension, and maintenance operations", () =>
       [["config", "list"], { _tag: "Config", action: "list" }],
       [["config", "edit", "--workspace"], { _tag: "Config", action: "edit", workspace: true }],
       [["config", "keymap"], { _tag: "Config", action: "keymap" }],
-      [["auth", "login", "openai"], { _tag: "Auth", action: "login", provider: "openai", deviceCode: false }],
+      [["credential", "set", "openai"], { _tag: "Auth", action: "login", provider: "openai", deviceCode: false }],
       [
-        ["auth", "login", "openai", "--device-code"],
+        ["credential", "set", "openai", "--device-code"],
         { _tag: "Auth", action: "login", provider: "openai", deviceCode: true },
       ],
-      [["auth", "status", "openai"], { _tag: "Auth", action: "status", provider: "openai" }],
-      [["auth", "logout", "openai"], { _tag: "Auth", action: "logout", provider: "openai" }],
+      [["credential", "list", "openai"], { _tag: "Auth", action: "status", provider: "openai" }],
+      [["credential", "revoke", "openai"], { _tag: "Auth", action: "logout", provider: "openai" }],
       [["tools", "list"], { _tag: "ToolCatalog", action: "list" }],
       [["tools", "list", "--mode", "ultra"], { _tag: "ToolCatalog", action: "list", mode: "ultra" }],
       [["tools", "list", "--mode", "deep-review"], { _tag: "ToolCatalog", action: "list", mode: "deep-review" }],
@@ -420,7 +430,7 @@ it.effect("renders version and branch help without dispatching", () =>
     const output = yield* execute(
       Effect.gen(function* () {
         yield* run(["version"])
-        yield* run(["threads", "--help"])
+        yield* run(["thread", "--help"])
         yield* run(["config", "--help"])
         yield* run(["tools", "--help"])
         yield* run(["skills", "--help"])
@@ -431,7 +441,7 @@ it.effect("renders version and branch help without dispatching", () =>
       layer,
     )
     expect(output.join("\n")).toContain("0.0.0")
-    expect(output.join("\n")).toContain("Manage local durable threads")
+    expect(output.join("\n")).toContain("Manage local and remote durable threads")
     expect(yield* Ref.get(calls)).toEqual([])
   }),
 )

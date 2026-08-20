@@ -2,7 +2,7 @@
 
 Thin Effect CLI shell and process composition root. Leaf command modules export command values. `src/command/root/rika-command.ts` exports the root command and testable `run(argv)`. `src/command/root/noninteractive-run-command.ts` owns JSONL parsing. `src/client-main.ts`, `src/interactive-main.ts`, `src/server-main.ts`, and `src/performance-main.ts` interpret their isolated process programs.
 
-Do not initialize SQL, Baton, models, MCP, plugins, or OpenTUI before command parsing selects an operation that needs them.
+Do not initialize SQL, TenetKit, models, MCP, plugins, or OpenTUI before command parsing selects an operation that needs them.
 
 Use `*.test.ts` for Unit tests of one owned behavior or interface, even when they need real OpenTUI adapters.
 

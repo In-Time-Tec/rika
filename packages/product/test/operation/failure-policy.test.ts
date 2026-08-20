@@ -9,7 +9,7 @@ import {
 } from "../../src/operation/failure-message"
 
 describe("failure policy", () => {
-  it("classifies model failures from the structured Baton event, never from prose", () => {
+  it("classifies model failures from the structured TenetKit event, never from prose", () => {
     const transient = modelFailurePresentation({ category: "rate-limit", classification: "transient" })
     expect(transient).toEqual({
       message: "The provider limited how often requests are accepted.",

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@rika/cli",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -18,7 +18,7 @@
     "@effect/platform-bun": "catalog:",
     "@opentui/core": "catalog:",
     "tenetkit": "catalog:",
-    "@rika/baton-execution": "workspace:*",
+    "@rika/execution": "workspace:*",
     "@rika/kernel": "workspace:*",
     "@rika/product": "workspace:*",
     "@rika/configuration": "workspace:*",
@@ -31,7 +31,11 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "@rika/identity": "workspace:*",
+    "@rika/remote-execution": "workspace:*",
     "@types/bun": "catalog:",
+    "@types/pg": "8.15.5",
+    "pg": "8.21.0",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },

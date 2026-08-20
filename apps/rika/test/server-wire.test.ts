@@ -83,7 +83,7 @@ describe("server client message frames", () => {
     expect(makeClientMessageFrameDecoder()(frames[0]!)).toEqual(message)
   })
 
-  it("round-trips typed authorization decisions without raw Baton identities", () => {
+  it("round-trips typed authorization decisions without raw TenetKit identities", () => {
     for (const command of [
       { _tag: "ApproveAuthorization" as const, turnId: "turn", authorizationId: "authorization" },
       { _tag: "DenyAuthorization" as const, turnId: "turn", authorizationId: "authorization" },

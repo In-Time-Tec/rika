@@ -180,7 +180,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   })
   const executionBackendContext = yield* Layer.buildWithScope(
     backendLayer({
-      filename: path.join(root, "baton.db"),
+      filename: path.join(root, "tenetkit.db"),
       kernelPool,
       registryLayer: laneModels.registryLayer,
       toolRuntimeLayer,

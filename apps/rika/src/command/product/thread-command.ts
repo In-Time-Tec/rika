@@ -1,6 +1,7 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
+import { dispatch as dispatchHosted } from "../root/hosted-command-dispatch"
 import { dispatch } from "../root/cli-operation-dispatch"
 
 const threadIdArgument = Argument.string("thread-id")
@@ -49,16 +50,16 @@ const continueCommand = Command.make(
     Effect.gen(function* () {
       if (last && threadIds.length > 0) {
         return yield* ProductOperation.InvalidInput.make({
-          message: "threads continue accepts --last or thread ids, not both",
+          message: "thread continue accepts --last or a thread id, not both",
         })
       }
       if (!last && threadIds.length === 0) {
         return yield* ProductOperation.InvalidInput.make({
-          message: "threads continue requires --last or at least one thread id",
+          message: "thread continue requires --last or a thread id",
         })
       }
       if (threadIds.length > 1) {
-        return yield* ProductOperation.InvalidInput.make({ message: "threads continue accepts exactly one thread id" })
+        return yield* ProductOperation.InvalidInput.make({ message: "thread continue accepts exactly one thread id" })
       }
       if (last) {
         yield* dispatch({ _tag: "Interactive", prompt: [], last: true, ephemeral: false })
@@ -92,10 +93,18 @@ const exportCommand = Command.make(
   ({ threadId, format }) => dispatch({ _tag: "Thread", action: "export", threadId, format }),
 )
 
-export const threadCommand = Command.make("threads").pipe(
-  Command.withDescription("Manage local durable threads"),
+export const threadCommand = Command.make("thread").pipe(
+  Command.withDescription("Manage local and remote durable threads"),
   Command.withSubcommands([
-    Command.make("create", {}, () => dispatch({ _tag: "Thread", action: "new" })),
+    Command.make("new", { remote: Flag.boolean("remote") }, ({ remote }) =>
+      Effect.gen(function* () {
+        if (remote) {
+          yield* dispatchHosted({ _tag: "RemoteThread", action: "new" })
+          return
+        }
+        yield* dispatch({ _tag: "Thread", action: "new" })
+      }),
+    ),
     continueCommand,
     list,
     search,

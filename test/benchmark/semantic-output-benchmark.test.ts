@@ -80,17 +80,17 @@ describe("semantic output workload", () => {
 
 describe("database evidence", () => {
   it("accounts for the database, live WAL and SHM, pages, checkpoint, tags, JSON, and operation bytes", () => {
-    const filename = HostFiles.join(temp(), "baton.db")
+    const filename = HostFiles.join(temp(), "tenetkit.db")
     const database = new Database(filename)
     database.run("PRAGMA journal_mode=WAL")
     database.run("PRAGMA wal_autocheckpoint=0")
-    database.run("CREATE TABLE baton_run_events (run_id TEXT, sequence INTEGER, event_json TEXT)")
-    database.run("CREATE TABLE baton_run_operations (result_json TEXT)")
-    database.run("CREATE TABLE baton_program_operations (result_json TEXT)")
-    database.run("INSERT INTO baton_run_events VALUES ('run', 0, '{\"_tag\":\"ModelPart\"}')")
-    database.run("INSERT INTO baton_run_events VALUES ('run', 1, '{\"_tag\":\"RunCompleted\"}')")
-    database.run("INSERT INTO baton_run_operations VALUES ('abcd')")
-    database.run("INSERT INTO baton_program_operations VALUES ('xy')")
+    database.run("CREATE TABLE tenetkit_run_events (run_id TEXT, sequence INTEGER, event_json TEXT)")
+    database.run("CREATE TABLE tenetkit_run_operations (result_json TEXT)")
+    database.run("CREATE TABLE tenetkit_program_operations (result_json TEXT)")
+    database.run("INSERT INTO tenetkit_run_events VALUES ('run', 0, '{\"_tag\":\"ModelPart\"}')")
+    database.run("INSERT INTO tenetkit_run_events VALUES ('run', 1, '{\"_tag\":\"RunCompleted\"}')")
+    database.run("INSERT INTO tenetkit_run_operations VALUES ('abcd')")
+    database.run("INSERT INTO tenetkit_program_operations VALUES ('xy')")
     const files = fileAccounting(filename)
     expect(files.total).toBe(files.database + files.wal + files.shm)
     expect(files.wal).toBeGreaterThan(0)
@@ -136,7 +136,7 @@ const makeSample = (
 ): Sample => ({
   schemaVersion: 1,
   source,
-  mode: "baton",
+  mode: "tenetkit",
   case: caseName,
   sample: sampleNumber,
   warmup: false,
@@ -160,7 +160,7 @@ const makeSample = (
     bunHeapStats: {},
     allocatorRelief: { status: "unsupported", detail: "test" },
   },
-  batonSql: {
+  tenetkitSql: {
     totalEvents: values.events,
     eventsByTag: {},
     eventJsonBytes: values.eventBytes ?? 1_000,
@@ -193,11 +193,11 @@ describe("aggregation and comparison", () => {
   it("aggregates medians and applies the ten-percent event gate only to flood cases", () => {
     const baseline = groups("baseline")
     const candidate = groups("candidate")
-    expect(candidate[0]?.median["batonSql.totalEvents"]).toBe(5)
+    expect(candidate[0]?.median["tenetkitSql.totalEvents"]).toBe(5)
     const result = compare({ baseline, candidate })
     expect(result.pass).toBe(true)
-    expect(result.failures).not.toContain("one: batonSql.totalEvents exceeds 10% of baseline")
-    expect(result.ratios["ten-thousand:batonSql.totalEvents"]).toBe(0.05)
+    expect(result.failures).not.toContain("one: tenetkitSql.totalEvents exceeds 10% of baseline")
+    expect(result.ratios["ten-thousand:tenetkitSql.totalEvents"]).toBe(0.05)
   })
 
   it("rejects shape-dependent candidate event counts and a flood regression", () => {
@@ -214,7 +214,7 @@ describe("aggregation and comparison", () => {
     const result = compare({ baseline, candidate })
     expect(result.pass).toBe(false)
     expect(result.failures).toContain("candidate event count is shape-dependent")
-    expect(result.failures).toContain("alternating-empty: batonSql.totalEvents exceeds 10% of baseline")
+    expect(result.failures).toContain("alternating-empty: tenetkitSql.totalEvents exceeds 10% of baseline")
     expect(result.failures).toContain("alternating-empty: timing.wallMilliseconds regressed by ratio 1.100")
   })
 
@@ -267,7 +267,7 @@ describe("isolation and CLI planning", () => {
     const root = temp()
     const isolation = makeIsolation(root)
     assertSafe({ isolation })
-    expect(isolation.batonDatabase).toBe(HostFiles.join(root, "baton.db"))
+    expect(isolation.tenetkitDatabase).toBe(HostFiles.join(root, "tenetkit.db"))
     expect(isolation.environment.RIKA_DATABASE).toBe(HostFiles.join(root, "rika.db"))
     expect(Object.values(isolation.environment).join("\n")).not.toContain("/.rika")
   })
@@ -297,8 +297,8 @@ describe("semantic output CLI", () => {
     const command = makeCommand((options) => Effect.sync(() => received.push(options)).pipe(Effect.asVoid))
 
     await runCli(command, ["plan", "--output", "/plan"])
-    await runCli(command, ["setup", "--output", "/setup", "--candidate-baton-release", "/release"])
-    await runCli(command, ["run", "--output", "/run", "--candidate-baton-release", "/release", "--samples", "5"])
+    await runCli(command, ["setup", "--output", "/setup", "--candidate-tenetkit-release", "/release"])
+    await runCli(command, ["run", "--output", "/run", "--candidate-tenetkit-release", "/release", "--samples", "5"])
     await runCli(command, [
       "compare",
       "--output",
@@ -315,23 +315,23 @@ describe("semantic output CLI", () => {
         output: "/plan",
         samples: 3,
         baselineTag: "v0.5.3",
-        baselineBatonVersion: "0.20.2",
+        baselineTenetKitVersion: "0.20.2",
       },
       {
         command: "setup",
         output: "/setup",
         samples: 3,
-        candidateBatonRelease: "/release",
+        candidateTenetKitRelease: "/release",
         baselineTag: "v0.5.3",
-        baselineBatonVersion: "0.20.2",
+        baselineTenetKitVersion: "0.20.2",
       },
       {
         command: "run",
         output: "/run",
         samples: 5,
-        candidateBatonRelease: "/release",
+        candidateTenetKitRelease: "/release",
         baselineTag: "v0.5.3",
-        baselineBatonVersion: "0.20.2",
+        baselineTenetKitVersion: "0.20.2",
       },
       {
         command: "compare",
@@ -340,11 +340,11 @@ describe("semantic output CLI", () => {
         baseline: "/baseline.json",
         candidate: "/candidate.json",
         baselineTag: "v0.5.3",
-        baselineBatonVersion: "0.20.2",
+        baselineTenetKitVersion: "0.20.2",
       },
     ])
     await expect(
-      runCli(command, ["run", "--output", "/run", "--candidate-baton-release", "/release", "--samples", "2"]),
+      runCli(command, ["run", "--output", "/run", "--candidate-tenetkit-release", "/release", "--samples", "2"]),
     ).rejects.toThrow()
   })
 

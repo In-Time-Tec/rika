@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/identity",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir dist --target bun --format esm",
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/identity/src packages/identity/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  },
+  "dependencies": {
+    "@better-auth/oauth-provider": "1.7.1",
+    "better-auth": "1.7.1",
+    "effect": "4.0.0-rc.109",
+    "pg": "8.21.0"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.109",
+    "@types/bun": "1.3.13",
+    "@types/pg": "8.15.5",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  },
+  "rika": {
+    "kind": "package",
+    "domain": "identity"
+  }
+}

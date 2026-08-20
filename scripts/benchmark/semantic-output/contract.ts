@@ -14,7 +14,7 @@ export interface SqlAccounting {
 export interface Sample {
   readonly schemaVersion: 1
   readonly source: Source
-  readonly mode: "baton"
+  readonly mode: "tenetkit"
   readonly case: Case
   readonly sample: number
   readonly warmup: boolean
@@ -39,7 +39,7 @@ export interface Sample {
     readonly bunHeapStats: Readonly<Record<string, number>>
     readonly allocatorRelief: { readonly status: "supported" | "unsupported"; readonly detail: string }
   }
-  readonly batonSql: SqlAccounting
+  readonly tenetkitSql: SqlAccounting
   readonly projection: { readonly commitProjectionCalls: number }
   readonly databases: Readonly<Record<string, unknown>>
   readonly identity: Readonly<Record<string, unknown>>
@@ -47,7 +47,7 @@ export interface Sample {
 
 export interface Aggregate {
   readonly source: Source
-  readonly mode: "baton"
+  readonly mode: "tenetkit"
   readonly case: Case
   readonly samples: ReadonlyArray<Sample>
   readonly median: Readonly<Record<string, number>>

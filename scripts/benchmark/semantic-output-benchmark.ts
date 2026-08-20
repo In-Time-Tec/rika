@@ -34,7 +34,7 @@ const execute = (options: Options): void => {
   const provisioned = setup({
     repositoryRoot,
     output: outputRoot,
-    candidateRelease: options.candidateBatonRelease!,
+    candidateRelease: options.candidateTenetKitRelease!,
   })
   if (options.command === "setup") {
     process.stdout.write(`${JSON.stringify(provisioned, null, 2)}\n`)
@@ -103,9 +103,9 @@ const execute = (options: Options): void => {
   const report = {
     schemaVersion: 1,
     configuration: {
-      baseline: { rika: "v0.5.3 detached source", baton: "published 0.20.2" },
-      candidate: { rika: "current source", batonRelease: HostFiles.resolve(options.candidateBatonRelease!) },
-      mode: "baton",
+      baseline: { rika: "v0.5.3 detached source", tenetkit: "published 0.20.2" },
+      candidate: { rika: "current source", tenetkitRelease: HostFiles.resolve(options.candidateTenetKitRelease!) },
+      mode: "tenetkit",
       warmups: 1,
       measuredSamples: options.samples,
       serial: true,

@@ -12,13 +12,7 @@
       "dependsOn": ["^build"]
     },
     "//#lint": {
-      "inputs": [
-        "package.json",
-        "apps/**/*.ts",
-        "packages/**/*.ts",
-        "scripts/**/*.ts",
-        "!**/dist/**"
-      ]
+      "inputs": ["package.json", "apps/**/*.ts", "packages/**/*.ts", "scripts/**/*.ts", "!**/dist/**"]
     },
     "//#test-unit": {
       "inputs": [
@@ -30,7 +24,8 @@
         "scripts/**",
         "test/**",
         "!**/dist/**"
-      ]
+      ],
+      "env": ["RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL"]
     },
     "//#test-tui": {
       "inputs": [

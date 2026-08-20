@@ -1,6 +1,6 @@
 import { HostFiles } from "./host-files"
-import { batonReleaseInventoryError, tenetkitReleasePackages } from "../../release/local-baton-smoke"
-import { tenetkitPackages } from "../../release/local-baton-package-verification"
+import { tenetkitReleaseInventoryError, tenetkitReleasePackages } from "../../release/local-tenetkit-smoke"
+import { tenetkitPackages } from "../../release/local-tenetkit-package-verification"
 
 interface Evidence {
   readonly schemaVersion: number
@@ -40,7 +40,7 @@ const releaseInventory = (directory: string): Evidence => {
       return [match[2]!, match[1]!] as const
     }),
   )
-  const inventoryError = batonReleaseInventoryError(evidence, "0.20.2", [...checksums.keys()])
+  const inventoryError = tenetkitReleaseInventoryError(evidence, "0.20.2", [...checksums.keys()])
   if (inventoryError !== undefined) throw new Error(inventoryError)
   for (const [filename, digest] of checksums) {
     if (fileSha256(HostFiles.join(directory, filename)) !== digest)
@@ -109,8 +109,7 @@ export const install = (input: {
 
 const verifyCandidateLock = (root: string): void => {
   const lock = HostFiles.read(HostFiles.join(root, "bun.lock"))
-  if (lock.includes("npmjs.org/tenetkit"))
-    throw new Error("candidate source resolved a TenetKit package from npm")
+  if (lock.includes("npmjs.org/tenetkit")) throw new Error("candidate source resolved a TenetKit package from npm")
   for (const packageName of tenetkitPackages) {
     const filename = `${packageName.replace("@tenetkit/", "tenetkit-")}-0.20.2.tgz`
     if (!lock.includes(filename)) throw new Error(`candidate source lock does not name ${filename}`)
@@ -193,13 +192,13 @@ export const setup = (input: {
     source: "baseline",
     sourceKind: "detached-rika-source",
     rika: gitIdentity(sourceOld),
-    baton: { kind: "published", version: "0.20.2" },
+    tenetkit: { kind: "published", version: "0.20.2" },
   }
   const candidateIdentity = {
     source: "candidate",
     sourceKind: "copied-current-rika-source",
     rika: gitIdentity(repositoryRoot),
-    baton: { kind: "full-local-release-inventory", releaseDirectory: candidateRelease, evidence },
+    tenetkit: { kind: "full-local-release-inventory", releaseDirectory: candidateRelease, evidence },
   }
 
   copyBenchmark(repositoryRoot, sourceOld)

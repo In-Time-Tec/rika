@@ -19,9 +19,26 @@ jobs:
     name: quality
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_DB: rika_test
+          POSTGRES_USER: rika
+          POSTGRES_PASSWORD: rika
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rika -d rika_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
       ENV: /dev/null
       BASH_ENV: /dev/null
+      DATABASE_URL: postgresql://rika:rika@127.0.0.1:5432/rika_test
+      DATABASE_SSL: disable
+      RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL: postgresql://rika:rika@127.0.0.1:5432/rika_test
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -57,9 +74,25 @@ jobs:
     name: tui
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_DB: rika_test
+          POSTGRES_USER: rika
+          POSTGRES_PASSWORD: rika
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rika -d rika_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
       ENV: /dev/null
       BASH_ENV: /dev/null
+      DATABASE_URL: postgresql://rika:rika@127.0.0.1:5432/rika_test
+      DATABASE_SSL: disable
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -93,9 +126,25 @@ jobs:
     name: proc
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_DB: rika_test
+          POSTGRES_USER: rika
+          POSTGRES_PASSWORD: rika
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rika -d rika_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
       ENV: /dev/null
       BASH_ENV: /dev/null
+      DATABASE_URL: postgresql://rika:rika@127.0.0.1:5432/rika_test
+      DATABASE_SSL: disable
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

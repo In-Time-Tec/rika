@@ -55,7 +55,7 @@ const openSession = (
   })
 
 describe("Operation queue drain", () => {
-  it.effect("promotes queued turns after Baton terminalizes a directly submitted turn", () =>
+  it.effect("promotes queued turns after TenetKit terminalizes a directly submitted turn", () =>
     Effect.gen(function* () {
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])

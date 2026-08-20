@@ -22,7 +22,7 @@ const safeName = (sessionId: string): string => encodeURIComponent(sessionId)
 /**
  * Best-effort namespace persistence under the profile data root, keyed by Session.
  *
- * This is never durable authority: Baton operations, events, Session entries, and children remain
+ * This is never durable authority: TenetKit operations, events, Session entries, and children remain
  * the only truth, so a missing snapshot is simply absent and a corrupt one is a typed, non-fatal
  * report rather than a failure of the cell. Files are owner-only and land through a same-directory
  * temporary plus rename, so a reader never observes a half-written payload.

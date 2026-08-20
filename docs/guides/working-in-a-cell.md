@@ -13,7 +13,7 @@ Find something, then read it. Both are inline calls with no approval.
 ```ts
 const hits = await rika.workspace.search({ pattern: "makeCellProjection" })
 const file = await rika.workspace.read({
-  path: "packages/baton-execution/src/baton-cell-projection.ts",
+  path: "packages/execution/src/projection/cell.ts",
   range: [1, 40],
 })
 console.log(hits.text, file.text)
@@ -25,7 +25,7 @@ Change the file. A replace is a durable nested operation with an approval capabi
 
 ```ts
 const edited = await rika.workspace.replace({
-  path: "packages/baton-execution/src/baton-cell-projection.ts",
+  path: "packages/execution/src/projection/cell.ts",
   oldStr: "export const maxCellNotices = 32",
   newStr: "export const maxCellNotices = 64",
 })
@@ -49,7 +49,7 @@ try {
 }
 ```
 
-Delegate when the work is large or independent with the model-facing `run_child` and `run_child_group` tools, not from inside a cell. Baton suspends the current Run while it waits and resumes that same Run with the durable child result.
+Delegate when the work is large or independent with the model-facing `run_child` and `run_child_group` tools, not from inside a cell. TenetKit suspends the current Run while it waits and resumes that same Run with the durable child result.
 
 Keep what you learned. A harness refinement requires the baseline you read. The overview's first line is `harness <snapshotId> (scope <scope>)`, so read the scope you intend to write.
 

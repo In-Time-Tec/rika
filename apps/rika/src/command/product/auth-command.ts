@@ -1,40 +1,40 @@
+import { Option } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
-import { Console, Effect, Option } from "effect"
-import { createInterface } from "node:readline"
-import { dispatch } from "../root/cli-operation-dispatch"
-
-const providerArgument = Argument.choice("provider", ["openai", "openrouter"])
-
-const readApiKey = Effect.callback<Option.Option<string>>((resume) => {
-  const readline = createInterface({ input: process.stdin, output: process.stderr })
-  readline.question("Paste your OpenRouter API key: ", (answer) => {
-    readline.close()
-    const apiKey = answer.trim()
-    resume(Effect.succeed(apiKey.length === 0 ? Option.none() : Option.some(apiKey)))
-  })
-})
+import { dispatch } from "../root/hosted-command-dispatch"
 
 export const authCommand = Command.make("auth").pipe(
-  Command.withDescription("Manage model provider account authentication"),
+  Command.withDescription("Manage your hosted Rika identity"),
   Command.withSubcommands([
     Command.make(
       "login",
-      { provider: providerArgument, deviceCode: Flag.boolean("device-code") },
-      ({ provider, deviceCode }) =>
-        provider === "openrouter"
-          ? Effect.flatMap(readApiKey, (apiKey) =>
-              Option.match(apiKey, {
-                onNone: () => Console.error("An OpenRouter API key is required"),
-                onSome: (value) => dispatch({ _tag: "Auth", action: "login", provider, apiKey: value }),
-              }),
-            )
-          : dispatch({ _tag: "Auth", action: "login", provider, deviceCode }),
+      {
+        server: Flag.string("server").pipe(Flag.optional),
+        noOpen: Flag.boolean("no-open"),
+      },
+      ({ server, noOpen }) => {
+        const selectedServer = Option.getOrUndefined(server)
+        return dispatch({
+          _tag: "Auth",
+          action: "login",
+          ...(selectedServer === undefined ? {} : { server: selectedServer }),
+          noOpen,
+        })
+      },
     ),
-    Command.make("status", { provider: providerArgument }, ({ provider }) =>
-      dispatch({ _tag: "Auth", action: "status", provider }),
+    Command.make("status", { json: Flag.boolean("json") }, ({ json }) =>
+      dispatch({ _tag: "Auth", action: "status", json }),
     ),
-    Command.make("logout", { provider: providerArgument }, ({ provider }) =>
-      dispatch({ _tag: "Auth", action: "logout", provider }),
+    Command.make("logout", { all: Flag.boolean("all") }, ({ all }) =>
+      dispatch({ _tag: "Auth", action: "logout", ...(all ? { all: true } : {}) }),
     ),
+    Command.make("devices", {}, () => dispatch({ _tag: "Auth", action: "devices" })),
+    Command.make("revoke-device", { device: Argument.string("device").pipe(Argument.optional) }, ({ device }) => {
+      const selectedDevice = Option.getOrUndefined(device)
+      return dispatch({
+        _tag: "Auth",
+        action: "revoke-device",
+        ...(selectedDevice === undefined ? {} : { device: selectedDevice }),
+      })
+    }),
   ]),
 )

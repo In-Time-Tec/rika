@@ -21,9 +21,9 @@ export const recoveredWorkGrace = (value: string) => Duration.millis(Number(valu
  * The profile data root the kernel pins, derived from the one runtime database path the
  * composition root already supplies rather than threaded separately.
  */
-export const dataRootOf = (batonDatabase: string): string => {
-  const separator = batonDatabase.lastIndexOf("/")
-  return separator > 0 ? batonDatabase.slice(0, separator) : "."
+export const dataRootOf = (tenetkitDatabase: string): string => {
+  const separator = tenetkitDatabase.lastIndexOf("/")
+  return separator > 0 ? tenetkitDatabase.slice(0, separator) : "."
 }
 
 export const makeThreadId: Effect.Effect<Thread.ThreadId, never, never> = Crypto.Crypto.pipe(

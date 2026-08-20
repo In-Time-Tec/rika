@@ -78,7 +78,7 @@ describe("harness snapshot on the Agent manifest", () => {
     expect(pinned.capabilities[0]!.name).toBe("rika-harness-snapshot")
   })
 
-  it("registers the payload under Baton's own harness codec", () => {
+  it("registers the payload under TenetKit's own harness codec", () => {
     const pinned = ExecutionPins.harness(state([entry("a", "c")]))
     expect(pinned.registrations[0]).toMatchObject({ codec: "tenetkit/harness/snapshot", version: "1" })
   })

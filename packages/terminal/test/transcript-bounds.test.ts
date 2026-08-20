@@ -28,7 +28,7 @@ const longDiff = [
   "@@ -68,3 +68,5 @@",
   " Credentials are resolved for each request. An optional secret-free recovery hook is coalesced by rejected credential generation and can run the login command.",
   "+SigV4 signs the final buffered Responses body with service bedrock-mantle; the regional endpoint and signing region must match across named profiles and SSO.",
-  "+Bearer authentication accepts a dynamic BearerTokens source or bearerTokens(Redacted.make(token)) without Baton minting or persisting any secret material.",
+  "+Bearer authentication accepts a dynamic BearerTokens source or bearerTokens(Redacted.make(token)) without TenetKit minting or persisting any secret material.",
   "",
 ].join("\n")
 

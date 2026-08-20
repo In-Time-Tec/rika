@@ -28,7 +28,7 @@ it("renders the Amp-parity shaded mark with title, workspace, and continue comma
       "   =::......",
       "     .....",
       "",
-      "rika threads continue T-abc123",
+      "rika thread continue T-abc123",
       "",
     ].join("\n"),
   )
@@ -45,5 +45,5 @@ it("mode-tints the mark so the brightest glyph tracks the mode color", () => {
 it("colors the workspace muted and omits the continue command without a thread", () => {
   const output = renderGoodbye({ mode: "medium", workspace: "/Users/dev/code" })
   expect(output).toContain(`${esc}[38;5;8m~/code${esc}[0m`)
-  expect(output).not.toContain("rika threads continue")
+  expect(output).not.toContain("rika thread continue")
 })

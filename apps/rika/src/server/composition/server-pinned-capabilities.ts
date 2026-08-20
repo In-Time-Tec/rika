@@ -58,7 +58,7 @@ export const pinnedCapabilitiesFor = (options: Parameters<typeof ServerKernel.ef
   })
 
 /**
- * The kernel worker pools, built on the Server's own scope. Baton builds a resolved Agent's
+ * The kernel worker pools, built on the Server's own scope. TenetKit builds a resolved Agent's
  * environment once per Run and a cell's scope ends with that cell, so a pool owned by either would
  * be released while later turns still needed it.
  *

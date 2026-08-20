@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/execution",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/runtime.ts",
+    "./route": "./src/route.ts",
+    "./postgres": "./src/postgres.ts",
+    "./remote-cells": "./src/remote-cells.ts",
+    "./cell-context": "./src/cell-context.ts",
+    "./scripted-model": "./src/scripted-model.ts",
+    "./test-harness": "./src/test-harness.ts"
+  },
+  "dependencies": {
+    "@tenetkit/pg": "0.33.0",
+    "tenetkit": "catalog:",
+    "@rika/coding-tools": "workspace:*",
+    "@rika/kernel": "workspace:*",
+    "@rika/product": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@rika/configuration": "workspace:*",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "rika": {
+    "kind": "adapter",
+    "domain": "execution"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/execution/src packages/execution/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  }
+}

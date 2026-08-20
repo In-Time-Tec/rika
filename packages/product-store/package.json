@@ -5,6 +5,15 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./memory-assignments": "./src/hosted/memory-assignments.ts",
+    "./memory-store": "./src/hosted/memory-store.ts",
+    "./postgres-assignments": "./src/hosted/postgres-assignments.ts",
+    "./postgres-layer": "./src/hosted/postgres-layer.ts",
+    "./postgres-store": "./src/hosted/postgres-store.ts",
+    "./migrations": "./src/hosted/migrations.ts",
+    "./migrations/postgres/0001-hosted-authority.sql": "./migrations/postgres/0001-hosted-authority.sql",
+    "./migrations/postgres/0002-hosted-identity-ancestry.sql": "./migrations/postgres/0002-hosted-identity-ancestry.sql",
+    "./migrations/postgres/0003-hosted-authority-fences.sql": "./migrations/postgres/0003-hosted-authority-fences.sql",
     "./product-database-layer": "./src/database/product-database-layer.ts",
     "./sqlite-goal-repository": "./src/goal/sqlite-goal-repository.ts",
     "./sqlite-thread-search-repository": "./src/search/sqlite-thread-search-repository.ts",
@@ -14,10 +23,11 @@
     "./sqlite-turn-repository": "./src/turn/sqlite-turn-repository.ts"
   },
   "dependencies": {
+    "@effect/sql-pg": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",
+    "@rika/product": "workspace:*",
     "@rika/transcript": "workspace:*",
-    "effect": "catalog:",
-    "@rika/product": "workspace:*"
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@effect/platform-bun": "catalog:",
@@ -27,7 +37,9 @@
     "@rika/coding-tools": "workspace:*",
     "@rika/extensions": "workspace:*",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@types/pg": "8.15.5",
+    "pg": "8.21.0"
   },
   "rika": {
     "kind": "adapter",

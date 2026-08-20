@@ -1,0 +1,26 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "apps/api/Dockerfile",
+    "watchPatterns": [
+      "apps/api/**",
+      "packages/**",
+      "apps/api/Dockerfile",
+      "apps/api/railway.json",
+      "package.json",
+      "bun.lock",
+      "tsconfig.json"
+    ]
+  },
+  "deploy": {
+    "preDeployCommand": ["bun --cwd apps/api migrate"],
+    "startCommand": "bun --cwd apps/api start",
+    "healthcheckPath": "/readyz",
+    "healthcheckTimeout": 300,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 5,
+    "overlapSeconds": 30,
+    "drainingSeconds": 60
+  }
+}

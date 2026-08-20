@@ -1,0 +1,7 @@
+# Hosted identity
+
+Users may create an account with email and password or sign in with GitHub. Every hosted user acts through an Organization membership with the `owner`, `admin`, or `member` role. An Organization owner can invite another email address, and an accepted invitation creates the membership Better Auth owns.
+
+Each CLI installation registers as a constrained public native OAuth client and binds its device grant to a proof-of-possession key. It requests a device code, prints and optionally opens the verification page, polls at the server-provided interval, and handles pending approval, slower polling, denial, expiry, interruption, and transport failure without exposing a browser session to the terminal. The resulting refresh credential and private key are stored in the operating-system credential store; access tokens stay in memory, while the selected server and Organization are non-secret profile settings. Signing out revokes that installation and removes local credentials. Signing out everywhere revokes every session and native-client grant for that user.
+
+GitHub sign-in and GitHub repository authorization are independent. Connecting repositories requires a GitHub App installation selected by an authorized Organization member.

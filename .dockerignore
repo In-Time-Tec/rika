@@ -1,0 +1,15 @@
+.git
+.github
+.amp
+.agents
+.env
+.env.*
+!.env.example
+.rika
+.turbo
+artifacts
+coverage
+dist
+node_modules
+repos
+*.log

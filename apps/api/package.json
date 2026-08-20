@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/api",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "bun build ./src/main.ts --outdir dist --target bun --format esm",
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js apps/api/src apps/api/test",
+    "migrate": "bun ./src/migrate.ts",
+    "start": "bun ./src/main.ts",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "4.0.0-rc.109",
+    "@effect/sql-pg": "4.0.0-rc.109",
+    "@rika/e2b-executor": "workspace:*",
+    "@rika/identity": "workspace:*",
+    "@rika/product": "workspace:*",
+    "@rika/execution": "workspace:*",
+    "@rika/product-store": "workspace:*",
+    "@rika/remote-execution": "workspace:*",
+    "effect": "4.0.0-rc.109"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.109",
+    "@types/bun": "1.3.13",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  },
+  "rika": {
+    "kind": "application",
+    "domain": "api"
+  }
+}

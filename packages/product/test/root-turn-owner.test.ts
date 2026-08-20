@@ -416,7 +416,7 @@ it.effect("persists the execution link before accepting interruption", () =>
   }),
 )
 
-it.effect("recovers every dual-database admission crash window into one idempotent Baton Run", () =>
+it.effect("recovers every dual-database admission crash window into one idempotent TenetKit Run", () =>
   Effect.gen(function* () {
     const input: ExecutionGateway.StartTurn = {
       threadId: "thread",
@@ -465,7 +465,7 @@ it.effect("recovers every dual-database admission crash window into one idempote
             const existing = runs.get(candidate.turnId)
             if (existing !== undefined) {
               if (existing.input !== encoded)
-                return yield* ExecutionGateway.StartTurnFailure.make({ message: "changed Baton admission" })
+                return yield* ExecutionGateway.StartTurnFailure.make({ message: "changed TenetKit admission" })
               return existing.link
             }
             const executionLink = {
@@ -643,7 +643,7 @@ it.effect("retries unknown steering admissions with one identity and journals de
   }),
 )
 
-it.effect("finalizes the source queue row when Baton accepts steering", () =>
+it.effect("finalizes the source queue row when TenetKit accepts steering", () =>
   Effect.gen(function* () {
     const input = { text: "durable steering", idempotencyKey: "durable-request" }
     let admission: TurnRepositorySteering.SteeringAdmission | undefined = {

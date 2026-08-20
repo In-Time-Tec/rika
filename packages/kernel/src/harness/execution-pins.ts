@@ -3,8 +3,8 @@ import { HarnessSnapshot, HarnessState } from "tenetkit/harness"
 
 /**
  * One registration record a durable host must supply for every Execution of the manifest that pins
- * it. This mirrors Baton's `ExecutableRegistration` shape without importing the runtime: the kernel
- * describes what must be registered, and the execution adapter that owns `baton-route` records it.
+ * it. This mirrors TenetKit's `ExecutableRegistration` shape without importing the runtime: the kernel
+ * describes what must be registered, and the execution adapter records it.
  */
 export interface Registration {
   readonly pin: string
@@ -32,7 +32,7 @@ const SKILL_VERSION = "1"
  * Turn discovered skills into the manifest capabilities and registrations that make a skill part of
  * an Execution's durable identity.
  *
- * `baton-route` pinned `skills: []`, so no skill has ever reached an executing Agent. Pinning the
+ * The execution route pinned `skills: []`, so no skill has ever reached an executing Agent. Pinning the
  * NAME and DIGEST — never the body — means the skill set is reconstructable and a changed skill
  * yields a different Execution rather than silently altering a replay, while the prompt still costs
  * only a listing line.

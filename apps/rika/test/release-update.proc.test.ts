@@ -38,6 +38,7 @@ const stubFetch = (routes: Readonly<Record<string, string | Uint8Array>>): typeo
 const buildArchive = Effect.fn("ReleaseUpdateProc.buildArchive")(function* (options: {
   readonly directory: string
   readonly withRuntime: boolean
+  readonly withServer?: boolean
 }) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -53,9 +54,10 @@ const buildArchive = Effect.fn("ReleaseUpdateProc.buildArchive")(function* (opti
     yield* fileSystem.writeFileString(path.join(stage, "bin", ".rika-interactive"), `interactive ${latest}`, {
       mode: 0o755,
     })
-    yield* fileSystem.writeFileString(path.join(stage, "bin", ".rika-server"), `server ${latest}`, {
-      mode: 0o755,
-    })
+    if (options.withServer !== false)
+      yield* fileSystem.writeFileString(path.join(stage, "bin", ".rika-server"), `server ${latest}`, {
+        mode: 0o755,
+      })
   }
   const archive = path.join(options.directory, archiveFile)
   const exitCode = yield* spawner.exitCode(
@@ -181,6 +183,35 @@ it.effect("leaves the working install in place when the downloaded archive has n
       }
       expect(yield* fileSystem.readFileString(install.binary)).toBe("rika 0.0.3")
       expect(yield* fileSystem.readFileString(install.command)).toBe("rika 0.0.3")
+      expect(yield* fileSystem.readDirectory(path.dirname(install.installRoot))).toEqual(["current"])
+    }),
+  ),
+)
+
+it.effect("accepts a serverless archive and removes the bridge server", () =>
+  withPlatform(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const install = yield* installed("rika-update-serverless-")
+      const workshop = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-update-archive-" })
+      const archive = yield* buildArchive({ directory: workshop, withRuntime: true, withServer: false })
+      const result = yield* runUpdate({
+        installRoot: install.installRoot,
+        executable: install.binary,
+        routes: {
+          [releaseApiUrl]: `{"tag_name":"v${latest}"}`,
+          [`${releaseBaseUrl}/SHA256SUMS`]: `${digestOf(archive)}  ${archiveFile}\n`,
+          [`${releaseBaseUrl}/${archiveFile}`]: archive,
+        },
+      })
+      expect(result._tag).toBe("Success")
+      expect(yield* fileSystem.readFileString(install.binary)).toBe(`rika ${latest}`)
+      expect(yield* fileSystem.readFileString(path.join(install.installRoot, "bin", ".rika-interactive"))).toBe(
+        `interactive ${latest}`,
+      )
+      expect(yield* fileSystem.exists(path.join(install.installRoot, "bin", ".rika-server"))).toBe(false)
+      expect(yield* fileSystem.readFileString(install.command)).toBe(`rika ${latest}`)
       expect(yield* fileSystem.readDirectory(path.dirname(install.installRoot))).toEqual(["current"])
     }),
   ),

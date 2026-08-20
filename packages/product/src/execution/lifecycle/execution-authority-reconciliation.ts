@@ -34,8 +34,8 @@ const failureUnit = (
   const key = failureKey(turn.id)
   const detail =
     kind === "execution-link-missing"
-      ? "Rika no longer has the durable Baton Execution link for this Turn."
-      : "Baton no longer has the durable Execution linked to this Turn."
+      ? "Rika no longer has the durable TenetKit Execution link for this Turn."
+      : "TenetKit no longer has the durable Execution linked to this Turn."
   return {
     key,
     turnId: turn.id,
@@ -93,7 +93,7 @@ export const make = Effect.fn("ExecutionAuthorityReconciliation.make")(function*
     }
     for (const turn of candidates.values()) {
       // A Turn without an execution link (for example a forked copy of an active thread) has no
-      // Baton authority to reconcile against; leave it untouched so fork semantics stay intact.
+      // TenetKit authority to reconcile against; leave it untouched so fork semantics stay intact.
       if (turn.executionLink === undefined) continue
       const inspected = yield* Effect.result(input.backend.inspectTurn(turn.executionLink))
       if (inspected._tag === "Failure") {

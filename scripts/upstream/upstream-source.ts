@@ -34,7 +34,7 @@ const recordedSpecifiers = Effect.fn("Upstream.recordedSpecifiers")(function* (p
   return manifest.overrides ?? {}
 })
 
-// Every Baton package declares `effect` as a peer dependency, so a Baton package that resolves
+// Every TenetKit package declares `effect` as a peer dependency, so a TenetKit package that resolves
 // outside this repository drags in its own `effect` copy. Effect's Redacted registry is a
 // module-local WeakMap, so an api key built by Rika's `effect` is unreadable by a second instance
 // and provider setup dies with "Unable to get redacted value". One resolved `effect` is therefore
@@ -106,7 +106,7 @@ const freshness = Effect.fn("Upstream.freshness")(function* () {
     if (sourceDigest !== installedDigest)
       stale.push(`${name} installed content ${installedDigest} does not match sibling content ${sourceDigest}`)
   }
-  if (stale.length > 0) return yield* new UpstreamError({ message: `Stale Baton install:\n${stale.join("\n")}` })
+  if (stale.length > 0) return yield* new UpstreamError({ message: `Stale TenetKit install:\n${stale.join("\n")}` })
 })
 
 const status = Effect.gen(function* () {
@@ -120,7 +120,7 @@ const status = Effect.gen(function* () {
 const link = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem
   const { path, project, projects } = yield* roots
-  for (const repository of ["batonfx"] as const) {
+  for (const repository of ["tenetkitfx"] as const) {
     const repositoryPath = path.join(projects, repository)
     if (!(yield* fileSystem.exists(repositoryPath))) {
       return yield* new UpstreamError({ message: `Missing sibling repository: ${repositoryPath}` })
@@ -178,7 +178,7 @@ const registry = Effect.gen(function* () {
 
 const command = Command.make("upstream").pipe(
   Command.withSubcommands([
-    Command.make("link", {}, () => link).pipe(Command.withDescription("Link sibling Baton packages")),
+    Command.make("link", {}, () => link).pipe(Command.withDescription("Link sibling TenetKit packages")),
     Command.make("status", {}, () => status).pipe(Command.withDescription("Verify sibling package links")),
     Command.make("registry", {}, () => registry).pipe(Command.withDescription("Restore registry dependencies")),
   ]),

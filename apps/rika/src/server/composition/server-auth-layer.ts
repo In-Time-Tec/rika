@@ -41,7 +41,7 @@ export interface ServerProductEnvironment {
 export interface ServerProductOptions {
   readonly environment: ServerProductEnvironment
   readonly database: string
-  readonly batonDatabase: string
+  readonly tenetkitDatabase: string
   readonly profileIdentity: string
   readonly globalConfig: string
   readonly workspaceConfig: string

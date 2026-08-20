@@ -26,7 +26,7 @@ export const makeInteractiveControl = (input: {
    * A steer carries whatever the caller wrote, and a queued turn's prompt has no size bound of its
    * own, so any prompt past the composer's convenience limit reached this path and was refused.
    * The refusal consumed the queued row and delivered nothing, which read as a steer that silently
-   * vanished. Baton bounds a steering prompt by the same message limits as any other prompt, and
+   * vanished. TenetKit bounds a steering prompt by the same message limits as any other prompt, and
    * the projection stopped enforcing this number when it stopped throwing on oversized internal
    * steers, so enforcing it here only rejected work the rest of the system accepts.
    */

@@ -1,5 +1,5 @@
-import * as BatonExecution from "@rika/baton-execution/baton-execution"
-import type { LaneModels } from "@rika/baton-execution/baton-test-harness"
+import * as Execution from "@rika/execution"
+import type { LaneModels } from "@rika/execution/test-harness"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ThreadQuery from "@rika/product/thread-query-service"
@@ -12,7 +12,7 @@ import * as ServerKernel from "../src/server/composition/server-kernel-layer"
 
 export interface BackendOptions {
   readonly filename: string
-  readonly kernelPool: NonNullable<Parameters<typeof BatonExecution.layer>[0]["kernelPool"]>
+  readonly kernelPool: Execution.LocalCellsOptions
   readonly registryLayer: LaneModels["registryLayer"]
   readonly toolRuntimeLayer: Layer.Layer<ToolRuntime.Service>
   readonly queryFactoryLayer: Layer.Layer<ThreadQuery.Factory>
@@ -53,9 +53,9 @@ export const kernelPoolFor = (options: {
   )
 
 export const backendLayer = (options: BackendOptions) =>
-  BatonExecution.layer({
+  Execution.layerLocal({
     filename: options.filename,
-    kernelPool: options.kernelPool,
+    cells: Execution.localCells(options.kernelPool),
 
     modelServices: options.registryLayer,
   })
