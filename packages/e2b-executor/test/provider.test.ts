@@ -55,7 +55,7 @@ describe("Provider", () => {
     const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
       expect(yield* provider.create(request)).toEqual({ sandboxId: "sandbox-e2b", state: "running" })
-      expect(template).toBe("ar7-template-alias")
+      expect(template).toBe("ar7-template-alias:7d0-build-receipt")
       expect(createOptions).toMatchObject({
         apiKey: "e2b-controller-secret",
         timeoutMs: 900_000,
