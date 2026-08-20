@@ -252,7 +252,7 @@ export const layer = Layer.effect(
               .bindProviderInstance({ ...version(preparing), providerInstanceId: input.actor.deviceId })
               .pipe(Effect.mapError(assignmentFailure))
             const persisted = yield* sql<{
-              readonly expiresAt: number
+              readonly expiresAt: string
             }>`INSERT INTO rika_hosted_local_executor_admissions (
             id, assignment_id, organization_id, device_id, client_id, user_id, member_id, generation,
             workspace_fingerprint, ticket_digest, expires_at
@@ -270,7 +270,7 @@ export const layer = Layer.effect(
             return {
               admissionId,
               ticket: Redacted.value(ticket),
-              expiresAt: expiry.expiresAt,
+              expiresAt: number(expiry.expiresAt),
               executorUrl: input.executorUrl,
               workspaceIdentity: input.workspaceFingerprint,
             }
