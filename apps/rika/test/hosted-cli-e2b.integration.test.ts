@@ -351,7 +351,7 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
         expect(operationRetry).toBeDefined()
         const retried = yield* Effect.promise(() => api.handler(operationRetry!))
         expect(retried.status).toBe(200)
-        expect(yield* Effect.promise(() => retried.json())).toEqual({ output: "hosted-mvp\n" })
+        expect(yield* Effect.promise(() => retried.json())).toEqual({ output: "hosted-mvp\n", exitCode: 0 })
         const [thread, assignment, commands, events] = yield* Effect.promise(() =>
           Promise.all([
             migrated!.query(`SELECT executor_kind FROM rika_hosted_threads WHERE id = $1`, [connection.threadId]),
