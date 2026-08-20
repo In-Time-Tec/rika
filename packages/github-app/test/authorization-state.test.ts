@@ -9,7 +9,7 @@ import { provide } from "./test-layer"
 const githubIdentity = { userId: 100, login: "octocat" } as const
 
 describe("GitHub authorization state validation", () => {
-  it.effect("rejects spoofed setup candidates and binds installation setup to control-plane state", () => {
+  it.effect("rejects spoofed setup candidates and binds installation setup to api state", () => {
     const setupStates = new Map<string, Authorization.SetupIntent>([
       [
         "spoofed",

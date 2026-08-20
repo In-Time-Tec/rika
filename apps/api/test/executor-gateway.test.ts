@@ -1,11 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ControllerError, type Interface as Controller } from "@rika/e2b-executor/controller"
-import { ControllerMessage, HostMessage } from "@rika/remote-execution/protocol"
+import { ApiMessage, ExecutorMessage } from "@rika/remote-execution/protocol"
 import { Effect, Fiber, Redacted, Schema } from "effect"
 import { makeGateway, type Socket } from "../src/executor-gateway"
 
-const encode = Schema.encodeSync(Schema.fromJsonString(HostMessage))
-const decode = Schema.decodeSync(Schema.fromJsonString(ControllerMessage))
+const encode = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
+const decode = Schema.decodeSync(Schema.fromJsonString(ApiMessage))
 
 const fence = {
   target: "e2b" as const,

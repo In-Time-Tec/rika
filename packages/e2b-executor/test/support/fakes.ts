@@ -10,12 +10,7 @@ import {
   layer as checkoutLayer,
   type InstallationTokensInterface,
 } from "../../src/checkout"
-import {
-  Controller,
-  type ControllerError,
-  type Options,
-  layer as controllerLayer,
-} from "../../src/controller"
+import { Controller, type ControllerError, type Options, layer as controllerLayer } from "../../src/controller"
 import { Provider, ProviderError, type CreateRequest, type InventoryEntry } from "../../src/provider"
 
 const digest = (_algorithm: string, data: Uint8Array) =>
@@ -142,8 +137,8 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     deploymentId: "test",
     templateId: "ar7-template-alias",
     templateBuildId: "template-build-v1-immutable",
-    controllerUrl: "wss://controller.example.test/executors",
-    allowedEgress: ["controller.example.test", "github.com", "api.github.com"],
+    apiUrl: "wss://api.example.test/executors",
+    allowedEgress: ["api.example.test", "github.com", "api.github.com"],
     ...overrides,
   }).pipe(Layer.provide(dependencies), Layer.provide(assignmentLayer))
   harness.layer = Layer.merge(controller, assignmentLayer)

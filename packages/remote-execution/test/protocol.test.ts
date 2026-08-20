@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { CellRequest, ControllerMessage, FilesystemCheckpoint, HostMessage } from "../src/protocol"
+import { CellRequest, ApiMessage, FilesystemCheckpoint, ExecutorMessage } from "../src/protocol"
 
 const fence = {
   target: "e2b" as const,
@@ -14,7 +14,7 @@ const fence = {
 describe("executor protocol v1", () => {
   it.effect("accepts both execution targets and rejects every other protocol version", () =>
     Effect.gen(function* () {
-      const decode = Schema.decodeUnknownEffect(HostMessage)
+      const decode = Schema.decodeUnknownEffect(ExecutorMessage)
       for (const target of ["local_device", "e2b"] as const) {
         const message = yield* decode({
           _tag: "ExecutorHello",
@@ -80,7 +80,7 @@ describe("executor protocol v1", () => {
         toolCallId: "call-1",
         code: "console.log('hello')",
       })
-      expect(yield* Schema.decodeUnknownEffect(ControllerMessage)({ _tag: "CellExecute", request })).toEqual({
+      expect(yield* Schema.decodeUnknownEffect(ApiMessage)({ _tag: "CellExecute", request })).toEqual({
         _tag: "CellExecute",
         request,
       })

@@ -15,7 +15,7 @@ import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
 import * as HostedExecution from "@rika/execution"
 import * as ExecutionPostgres from "@rika/execution/postgres"
 import * as RemoteCells from "@rika/execution/remote-cells"
-import { serveControlPlane } from "./adapters/bun-server"
+import { serveApi } from "./adapters/bun-server"
 import { config as executorConfig, Executor, layer as executorLayer, service as executorService } from "./executor"
 import { HostedProduct, postgres as hostedProductPostgres } from "./hosted-product"
 
@@ -88,7 +88,7 @@ const program = Effect.scoped(
           }),
           postgres: {
             url: Redacted.value(config.databaseUrl),
-            source: "rika-control-plane",
+            source: "rika-api",
             maxConnections: postgres.maxConnections,
             worker: {
               workerId: Bun.env.RAILWAY_DEPLOYMENT_ID ?? executorOptions.deploymentId,
@@ -102,7 +102,7 @@ const program = Effect.scoped(
       ),
       ExecutionPostgres.Readiness,
     )
-    yield* serveControlPlane({
+    yield* serveApi({
       config,
       dependencies: {
         identity,
@@ -114,7 +114,7 @@ const program = Effect.scoped(
         production: config.production,
       },
     })
-    yield* Console.log(`Rika control plane listening on port ${config.port}`)
+    yield* Console.log(`Rika API listening on port ${config.port}`)
     return yield* Effect.never
   }),
 )

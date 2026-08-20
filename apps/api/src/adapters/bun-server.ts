@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import type { IdentityConfig } from "@rika/identity"
 import type { Gateway, Socket } from "../executor-gateway"
-import { isControlPlaneApiPath, makeControlPlaneApiHandler } from "../api"
+import { isRikaApiPath, makeRikaApiHandler } from "../api"
 import { makeWebRequestHandler, secureResponse, type HttpDependencies } from "../http"
 
 export const canonicalPublicRequest = (input: { readonly request: Request; readonly baseUrl: string }): Request => {
@@ -47,13 +47,10 @@ const session = (gateway: Gateway): Session => {
   }
 }
 
-export const serveControlPlane = (input: {
-  readonly config: IdentityConfig
-  readonly dependencies: HttpDependencies
-}) =>
+export const serveApi = (input: { readonly config: IdentityConfig; readonly dependencies: HttpDependencies }) =>
   Effect.acquireRelease(
     Effect.sync(() => {
-      const api = makeControlPlaneApiHandler(input.dependencies)
+      const api = makeRikaApiHandler(input.dependencies)
       const sessions = new Set<Session>()
       const idleWaiters = new Set<() => void>()
       let activeRequests = 0
@@ -91,7 +88,7 @@ export const serveControlPlane = (input: {
               : new Response("WebSocket upgrade required", { status: 426 })
           }
           const publicRequest = canonicalPublicRequest({ request, baseUrl: input.config.baseUrl })
-          if (isControlPlaneApiPath(pathname))
+          if (isRikaApiPath(pathname))
             return track(api.handler(publicRequest).then(secureResponse(input.dependencies.production)))
           return track(Promise.resolve(web(publicRequest)))
         },

@@ -114,7 +114,7 @@ const presence = {
   expiresAt,
 }
 
-describe("client control-plane protocol", () => {
+describe("client api protocol", () => {
   it("round trips every client request variant", () => {
     const values = [
       {
@@ -177,7 +177,7 @@ describe("client control-plane protocol", () => {
     expect(values.map((value) => roundTrip(ClientRequest, value))).toEqual(values)
   })
 
-  it("round trips every control-plane response variant including terminal output broadcast", () => {
+  it("round trips every api response variant including terminal output broadcast", () => {
     const values = [
       { _tag: "WorkspaceCreated", workspace },
       { _tag: "ThreadCreated", thread },

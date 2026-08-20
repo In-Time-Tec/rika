@@ -13,7 +13,7 @@ import {
 import { handleRequest, type HttpDependencies } from "../src/http"
 import { HostedProductError, type HostedProductService } from "../src/hosted-product"
 import type { Runtime as Executor } from "../src/executor"
-import { isControlPlaneApiPath, makeControlPlaneApiHandler } from "../src/api"
+import { isRikaApiPath, makeRikaApiHandler } from "../src/api"
 
 const account: Account = {
   user: {
@@ -42,7 +42,7 @@ const runtime = (userId: string | undefined): IdentityRuntime => ({
   handle: () => Effect.succeed(new Response("delegated", { status: 204 })),
   identify: () => Effect.succeed(userId === undefined ? undefined : { userId }),
   protectedResourceMetadata: Effect.succeed({
-    resource: "https://control.example.com/api/v1",
+    resource: "https://api.example.com/api/v1",
     dpop_bound_access_tokens_required: true,
   }),
 })
@@ -94,13 +94,13 @@ const dependencies = (
   production: true,
 })
 
-const request = (path: string, options?: RequestInit) => new Request(`https://control.example.com${path}`, options)
+const request = (path: string, options?: RequestInit) => new Request(`https://api.example.com${path}`, options)
 
 const response = (path: string, deps = dependencies(), options?: RequestInit) => {
   const input = request(path, options)
-  if (!isControlPlaneApiPath(new URL(input.url).pathname)) return handleRequest({ request: input, dependencies: deps })
+  if (!isRikaApiPath(new URL(input.url).pathname)) return handleRequest({ request: input, dependencies: deps })
   return Effect.acquireUseRelease(
-    Effect.sync(() => makeControlPlaneApiHandler(deps)),
+    Effect.sync(() => makeRikaApiHandler(deps)),
     (api) => Effect.promise(() => api.handler(input)),
     (api) => Effect.promise(api.dispose),
   )
@@ -113,7 +113,7 @@ const cliRegistrationBody = {
   token_endpoint_auth_method: "none",
   grant_types: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"],
   scope: "openid profile email offline_access account",
-  resource: "https://control.example.com/api/v1",
+  resource: "https://api.example.com/api/v1",
   dpop_jkt: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ",
   jwk: {
     kty: "EC",
@@ -123,7 +123,7 @@ const cliRegistrationBody = {
   },
 } as const
 
-describe("control-plane HTTP", () => {
+describe("api HTTP", () => {
   it.effect("serves liveness without consulting identity or PostgreSQL", () =>
     Effect.gen(function* () {
       const unavailable: HttpDependencies = {
@@ -207,7 +207,7 @@ describe("control-plane HTTP", () => {
       )
       expect(result.status).toBe(201)
       expect(yield* Effect.promise(() => result.json())).toMatchObject({ client_id: "client-1" })
-      expect(delegated?.url).toBe("https://control.example.com/api/auth/oauth2/register")
+      expect(delegated?.url).toBe("https://api.example.com/api/auth/oauth2/register")
       expect(yield* Effect.promise(() => delegated!.json())).toEqual({
         client_name: "Rika CLI",
         application_type: "native",
@@ -216,7 +216,7 @@ describe("control-plane HTTP", () => {
         scope: "openid profile email offline_access account",
         software_id: "rika-cli",
         dpop_bound_access_tokens: true,
-        resources: ["https://control.example.com/api/v1"],
+        resources: ["https://api.example.com/api/v1"],
       })
       expect(registered).toEqual({
         clientId: "client-1",
@@ -312,17 +312,13 @@ describe("control-plane HTTP", () => {
           ...product,
           projects: (memberIds) => {
             expect(memberIds).toEqual(["member-1"])
-            return Effect.succeed([
-              { id: "project-1", organizationId: "organization-1", name: "Control Plane", role: "owner" },
-            ])
+            return Effect.succeed([{ id: "project-1", organizationId: "organization-1", name: "API", role: "owner" }])
           },
         },
       })
       expect(result.status).toBe(200)
       const body = yield* Effect.promise(() => result.json() as Promise<{ readonly projects: unknown }>)
-      expect(body.projects).toEqual([
-        { id: "project-1", organizationId: "organization-1", name: "Control Plane", slug: "control-plane" },
-      ])
+      expect(body.projects).toEqual([{ id: "project-1", organizationId: "organization-1", name: "API", slug: "api" }])
     }),
   )
 
@@ -350,7 +346,7 @@ describe("control-plane HTTP", () => {
       })
       expect(accepted.status).toBe(200)
       expect(rejected.status).toBe(404)
-      expect(forwarded?.url).toBe("https://control.example.com/api/auth/organization/invite-member")
+      expect(forwarded?.url).toBe("https://api.example.com/api/auth/organization/invite-member")
       expect(yield* Effect.promise(() => forwarded!.json())).toEqual({
         email: "new@example.test",
         organizationId: "organization-1",
@@ -661,7 +657,7 @@ describe("control-plane HTTP", () => {
       const result = yield* response("/.well-known/oauth-protected-resource/api/v1")
       expect(result.status).toBe(200)
       expect(yield* Effect.promise(() => result.json())).toEqual({
-        resource: "https://control.example.com/api/v1",
+        resource: "https://api.example.com/api/v1",
         dpop_bound_access_tokens_required: true,
       })
     }),

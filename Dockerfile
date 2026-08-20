@@ -9,4 +9,4 @@ ENV NODE_ENV=production
 EXPOSE 3000
 USER bun
 
-CMD ["bun", "--cwd", "apps/control-plane", "start"]
+CMD ["bun", "--cwd", "apps/api", "start"]

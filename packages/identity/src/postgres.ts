@@ -139,15 +139,11 @@ export const runMigration = (input: {
     (client) =>
       Effect.gen(function* () {
         yield* clientQuery(client, "begin migration", "begin")
-        yield* clientQuery(
-          client,
-          "lock migrations",
-          "select pg_advisory_xact_lock(hashtext('rika-control-plane-migrations'))",
-        )
+        yield* clientQuery(client, "lock migrations", "select pg_advisory_xact_lock(hashtext('rika-api-migrations'))")
         yield* clientQuery(
           client,
           "create migration metadata",
-          `create table if not exists control_plane_migration (
+          `create table if not exists rika_api_migration (
             id text primary key,
             checksum text not null,
             applied_at timestamptz not null default now()
@@ -156,12 +152,12 @@ export const runMigration = (input: {
         yield* clientQuery(
           client,
           "add migration checksums",
-          "alter table control_plane_migration add column if not exists checksum text",
+          "alter table rika_api_migration add column if not exists checksum text",
         )
         const applied = yield* clientQuery(
           client,
           "check migration",
-          "select checksum from control_plane_migration where id = $1",
+          "select checksum from rika_api_migration where id = $1",
           [input.id],
         )
         if (applied.rowCount !== 0 && applied.rows[0]?.checksum !== input.checksum) {
@@ -172,7 +168,7 @@ export const runMigration = (input: {
           yield* clientQuery(
             client,
             "record migration",
-            "insert into control_plane_migration (id, checksum) values ($1, $2)",
+            "insert into rika_api_migration (id, checksum) values ($1, $2)",
             [input.id, input.checksum],
           )
         }

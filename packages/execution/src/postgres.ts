@@ -65,7 +65,7 @@ export interface ReadinessInterface {
 
 export class Readiness extends Context.Service<Readiness, ReadinessInterface>()("@rika/execution/postgres/Readiness") {}
 
-const invalidOptions = () => InvalidOptions.make({ message: "PostgreSQL control-plane options are invalid" })
+const invalidOptions = () => InvalidOptions.make({ message: "PostgreSQL API options are invalid" })
 
 export const validateOptions = Effect.fn("Postgres.validateOptions")(function* (input: unknown) {
   return yield* Schema.decodeUnknownEffect(Options, { onExcessProperty: "error" })(input).pipe(

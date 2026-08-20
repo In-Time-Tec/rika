@@ -6,15 +6,15 @@ import {
 } from "../src/cli-device"
 
 const identity = {
-  baseUrl: "https://control.example.com",
-  resource: "https://control.example.com/api/v1",
+  baseUrl: "https://api.example.com",
+  resource: "https://api.example.com/api/v1",
 }
 
 describe("CLI device companion", () => {
   it("builds a distinct public DPoP registration request for each installation", () => {
     const request = cliInstallRegistrationRequest({ config: identity, softwareVersion: "1.2.3" })
     expect(request).toEqual({
-      endpoint: "https://control.example.com/api/auth/oauth2/register",
+      endpoint: "https://api.example.com/api/auth/oauth2/register",
       body: {
         client_name: "Rika CLI",
         application_type: "native",
@@ -24,7 +24,7 @@ describe("CLI device companion", () => {
         software_id: "rika-cli",
         software_version: "1.2.3",
         dpop_bound_access_tokens: true,
-        resources: ["https://control.example.com/api/v1"],
+        resources: ["https://api.example.com/api/v1"],
       },
     })
   })
@@ -38,7 +38,7 @@ describe("CLI device companion", () => {
         tokenType: "refresh_token",
       }),
     ).toEqual({
-      endpoint: "https://control.example.com/api/auth/oauth2/revoke",
+      endpoint: "https://api.example.com/api/auth/oauth2/revoke",
       body: {
         client_id: "client-1",
         token: "token-1",

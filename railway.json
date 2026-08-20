@@ -4,7 +4,7 @@
     "builder": "DOCKERFILE",
     "dockerfilePath": "Dockerfile",
     "watchPatterns": [
-      "apps/control-plane/**",
+      "apps/api/**",
       "packages/**",
       "Dockerfile",
       "package.json",
@@ -14,10 +14,8 @@
     ]
   },
   "deploy": {
-    "preDeployCommand": [
-      "bun --cwd apps/control-plane migrate"
-    ],
-    "startCommand": "bun --cwd apps/control-plane start",
+    "preDeployCommand": ["bun --cwd apps/api migrate"],
+    "startCommand": "bun --cwd apps/api start",
     "healthcheckPath": "/readyz",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",

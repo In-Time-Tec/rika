@@ -38,8 +38,8 @@
         "vitest": "catalog:",
       },
     },
-    "apps/control-plane": {
-      "name": "@rika/control-plane",
+    "apps/api": {
+      "name": "@rika/api",
       "version": "0.1.0",
       "dependencies": {
         "@effect/platform-bun": "4.0.0-rc.109",
@@ -708,7 +708,7 @@
 
     "@rika/configuration": ["@rika/configuration@workspace:packages/configuration"],
 
-    "@rika/control-plane": ["@rika/control-plane@workspace:apps/control-plane"],
+    "@rika/api": ["@rika/api@workspace:apps/api"],
 
     "@rika/credential-vault": ["@rika/credential-vault@workspace:packages/credential-vault"],
 

@@ -12,7 +12,7 @@ const request = {
   threadId: "thread-1",
   generation: 3,
   idleTimeoutMillis: 900_000,
-  allowedEgress: ["controller.example.test", "github.com"],
+  allowedEgress: ["api.example.test", "github.com"],
   environment: {
     RIKA_EXECUTOR_ASSIGNMENT_ID: "assignment-1",
     RIKA_EXECUTOR_TEMPLATE_BUILD_ID: "7d0-build-receipt",
@@ -64,7 +64,7 @@ describe("Provider", () => {
         lifecycle: { onTimeout: { action: "pause", keepMemory: false }, autoResume: false },
         network: {
           allowPublicTraffic: false,
-          allowOut: ["controller.example.test", "github.com"],
+          allowOut: ["api.example.test", "github.com"],
           denyOut: ["0.0.0.0/0"],
         },
         metadata: {

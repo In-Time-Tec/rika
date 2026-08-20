@@ -4,7 +4,7 @@ import type { CliDeviceDirectory, IdentityConfig, IdentityDirectory, IdentityRun
 import type { HostedProductService } from "../src/hosted-product"
 import type { Runtime as ExecutorRuntime } from "../src/executor"
 import type { HttpDependencies } from "../src/http"
-import { canonicalPublicRequest, serveControlPlane } from "../src/adapters/bun-server"
+import { canonicalPublicRequest, serveApi } from "../src/adapters/bun-server"
 
 const config: IdentityConfig = {
   production: false,
@@ -67,9 +67,7 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
       production: false,
     }
     const resourceScope = yield* Scope.make()
-    const running = yield* serveControlPlane({ config, dependencies }).pipe(
-      Effect.provideService(Scope.Scope, resourceScope),
-    )
+    const running = yield* serveApi({ config, dependencies }).pipe(Effect.provideService(Scope.Scope, resourceScope))
     const request = yield* Effect.forkChild(
       Effect.promise(() => Bun.fetch(`http://127.0.0.1:${running.server.port}/readyz`)),
     )
@@ -105,11 +103,11 @@ it.effect("canonicalizes public HTTPS requests from the configured origin instea
       },
       body: "request-body",
     })
-    const canonical = canonicalPublicRequest({ request, baseUrl: "https://control.example.test" })
-    expect(canonical.url).toBe("https://control.example.test/api/v1/auth/cli/registrations?proof=1")
+    const canonical = canonicalPublicRequest({ request, baseUrl: "https://api.example.test" })
+    expect(canonical.url).toBe("https://api.example.test/api/v1/auth/cli/registrations?proof=1")
     expect(canonical.method).toBe("POST")
     expect(canonical.headers.get("authorization")).toBe("DPoP proof")
-    expect(canonical.headers.get("host")).toBe("control.example.test")
+    expect(canonical.headers.get("host")).toBe("api.example.test")
     expect(canonical.headers.get("x-forwarded-host")).toBeNull()
     expect(canonical.headers.get("x-forwarded-proto")).toBeNull()
     expect(yield* Effect.promise(() => canonical.text())).toBe("request-body")
@@ -156,13 +154,13 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
       production: true,
     }
     const resourceScope = yield* Scope.make()
-    const running = yield* serveControlPlane({
+    const running = yield* serveApi({
       config: {
         ...config,
         production: true,
-        baseUrl: "https://control.example.test",
-        trustedOrigins: ["https://control.example.test"],
-        resource: "https://control.example.test/api/v1",
+        baseUrl: "https://api.example.test",
+        trustedOrigins: ["https://api.example.test"],
+        resource: "https://api.example.test/api/v1",
       },
       dependencies,
     }).pipe(Effect.provideService(Scope.Scope, resourceScope))
@@ -173,6 +171,6 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
     )
     yield* Scope.close(resourceScope, Exit.void)
     expect(response.status).toBe(200)
-    expect(handledUrl).toBe("https://control.example.test/api/auth/session?proof=1")
+    expect(handledUrl).toBe("https://api.example.test/api/auth/session?proof=1")
   }),
 )

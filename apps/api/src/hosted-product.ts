@@ -85,7 +85,7 @@ export interface HostedProductService {
 }
 
 export class HostedProduct extends Context.Service<HostedProduct, HostedProductService>()(
-  "@rika/control-plane/hosted-product/HostedProduct",
+  "@rika/api/hosted-product/HostedProduct",
 ) {}
 
 export const layer = (options: { readonly templateBuildId: string; readonly providerScope: string }) =>

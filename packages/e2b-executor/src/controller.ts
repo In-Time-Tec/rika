@@ -98,7 +98,7 @@ export interface Options {
   readonly deploymentId: string
   readonly templateId: string
   readonly templateBuildId: string
-  readonly controllerUrl: string
+  readonly apiUrl: string
   readonly allowedEgress: ReadonlyArray<string>
   readonly idleTimeoutMillis?: number
   readonly heartbeatIntervalMillis?: number
@@ -259,7 +259,7 @@ export const layer = (
             RIKA_EXECUTOR_GENERATION: assignment.generation,
             RIKA_EXECUTOR_ID: `${assignment.id}:g${assignment.generation}`,
             RIKA_EXECUTOR_TEMPLATE_BUILD_ID: placement.templateBuildId,
-            RIKA_EXECUTOR_CONTROLLER_URL: options.controllerUrl,
+            RIKA_EXECUTOR_API_URL: options.apiUrl,
             RIKA_EXECUTOR_WORKSPACE: "/workspace",
             RIKA_CHECKPOINT_OBJECT_PREFIX: `assignments/${assignment.id}/g${assignment.generation}/`,
           },

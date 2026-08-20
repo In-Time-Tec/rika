@@ -1,13 +1,13 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@rika/control-plane",
+  "name": "@rika/api",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "bun build ./src/main.ts --outdir dist --target bun --format esm",
-    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js apps/control-plane/src apps/control-plane/test",
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js apps/api/src apps/api/test",
     "migrate": "bun ./src/migrate.ts",
     "start": "bun ./src/main.ts",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
@@ -31,6 +31,6 @@
   },
   "rika": {
     "kind": "application",
-    "domain": "control-plane"
+    "domain": "api"
   }
 }

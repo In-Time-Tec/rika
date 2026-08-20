@@ -16,8 +16,8 @@ const layout = (title: string, page: string, content: string, attributes: Readon
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)} · Rika</title>
-  <link rel="stylesheet" href="/assets/control-plane.css">
-  <script src="/assets/control-plane.js" defer></script>
+  <link rel="stylesheet" href="/assets/api.css">
+  <script src="/assets/api.js" defer></script>
 </head>
 <body${bodyAttributes}>
   <main>

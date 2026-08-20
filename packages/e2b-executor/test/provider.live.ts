@@ -36,7 +36,7 @@ const program = Effect.gen(function* () {
       RIKA_EXECUTOR_GENERATION: "1",
       RIKA_EXECUTOR_ID: "live-validation:g1",
       RIKA_EXECUTOR_TEMPLATE_BUILD_ID: templateBuildId,
-      RIKA_EXECUTOR_CONTROLLER_URL: "wss://controller.invalid/executors",
+      RIKA_EXECUTOR_API_URL: "wss://api.invalid/executors",
     },
   })
   yield* provider.bootstrap({

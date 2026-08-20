@@ -82,8 +82,8 @@ describe("Controller", () => {
       })
       expect(Object.keys(harness.provider.creates[0]!.environment).sort()).toEqual([
         "RIKA_CHECKPOINT_OBJECT_PREFIX",
+        "RIKA_EXECUTOR_API_URL",
         "RIKA_EXECUTOR_ASSIGNMENT_ID",
-        "RIKA_EXECUTOR_CONTROLLER_URL",
         "RIKA_EXECUTOR_GENERATION",
         "RIKA_EXECUTOR_ID",
         "RIKA_EXECUTOR_TARGET",

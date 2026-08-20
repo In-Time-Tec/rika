@@ -18,14 +18,14 @@ const required = (environment: Record<string, string | undefined>, name: string)
 }
 
 export const config = (environment: Record<string, string | undefined>) => {
-  const controllerUrl = required(environment, "RIKA_EXECUTOR_CONTROLLER_URL")
+  const apiUrl = required(environment, "RIKA_EXECUTOR_API_URL")
   return {
     appId: required(environment, "E2B_APP_ID"),
     deploymentId: required(environment, "E2B_DEPLOYMENT_ID"),
     templateId: required(environment, "E2B_TEMPLATE_ID"),
     templateBuildId: required(environment, "E2B_TEMPLATE_BUILD_ID"),
-    controllerUrl,
-    allowedEgress: [new URL(controllerUrl).hostname, "github.com", "api.github.com"],
+    apiUrl,
+    allowedEgress: [new URL(apiUrl).hostname, "github.com", "api.github.com"],
     apiKey: Redacted.make(required(environment, "E2B_API_KEY"), { label: "e2b-api-key" }),
   }
 }
@@ -64,7 +64,7 @@ export interface Runtime {
   readonly ready: Effect.Effect<void, ControllerError>
 }
 
-export class Executor extends Context.Service<Executor, Runtime>()("@rika/control-plane/executor") {}
+export class Executor extends Context.Service<Executor, Runtime>()("@rika/api/executor") {}
 
 export const service = Layer.effect(
   Executor,

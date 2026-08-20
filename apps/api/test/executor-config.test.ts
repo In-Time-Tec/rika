@@ -8,7 +8,7 @@ const environment = {
   E2B_DEPLOYMENT_ID: "deployment-1",
   E2B_TEMPLATE_ID: "ar7-template-alias",
   E2B_TEMPLATE_BUILD_ID: "7d0-build-receipt",
-  RIKA_EXECUTOR_CONTROLLER_URL: "wss://controller.example.test/api/v1/executors",
+  RIKA_EXECUTOR_API_URL: "wss://api.example.test/api/v1/executors",
 }
 
 describe("executor configuration", () => {
@@ -17,8 +17,11 @@ describe("executor configuration", () => {
     expect(configured).toMatchObject({
       templateId: "ar7-template-alias",
       templateBuildId: "7d0-build-receipt",
+      apiUrl: "wss://api.example.test/api/v1/executors",
+      allowedEgress: ["api.example.test", "github.com", "api.github.com"],
     })
     expect(Redacted.value(configured.apiKey)).toBe("e2b-api-key")
     expect(() => config({ ...environment, E2B_TEMPLATE_ID: "" })).toThrow("E2B_TEMPLATE_ID is required")
+    expect(() => config({ ...environment, RIKA_EXECUTOR_API_URL: "" })).toThrow("RIKA_EXECUTOR_API_URL is required")
   })
 })

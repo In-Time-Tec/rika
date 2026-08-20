@@ -562,7 +562,7 @@ export const layerHosted = (
         options.credentialStore === undefined
           ? undefined
           : Context.get(yield* Layer.build(options.credentialStore), ProviderCredentialStore)
-      const controlPlane = Postgres.layer({
+      const apiPostgres = Postgres.layer({
         postgres: options.postgres,
         resolver: resolverFor(options, credentialStore),
         ...(options.subscriberQueueCapacity === undefined
@@ -570,11 +570,11 @@ export const layerHosted = (
           : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
         ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
       })
-      const execution = Layer.effectContext(make(options, credentialStore)).pipe(Layer.provide(controlPlane))
+      const execution = Layer.effectContext(make(options, credentialStore)).pipe(Layer.provide(apiPostgres))
       const readiness = Layer.effect(
         Postgres.Readiness,
         Effect.map(Postgres.Readiness, Postgres.Readiness.of),
-      ).pipe(Layer.provide(controlPlane))
+      ).pipe(Layer.provide(apiPostgres))
       return Layer.merge(execution, readiness).pipe(
         Layer.catchCause((cause) =>
           Layer.effectContext(

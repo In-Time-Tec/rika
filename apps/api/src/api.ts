@@ -64,12 +64,12 @@ const OperationResponse = Schema.Struct({ output: Schema.String })
 export class CurrentAccess extends Context.Service<
   CurrentAccess,
   Extract<AccountAccess, { readonly _tag: "account" }>
->()("@rika/control-plane/api/CurrentAccess") {}
+>()("@rika/api/api/CurrentAccess") {}
 
 export class Authorization extends HttpApiMiddleware.Service<
   Authorization,
   { provides: CurrentAccess; requires: never }
->()("@rika/control-plane/api/Authorization", {
+>()("@rika/api/api/Authorization", {
   error: [Unauthorized, ServiceUnavailable],
 }) {}
 
@@ -103,7 +103,7 @@ class ProductGroup extends HttpApiGroup.make("product", { topLevel: true })
   )
   .middleware(Authorization) {}
 
-export class ControlPlaneApi extends HttpApi.make("rika-control-plane").add(PublicGroup).add(ProductGroup) {}
+export class RikaApi extends HttpApi.make("rika-api").add(PublicGroup).add(ProductGroup) {}
 
 const authorizationLayer = (dependencies: HttpDependencies) =>
   Layer.succeed(
@@ -124,7 +124,7 @@ const authorizationLayer = (dependencies: HttpDependencies) =>
   )
 
 const publicHandlers = (dependencies: HttpDependencies) =>
-  HttpApiBuilder.group(ControlPlaneApi, "public", (handlers) =>
+  HttpApiBuilder.group(RikaApi, "public", (handlers) =>
     handlers.handleAll({
       health: () => Effect.succeed({ status: "ok" }),
       ready: () =>
@@ -135,13 +135,13 @@ const publicHandlers = (dependencies: HttpDependencies) =>
           dependencies.execution.check,
         ]).pipe(
           Effect.as({ status: "ready" }),
-          Effect.mapError(() => ServiceUnavailable.make({ message: "Control plane is unavailable" })),
+          Effect.mapError(() => ServiceUnavailable.make({ message: "API is unavailable" })),
         ),
     }),
   )
 
 const productHandlers = (dependencies: HttpDependencies) =>
-  HttpApiBuilder.group(ControlPlaneApi, "product", (handlers) =>
+  HttpApiBuilder.group(RikaApi, "product", (handlers) =>
     handlers.handleAll({
       revokeAllDevices: () =>
         Effect.gen(function* () {
@@ -237,9 +237,7 @@ const productHandlers = (dependencies: HttpDependencies) =>
             yield* dependencies.product
               .completeRun({ run, access: result.access, response: result.response })
               .pipe(
-                Effect.mapError(() =>
-                  ServiceUnavailable.make({ message: "Operation result could not be persisted" }),
-                ),
+                Effect.mapError(() => ServiceUnavailable.make({ message: "Operation result could not be persisted" })),
               )
             response = result.response
           }
@@ -258,7 +256,7 @@ const productHandlers = (dependencies: HttpDependencies) =>
     }),
   )
 
-export const isControlPlaneApiPath = (pathname: string) =>
+export const isRikaApiPath = (pathname: string) =>
   pathname === "/healthz" ||
   pathname === "/readyz" ||
   pathname === "/api/v1/auth/cli/devices/revoke-all" ||
@@ -266,9 +264,9 @@ export const isControlPlaneApiPath = (pathname: string) =>
   pathname === "/api/v1/connections" ||
   /^\/api\/v1\/threads\/[^/]+\/operations$/.test(pathname)
 
-export const makeControlPlaneApiHandler = (dependencies: HttpDependencies) =>
+export const makeRikaApiHandler = (dependencies: HttpDependencies) =>
   HttpRouter.toWebHandler(
-    HttpApiBuilder.layer(ControlPlaneApi).pipe(
+    HttpApiBuilder.layer(RikaApi).pipe(
       Layer.provide(
         Layer.merge(
           publicHandlers(dependencies),

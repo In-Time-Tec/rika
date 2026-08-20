@@ -1,14 +1,14 @@
 import type { ControllerError, Interface as Controller } from "@rika/e2b-executor/controller"
 import {
-  ControllerMessage,
-  HostMessage,
+  ApiMessage,
+  ExecutorMessage,
   redactAccess,
   redactHeartbeat,
   redactHello,
   type AccessWire,
   type CellResponse,
   type Fence,
-  type HostMessage as HostMessageValue,
+  type ExecutorMessage as ExecutorMessageValue,
 } from "@rika/remote-execution/protocol"
 import { Clock, Deferred, Effect, Option, Redacted, Ref, Schema, Semaphore } from "effect"
 
@@ -56,8 +56,8 @@ export interface Gateway {
   readonly execute: (input: ExecuteInput) => Effect.Effect<ExecutionResult, GatewayError>
 }
 
-const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(HostMessage))
-const encode = Schema.encodeSync(Schema.fromJsonString(ControllerMessage))
+const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(ExecutorMessage))
+const encode = Schema.encodeSync(Schema.fromJsonString(ApiMessage))
 const key = (assignmentId: string, operationKey: string) => `${assignmentId}\u0000${operationKey}`
 
 const sameAccess = (left: AccessWire, right: AccessWire) =>
@@ -81,7 +81,7 @@ const expired = () => GatewayError.make({ kind: "fenced", message: "Executor lea
 const disconnectedFailure = () =>
   GatewayError.make({ kind: "disconnected", message: "Executor disconnected before returning a result" })
 
-const fenceOf = (message: HostMessageValue): Fence | undefined => {
+const fenceOf = (message: ExecutorMessageValue): Fence | undefined => {
   switch (message._tag) {
     case "ExecutorHello":
       return message.hello.fence
@@ -104,7 +104,7 @@ const close = (socket: Socket, code: number, reason: string) => {
   socket.close(code, reason)
 }
 
-const failure = (socket: Socket, message: HostMessageValue, error: ControllerError) => {
+const failure = (socket: Socket, message: ExecutorMessageValue, error: ControllerError) => {
   const fence = fenceOf(message)
   if (fence !== undefined) socket.send(encode({ _tag: "Fenced", fence, message: error.message }))
   close(socket, 1008, error.kind)
@@ -256,13 +256,11 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controll
   })
 
   const recover = Effect.fn("ExecutorGateway.recover")(function* (
-    message: HostMessageValue,
+    message: ExecutorMessageValue,
     error: ControllerError,
   ) {
     if (message._tag !== "ExecutorReconnect" || error.kind !== "fenced") return
-    const current = yield* Ref.get(sessions).pipe(
-      Effect.map((active) => active.get(message.access.fence.assignmentId)),
-    )
+    const current = yield* Ref.get(sessions).pipe(Effect.map((active) => active.get(message.access.fence.assignmentId)))
     if (current !== undefined) return
     const successor = {
       ...message.access,
@@ -278,7 +276,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controll
       .pipe(Effect.catchCause(() => Effect.void))
   })
 
-  const handle = Effect.fn("ExecutorGateway.handle")(function* (socket: Socket, message: HostMessageValue) {
+  const handle = Effect.fn("ExecutorGateway.handle")(function* (socket: Socket, message: ExecutorMessageValue) {
     switch (message._tag) {
       case "ExecutorHello": {
         const welcome = yield* controller.hello(redactHello(message.hello))
@@ -350,9 +348,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controll
           handle(socket, message).pipe(
             Effect.matchEffect({
               onFailure: (error) =>
-                recover(message, error).pipe(
-                  Effect.andThen(Effect.sync(() => failure(socket, message, error))),
-                ),
+                recover(message, error).pipe(Effect.andThen(Effect.sync(() => failure(socket, message, error)))),
               onSuccess: () => Effect.void,
             }),
           ),

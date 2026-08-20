@@ -135,7 +135,7 @@ export type AccountAccess =
   | { readonly _tag: "invalid" }
   | { readonly _tag: "unavailable" }
 
-export const accountAccess = Effect.fn("ControlPlaneHttp.accountAccess")(function* (
+export const accountAccess = Effect.fn("ApiHttp.accountAccess")(function* (
   request: Request,
   dependencies: HttpDependencies,
 ): Effect.fn.Return<AccountAccess> {
@@ -187,7 +187,7 @@ const accessFailure = (
   )
 }
 
-const protectedPage = Effect.fn("ControlPlaneHttp.protectedPage")(function* (
+const protectedPage = Effect.fn("ApiHttp.protectedPage")(function* (
   request: Request,
   url: URL,
   dependencies: HttpDependencies,
@@ -202,7 +202,7 @@ const protectedPage = Effect.fn("ControlPlaneHttp.protectedPage")(function* (
   return html(render(access.account), dependencies.production)
 })
 
-const routeRequest = Effect.fn("ControlPlaneHttp.route")(function* (request: Request, dependencies: HttpDependencies) {
+const routeRequest = Effect.fn("ApiHttp.route")(function* (request: Request, dependencies: HttpDependencies) {
   const url = new URL(request.url)
   const { pathname } = url
 
@@ -222,14 +222,14 @@ const routeRequest = Effect.fn("ControlPlaneHttp.route")(function* (request: Req
       : response
   }
 
-  if (pathname === "/assets/control-plane.css" && request.method === "GET") {
+  if (pathname === "/assets/api.css" && request.method === "GET") {
     const response = new Response(webStyles, {
       headers: { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=3600" },
     })
     return secured(response, dependencies.production)
   }
 
-  if (pathname === "/assets/control-plane.js" && request.method === "GET") {
+  if (pathname === "/assets/api.js" && request.method === "GET") {
     const response = new Response(webScript, {
       headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=3600" },
     })
