@@ -122,7 +122,7 @@ describe("release target construction", () => {
     )
     const files = [...graph.files].join("\n")
     const external = [...graph.external].join("\n")
-    expect(source).toContain("isServerProcessRole(process.argv.slice(2))")
+    expect(source).toContain("isServerProcessLaunch()")
     expect(source).toContain("startServer()")
     for (const forbidden of ["/packages/terminal/"]) expect(files).not.toContain(forbidden)
     for (const forbidden of ["@opentui/"]) expect(external).not.toContain(forbidden)

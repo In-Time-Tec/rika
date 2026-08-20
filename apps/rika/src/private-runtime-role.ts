@@ -17,3 +17,5 @@ export const serverProcessRuntime = (input: {
 
 export const isServerProcessRole = (argv: ReadonlyArray<string>): boolean =>
   argv.length === 1 && argv[0] === serverProcessRole
+
+export const isServerProcessLaunch = (): boolean => isServerProcessRole(process.argv.slice(2))

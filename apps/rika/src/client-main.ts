@@ -2,7 +2,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Context, Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { isServerProcessRole } from "./private-runtime-role"
+import { isServerProcessLaunch } from "./private-runtime-role"
 import { start as startServer } from "./server/process/server-process-launch"
 
 const provideLayerScoped =
@@ -39,6 +39,6 @@ const startClient = () => {
 }
 
 if (import.meta.main) {
-  if (isServerProcessRole(process.argv.slice(2))) startServer()
+  if (isServerProcessLaunch()) startServer()
   else startClient()
 }
