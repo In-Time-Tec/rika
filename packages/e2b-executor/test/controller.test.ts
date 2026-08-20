@@ -139,9 +139,7 @@ describe("Controller", () => {
       yield* provision()
       yield* authenticate(harness, 1)
       harness.provider.pauseFailure = true
-      expect(
-        (yield* Effect.flip(service.pause({ assignmentId: "assignment-1", generation: 1 }))).kind,
-      ).toBe("provider")
+      expect((yield* Effect.flip(service.pause({ assignmentId: "assignment-1", generation: 1 }))).kind).toBe("provider")
       expect((yield* readAssignment()).lifecycle._tag).toBe("Paused")
       harness.provider.pauseFailure = false
       expect((yield* service.pause({ assignmentId: "assignment-1", generation: 1 })).state).toBe("paused")
@@ -297,12 +295,14 @@ describe("Controller", () => {
       {
         sandboxId: "sandbox-z-duplicate",
         state: "running",
+        templateId: "ar7-template-alias",
         templateBuildId: "template-build-v1-immutable",
         metadata,
       },
       {
         sandboxId: "sandbox-a-adopt",
         state: "running",
+        templateId: "ar7-template-alias",
         templateBuildId: "template-build-v1-immutable",
         metadata,
       },
@@ -320,14 +320,42 @@ describe("Controller", () => {
     }).pipe(provideLayer(harness.layer))
   })
 
-  it.effect("does not reconcile an unknown create outcome against a mutable template alias", () => {
+  it.effect("does not reconcile an unknown create outcome against a different build receipt", () => {
     const harness = makeHarness()
     harness.provider.createFailure = true
     harness.provider.inventory = [
       {
         sandboxId: "sandbox-wrong-build",
         state: "running",
+        templateId: "ar7-template-alias",
         templateBuildId: "different-build-receipt",
+        metadata: {
+          "rika.managed": "e2b-executor",
+          "rika.app-id": "rika",
+          "rika.deployment-id": "test",
+          "rika.assignment-id": "assignment-1",
+          "rika.generation": "1",
+        },
+      },
+    ]
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* createAssignment()
+      expect((yield* Effect.flip(service.provision("assignment-1"))).kind).toBe("provider")
+      expect(harness.provider.bootstraps).toEqual([])
+      expect(harness.provider.kills).toEqual([])
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("does not reconcile an unknown create outcome against a different template", () => {
+    const harness = makeHarness()
+    harness.provider.createFailure = true
+    harness.provider.inventory = [
+      {
+        sandboxId: "sandbox-wrong-template",
+        state: "running",
+        templateId: "different-template",
+        templateBuildId: "template-build-v1-immutable",
         metadata: {
           "rika.managed": "e2b-executor",
           "rika.app-id": "rika",
@@ -352,12 +380,14 @@ describe("Controller", () => {
       {
         sandboxId: "sandbox-1",
         state: "running",
+        templateId: "ar7-template-alias",
         templateBuildId: "template-build-v1-immutable",
         metadata: { "rika.managed": "e2b-executor", "rika.app-id": "rika", "rika.deployment-id": "test" },
       },
       {
         sandboxId: "sandbox-orphan",
         state: "paused",
+        templateId: "ar7-template-alias",
         templateBuildId: "template-build-v1-immutable",
         metadata: { "rika.managed": "e2b-executor", "rika.app-id": "rika", "rika.deployment-id": "test" },
       },

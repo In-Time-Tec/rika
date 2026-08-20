@@ -8,6 +8,8 @@ The browser surface is server-rendered HTML with one static script and styleshee
 
 Railway builds the root `Dockerfile`, runs `migrate` as the pre-deploy command, and only promotes a release after `GET /readyz` can reach PostgreSQL. The configured 30-second overlap keeps the healthy release serving while its replacement becomes ready; Railway then gives the old release 30 seconds to drain after `SIGTERM`.
 
+Railway terminates public TLS before forwarding plain HTTP to Bun. At the adapter boundary, the control plane reconstructs the request URL from the configured `BETTER_AUTH_URL` plus the incoming path and query. It does not trust `Host` or `X-Forwarded-*` to choose the OAuth resource origin. This keeps DPoP `htu`, dynamic-registration resources, and Better Auth callbacks on the canonical public HTTPS origin.
+
 Set these service variables in Railway. Railway supplies `PORT`; do not replace it with a fixed production value.
 
 - `NODE_ENV=production`

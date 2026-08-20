@@ -4,6 +4,22 @@ import type { Gateway, Socket } from "../executor-gateway"
 import { isControlPlaneApiPath, makeControlPlaneApiHandler } from "../api"
 import { makeWebRequestHandler, secureResponse, type HttpDependencies } from "../http"
 
+export const canonicalPublicRequest = (input: { readonly request: Request; readonly baseUrl: string }): Request => {
+  const incoming = new URL(input.request.url)
+  const publicUrl = new URL(input.baseUrl)
+  publicUrl.pathname = incoming.pathname
+  publicUrl.search = incoming.search
+  const headers = new Headers(input.request.headers)
+  headers.set("host", publicUrl.host)
+  for (const name of ["forwarded", "x-forwarded-host", "x-forwarded-port", "x-forwarded-proto"]) headers.delete(name)
+  return new Request(publicUrl.href, {
+    method: input.request.method,
+    headers,
+    signal: input.request.signal,
+    ...(input.request.body === null ? {} : { body: input.request.body }),
+  })
+}
+
 interface Session {
   readonly attach: (socket: Bun.ServerWebSocket<Session>) => void
   readonly receive: (socket: Socket, message: unknown) => void
@@ -74,9 +90,10 @@ export const serveControlPlane = (input: {
               ? undefined
               : new Response("WebSocket upgrade required", { status: 426 })
           }
+          const publicRequest = canonicalPublicRequest({ request, baseUrl: input.config.baseUrl })
           if (isControlPlaneApiPath(pathname))
-            return track(api.handler(request).then(secureResponse(input.dependencies.production)))
-          return track(Promise.resolve(web(request)))
+            return track(api.handler(publicRequest).then(secureResponse(input.dependencies.production)))
+          return track(Promise.resolve(web(publicRequest)))
         },
         websocket: {
           open: (socket) => {
