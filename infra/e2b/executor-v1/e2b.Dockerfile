@@ -8,11 +8,13 @@ RUN apt-get update \
   && useradd --uid 10001 --gid rika-executor --create-home --shell /bin/sh rika-executor \
   && groupadd --gid 10002 rika-workspace \
   && useradd --uid 10002 --gid rika-workspace --create-home --shell /bin/sh rika-workspace \
+  && usermod --append --groups rika-workspace rika-executor \
   && echo 'Defaults:rika-executor env_reset' > /etc/sudoers.d/rika-workspace \
   && echo 'rika-executor ALL=(rika-workspace) NOPASSWD: ALL' >> /etc/sudoers.d/rika-workspace \
   && chmod 0440 /etc/sudoers.d/rika-workspace \
   && install -d -m 0700 -o rika-executor -g rika-executor /var/lib/rika-executor \
-  && install -d -m 0750 -o rika-workspace -g rika-workspace /workspace
+  && install -d -m 0750 -o rika-workspace -g rika-workspace /workspace \
+  && su --shell /bin/sh --command 'cd /workspace && sudo -n -u rika-workspace -- test -w /workspace' rika-executor
 
 WORKDIR /opt/rika
 COPY infra/e2b/executor-v1/package.json ./package.json

@@ -12,6 +12,8 @@ describe("E2B template", () => {
       const dockerfile = yield* read("../../../infra/e2b/executor-v1/e2b.Dockerfile")
       expect(dockerfile).toContain("install -d -m 0700 -o rika-executor -g rika-executor /var/lib/rika-executor")
       expect(dockerfile).toContain("Defaults:rika-executor env_reset")
+      expect(dockerfile).toContain("usermod --append --groups rika-workspace rika-executor")
+      expect(dockerfile).toContain("cd /workspace && sudo -n -u rika-workspace -- test -w /workspace")
       expect(dockerfile).toContain("RIKA_EXECUTOR_ASSIGNMENT_ID=template-readiness")
       expect(dockerfile).not.toMatch(/DATABASE_URL|E2B_API_KEY|BETTER_AUTH_SECRET/)
       const startup = yield* read("../../../infra/e2b/executor-v1/start.sh")
