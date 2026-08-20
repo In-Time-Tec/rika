@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, readdir, readlink, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -36,11 +36,7 @@ const publish = async (releases: string, version: string, marker: string, tamper
   await mkdir(join(payload, "bin"), { recursive: true })
   await writeFile(join(payload, "INSTALL"), "install fixture\n")
   await writeFile(join(payload, "bin", "rika"), marker)
-  await writeFile(join(payload, "bin", ".rika-performance"), `performance-${marker}`)
-  await writeFile(join(payload, "bin", ".rika-interactive"), `interactive-${marker}`)
   await chmod(join(payload, "bin", "rika"), 0o755)
-  await chmod(join(payload, "bin", ".rika-performance"), 0o755)
-  await chmod(join(payload, "bin", ".rika-interactive"), 0o755)
   const archiveFile = `rika-${version}-${target}.tar.gz`
   const archivePath = join(releases, archiveFile)
   const child = Bun.spawn(["tar", "-czf", archivePath, payloadRoot], { cwd: stage })
@@ -77,13 +73,26 @@ test("re-running the installer upgrades in place, verifies checksums, and never 
     expect(await readlink(command)).toBe(join(installRoot, "bin", "rika"))
     expect(await readFile(command, "utf8")).toBe("first")
 
+    // Simulate a v0.6.4 install with stale private siblings. A corrected installer must
+    // remove them as part of the atomic root replacement.
+    await writeFile(join(installRoot, "bin", ".rika-interactive"), "stale interactive")
+    await writeFile(join(installRoot, "bin", ".rika-performance"), "stale performance")
+    await writeFile(join(installRoot, "bin", ".rika-kernel-runtime"), "stale runtime")
+    await writeFile(join(installRoot, "bin", ".rika-kernel-worker.js"), "stale worker")
     await publish(releases, "1.0.1", "second", false)
     const upgrade = await run(environment)
     expect(upgrade.stderr).toBe("")
     expect(upgrade.exitCode).toBe(0)
     expect(await readFile(command, "utf8")).toBe("second")
-    expect(await readFile(join(installRoot, "bin", ".rika-performance"), "utf8")).toBe("performance-second")
-    expect(await readFile(join(installRoot, "bin", ".rika-interactive"), "utf8")).toBe("interactive-second")
+    for (const stale of [
+      ".rika-interactive",
+      ".rika-performance",
+      ".rika-kernel-runtime",
+      ".rika-kernel-worker.js",
+      ".rika-server",
+      "text-result.js",
+    ])
+      await expect(stat(join(installRoot, "bin", stale))).rejects.toThrow()
     expect(await strays(dirname(installRoot))).toEqual([])
     expect(await strays(binDir)).toEqual([])
 

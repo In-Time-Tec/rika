@@ -146,6 +146,13 @@ export interface AppendEventInput {
   readonly event: JsonObject
 }
 
+export interface AppendRecoveredEventInput extends AppendEventInput {
+  /** The executor that owned the dispatch before its lease was fenced. */
+  readonly executorInstanceId: string
+  /** The process incarnation that owned the dispatch before its lease was fenced. */
+  readonly processIncarnation: string
+}
+
 export interface ThreadCursorInput {
   readonly organizationId: OrganizationId
   readonly threadId: ThreadId
@@ -232,6 +239,8 @@ export interface StoreService {
     input: ReadThreadLogInput,
   ) => Effect.Effect<ReadonlyArray<ThreadCommand>, StoreError>
   readonly appendEvent: (input: AppendEventInput) => Effect.Effect<ThreadEvent, StoreError>
+  /** Append a terminal recovery event without requiring the expired dispatch lease. */
+  readonly appendRecoveredEvent: (input: AppendRecoveredEventInput) => Effect.Effect<ThreadEvent, StoreError>
   readonly readEvents: (input: ReadThreadLogInput) => Effect.Effect<ReadonlyArray<ThreadEvent>, StoreError>
   readonly acknowledgeCursor: (input: AcknowledgeCursorInput) => Effect.Effect<ResumableCursor, StoreError>
   readonly acquireTerminalWriter: (

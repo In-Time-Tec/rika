@@ -1,4 +1,5 @@
 import { Context, Effect, Option, Redacted, Schema } from "effect"
+import type { ForegroundLocalExecutorSnapshot } from "@rika/remote-execution/foreground"
 
 export const defaultOrigin = "https://rika-app.up.railway.app"
 export const scopes = "openid profile email offline_access account"
@@ -112,16 +113,31 @@ export const CliDevice = Schema.Struct({
 })
 export type CliDevice = typeof CliDevice.Type
 
+/** Hosted ids are controller-owned opaque identifiers. Do not infer placement from them. */
+export const HostedThreadId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
+export type HostedThreadId = typeof HostedThreadId.Type
+
+export const isHostedThreadId = Schema.is(HostedThreadId)
+export const isLocalHostedThreadId = (threadId: string): boolean => threadId.startsWith("local_")
+
 export const RemoteConnection = Schema.Struct({
   threadId: Schema.String,
   url: Schema.optionalKey(Schema.String),
 })
 export type RemoteConnection = typeof RemoteConnection.Type
 
-export const HostedThreadId = Schema.String.check(Schema.isPattern(/^e2b_[A-Za-z0-9_-]+$/))
-export type HostedThreadId = typeof HostedThreadId.Type
+export const LocalConnection = Schema.Struct({ threadId: HostedThreadId })
+export type LocalConnection = typeof LocalConnection.Type
 
-export const isHostedThreadId = Schema.is(HostedThreadId)
+/** One-use secret. It is held only by the foreground process. */
+export const LocalExecutorAdmission = Schema.Struct({
+  admissionId: Schema.String,
+  ticket: Schema.String,
+  expiresAt: Schema.Int,
+  executorUrl: Schema.String,
+  workspaceIdentity: Schema.String,
+})
+export type LocalExecutorAdmission = typeof LocalExecutorAdmission.Type
 
 export const RunRequest = Schema.Struct({
   prompt: Schema.Array(Schema.String),
@@ -129,7 +145,7 @@ export const RunRequest = Schema.Struct({
 })
 export type RunRequest = typeof RunRequest.Type
 
-export const RunResult = Schema.Struct({ output: Schema.String })
+export const RunResult = Schema.Struct({ output: Schema.String, exitCode: Schema.optionalKey(Schema.Int) })
 export type RunResult = typeof RunResult.Type
 
 export interface HttpInterface {
@@ -166,6 +182,18 @@ export interface HttpInterface {
   readonly devices: (origin: string, session: Session) => Effect.Effect<ReadonlyArray<CliDevice>, HostedError>
   readonly revokeDevice: (origin: string, deviceId: string, session: Session) => Effect.Effect<void, HostedError>
   readonly revokeAllDevices: (origin: string, session: Session) => Effect.Effect<void, HostedError>
+  readonly createLocalConnection: (
+    origin: string,
+    organization: string,
+    session: Session,
+  ) => Effect.Effect<LocalConnection, HostedError>
+  readonly admitLocalExecutor: (
+    origin: string,
+    organization: string,
+    threadId: string,
+    workspaceFingerprint: string,
+    session: Session,
+  ) => Effect.Effect<LocalExecutorAdmission, HostedError>
   readonly createRemoteConnection: (
     origin: string,
     organization: string,
@@ -175,7 +203,7 @@ export interface HttpInterface {
   readonly runThread: (
     origin: string,
     organization: string,
-    threadId: HostedThreadId,
+    threadId: string,
     request: RunRequest,
     idempotencyKey: string,
     session: Session,
@@ -192,6 +220,18 @@ export interface CredentialStoreInterface {
 
 export class CredentialStore extends Context.Service<CredentialStore, CredentialStoreInterface>()(
   "@rika/cli/hosted/hosted-contract/CredentialStore",
+) {}
+
+export interface LocalExecutorReceiptStoreInterface {
+  readonly load: (
+    scope: string,
+  ) => Effect.Effect<Option.Option<ForegroundLocalExecutorSnapshot>, HostedError>
+  readonly save: (scope: string, snapshot: ForegroundLocalExecutorSnapshot) => Effect.Effect<void, HostedError>
+  readonly remove: (scope: string) => Effect.Effect<boolean, HostedError>
+}
+
+export class LocalExecutorReceiptStore extends Context.Service<LocalExecutorReceiptStore, LocalExecutorReceiptStoreInterface>()(
+  "@rika/cli/hosted/hosted-contract/LocalExecutorReceiptStore",
 ) {}
 
 export interface Profile {

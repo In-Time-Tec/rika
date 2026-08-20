@@ -76,6 +76,14 @@ verify_checksum() {
   actual   $actual"
 }
 
+verify_archive_inventory() {
+  archive_path="$1"
+  archive_root="$2"
+  actual="$(tar -tzf "$archive_path" | LC_ALL=C sort)"
+  expected="$(printf '%s\n' "${archive_root}/" "${archive_root}/INSTALL" "${archive_root}/bin/" "${archive_root}/bin/rika" | LC_ALL=C sort)"
+  [ "$actual" = "$expected" ] || fail "release archive has unexpected contents (expected only INSTALL and bin/rika)"
+}
+
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 command -v tar >/dev/null 2>&1 || fail "tar is required"
 [ -n "${HOME:-}" ] || fail "HOME is not set"
@@ -140,11 +148,10 @@ curl -fsSL "${base_url}/SHA256SUMS" -o "${staging}/SHA256SUMS" ||
   fail "could not download SHA256SUMS from release v${version}"
 
 verify_checksum "${staging}/${archive_file}" "${staging}/SHA256SUMS" "$archive_file"
+verify_archive_inventory "${staging}/${archive_file}" "$archive_root"
 
 tar -xzf "${staging}/${archive_file}" -C "$staging"
 [ -x "${staging}/${archive_root}/bin/rika" ] || fail "release archive is missing bin/rika"
-[ -f "${staging}/${archive_root}/bin/.rika-interactive" ] || fail "release archive is missing bin/.rika-interactive"
-[ -f "${staging}/${archive_root}/bin/.rika-performance" ] || fail "release archive is missing bin/.rika-performance"
 
 previous="${install_parent}/.rika-previous-$$"
 if [ -e "$install_root" ]; then

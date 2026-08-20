@@ -148,6 +148,9 @@ export interface AssignmentsService {
   readonly authenticate: (
     access: Access,
   ) => Effect.Effect<ExecutorAssignment, AssignmentError>
+  readonly release: (
+    access: Access,
+  ) => Effect.Effect<ExecutorAssignment, AssignmentError>
   readonly validateFence: (
     fence: Fence,
   ) => Effect.Effect<ExecutorAssignment, AssignmentError>

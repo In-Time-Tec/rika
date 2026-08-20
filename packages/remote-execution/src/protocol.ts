@@ -33,6 +33,23 @@ export const ExecutorBootstrapWire = Schema.Struct({
 })
 export type ExecutorBootstrapWire = typeof ExecutorBootstrapWire.Type
 
+/**
+ * A one-use admission for a foreground executor on the user's device.
+ *
+ * `workspaceIdentity` is an opaque controller identity. It is deliberately
+ * not a filesystem path: only the foreground process knows `workspacePath`.
+ * This is separate from `ExecutorBootstrapWire`, whose E2B identity remains
+ * attested by the sandbox bootstrap listener.
+ */
+export const LocalExecutorAdmissionWire = Schema.Struct({
+  admissionId: Identifier,
+  ticket: Identifier,
+  executorUrl: Identifier,
+  workspaceIdentity: Identifier,
+  expiresAt: Timestamp,
+})
+export type LocalExecutorAdmissionWire = typeof LocalExecutorAdmissionWire.Type
+
 export const Cursor = Schema.Struct({
   sequence: Sequence,
   value: Schema.String,
@@ -252,6 +269,30 @@ export const CredentialWire = Schema.Struct({
   expiresAt: Timestamp,
 })
 
+export const LocalExecutorHelloWire = Schema.Struct({
+  admissionId: Identifier,
+  ticket: Identifier,
+  processIncarnation: Identifier,
+  capabilities: Capabilities,
+  cursors: ResumeCursors,
+})
+export type LocalExecutorHelloWire = typeof LocalExecutorHelloWire.Type
+
+/** Frames accepted only on the foreground local executor socket. */
+export const LocalExecutorMessage = Schema.Union([
+  Schema.TaggedStruct("LocalExecutorHello", { hello: LocalExecutorHelloWire }),
+  Schema.TaggedStruct("ExecutorReconnect", { access: AccessWire }),
+  Schema.TaggedStruct("ExecutorHeartbeat", { heartbeat: HeartbeatWire }),
+  Schema.TaggedStruct("LocalExecutorGoodbye", { access: AccessWire }),
+  Schema.TaggedStruct("LocalCellResult", {
+    access: AccessWire,
+    operationKey: Identifier,
+    attempt: Sequence,
+    response: CellResponse,
+  }),
+])
+export type LocalExecutorMessage = typeof LocalExecutorMessage.Type
+
 export const ExecutorMessage = Schema.Union([
   Schema.TaggedStruct("ExecutorHello", { hello: HelloWire }),
   Schema.TaggedStruct("ExecutorReconnect", { access: AccessWire }),
@@ -269,6 +310,7 @@ export const ApiMessage = Schema.Union([
   Schema.TaggedStruct("ExecutorWelcome", { welcome: WelcomeWire }),
   Schema.TaggedStruct("ExecutorReconnected", { welcome: ReconnectWelcomeWire }),
   Schema.TaggedStruct("LeaseReceipt", { receipt: ReceiptWire }),
+  Schema.TaggedStruct("LocalCellReceipt", { access: AccessWire, operationKey: Identifier, attempt: Sequence }),
   Schema.TaggedStruct("CheckpointAccepted", { checkpointId: Identifier, contentDigest: Sha256 }),
   Schema.TaggedStruct("CheckoutCredential", { credential: CredentialWire }),
   Schema.TaggedStruct("PtyCreate", { fence: Fence, request: PtyCreate }),

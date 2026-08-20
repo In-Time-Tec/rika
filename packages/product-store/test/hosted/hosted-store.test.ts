@@ -11,6 +11,8 @@ import {
   EventId,
   ExecutorAssignmentId,
   ExecutorInstanceId,
+  FencingGeneration,
+  AssignmentLeaseEpoch,
   IdempotencyKey,
   LeaseId,
   OrganizationId,
@@ -298,6 +300,28 @@ it.layer(layer)("hosted store", (test) => {
           }),
         ),
       ).toMatchObject({ _tag: "Failure", failure: { reason: "stale-fence" } })
+    }),
+  )
+
+  test.effect("fails closed for recovered events without PostgreSQL operation authority", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-01-01T00:00:00.000Z"))
+      const store = yield* initialize(testIds("recovered"))
+      expect(
+        yield* Effect.result(
+          store.appendRecoveredEvent({
+            eventId: EventId.make("recovered"),
+            idempotencyKey: IdempotencyKey.make("recovered"),
+            assignmentId: ExecutorAssignmentId.make("assignment-recovered"),
+            assignmentGeneration: FencingGeneration.make("1"),
+            leaseEpoch: AssignmentLeaseEpoch.make("1"),
+            commandSequence: Sequence.make("1"),
+            event: { _tag: "CellResult", operationKey: "recovered" },
+            executorInstanceId: "executor-recovered",
+            processIncarnation: "process-recovered",
+          }),
+        ),
+      ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-authority" } })
     }),
   )
 })

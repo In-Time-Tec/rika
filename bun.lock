@@ -55,6 +55,8 @@
       "devDependencies": {
         "@effect/vitest": "4.0.0-rc.109",
         "@types/bun": "1.3.13",
+        "@types/pg": "8.15.5",
+        "pg": "8.21.0",
         "typescript": "7.0.2",
         "vitest": "4.1.11",
       },
@@ -68,17 +70,8 @@
       "dependencies": {
         "@effect/platform-bun": "catalog:",
         "@opentui/core": "catalog:",
-        "@rika/coding-tools": "workspace:*",
-        "@rika/configuration": "workspace:*",
-        "@rika/execution": "workspace:*",
-        "@rika/extensions": "workspace:*",
-        "@rika/kernel": "workspace:*",
-        "@rika/product": "workspace:*",
-        "@rika/product-store": "workspace:*",
-        "@rika/terminal": "workspace:*",
-        "@rika/transcript": "workspace:*",
+        "@rika/remote-execution": "workspace:*",
         "effect": "catalog:",
-        "tenetkit": "catalog:",
       },
       "devDependencies": {
         "@effect/vitest": "catalog:",

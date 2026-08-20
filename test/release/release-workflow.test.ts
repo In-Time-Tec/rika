@@ -92,11 +92,17 @@ test("publishes npm packages built from the same attested archives", () => {
   expect(commands("npm")).toContain("sha256sum --check SHA256SUMS")
   expect(commands("npm")).toContain("bun run npm-package")
 
-  // Every public and private binary must be present in each platform package.
+  // Each platform package carries only the public executable.
   expect(commands("npm")).toContain("package/bin/rika")
-  expect(commands("npm")).toContain("package/bin/.rika-performance")
-  expect(commands("npm")).toContain("package/bin/.rika-interactive")
-  expect(commands("npm")).not.toContain("package/bin/.rika-server")
+  for (const privateArtifact of [
+    ".rika-interactive",
+    ".rika-kernel-runtime",
+    ".rika-kernel-worker.js",
+    "text-result.js",
+    ".rika-performance",
+    ".rika-server",
+  ])
+    expect(commands("npm")).not.toContain(`package/bin/${privateArtifact}`)
 
   const npmCommands = commands("npm")
   expect(npmCommands.indexOf("--dry-run")).toBeGreaterThan(-1)

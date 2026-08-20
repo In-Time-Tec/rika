@@ -1,9 +1,7 @@
 # Rika CLI
 
-Thin Effect CLI shell and process composition root. Leaf command modules export command values. `src/command/root/rika-command.ts` exports the root command and testable `run(argv)`. `src/command/root/noninteractive-run-command.ts` owns JSONL parsing. `src/client-main.ts`, `src/interactive-main.ts`, `src/server-main.ts`, and `src/performance-main.ts` interpret their isolated process programs.
+Hosted client and foreground local executor. The Railway API owns authentication, threads, commands, events, assignments, leases, fencing, and results. `src/client-main.ts` is the only executable entrypoint; `src/hosted/hosted-foreground.ts` owns the scoped outbound TUI session.
 
-Do not initialize SQL, TenetKit, models, MCP, plugins, or OpenTUI before command parsing selects an operation that needs them.
+The client must not initialize or import a local server, listener, daemon, sidecar, SQLite/TenetKit authority, product store, or hidden helper. Local workspace paths and admission tickets stay in the foreground process and never cross the API boundary.
 
-Use `*.test.ts` for Unit tests of one owned behavior or interface, even when they need real OpenTUI adapters.
-
-For user-visible interactive behavior, add or update an in-process `*.tui.test.ts` on `test/tui-app.ts`: the real Surface on the OpenTUI test renderer, the real interactive loop, and the real product stack with a scripted model. The TUI app suite runs through `bun run test-tui` in CI, not in `bun run check`; prefer extending an existing app instance over adding one. Provider models and network calls are forbidden. Tests that spawn servers, PTYs, or kill fixtures use `*.proc.test.ts` and run through `bun run test-proc` in CI. Use reducer or renderer tests as narrower support, not as a substitute for a TUI app test.
+Use `*.test.ts` for unit tests of one owned behavior. Native E2B acceptance tests use `*.integration.proc.test.ts` and run through the Bun proc project. Do not load Bun-only E2B modules from the Node/unit project.

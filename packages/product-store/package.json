@@ -14,13 +14,15 @@
     "./migrations/postgres/0001-hosted-authority.sql": "./migrations/postgres/0001-hosted-authority.sql",
     "./migrations/postgres/0002-hosted-identity-ancestry.sql": "./migrations/postgres/0002-hosted-identity-ancestry.sql",
     "./migrations/postgres/0003-hosted-authority-fences.sql": "./migrations/postgres/0003-hosted-authority-fences.sql",
+    "./migrations/postgres/0004-local-executor.sql": "./migrations/postgres/0004-local-executor.sql",
     "./product-database-layer": "./src/database/product-database-layer.ts",
     "./sqlite-goal-repository": "./src/goal/sqlite-goal-repository.ts",
     "./sqlite-thread-search-repository": "./src/search/sqlite-thread-search-repository.ts",
     "./sqlite-thread-summary-repository": "./src/summary/sqlite-thread-summary-repository.ts",
     "./sqlite-thread-repository": "./src/thread/sqlite-thread-repository.ts",
     "./sqlite-transcript-repository": "./src/transcript/sqlite-transcript-repository.ts",
-    "./sqlite-turn-repository": "./src/turn/sqlite-turn-repository.ts"
+    "./sqlite-turn-repository": "./src/turn/sqlite-turn-repository.ts",
+    "./migrations/postgres/0005-local-executor-recovery.sql": "./migrations/postgres/0005-local-executor-recovery.sql"
   },
   "dependencies": {
     "@effect/sql-pg": "catalog:",

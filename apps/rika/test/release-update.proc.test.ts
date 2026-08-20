@@ -35,25 +35,15 @@ const stubFetch = (routes: Readonly<Record<string, string | Uint8Array>>): typeo
   return Object.assign(handler, { preconnect: globalThis.fetch.preconnect })
 }
 
-const buildArchive = Effect.fn("ReleaseUpdateProc.buildArchive")(function* (options: {
-  readonly directory: string
-  readonly withRuntime: boolean
-}) {
+const buildArchive = Effect.fn("ReleaseUpdateProc.buildArchive")(function* (options: { readonly directory: string }) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const root = ReleaseUpdate.archiveRootName(latest, target)
   const stage = path.join(options.directory, root)
   yield* fileSystem.makeDirectory(path.join(stage, "bin"), { recursive: true })
+  yield* fileSystem.writeFileString(path.join(stage, "INSTALL"), "Install bin/rika on PATH.\n")
   yield* fileSystem.writeFileString(path.join(stage, "bin", "rika"), `rika ${latest}`, { mode: 0o755 })
-  if (options.withRuntime) {
-    yield* fileSystem.writeFileString(path.join(stage, "bin", ".rika-performance"), `performance ${latest}`, {
-      mode: 0o755,
-    })
-    yield* fileSystem.writeFileString(path.join(stage, "bin", ".rika-interactive"), `interactive ${latest}`, {
-      mode: 0o755,
-    })
-  }
   const archive = path.join(options.directory, archiveFile)
   const exitCode = yield* spawner.exitCode(
     ChildProcess.make("tar", ["-czf", archive, root], { cwd: options.directory }),
@@ -74,15 +64,6 @@ const installed = Effect.fn("ReleaseUpdateProc.installed")(function* (prefix: st
   yield* fileSystem.makeDirectory(path.join(installRoot, "bin"), { recursive: true })
   yield* fileSystem.makeDirectory(binDirectory, { recursive: true })
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", "rika"), "rika 0.0.3", { mode: 0o755 })
-  yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-performance"), "performance 0.0.3", {
-    mode: 0o755,
-  })
-  yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-interactive"), "interactive 0.0.3", {
-    mode: 0o755,
-  })
-  yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-server"), "server 0.0.3", {
-    mode: 0o755,
-  })
   const command = path.join(binDirectory, "rika")
   yield* fileSystem.symlink(path.join(installRoot, "bin", "rika"), command)
   return { home, installRoot, command, binary: path.join(installRoot, "bin", "rika") }
@@ -120,7 +101,7 @@ it.effect("replaces a verified install in one rename and keeps the command on PA
       const path = yield* Path.Path
       const install = yield* installed("rika-update-publish-")
       const workshop = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-update-archive-" })
-      const archive = yield* buildArchive({ directory: workshop, withRuntime: true })
+      const archive = yield* buildArchive({ directory: workshop })
       const result = yield* runUpdate({
         installRoot: install.installRoot,
         executable: install.binary,
@@ -139,56 +120,38 @@ it.effect("replaces a verified install in one rename and keeps the command on PA
           installRoot: install.installRoot,
         })
       expect(yield* fileSystem.readFileString(install.binary)).toBe(`rika ${latest}`)
-      expect(yield* fileSystem.readFileString(path.join(install.installRoot, "bin", ".rika-performance"))).toBe(
-        `performance ${latest}`,
-      )
-      expect(yield* fileSystem.readFileString(path.join(install.installRoot, "bin", ".rika-interactive"))).toBe(
-        `interactive ${latest}`,
-      )
-      expect(yield* fileSystem.exists(path.join(install.installRoot, "bin", ".rika-server"))).toBe(false)
+      for (const stale of [
+        ".rika-interactive",
+        ".rika-performance",
+        ".rika-kernel-runtime",
+        ".rika-kernel-worker.js",
+        ".rika-server",
+        "text-result.js",
+      ])
+        expect(yield* fileSystem.exists(path.join(install.installRoot, "bin", stale))).toBe(false)
       expect(yield* fileSystem.readFileString(install.command)).toBe(`rika ${latest}`)
       expect(yield* fileSystem.readDirectory(path.dirname(install.installRoot))).toEqual(["current"])
     }),
   ),
 )
 
-it.effect("leaves the working install in place when the downloaded archive has no payload", () =>
-  withPlatform(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const install = yield* installed("rika-update-rollback-")
-      const workshop = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-update-archive-" })
-      const archive = yield* buildArchive({ directory: workshop, withRuntime: false })
-      const result = yield* runUpdate({
-        installRoot: install.installRoot,
-        executable: install.binary,
-        routes: {
-          [releaseApiUrl]: `{"tag_name":"v${latest}"}`,
-          [`${releaseBaseUrl}/SHA256SUMS`]: `${digestOf(archive)}  ${archiveFile}\n`,
-          [`${releaseBaseUrl}/${archiveFile}`]: archive,
-        },
-      })
-      expect(result._tag).toBe("Failure")
-      if (result._tag === "Failure") {
-        expect(result.failure.failure).toBe("install-failed")
-        expect(result.failure.message).toContain("left unchanged")
-      }
-      expect(yield* fileSystem.readFileString(install.binary)).toBe("rika 0.0.3")
-      expect(yield* fileSystem.readFileString(install.command)).toBe("rika 0.0.3")
-      expect(yield* fileSystem.readDirectory(path.dirname(install.installRoot))).toEqual(["current"])
-    }),
-  ),
-)
-
-it.effect("accepts a serverless archive and removes the bridge server", () =>
+it.effect("accepts the one-executable archive and removes stale siblings", () =>
   withPlatform(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const install = yield* installed("rika-update-serverless-")
+      for (const stale of [
+        ".rika-interactive",
+        ".rika-performance",
+        ".rika-kernel-runtime",
+        ".rika-kernel-worker.js",
+        ".rika-server",
+        "text-result.js",
+      ])
+        yield* fileSystem.writeFileString(path.join(install.installRoot, "bin", stale), "stale")
       const workshop = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-update-archive-" })
-      const archive = yield* buildArchive({ directory: workshop, withRuntime: true })
+      const archive = yield* buildArchive({ directory: workshop })
       const result = yield* runUpdate({
         installRoot: install.installRoot,
         executable: install.binary,
@@ -200,10 +163,15 @@ it.effect("accepts a serverless archive and removes the bridge server", () =>
       })
       expect(result._tag).toBe("Success")
       expect(yield* fileSystem.readFileString(install.binary)).toBe(`rika ${latest}`)
-      expect(yield* fileSystem.readFileString(path.join(install.installRoot, "bin", ".rika-interactive"))).toBe(
-        `interactive ${latest}`,
-      )
-      expect(yield* fileSystem.exists(path.join(install.installRoot, "bin", ".rika-server"))).toBe(false)
+      for (const stale of [
+        ".rika-interactive",
+        ".rika-performance",
+        ".rika-kernel-runtime",
+        ".rika-kernel-worker.js",
+        ".rika-server",
+        "text-result.js",
+      ])
+        expect(yield* fileSystem.exists(path.join(install.installRoot, "bin", stale))).toBe(false)
       expect(yield* fileSystem.readFileString(install.command)).toBe(`rika ${latest}`)
       expect(yield* fileSystem.readDirectory(path.dirname(install.installRoot))).toEqual(["current"])
     }),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { CellRequest, ApiMessage, FilesystemCheckpoint, ExecutorMessage } from "../src/protocol"
+import { CellRequest, ApiMessage, FilesystemCheckpoint, ExecutorMessage, LocalExecutorMessage } from "../src/protocol"
 
 const fence = {
   target: "e2b" as const,
@@ -86,6 +86,57 @@ describe("executor protocol v1", () => {
       })
       expect(
         (yield* Effect.flip(Schema.decodeUnknownEffect(CellRequest)({ ...request, operationKey: "" }))).issue,
+      ).toBeDefined()
+    }),
+  )
+
+  it.effect("keeps local admission frames out of the E2B executor decoder", () =>
+    Effect.gen(function* () {
+      const local = LocalExecutorMessage.make({
+        _tag: "LocalExecutorHello",
+        hello: {
+          admissionId: "admission-1",
+          ticket: "one-use-ticket",
+          processIncarnation: "process-1",
+          capabilities: { cells: true, checkpoints: false, pty: false },
+          cursors: { command: 0, event: 0, pty: 0 },
+        },
+      })
+      expect(yield* Schema.decodeUnknownEffect(LocalExecutorMessage)(local)).toEqual(local)
+      expect((yield* Effect.flip(Schema.decodeUnknownEffect(ExecutorMessage)(local))).issue).toBeDefined()
+    }),
+  )
+
+  it.effect("accepts local goodbye and receipt frames and rejects PTY frames on the local decoder", () =>
+    Effect.gen(function* () {
+      const localAccess = {
+        version: 1 as const,
+        fence: { ...fence, target: "local_device" as const },
+        leaseEpoch: 1,
+        sessionToken: "session",
+      }
+      const goodbye = {
+        _tag: "LocalExecutorGoodbye" as const,
+        access: localAccess,
+      }
+      const receipt = {
+        _tag: "LocalCellReceipt" as const,
+        access: localAccess,
+        operationKey: "operation-1",
+        attempt: 0,
+      }
+      expect(yield* Schema.decodeUnknownEffect(LocalExecutorMessage)(goodbye)).toEqual(goodbye)
+      expect(yield* Schema.decodeUnknownEffect(ApiMessage)(receipt)).toEqual(receipt)
+      expect(
+        (
+          yield* Effect.flip(
+            Schema.decodeUnknownEffect(LocalExecutorMessage)({
+              _tag: "PtyOpened",
+              access: localAccess,
+              pty: { ptyId: "pty-1", command: "bash", cwd: "/tmp", cols: 80, rows: 24 },
+            }),
+          )
+        ).issue,
       ).toBeDefined()
     }),
   )

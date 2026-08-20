@@ -12,13 +12,23 @@ const headers = entries
   .join("\n")
 
 describe("package archive contract", () => {
-  test("accepts the exact regular-file package with executable binaries", () => {
+  test("accepts exactly INSTALL and one executable", () => {
+    expect(entries.map(({ name }) => name)).toEqual([`${root}/`, `${root}/INSTALL`, `${root}/bin/`, `${root}/bin/rika`])
     expect(() => validatePackageArchive(root, names, headers)).not.toThrow()
   })
 
   test.each([
-    ["missing performance runtime", names.replace(`${root}/bin/.rika-performance\n`, ""), headers],
-    ["missing interactive binary", names.replace(`${root}/bin/.rika-interactive\n`, ""), headers],
+    ["missing executable", names.replace(`${root}/bin/rika\n`, ""), headers],
+    [
+      "private runtime",
+      names + `${root}/bin/.rika-performance\n`,
+      headers + `\n-rwxr-xr-x user/group 1 2026-07-22 00:00 ${root}/bin/.rika-performance`,
+    ],
+    [
+      "kernel helper",
+      names + `${root}/bin/.rika-kernel-runtime\n`,
+      headers + `\n-rwxr-xr-x user/group 1 2026-07-22 00:00 ${root}/bin/.rika-kernel-runtime`,
+    ],
     [
       "server sidecar",
       names + `${root}/bin/.rika-server\n`,
@@ -35,8 +45,7 @@ describe("package archive contract", () => {
       headers + `\n-rw-r--r-- user/group 1 2026-07-22 00:00 ${root}/node_modules`,
     ],
     ["symlink executable", names, headers.replace("-rwxr-xr-x", "lrwxrwxrwx")],
-    ["non-executable runtime", names, headers.replace("-rwxr-xr-x", "-rw-r--r--")],
-    ["group-only executable runtime", names, headers.replace("-rwxr-xr-x", "-rw-r-xr--")],
+    ["non-executable binary", names, headers.replace("-rwxr-xr-x", "-rw-r--r--")],
     ["traversal", names.replace(`${root}/INSTALL`, `${root}/../INSTALL`), headers],
     ["absolute path", names.replace(`${root}/INSTALL`, "/tmp/INSTALL"), headers],
   ])("rejects %s", (_case, candidateNames, candidateHeaders) => {

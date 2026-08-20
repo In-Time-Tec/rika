@@ -17,6 +17,7 @@ import * as ExecutionPostgres from "@rika/execution/postgres"
 import * as RemoteCells from "@rika/execution/remote-cells"
 import { serveApi } from "./adapters/bun-server"
 import { config as executorConfig, Executor, layer as executorLayer, service as executorService } from "./executor"
+import { layer as localExecutorLayer } from "./local-executor"
 import { HostedProduct, postgres as hostedProductPostgres } from "./hosted-product"
 import { runtimeEnvironment } from "./runtime-environment"
 
@@ -64,7 +65,7 @@ const program = Effect.scoped(
     const executor = Context.get(
       yield* Layer.build(
         executorService.pipe(
-          Layer.provide(executorLayer(executorOptions)),
+          Layer.provide(Layer.merge(executorLayer(executorOptions), localExecutorLayer)),
           Layer.provide(postgresLayer(postgres)),
           Layer.provide(BunCrypto.layer),
         ),

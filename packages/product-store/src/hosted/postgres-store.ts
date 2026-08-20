@@ -12,7 +12,7 @@ import {
   HostedWorkspace,
   JsonObject,
   LocalWorkspaceBinding,
-  type ExecutorInstanceId,
+  ExecutorInstanceId,
   type OrganizationId,
   Presence,
   Project,
@@ -31,6 +31,7 @@ import {
   type AcquireTerminalWriterInput,
   type AdmitCommandInput,
   type AppendEventInput,
+  type AppendRecoveredEventInput,
   type AuthenticateClientInput,
   type BindLocalWorkspaceInput,
   type CreateProjectInput,
@@ -503,6 +504,8 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
           FROM rika_hosted_thread_events
           WHERE thread_id = ${assignment.threadId}
             AND (event_id = ${input.eventId} OR idempotency_key = ${input.idempotencyKey})`)
+        if (existingRows.length > 1)
+          return yield* failure("conflict", "Event identity or idempotency key collides with multiple events")
         const comparable = {
           ...input,
           organizationId: assignment.organizationId,
@@ -535,6 +538,87 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
             lease_epoch::text AS "leaseEpoch", sequence::text AS sequence,
             commit_cursor::text AS "commitCursor",
             command_sequence::text AS "commandSequence", event,
+            to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"`)
+        return yield* decode(ThreadEvent, rows[0])
+      }),
+    )
+  })
+
+  const appendRecoveredEvent = Effect.fn("PostgresStore.appendRecoveredEvent")(function* (
+    input: AppendRecoveredEventInput,
+  ) {
+    if (String(input.eventId) !== String(input.idempotencyKey))
+      return yield* failure("conflict", "Recovered event identity must equal its operation key")
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        const assignments = yield* query(sql<{
+          readonly organizationId: OrganizationId
+          readonly threadId: ThreadId
+        }>`SELECT organization_id AS "organizationId", thread_id AS "threadId"
+          FROM rika_hosted_executor_assignments
+          WHERE id = ${input.assignmentId}
+          FOR SHARE`)
+        const assignment = assignments[0]
+        if (assignment === undefined) return yield* failure("not-found", "Executor assignment does not exist")
+        const operations = yield* query(sql`SELECT operation.operation_key AS "operationKey"
+          FROM rika_hosted_executor_operations operation
+          WHERE operation.assignment_id = ${input.assignmentId}
+            AND operation.operation_key = ${input.idempotencyKey}
+            AND operation.state = 'unknown'
+            AND operation.dispatched_generation = ${input.assignmentGeneration}::bigint
+            AND operation.dispatched_lease_epoch = ${input.leaseEpoch}::bigint
+            AND operation.dispatched_executor_instance_id = ${input.executorInstanceId}
+            AND operation.dispatched_process_incarnation = ${input.processIncarnation}
+          FOR UPDATE`)
+        if (operations[0] === undefined)
+          return yield* failure("stale-fence", "Recovered event does not match the dispatched operation fence")
+        const locked = yield* query(sql`SELECT id FROM rika_hosted_threads
+          WHERE id = ${assignment.threadId} AND organization_id = ${assignment.organizationId} FOR UPDATE`)
+        if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist in the organization")
+        const existingRows = yield* query(sql`SELECT organization_id AS "organizationId", thread_id AS "threadId",
+          event_id AS "eventId", idempotency_key AS "idempotencyKey",
+          assignment_id AS "assignmentId", executor_instance_id AS "executorInstanceId",
+          assignment_generation::text AS "assignmentGeneration", lease_epoch::text AS "leaseEpoch",
+          sequence::text AS sequence, commit_cursor::text AS "commitCursor",
+          command_sequence::text AS "commandSequence", event,
+          to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"
+          FROM rika_hosted_thread_events
+          WHERE thread_id = ${assignment.threadId}
+            AND (event_id = ${input.eventId} OR idempotency_key = ${input.idempotencyKey})`)
+        if (existingRows.length > 1)
+          return yield* failure("conflict", "Recovered event identity collides with multiple events")
+        const comparable = {
+          ...input,
+          organizationId: assignment.organizationId,
+          threadId: assignment.threadId,
+          executorInstanceId: ExecutorInstanceId.make(input.executorInstanceId),
+        }
+        const existingRow = existingRows[0]
+        if (existingRow !== undefined) {
+          const existing = yield* decode(ThreadEvent, existingRow)
+          if (!eventEquivalent(existing, comparable))
+            return yield* failure("conflict", "Event identity or idempotency key was reused with different content")
+          return existing
+        }
+        const sequences = yield* query(sql<{ readonly sequence: string }>`UPDATE rika_hosted_threads
+          SET next_event_sequence = next_event_sequence + 1
+          WHERE id = ${assignment.threadId} AND organization_id = ${assignment.organizationId}
+          RETURNING (next_event_sequence - 1)::text AS sequence`)
+        const sequence = Sequence.make(sequences[0]!.sequence)
+        const commitCursor = yield* allocateCommitCursor(sql, assignment.organizationId)
+        const rows = yield* query(sql`INSERT INTO rika_hosted_thread_events
+          (organization_id, thread_id, event_id, idempotency_key, assignment_id, executor_instance_id,
+            assignment_generation, lease_epoch, sequence, commit_cursor, command_sequence, event)
+          VALUES (${assignment.organizationId}, ${assignment.threadId}, ${input.eventId}, ${input.idempotencyKey},
+            ${input.assignmentId}, ${input.executorInstanceId}, ${input.assignmentGeneration}::bigint,
+            ${input.leaseEpoch}::bigint, ${sequence}::bigint, ${commitCursor}::bigint,
+            ${input.commandSequence}::bigint, ${sql.json(input.event)})
+          RETURNING organization_id AS "organizationId", thread_id AS "threadId", event_id AS "eventId",
+            idempotency_key AS "idempotencyKey", assignment_id AS "assignmentId",
+            executor_instance_id AS "executorInstanceId", assignment_generation::text AS "assignmentGeneration",
+            lease_epoch::text AS "leaseEpoch", sequence::text AS sequence,
+            commit_cursor::text AS "commitCursor", command_sequence::text AS "commandSequence", event,
             to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"`)
         return yield* decode(ThreadEvent, rows[0])
       }),
@@ -768,6 +852,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
     admitCommand,
     readCommands,
     appendEvent,
+    appendRecoveredEvent,
     readEvents,
     acknowledgeCursor,
     acquireTerminalWriter,

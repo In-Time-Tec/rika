@@ -59,7 +59,11 @@ export const buildNpmPackages = Effect.fn("NpmPackage.build")(function* () {
     const exitCode = yield* spawner.exitCode(ChildProcess.make("tar", ["-xzf", archive, "-C", staging]))
     if (Number(exitCode) !== 0)
       return yield* npmPackageError("extract", `extract ${target}: tar exited with code ${exitCode}`)
-    yield* fileSystem.copy(path.join(staging, archiveRoot(version, target), "bin"), path.join(directory, "bin"))
+    yield* fileSystem.makeDirectory(path.join(directory, "bin"), { recursive: true })
+    yield* fileSystem.copyFile(
+      path.join(staging, archiveRoot(version, target), "bin", "rika"),
+      path.join(directory, "bin", "rika"),
+    )
     yield* writeJson(path.join(directory, "package.json"), platformManifest(target, version))
     yield* fileSystem.writeFileString(path.join(directory, "LICENSE"), license)
     built.push(target)

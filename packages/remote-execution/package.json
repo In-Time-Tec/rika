@@ -10,7 +10,8 @@
     "./operations": "./src/operations.ts",
     "./cells": "./src/cells.ts",
     "./protocol": "./src/protocol.ts",
-    "./pty": "./src/pty.ts"
+    "./pty": "./src/pty.ts",
+    "./foreground": "./src/foreground.ts"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",

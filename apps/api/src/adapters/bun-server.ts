@@ -20,14 +20,17 @@ export const canonicalPublicRequest = (input: { readonly request: Request; reado
   })
 }
 
+type SessionGateway = Pick<Gateway, "receive" | "disconnected">
+
 interface Session {
   readonly attach: (socket: Bun.ServerWebSocket<Session>) => void
   readonly receive: (socket: Socket, message: unknown) => void
+  readonly disconnected: (socket: Socket) => void
   readonly drain: () => Promise<void>
   readonly close: () => void
 }
 
-const session = (gateway: Gateway): Session => {
+const session = (gateway: SessionGateway): Session => {
   let pending: Promise<unknown> = Promise.resolve()
   let activeSocket: Bun.ServerWebSocket<Session> | undefined
   let draining = false
@@ -38,6 +41,9 @@ const session = (gateway: Gateway): Session => {
     receive: (socket, message) => {
       if (draining) return
       pending = pending.then(() => Effect.runPromise(gateway.receive(socket, message))).catch(() => undefined)
+    },
+    disconnected: (socket) => {
+      pending = pending.then(() => Effect.runPromise(gateway.disconnected(socket))).catch(() => undefined)
     },
     drain: () => {
       draining = true
@@ -81,9 +87,10 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
         port: input.config.port,
         fetch: (request, bunServer) => {
           const pathname = new URL(request.url).pathname
-          if (pathname === "/api/v1/executors") {
+          if (pathname === "/api/v1/executors" || pathname === "/api/v1/local-executors") {
             if (request.method !== "GET") return new Response("Method not allowed", { status: 405 })
-            return bunServer.upgrade(request, { data: session(input.dependencies.executor.gateway) })
+            const gateway = pathname === "/api/v1/executors" ? input.dependencies.executor.gateway : input.dependencies.executor.localGateway
+            return bunServer.upgrade(request, { data: session(gateway) })
               ? undefined
               : new Response("WebSocket upgrade required", { status: 426 })
           }
@@ -100,7 +107,7 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
           message: (socket, message) => socket.data!.receive(socket, message),
           close: (socket) => {
             sessions.delete(socket.data!)
-            Effect.runFork(input.dependencies.executor.gateway.disconnected(socket))
+            socket.data!.disconnected(socket)
           },
         },
       })

@@ -14,6 +14,7 @@ import {
 } from "../../scripts/installation/install-paths"
 import { validateInstallerScript } from "../../scripts/installation/install-script-validation"
 import { launcherManifest } from "../../scripts/packaging/npm-launcher"
+import { platformManifest } from "../../scripts/packaging/npm-platform-package"
 import { packedName, platformConstraints, platformPackageName } from "../../scripts/packaging/npm-package-names"
 import { archiveName, archiveRoot } from "../../scripts/packaging/release-archive"
 import { targetNames } from "../../scripts/packaging/package-target-contract"
@@ -47,6 +48,20 @@ describe("install contract", () => {
 
   test("install.sh rejects a drifted default", () => {
     expect(() => validateInstallerScript(installer.replaceAll(defaultBinDir, "$HOME/bin"))).toThrow(binDirEnv)
+  })
+
+  test("install.sh validates the strict one-executable archive inventory", () => {
+    expect(installer).toContain("verify_archive_inventory")
+    expect(installer).toContain('"${archive_root}/INSTALL"')
+    expect(installer).toContain('"${archive_root}/bin/rika"')
+    for (const forbidden of [
+      ".rika-interactive",
+      ".rika-performance",
+      ".rika-kernel-runtime",
+      ".rika-kernel-worker.js",
+      "text-result.js",
+    ])
+      expect(installer).not.toContain(forbidden)
   })
 
   test("install.sh verifies a checksum before publishing the install", () => {
@@ -105,6 +120,10 @@ describe("install contract", () => {
     )
     for (const version of Object.values(manifest.optionalDependencies)) expect(version).toBe("1.2.3")
     expect(manifest.bin[releaseCommandName]).toBe("bin/rika.js")
+  })
+
+  test("platform npm packages expose exactly bin/rika", () => {
+    expect(platformManifest("linux-x64", "1.2.3").files).toEqual(["bin/rika"])
   })
 
   test("platform packages constrain os and cpu", () => {

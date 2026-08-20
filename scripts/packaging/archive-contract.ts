@@ -5,11 +5,6 @@ export const packageEntries = (root: string) =>
     { name: `${root}/`, type: "d", executable: true },
     { name: `${root}/INSTALL`, type: "-", executable: false },
     { name: `${root}/bin/`, type: "d", executable: true },
-    { name: `${root}/bin/.rika-interactive`, type: "-", executable: true },
-    { name: `${root}/bin/.rika-kernel-runtime`, type: "-", executable: true },
-    { name: `${root}/bin/.rika-kernel-worker.js`, type: "-", executable: false },
-    { name: `${root}/bin/text-result.js`, type: "-", executable: false },
-    { name: `${root}/bin/.rika-performance`, type: "-", executable: true },
     { name: `${root}/bin/rika`, type: "-", executable: true },
   ] as const
 

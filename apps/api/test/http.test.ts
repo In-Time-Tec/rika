@@ -67,6 +67,8 @@ const product: HostedProductService = {
 const executor: Executor = {
   controller: undefined as never,
   gateway: undefined as never,
+  localGateway: undefined as never,
+  admitLocal: () => Effect.die("unused"),
   run: () => Effect.die("unused"),
   ready: Effect.void,
 }
@@ -439,6 +441,7 @@ describe("api HTTP", () => {
               return Effect.succeed({
                 access,
                 response: { _tag: "Success", result: { exitCode: 0, stdout: "hosted-mvp\n", stderr: "" } },
+                eventPersisted: false,
               })
             },
           },
@@ -450,7 +453,7 @@ describe("api HTTP", () => {
         },
       )
       expect(result.status).toBe(200)
-      expect(yield* Effect.promise(() => result.json())).toEqual({ output: "hosted-mvp\n" })
+      expect(yield* Effect.promise(() => result.json())).toEqual({ output: "hosted-mvp\n", exitCode: 0 })
       expect(admitted).toEqual({
         authority: {
           organizationId: "organization-1",
@@ -515,7 +518,7 @@ describe("api HTTP", () => {
         },
       )
       expect(result.status).toBe(200)
-      expect(yield* Effect.promise(() => result.json())).toEqual({ output: "hosted-mvp\n" })
+      expect(yield* Effect.promise(() => result.json())).toEqual({ output: "hosted-mvp\n", exitCode: 0 })
       expect(dispatched).toBe(false)
       expect(completed).toBe(false)
     }),

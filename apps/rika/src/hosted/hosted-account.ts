@@ -1,16 +1,18 @@
-import { Clock, Console, Crypto, Effect, Option, Redacted, Result, Schema } from "effect"
+import { Clock, Console, Crypto, Effect, Option, Redacted, Result, Runtime, Schema } from "effect"
 import {
   Browser,
   CredentialStore,
   defaultOrigin,
   HostedError,
   Http,
+  LocalExecutorReceiptStore,
   ProfileStore,
   type Credential,
   type DeviceAuthorization,
   type PrivateJwk,
   type Profile,
   type Session,
+  type LocalExecutorAdmission,
   type TokenSet,
 } from "./hosted-contract"
 import type { RunRequest } from "./hosted-contract"
@@ -338,7 +340,53 @@ export const createRemoteThread = Effect.fn("HostedAccount.createRemoteThread")(
   )
 })
 
-export const runThread = Effect.fn("HostedAccount.runThread")(function* (threadId: string, request: RunRequest) {
+export const createLocalThread = Effect.fn("HostedAccount.createLocalThread")(function* () {
+  const profile = yield* selectedProfile()
+  if (profile.organization === undefined) return yield* failure("invalid-input", "Run rika org use first")
+  const http = yield* Http
+  const connection = yield* authenticated(profile, (session) =>
+    http.createLocalConnection(profile.origin, profile.organization!, session),
+  )
+  yield* Console.log(`Created local hosted thread ${connection.threadId}`)
+})
+
+/**
+ * Creates the hosted local thread when needed, then claims one foreground
+ * executor. `workspaceFingerprint` is random and opaque: no local pathname
+ * crosses this boundary.
+ */
+const receiptScope = (origin: string, deviceId: string, threadId: string) =>
+  `${new URL(origin).origin}/${encodeURIComponent(deviceId)}/${encodeURIComponent(threadId)}`
+
+export const prepareLocalExecutor = Effect.fn("HostedAccount.prepareLocalExecutor")(function* (threadId?: string) {
+  const profile = yield* selectedProfile()
+  if (profile.organization === undefined) return yield* failure("invalid-input", "Run rika org use first")
+  const crypto = yield* Crypto.Crypto
+  const http = yield* Http
+  const receipts = yield* LocalExecutorReceiptStore
+  const resolvedThreadId =
+    threadId ??
+    (yield* authenticated(profile, (session) =>
+      http.createLocalConnection(profile.origin, profile.organization!, session),
+    )).threadId
+  const scope = receiptScope(profile.origin, profile.deviceId, resolvedThreadId)
+  const stored = yield* receipts.load(scope)
+  if (Option.isSome(stored) && stored.value.leaseExpiresAt > (yield* Clock.currentTimeMillis))
+    return { threadId: resolvedThreadId, resume: stored.value, origin: profile.origin, scope }
+  // A per-admission nonce intentionally cannot identify or reveal a path.
+  const workspaceFingerprint = yield* crypto.randomUUIDv4.pipe(
+    Effect.mapError(() => failure("host", "Could not create a workspace identity")),
+  )
+  const admission: LocalExecutorAdmission = yield* authenticated(profile, (session) =>
+    http.admitLocalExecutor(profile.origin, profile.organization!, resolvedThreadId, workspaceFingerprint, session),
+  )
+  return { threadId: resolvedThreadId, admission, origin: profile.origin, scope }
+})
+
+export const runThreadOperation = Effect.fn("HostedAccount.runThreadOperation")(function* (
+  threadId: string,
+  request: RunRequest,
+) {
   const profile = yield* selectedProfile()
   if (profile.organization === undefined) return yield* failure("invalid-input", "Run rika org use first")
   const crypto = yield* Crypto.Crypto
@@ -346,8 +394,16 @@ export const runThread = Effect.fn("HostedAccount.runThread")(function* (threadI
   const key = yield* crypto.randomUUIDv4.pipe(
     Effect.mapError(() => failure("host", "Could not create a hosted operation identifier")),
   )
-  const result = yield* authenticated(profile, (session) =>
+  return yield* authenticated(profile, (session) =>
     http.runThread(profile.origin, profile.organization!, threadId, request, key, session),
   )
+})
+
+export const runThread = Effect.fn("HostedAccount.runThread")(function* (threadId: string, request: RunRequest) {
+  const result = yield* runThreadOperation(threadId, request)
   yield* Console.log(result.output)
+  if (result.exitCode !== undefined && result.exitCode !== 0) {
+    const error = failure("host", `Remote command exited with status ${result.exitCode}`)
+    return yield* Object.assign(error, { [Runtime.errorExitCode]: result.exitCode })
+  }
 })

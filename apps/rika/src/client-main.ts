@@ -2,8 +2,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Context, Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { isServerProcessLaunch } from "./private-runtime-role"
-import { start as startServer } from "./server/process/server-process-launch"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -18,27 +16,22 @@ const provideLayerScoped =
       ),
     )
 import { clientProcessExitCode } from "./client/client-process-exit"
-import { installClientSigintHandler, isInteractiveClientLaunch, run } from "./client/client-process"
+import { run } from "./client/client-process"
 
-const startClient = () => {
+export const startClient = () => {
   let interruptedBySigint = false
   let rootFiber: ReturnType<typeof Effect.runFork> | undefined
-  const removeSigintHandler = installClientSigintHandler({
-    inputMode: () => (isInteractiveClientLaunch() ? "child" : "root"),
-    rootFiber: () => rootFiber,
-    onSignal: () => {
-      interruptedBySigint = true
-    },
-  })
+  const onSignal = () => {
+    interruptedBySigint = true
+    rootFiber?.interruptUnsafe()
+  }
+  process.on("SIGINT", onSignal)
   rootFiber = Effect.runFork(run().pipe(provideLayerScoped(Layer.merge(BunServices.layer, FetchHttpClient.layer))))
-  if (interruptedBySigint && !isInteractiveClientLaunch()) rootFiber.interruptUnsafe()
+  if (interruptedBySigint) rootFiber.interruptUnsafe()
   rootFiber.addObserver((exit) => {
-    removeSigintHandler()
+    process.off("SIGINT", onSignal)
     process.exit(clientProcessExitCode({ exit, interruptedBySigint }))
   })
 }
 
-if (import.meta.main) {
-  if (isServerProcessLaunch()) startServer()
-  else startClient()
-}
+if (import.meta.main) startClient()

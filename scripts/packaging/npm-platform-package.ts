@@ -18,6 +18,6 @@ export const platformManifest: {
   description: `Rika binaries for ${target}`,
   ...shared(version),
   ...platformConstraints(target),
-  files: ["bin/"],
+  files: ["bin/rika"],
   preferUnplugged: true,
 }))

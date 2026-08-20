@@ -302,6 +302,18 @@ const make = Effect.gen(function* () {
           )
         }),
       ),
+    release: (input) =>
+      mutation((current, now) => {
+        const assignment = load(current, input.assignmentId)
+        const invalid = access(assignment, current.credentials.get(input.assignmentId), input, now, false)
+        if (invalid !== undefined) return invalid
+        const lifecycle = assignment!.lifecycle
+        if (lifecycle._tag !== "Active") return fail("invalid-state", "Assignment is not active")
+        const next = revised(assignment!, now, {
+          lifecycle: { _tag: "Paused", providerInstanceId: lifecycle.providerInstanceId },
+        })
+        return succeed(next, saveCredentials(save(current, next), next.id, {}))
+      }),
     validateFence: (input) =>
       Clock.currentTimeMillis.pipe(
         Effect.flatMap((millis) => {

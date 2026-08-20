@@ -7,6 +7,8 @@ import {
   Http,
   IdentityContext,
   Invitation,
+  LocalConnection,
+  LocalExecutorAdmission,
   Registration,
   RemoteConnection,
   RunResult,
@@ -304,6 +306,35 @@ export const layer = Layer.effect(
       revokeAllDevices: (origin, session) => {
         const url = `${origin}/api/v1/auth/cli/devices/revoke-all`
         return authenticatedEmpty("POST", url, HttpClientRequest.post(url), session, "All CLI device revocation")
+      },
+      createLocalConnection: (origin, organization, session) => {
+        const url = `${origin}/api/v1/connections`
+        return authenticatedJson(
+          "POST",
+          url,
+          HttpClientRequest.post(url).pipe(
+            HttpClientRequest.bodyJsonUnsafe({ placement: "local", organization_id: organization }),
+          ),
+          session,
+          LocalConnection,
+          "Local connection creation",
+        )
+      },
+      admitLocalExecutor: (origin, organization, threadId, workspaceFingerprint, session) => {
+        const url = `${origin}/api/v1/threads/${encodeURIComponent(threadId)}/local-executor-admissions`
+        return authenticatedJson(
+          "POST",
+          url,
+          HttpClientRequest.post(url).pipe(
+            HttpClientRequest.bodyJsonUnsafe({
+              organization_id: organization,
+              workspace_fingerprint: workspaceFingerprint,
+            }),
+          ),
+          session,
+          LocalExecutorAdmission,
+          "Local executor admission",
+        )
       },
       createRemoteConnection: (origin, organization, project, session) => {
         const url = `${origin}/api/v1/connections`

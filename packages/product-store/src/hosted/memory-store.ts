@@ -467,6 +467,13 @@ const make = Effect.gen(function* () {
           )
         }),
       ),
+    appendRecoveredEvent: () =>
+      Effect.fail(
+        StoreError.make({
+          reason: "invalid-authority",
+          message: "Recovered events require PostgreSQL operation authority",
+        }),
+      ),
     readEvents: (input) =>
       Ref.get(state).pipe(
         Effect.flatMap((current) => {

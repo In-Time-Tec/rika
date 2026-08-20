@@ -49,7 +49,18 @@ const ConnectionRequest = Schema.Struct({
   placement: Schema.optionalKey(Schema.Literals(["local", "e2b"])),
 })
 const ConnectionResponse = Schema.Struct({ threadId: Schema.String }).pipe(HttpApiSchema.status(201))
-const ThreadId = Schema.String.check(Schema.isPattern(/^e2b_[A-Za-z0-9_-]+$/))
+const LocalExecutorAdmissionRequest = Schema.Struct({
+  organization_id: Schema.NonEmptyString,
+  workspace_fingerprint: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
+})
+const LocalExecutorAdmissionResponse = Schema.Struct({
+  admissionId: Schema.String,
+  ticket: Schema.String,
+  expiresAt: Schema.Finite,
+  executorUrl: Schema.String,
+  workspaceIdentity: Schema.String,
+}).pipe(HttpApiSchema.status(201))
+const ThreadId = Schema.String.check(Schema.isPattern(/^(local|e2b)_[A-Za-z0-9_-]+$/))
 const OperationKey = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
 )
@@ -59,7 +70,7 @@ const OperationRequest = Schema.Struct({
   prompt: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
   mode: Schema.optionalKey(Schema.String),
 })
-const OperationResponse = Schema.Struct({ output: Schema.String })
+const OperationResponse = Schema.Struct({ output: Schema.String, exitCode: Schema.optionalKey(Schema.Int) })
 
 export class CurrentAccess extends Context.Service<
   CurrentAccess,
@@ -92,6 +103,12 @@ class ProductGroup extends HttpApiGroup.make("product", { topLevel: true })
       payload: ConnectionRequest,
       success: ConnectionResponse,
       error: [Forbidden, NotFound, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.post("admitLocalExecutor", "/api/v1/threads/:threadId/local-executor-admissions", {
+      params: { threadId: ThreadId },
+      payload: LocalExecutorAdmissionRequest,
+      success: LocalExecutorAdmissionResponse,
+      error: [Forbidden, NotFound, Conflict, ServiceUnavailable],
     }),
     HttpApiEndpoint.post("run", "/api/v1/threads/:threadId/operations", {
       params: { threadId: ThreadId },
@@ -199,6 +216,44 @@ const productHandlers = (dependencies: HttpDependencies) =>
             })
             .pipe(Effect.mapError(() => Forbidden.make({ message: "Connection could not be created" })))
         }),
+      admitLocalExecutor: ({ params, payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          const membership = access.account.memberships.find(
+            (candidate) => candidate.organization.id === payload.organization_id,
+          )
+          if (membership === undefined) return yield* NotFound.make({ message: "Organization is unavailable" })
+          const serverRequest = yield* HttpServerRequest.HttpServerRequest
+          const request = yield* HttpServerRequest.toWeb(serverRequest).pipe(
+            Effect.mapError(() => ServiceUnavailable.make({ message: "Request is unavailable" })),
+          )
+          const executorUrl = new URL("/api/v1/local-executors", request.url)
+          executorUrl.protocol = "wss:"
+          return yield* dependencies.executor
+            .admitLocal({
+              threadId: params.threadId,
+              organizationId: membership.organization.id,
+              workspaceFingerprint: payload.workspace_fingerprint,
+              executorUrl: executorUrl.toString(),
+              actor: {
+                organizationIds: access.account.memberships.map((candidate) => candidate.organization.id),
+                deviceId: access.deviceId,
+                clientId: access.principal.clientId,
+                userId: access.principal.userId,
+                memberId: membership.id,
+              },
+            })
+            .pipe(
+              Effect.mapError((error) => {
+                if (error.kind === "assignment-missing") return NotFound.make({ message: "Thread is unavailable" })
+                if (error.kind === "assignment-conflict" || error.kind === "fenced")
+                  return Conflict.make({ message: "Local executor admission is unavailable" })
+                return Forbidden.make({ message: "Local executor admission was rejected" })
+              }),
+            )
+        }),
       run: ({ headers, params, payload }) =>
         Effect.gen(function* () {
           const access = yield* CurrentAccess
@@ -234,24 +289,34 @@ const productHandlers = (dependencies: HttpDependencies) =>
             const result = yield* dependencies.executor
               .run({ threadId: params.threadId, operationKey: run.operationKey, code: run.prompt })
               .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Executor is unavailable" })))
-            yield* dependencies.product
-              .completeRun({ run, access: result.access, response: result.response })
-              .pipe(
-                Effect.mapError(() => ServiceUnavailable.make({ message: "Operation result could not be persisted" })),
-              )
+            if (!result.eventPersisted) {
+              if (result.access === undefined)
+                return yield* ServiceUnavailable.make({ message: "Executor result has no completion authority" })
+              yield* dependencies.product
+                .completeRun({ run, access: result.access, response: result.response })
+                .pipe(
+                  Effect.mapError(() => ServiceUnavailable.make({ message: "Operation result could not be persisted" })),
+                )
+            }
             response = result.response
           }
           if (response._tag === "Suspend")
             return yield* ServiceUnavailable.make({ message: "Executor operation suspended" })
-          if (response._tag === "DomainFailure")
-            return yield* Unprocessable.make({ message: "Executor operation failed" })
+          if (response._tag === "DomainFailure") {
+            const failureValue = response.failure as Record<string, unknown>
+            const stdout = typeof failureValue.stdout === "string" ? failureValue.stdout : ""
+            const stderr = typeof failureValue.stderr === "string" ? failureValue.stderr : ""
+            const exitCode = typeof failureValue.exitCode === "number" ? failureValue.exitCode : undefined
+            return { output: `${stdout}${stderr}`, ...(exitCode === undefined ? {} : { exitCode }) }
+          }
           const value = response.result
           if (typeof value !== "object" || value === null || Array.isArray(value))
             return yield* ServiceUnavailable.make({ message: "Executor returned an invalid result" })
           const output = value as Record<string, unknown>
           const stdout = typeof output.stdout === "string" ? output.stdout : ""
           const stderr = typeof output.stderr === "string" ? output.stderr : ""
-          return { output: `${stdout}${stderr}` }
+          const exitCode = typeof output.exitCode === "number" ? output.exitCode : undefined
+          return { output: `${stdout}${stderr}`, ...(exitCode === undefined ? {} : { exitCode }) }
         }),
     }),
   )
@@ -262,7 +327,7 @@ export const isRikaApiPath = (pathname: string) =>
   pathname === "/api/v1/auth/cli/devices/revoke-all" ||
   pathname === "/api/v1/me/context" ||
   pathname === "/api/v1/connections" ||
-  /^\/api\/v1\/threads\/[^/]+\/operations$/.test(pathname)
+  /^\/api\/v1\/threads\/[^/]+\/(operations|local-executor-admissions)$/.test(pathname)
 
 export const makeRikaApiHandler = (dependencies: HttpDependencies) =>
   HttpRouter.toWebHandler(

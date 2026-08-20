@@ -67,7 +67,10 @@ interface CheckpointRow {
 }
 
 const databaseError = (cause: unknown) =>
-  AssignmentError.make({ reason: "database", message: `Executor assignment database operation failed: ${String(cause)}` })
+  AssignmentError.make({
+    reason: "database",
+    message: `Executor assignment database operation failed: ${String(cause)}`,
+  })
 const failure = (reason: AssignmentError["reason"], message: string) => AssignmentError.make({ reason, message })
 const query = <A extends object, E, R>(statement: Effect.Effect<ReadonlyArray<A>, E, R>) =>
   statement.pipe(Effect.mapError(databaseError))
@@ -150,9 +153,7 @@ const checkVersion = (row: AssignmentRow, input: Version) =>
     : Effect.fail(failure("conflict", "Executor assignment revision is stale"))
 
 const checkFence = (row: AssignmentRow, input: Fence) =>
-  row.lifecycle === "active" &&
-  row.generation === input.assignmentGeneration &&
-  row.leaseEpoch === input.leaseEpoch
+  row.lifecycle === "active" && row.generation === input.assignmentGeneration && row.leaseEpoch === input.leaseEpoch
     ? Effect.void
     : Effect.fail(failure("stale-fence", "Executor assignment fence is stale"))
 
@@ -183,12 +184,12 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
       provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",
       CASE WHEN bootstrap_expires_at IS NULL THEN NULL
         ELSE to_char(bootstrap_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS "bootstrapExpiresAt",
-      COALESCE(bootstrap_expires_at > transaction_timestamp(), false) AS "bootstrapLive",
+      COALESCE(bootstrap_expires_at > clock_timestamp(), false) AS "bootstrapLive",
       executor_instance_id AS "executorInstanceId", process_incarnation AS "processIncarnation",
       session_digest AS "sessionCredentialDigest", lease_epoch::text AS "leaseEpoch",
       CASE WHEN lease_expires_at IS NULL THEN NULL
         ELSE to_char(lease_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS "leaseExpiresAt",
-      COALESCE(lease_expires_at > transaction_timestamp(), false) AS "leaseLive",
+      COALESCE(lease_expires_at > clock_timestamp(), false) AS "leaseLive",
       cursor_sequence::text AS "cursorSequence", cursor_value AS "cursorValue",
       latest_checkpoint_id AS "latestCheckpointId",
       to_char(last_active_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastActiveAt",
@@ -204,12 +205,12 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
           provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",
           CASE WHEN bootstrap_expires_at IS NULL THEN NULL
             ELSE to_char(bootstrap_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS "bootstrapExpiresAt",
-          COALESCE(bootstrap_expires_at > transaction_timestamp(), false) AS "bootstrapLive",
+          COALESCE(bootstrap_expires_at > clock_timestamp(), false) AS "bootstrapLive",
           executor_instance_id AS "executorInstanceId", process_incarnation AS "processIncarnation",
           session_digest AS "sessionCredentialDigest", lease_epoch::text AS "leaseEpoch",
           CASE WHEN lease_expires_at IS NULL THEN NULL
             ELSE to_char(lease_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS "leaseExpiresAt",
-          COALESCE(lease_expires_at > transaction_timestamp(), false) AS "leaseLive",
+          COALESCE(lease_expires_at > clock_timestamp(), false) AS "leaseLive",
           cursor_sequence::text AS "cursorSequence", cursor_value AS "cursorValue",
           latest_checkpoint_id AS "latestCheckpointId",
           to_char(last_active_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastActiveAt",
@@ -222,12 +223,12 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
           provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",
           CASE WHEN bootstrap_expires_at IS NULL THEN NULL
             ELSE to_char(bootstrap_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS "bootstrapExpiresAt",
-          COALESCE(bootstrap_expires_at > transaction_timestamp(), false) AS "bootstrapLive",
+          COALESCE(bootstrap_expires_at > clock_timestamp(), false) AS "bootstrapLive",
           executor_instance_id AS "executorInstanceId", process_incarnation AS "processIncarnation",
           session_digest AS "sessionCredentialDigest", lease_epoch::text AS "leaseEpoch",
           CASE WHEN lease_expires_at IS NULL THEN NULL
             ELSE to_char(lease_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS "leaseExpiresAt",
-          COALESCE(lease_expires_at > transaction_timestamp(), false) AS "leaseLive",
+          COALESCE(lease_expires_at > clock_timestamp(), false) AS "leaseLive",
           cursor_sequence::text AS "cursorSequence", cursor_value AS "cursorValue",
           latest_checkpoint_id AS "latestCheckpointId",
           to_char(last_active_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastActiveAt",
@@ -235,10 +236,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
           to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"
           FROM rika_hosted_executor_assignments WHERE id = ${assignmentId} FOR SHARE`)
 
-  const locked = Effect.fn("PostgresAssignments.locked")(function* (
-    assignmentId: string,
-    lock: "SHARE" | "UPDATE",
-  ) {
+  const locked = Effect.fn("PostgresAssignments.locked")(function* (assignmentId: string, lock: "SHARE" | "UPDATE") {
     const row = (yield* selectLocked(assignmentId, lock))[0]
     if (row === undefined) return yield* failure("not-found", "Executor assignment does not exist")
     return row
@@ -253,9 +251,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
     return yield* decodeAssignment(yield* locked(assignmentId, "UPDATE"))
   })
 
-  const create: AssignmentsService["create"] = Effect.fn(
-    "PostgresAssignments.create",
-  )(function* (input) {
+  const create: AssignmentsService["create"] = Effect.fn("PostgresAssignments.create")(function* (input) {
     if (String(input.id) !== String(input.threadId))
       return yield* failure("invalid-authority", "Executor assignment identity must equal its thread identity")
     return yield* transaction(
@@ -267,7 +263,10 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
           WHERE id = ${input.threadId} AND organization_id = ${input.organizationId}
           FOR KEY SHARE`)
         if (threads[0]?.executorKind !== kind)
-          return yield* failure("invalid-authority", "Assignment placement does not match the immutable thread placement")
+          return yield* failure(
+            "invalid-authority",
+            "Assignment placement does not match the immutable thread placement",
+          )
         const rows = yield* query(sql`INSERT INTO rika_hosted_executor_assignments
           (id, organization_id, thread_id, executor_kind, placement, checkout, generation, revision,
             last_lease_epoch, lifecycle)
@@ -280,37 +279,46 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
     )
   })
 
-  const beginProvisioning: AssignmentsService["beginProvisioning"] = Effect.fn(
-    "PostgresAssignments.beginProvisioning",
-  )(function* (input) {
-    return yield* transaction(sql, Effect.gen(function* () {
-      const row = yield* locked(input.assignmentId, "UPDATE")
-      yield* checkVersion(row, input)
-      if (row.lifecycle === "active" || row.lifecycle === "terminated")
-        return yield* failure("invalid-state", "Assignment cannot begin provisioning")
-      const providerInstanceId =
-        row.lifecycle === "paused" || row.lifecycle === "provisioning" || row.lifecycle === "awaiting_bootstrap"
-          ? row.providerInstanceId
-          : null
-      return yield* updated(input.assignmentId, sql`UPDATE rika_hosted_executor_assignments SET
+  const beginProvisioning: AssignmentsService["beginProvisioning"] = Effect.fn("PostgresAssignments.beginProvisioning")(
+    function* (input) {
+      return yield* transaction(
+        sql,
+        Effect.gen(function* () {
+          const row = yield* locked(input.assignmentId, "UPDATE")
+          yield* checkVersion(row, input)
+          if (row.lifecycle === "active" || row.lifecycle === "terminated")
+            return yield* failure("invalid-state", "Assignment cannot begin provisioning")
+          const providerInstanceId =
+            row.lifecycle === "paused" || row.lifecycle === "provisioning" || row.lifecycle === "awaiting_bootstrap"
+              ? row.providerInstanceId
+              : null
+          return yield* updated(
+            input.assignmentId,
+            sql`UPDATE rika_hosted_executor_assignments SET
         revision = revision + 1, lifecycle = 'provisioning', provider_instance_id = ${providerInstanceId},
         bootstrap_digest = ${Redacted.value(input.bootstrapCredentialDigest)},
         bootstrap_expires_at = transaction_timestamp() + (${input.bootstrapLifetimeMillis} * interval '1 millisecond'),
         executor_instance_id = NULL, process_incarnation = NULL, session_digest = NULL,
         lease_epoch = NULL, lease_expires_at = NULL, updated_at = transaction_timestamp()
         WHERE id = ${input.assignmentId} AND generation = ${input.generation}::bigint
-          AND revision = ${input.revision}::bigint RETURNING id`)
-    }))
-  })
+          AND revision = ${input.revision}::bigint RETURNING id`,
+          )
+        }),
+      )
+    },
+  )
 
-  const beginReplacement: AssignmentsService["beginReplacement"] = Effect.fn(
-    "PostgresAssignments.beginReplacement",
-  )(function* (input) {
-    return yield* transaction(sql, Effect.gen(function* () {
-      const row = yield* locked(input.assignmentId, "UPDATE")
-      yield* checkVersion(row, input)
-      if (row.lifecycle === "terminated") return yield* failure("invalid-state", "Assignment cannot be replaced")
-      return yield* updated(input.assignmentId, sql`UPDATE rika_hosted_executor_assignments SET
+  const beginReplacement: AssignmentsService["beginReplacement"] = Effect.fn("PostgresAssignments.beginReplacement")(
+    function* (input) {
+      return yield* transaction(
+        sql,
+        Effect.gen(function* () {
+          const row = yield* locked(input.assignmentId, "UPDATE")
+          yield* checkVersion(row, input)
+          if (row.lifecycle === "terminated") return yield* failure("invalid-state", "Assignment cannot be replaced")
+          return yield* updated(
+            input.assignmentId,
+            sql`UPDATE rika_hosted_executor_assignments SET
         generation = generation + 1, revision = revision + 1, last_lease_epoch = 0,
         lifecycle = 'provisioning', provider_instance_id = NULL,
         bootstrap_digest = ${Redacted.value(input.bootstrapCredentialDigest)},
@@ -318,40 +326,51 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
         executor_instance_id = NULL, process_incarnation = NULL, session_digest = NULL,
         lease_epoch = NULL, lease_expires_at = NULL, updated_at = transaction_timestamp()
         WHERE id = ${input.assignmentId} AND generation = ${input.generation}::bigint
-          AND revision = ${input.revision}::bigint RETURNING id`)
-    }))
-  })
+          AND revision = ${input.revision}::bigint RETURNING id`,
+          )
+        }),
+      )
+    },
+  )
 
   const bindProviderInstance: AssignmentsService["bindProviderInstance"] = Effect.fn(
     "PostgresAssignments.bindProviderInstance",
   )(function* (input) {
-    return yield* transaction(sql, Effect.gen(function* () {
-      const row = yield* locked(input.assignmentId, "UPDATE")
-      yield* checkVersion(row, input)
-      if (row.lifecycle !== "provisioning") return yield* failure("invalid-state", "Assignment is not provisioning")
-      if (row.providerInstanceId !== null && row.providerInstanceId !== input.providerInstanceId)
-        return yield* failure("conflict", "Assignment is already bound to another provider instance")
-      return yield* updated(input.assignmentId, sql`UPDATE rika_hosted_executor_assignments SET
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        const row = yield* locked(input.assignmentId, "UPDATE")
+        yield* checkVersion(row, input)
+        if (row.lifecycle !== "provisioning") return yield* failure("invalid-state", "Assignment is not provisioning")
+        if (row.providerInstanceId !== null && row.providerInstanceId !== input.providerInstanceId)
+          return yield* failure("conflict", "Assignment is already bound to another provider instance")
+        return yield* updated(
+          input.assignmentId,
+          sql`UPDATE rika_hosted_executor_assignments SET
         revision = revision + 1, lifecycle = 'awaiting_bootstrap',
         provider_instance_id = ${input.providerInstanceId}, updated_at = transaction_timestamp()
         WHERE id = ${input.assignmentId} AND generation = ${input.generation}::bigint
-          AND revision = ${input.revision}::bigint RETURNING id`)
-    }))
+          AND revision = ${input.revision}::bigint RETURNING id`,
+        )
+      }),
+    )
   })
 
-  const openSession: AssignmentsService["openSession"] = Effect.fn(
-    "PostgresAssignments.openSession",
-  )(function* (input) {
-    return yield* transaction(sql, Effect.gen(function* () {
-      const row = yield* locked(input.assignmentId, "UPDATE")
-      yield* checkVersion(row, input)
-      if (row.lifecycle !== "awaiting_bootstrap" || row.providerInstanceId !== input.providerInstanceId)
-        return yield* failure("stale-fence", "Executor bootstrap is invalid, expired, or consumed")
-      if (row.bootstrapCredentialDigest !== Redacted.value(input.presentedBootstrapCredentialDigest))
-        return yield* failure("authentication", "Executor bootstrap credential is invalid")
-      if (!row.bootstrapLive)
-        return yield* failure("stale-fence", "Executor bootstrap is expired or consumed")
-      return yield* updated(input.assignmentId, sql`UPDATE rika_hosted_executor_assignments SET
+  const openSession: AssignmentsService["openSession"] = Effect.fn("PostgresAssignments.openSession")(
+    function* (input) {
+      return yield* transaction(
+        sql,
+        Effect.gen(function* () {
+          const row = yield* locked(input.assignmentId, "UPDATE")
+          yield* checkVersion(row, input)
+          if (row.lifecycle !== "awaiting_bootstrap" || row.providerInstanceId !== input.providerInstanceId)
+            return yield* failure("stale-fence", "Executor bootstrap is invalid, expired, or consumed")
+          if (row.bootstrapCredentialDigest !== Redacted.value(input.presentedBootstrapCredentialDigest))
+            return yield* failure("authentication", "Executor bootstrap credential is invalid")
+          if (!row.bootstrapLive) return yield* failure("stale-fence", "Executor bootstrap is expired or consumed")
+          return yield* updated(
+            input.assignmentId,
+            sql`UPDATE rika_hosted_executor_assignments SET
         revision = revision + 1, last_lease_epoch = last_lease_epoch + 1, lifecycle = 'active',
         bootstrap_digest = NULL, bootstrap_expires_at = NULL,
         executor_instance_id = ${input.executorInstanceId}, process_incarnation = ${input.processIncarnation},
@@ -359,114 +378,161 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
         lease_expires_at = transaction_timestamp() + (${input.leaseLifetimeMillis} * interval '1 millisecond'),
         last_active_at = transaction_timestamp(), updated_at = transaction_timestamp()
         WHERE id = ${input.assignmentId} AND generation = ${input.generation}::bigint
-          AND revision = ${input.revision}::bigint RETURNING id`)
-    }))
-  })
+          AND revision = ${input.revision}::bigint RETURNING id`,
+          )
+        }),
+      )
+    },
+  )
 
-  const reconnect: AssignmentsService["reconnect"] = Effect.fn(
-    "PostgresAssignments.reconnect",
-  )(function* (input) {
-    return yield* transaction(sql, Effect.gen(function* () {
-      const row = yield* locked(input.access.assignmentId, "UPDATE")
-      yield* checkAccess(row, input.access, false)
-      return yield* updated(input.access.assignmentId, sql`UPDATE rika_hosted_executor_assignments SET
+  const reconnect: AssignmentsService["reconnect"] = Effect.fn("PostgresAssignments.reconnect")(function* (input) {
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        const row = yield* locked(input.access.assignmentId, "UPDATE")
+        yield* checkAccess(row, input.access, false)
+        return yield* updated(
+          input.access.assignmentId,
+          sql`UPDATE rika_hosted_executor_assignments SET
         revision = revision + 1, last_lease_epoch = last_lease_epoch + 1,
         lease_epoch = last_lease_epoch + 1,
         lease_expires_at = transaction_timestamp() + (${input.leaseLifetimeMillis} * interval '1 millisecond'),
         last_active_at = transaction_timestamp(), updated_at = transaction_timestamp()
         WHERE id = ${input.access.assignmentId} AND generation = ${input.access.assignmentGeneration}::bigint
-          AND lease_epoch = ${input.access.leaseEpoch}::bigint RETURNING id`)
-    }))
+          AND lease_epoch = ${input.access.leaseEpoch}::bigint RETURNING id`,
+        )
+      }),
+    )
   })
 
-  const heartbeat: AssignmentsService["heartbeat"] = Effect.fn(
-    "PostgresAssignments.heartbeat",
-  )(function* (input) {
-    return yield* transaction(sql, Effect.gen(function* () {
-      const row = yield* locked(input.access.assignmentId, "UPDATE")
-      yield* checkAccess(row, input.access, true)
-      if (BigInt(input.cursor.sequence) < BigInt(row.cursorSequence))
-        return yield* failure("conflict", "Executor cursor cannot move backwards")
-      if (input.cursor.sequence === row.cursorSequence && input.cursor.value !== row.cursorValue)
-        return yield* failure("conflict", "Executor cursor conflicts at the same sequence")
-      return yield* updated(input.access.assignmentId, sql`UPDATE rika_hosted_executor_assignments SET
+  const heartbeat: AssignmentsService["heartbeat"] = Effect.fn("PostgresAssignments.heartbeat")(function* (input) {
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        const row = yield* locked(input.access.assignmentId, "UPDATE")
+        yield* checkAccess(row, input.access, true)
+        if (BigInt(input.cursor.sequence) < BigInt(row.cursorSequence))
+          return yield* failure("conflict", "Executor cursor cannot move backwards")
+        if (input.cursor.sequence === row.cursorSequence && input.cursor.value !== row.cursorValue)
+          return yield* failure("conflict", "Executor cursor conflicts at the same sequence")
+        return yield* updated(
+          input.access.assignmentId,
+          sql`UPDATE rika_hosted_executor_assignments SET
         revision = revision + 1, cursor_sequence = ${input.cursor.sequence}::bigint,
         cursor_value = ${input.cursor.value},
         lease_expires_at = transaction_timestamp() + (${input.leaseLifetimeMillis} * interval '1 millisecond'),
         last_active_at = transaction_timestamp(), updated_at = transaction_timestamp()
         WHERE id = ${input.access.assignmentId} AND generation = ${input.access.assignmentGeneration}::bigint
-          AND lease_epoch = ${input.access.leaseEpoch}::bigint RETURNING id`)
-    }))
+          AND lease_epoch = ${input.access.leaseEpoch}::bigint RETURNING id`,
+        )
+      }),
+    )
   })
 
-  const authenticate: AssignmentsService["authenticate"] = Effect.fn(
-    "PostgresAssignments.authenticate",
-  )(function* (input) {
-    return yield* transaction(sql, Effect.gen(function* () {
-      const row = yield* locked(input.assignmentId, "SHARE")
-      yield* checkAccess(row, input, true)
-      return yield* decodeAssignment(row)
-    }))
+  const authenticate: AssignmentsService["authenticate"] = Effect.fn("PostgresAssignments.authenticate")(
+    function* (input) {
+      return yield* transaction(
+        sql,
+        Effect.gen(function* () {
+          const row = yield* locked(input.assignmentId, "SHARE")
+          yield* checkAccess(row, input, true)
+          return yield* decodeAssignment(row)
+        }),
+      )
+    },
+  )
+
+  const release: AssignmentsService["release"] = Effect.fn("PostgresAssignments.release")(function* (input) {
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        const row = yield* locked(input.assignmentId, "UPDATE")
+        yield* checkAccess(row, input, false)
+        return yield* updated(
+          input.assignmentId,
+          sql`UPDATE rika_hosted_executor_assignments SET
+        revision = revision + 1, lifecycle = 'paused', bootstrap_digest = NULL, bootstrap_expires_at = NULL,
+        executor_instance_id = NULL, process_incarnation = NULL, session_digest = NULL,
+        lease_epoch = NULL, lease_expires_at = NULL, updated_at = clock_timestamp()
+        WHERE id = ${row.id} AND generation = ${row.generation}::bigint
+          AND lease_epoch = ${row.leaseEpoch}::bigint AND lifecycle = 'active' RETURNING id`,
+        )
+      }),
+    )
   })
 
-  const validateFence: AssignmentsService["validateFence"] = Effect.fn(
-    "PostgresAssignments.validateFence",
-  )(function* (input) {
-    return yield* transaction(sql, Effect.gen(function* () {
-      const row = yield* locked(input.assignmentId, "SHARE")
-      yield* checkFence(row, input)
-      if (!row.leaseLive)
-        return yield* failure("stale-fence", "Executor assignment fence is stale")
-      return yield* decodeAssignment(row)
-    }))
-  })
+  const validateFence: AssignmentsService["validateFence"] = Effect.fn("PostgresAssignments.validateFence")(
+    function* (input) {
+      return yield* transaction(
+        sql,
+        Effect.gen(function* () {
+          const row = yield* locked(input.assignmentId, "SHARE")
+          yield* checkFence(row, input)
+          if (!row.leaseLive) return yield* failure("stale-fence", "Executor assignment fence is stale")
+          return yield* decodeAssignment(row)
+        }),
+      )
+    },
+  )
 
-  const pause: AssignmentsService["pause"] = Effect.fn(
-    "PostgresAssignments.pause",
-  )(function* (input) {
-    return yield* transaction(sql, Effect.gen(function* () {
-      const row = yield* locked(input.assignmentId, "UPDATE")
-      yield* checkVersion(row, input)
-      if (row.lifecycle !== "active") return yield* failure("invalid-state", "Assignment is not active")
-      return yield* updated(input.assignmentId, sql`UPDATE rika_hosted_executor_assignments SET
+  const pause: AssignmentsService["pause"] = Effect.fn("PostgresAssignments.pause")(function* (input) {
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        const row = yield* locked(input.assignmentId, "UPDATE")
+        yield* checkVersion(row, input)
+        if (row.lifecycle !== "active") return yield* failure("invalid-state", "Assignment is not active")
+        return yield* updated(
+          input.assignmentId,
+          sql`UPDATE rika_hosted_executor_assignments SET
         revision = revision + 1, lifecycle = 'paused', bootstrap_digest = NULL, bootstrap_expires_at = NULL,
         executor_instance_id = NULL, process_incarnation = NULL, session_digest = NULL,
         lease_epoch = NULL, lease_expires_at = NULL, updated_at = transaction_timestamp()
         WHERE id = ${input.assignmentId} AND generation = ${input.generation}::bigint
-          AND revision = ${input.revision}::bigint RETURNING id`)
-    }))
+          AND revision = ${input.revision}::bigint RETURNING id`,
+        )
+      }),
+    )
   })
 
-  const resume: AssignmentsService["resume"] = Effect.fn(
-    "PostgresAssignments.resume",
-  )(function* (input) {
-    return yield* transaction(sql, Effect.gen(function* () {
-      const row = yield* locked(input.assignmentId, "UPDATE")
-      yield* checkVersion(row, input)
-      if (row.lifecycle !== "paused") return yield* failure("invalid-state", "Assignment is not paused")
-      return yield* updated(input.assignmentId, sql`UPDATE rika_hosted_executor_assignments SET
+  const resume: AssignmentsService["resume"] = Effect.fn("PostgresAssignments.resume")(function* (input) {
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        const row = yield* locked(input.assignmentId, "UPDATE")
+        yield* checkVersion(row, input)
+        if (row.lifecycle !== "paused") return yield* failure("invalid-state", "Assignment is not paused")
+        return yield* updated(
+          input.assignmentId,
+          sql`UPDATE rika_hosted_executor_assignments SET
         revision = revision + 1, lifecycle = 'provisioning',
         bootstrap_digest = ${Redacted.value(input.bootstrapCredentialDigest)},
         bootstrap_expires_at = transaction_timestamp() + (${input.bootstrapLifetimeMillis} * interval '1 millisecond'),
         updated_at = transaction_timestamp()
         WHERE id = ${input.assignmentId} AND generation = ${input.generation}::bigint
-          AND revision = ${input.revision}::bigint RETURNING id`)
-    }))
+          AND revision = ${input.revision}::bigint RETURNING id`,
+        )
+      }),
+    )
   })
 
-  const terminate: AssignmentsService["terminate"] = Effect.fn(
-    "PostgresAssignments.terminate",
-  )(function* (input) {
-    return yield* transaction(sql, Effect.gen(function* () {
-      const row = yield* locked(input.assignmentId, "UPDATE")
-      yield* checkVersion(row, input)
-      return yield* updated(input.assignmentId, sql`UPDATE rika_hosted_executor_assignments SET
+  const terminate: AssignmentsService["terminate"] = Effect.fn("PostgresAssignments.terminate")(function* (input) {
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        const row = yield* locked(input.assignmentId, "UPDATE")
+        yield* checkVersion(row, input)
+        return yield* updated(
+          input.assignmentId,
+          sql`UPDATE rika_hosted_executor_assignments SET
         revision = revision + 1, lifecycle = 'terminated', bootstrap_digest = NULL, bootstrap_expires_at = NULL,
         executor_instance_id = NULL, process_incarnation = NULL, session_digest = NULL,
         lease_epoch = NULL, lease_expires_at = NULL, updated_at = transaction_timestamp()
         WHERE id = ${input.assignmentId} AND generation = ${input.generation}::bigint
-          AND revision = ${input.revision}::bigint RETURNING id`)
-    }))
+          AND revision = ${input.revision}::bigint RETURNING id`,
+        )
+      }),
+    )
   })
 
   const checkpointById = (checkpointId: string) =>
@@ -493,41 +559,42 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
     checkpoint.cursor.value === input.cursor.value &&
     metadataEquivalent(checkpoint.metadata, input.metadata)
 
-  const commitCheckpoint: AssignmentsService["commitCheckpoint"] = Effect.fn(
-    "PostgresAssignments.commitCheckpoint",
-  )(function* (input) {
-    return yield* transaction(sql, Effect.gen(function* () {
-      const row = yield* locked(input.access.assignmentId, "UPDATE")
-      yield* checkAccess(row, input.access, true)
-      if (input.cursor.sequence !== row.cursorSequence || input.cursor.value !== row.cursorValue)
-        return yield* failure("conflict", "Checkpoint cursor is not the acknowledged executor cursor")
-      const existingRow = (yield* checkpointById(input.id))[0]
-      if (existingRow !== undefined) {
-        const existing = yield* decodeCheckpoint(existingRow)
-        return checkpointMatches(existing, input)
-          ? existing
-          : yield* failure("conflict", "Checkpoint identity has different content")
-      }
-      const inserted = yield* query(sql`INSERT INTO rika_hosted_checkpoints
+  const commitCheckpoint: AssignmentsService["commitCheckpoint"] = Effect.fn("PostgresAssignments.commitCheckpoint")(
+    function* (input) {
+      return yield* transaction(
+        sql,
+        Effect.gen(function* () {
+          const row = yield* locked(input.access.assignmentId, "UPDATE")
+          yield* checkAccess(row, input.access, true)
+          if (input.cursor.sequence !== row.cursorSequence || input.cursor.value !== row.cursorValue)
+            return yield* failure("conflict", "Checkpoint cursor is not the acknowledged executor cursor")
+          const existingRow = (yield* checkpointById(input.id))[0]
+          if (existingRow !== undefined) {
+            const existing = yield* decodeCheckpoint(existingRow)
+            return checkpointMatches(existing, input)
+              ? existing
+              : yield* failure("conflict", "Checkpoint identity has different content")
+          }
+          const inserted = yield* query(sql`INSERT INTO rika_hosted_checkpoints
         (id, organization_id, thread_id, assignment_id, executor_instance_id, assignment_generation,
           lease_epoch, object_key, content_digest, size_bytes, format, cursor_sequence, cursor_value, metadata)
         VALUES (${input.id}, ${row.organizationId}, ${row.threadId}, ${row.id}, ${row.executorInstanceId},
           ${row.generation}::bigint, ${row.leaseEpoch}::bigint, ${input.objectKey}, ${input.contentDigest},
           ${input.sizeBytes}, ${input.format}, ${input.cursor.sequence}::bigint, ${input.cursor.value},
           ${sql.json(input.metadata)}) ON CONFLICT (id) DO NOTHING RETURNING id`)
-      if (inserted[0] === undefined) return yield* failure("conflict", "Checkpoint identity has different content")
-      const update = yield* query(sql`UPDATE rika_hosted_executor_assignments SET
+          if (inserted[0] === undefined) return yield* failure("conflict", "Checkpoint identity has different content")
+          const update = yield* query(sql`UPDATE rika_hosted_executor_assignments SET
         revision = revision + 1, latest_checkpoint_id = ${input.id}, updated_at = transaction_timestamp()
         WHERE id = ${row.id} AND generation = ${row.generation}::bigint
           AND revision = ${row.revision}::bigint RETURNING id`)
-      if (update[0] === undefined) return yield* failure("conflict", "Executor assignment changed concurrently")
-      return yield* decodeCheckpoint((yield* checkpointById(input.id))[0]!)
-    }))
-  })
+          if (update[0] === undefined) return yield* failure("conflict", "Executor assignment changed concurrently")
+          return yield* decodeCheckpoint((yield* checkpointById(input.id))[0]!)
+        }),
+      )
+    },
+  )
 
-  const get: AssignmentsService["get"] = Effect.fn(
-    "PostgresAssignments.get",
-  )(function* (assignmentId) {
+  const get: AssignmentsService["get"] = Effect.fn("PostgresAssignments.get")(function* (assignmentId) {
     const row = (yield* select(assignmentId))[0]
     return row === undefined ? undefined : yield* decodeAssignment(row)
   })
@@ -539,21 +606,19 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
         provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",
         CASE WHEN bootstrap_expires_at IS NULL THEN NULL
           ELSE to_char(bootstrap_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS "bootstrapExpiresAt",
-        COALESCE(bootstrap_expires_at > transaction_timestamp(), false) AS "bootstrapLive",
+        COALESCE(bootstrap_expires_at > clock_timestamp(), false) AS "bootstrapLive",
         executor_instance_id AS "executorInstanceId", process_incarnation AS "processIncarnation",
         session_digest AS "sessionCredentialDigest", lease_epoch::text AS "leaseEpoch",
         CASE WHEN lease_expires_at IS NULL THEN NULL
           ELSE to_char(lease_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS "leaseExpiresAt",
-        COALESCE(lease_expires_at > transaction_timestamp(), false) AS "leaseLive",
+        COALESCE(lease_expires_at > clock_timestamp(), false) AS "leaseLive",
         cursor_sequence::text AS "cursorSequence", cursor_value AS "cursorValue",
         latest_checkpoint_id AS "latestCheckpointId",
         to_char(last_active_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastActiveAt",
         to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",
         to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"
         FROM rika_hosted_executor_assignments ORDER BY id`,
-  ).pipe(
-    Effect.flatMap((rows) => Effect.forEach(rows, decodeAssignment)),
-  )
+  ).pipe(Effect.flatMap((rows) => Effect.forEach(rows, decodeAssignment)))
 
   return ExecutorAssignments.of({
     create,
@@ -565,6 +630,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
     reconnect,
     heartbeat,
     authenticate,
+    release,
     validateFence,
     pause,
     resume,
