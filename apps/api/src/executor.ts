@@ -11,7 +11,8 @@ import { ExecutorAssignments } from "@rika/product/executor-assignments"
 import { ExecutorAssignmentId } from "@rika/product/hosted-model"
 import { Context, Effect, Layer, Redacted } from "effect"
 import { makeGateway, type Gateway, type GatewayError } from "./executor-gateway"
-import { LocalExecutor, type LocalActor } from "./local-executor"
+import type { AuthenticatedPrincipal } from "./hosted-product"
+import { LocalExecutor } from "./local-executor"
 import { makeLocalGateway, type LocalGateway } from "./local-executor-gateway"
 
 const required = (environment: Record<string, string | undefined>, name: string) => {
@@ -56,9 +57,8 @@ export interface Runtime {
   readonly localGateway: LocalGateway
   readonly admitLocal: (input: {
     readonly threadId: string
-    readonly organizationId: string
     readonly workspaceFingerprint: string
-    readonly actor: LocalActor
+    readonly principal: AuthenticatedPrincipal
     readonly executorUrl: string
   }) => Effect.Effect<import("./local-executor").LocalAdmission, ControllerError>
   readonly run: (input: {

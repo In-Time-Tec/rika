@@ -11,18 +11,11 @@ import {
   Sequence,
 } from "@rika/product/hosted-model"
 import type { Access as ProtocolAccess, Heartbeat } from "@rika/remote-execution/protocol"
+import type { AuthenticatedPrincipal } from "./hosted-product"
 
 const leaseLifetimeMillis = 60_000
 const heartbeatIntervalMillis = 20_000
 const admissionLifetimeMillis = 60_000
-
-export interface LocalActor {
-  readonly organizationIds: ReadonlyArray<string>
-  readonly deviceId: string
-  readonly clientId: string
-  readonly userId: string
-  readonly memberId: string
-}
 
 export interface LocalAdmission {
   readonly admissionId: string
@@ -35,9 +28,8 @@ export interface LocalAdmission {
 export interface LocalExecutorAuthority {
   readonly admit: (input: {
     readonly threadId: string
-    readonly organizationId: string
     readonly workspaceFingerprint: string
-    readonly actor: LocalActor
+    readonly principal: AuthenticatedPrincipal
     readonly executorUrl: string
   }) => Effect.Effect<LocalAdmission, ControllerError>
   readonly hello: (input: {
@@ -74,11 +66,10 @@ const version = (assignment: ExecutorAssignment) => ({
 interface AdmissionRow {
   readonly id: string
   readonly assignmentId: string
-  readonly organizationId: string
+  readonly ownerId: string
   readonly deviceId: string
   readonly clientId: string
   readonly userId: string
-  readonly memberId: string
   readonly generation: string
   readonly workspaceFingerprint: string
   readonly expiresAt: string
@@ -110,40 +101,49 @@ export const layer = Layer.effect(
       if (assignment === undefined) return yield* failure("assignment-missing", "Local assignment does not exist")
       return assignment
     })
-    const local = (assignment: ExecutorAssignment, actor: LocalActor) => {
+    const local = (assignment: ExecutorAssignment, principal: AuthenticatedPrincipal) => {
       if (assignment.placement._tag !== "LocalDevicePlacement")
         return Effect.fail(failure("fenced", "Assignment placement is not local"))
-      if (assignment.placement.deviceId !== actor.deviceId)
+      if (assignment.placement.deviceId !== principal.deviceId)
         return Effect.fail(failure("fenced", "Authenticated device is not assigned to this executor"))
-      if (!actor.organizationIds.includes(assignment.organizationId))
-        return Effect.fail(failure("authentication", "Authenticated membership is not assigned to this executor"))
       return Effect.succeed(assignment.placement)
     }
-    const verifyActor = Effect.fn("LocalExecutor.verifyActor")(function* (actor: LocalActor, organizationId: string) {
-      if (!actor.organizationIds.includes(organizationId))
-        return yield* failure("authentication", "Authenticated membership is unavailable")
-      const valid = yield* sql<{ readonly clientId: string }>`SELECT registration.client_id AS "clientId"
-        FROM rika_cli_registration registration
-        JOIN member membership
-          ON membership.user_id = registration.user_id
-          AND membership.id = ${actor.memberId}
-          AND membership.organization_id = ${organizationId}
-        WHERE registration.client_id = ${actor.clientId}
-          AND registration.device_id::text = ${actor.deviceId}
-          AND registration.user_id = ${actor.userId}
-          AND registration.revoked_at IS NULL
+    const verifyPrincipal = Effect.fn("LocalExecutor.verifyPrincipal")(function* (
+      principal: AuthenticatedPrincipal,
+      ownerId: string,
+    ) {
+      const valid = yield* sql<{ readonly ownerId: string }>`SELECT owner_record.id AS "ownerId"
+        FROM rika_hosted_owners owner_record
+        WHERE owner_record.id = ${ownerId}
+          AND (
+            (owner_record.kind = 'personal' AND owner_record.user_id = ${principal.userId})
+            OR (owner_record.kind = 'organization' AND EXISTS (
+              SELECT 1 FROM member membership
+              WHERE membership.organization_id = owner_record.organization_id
+                AND membership.user_id = ${principal.userId}
+            ))
+          )
+          AND (
+            EXISTS (
+              SELECT 1 FROM rika_cli_registration registration
+              WHERE registration.client_id = ${principal.clientId}
+                AND registration.device_id::text = ${principal.deviceId}
+                AND registration.user_id = ${principal.userId}
+                AND registration.revoked_at IS NULL
+                AND (${principal.dpopJkt ?? null}::text IS NULL OR registration.jwk_thumbprint = ${principal.dpopJkt ?? null})
+            )
+          )
         LIMIT 1`.pipe(Effect.mapError(() => failure("repository", "Local device authority is unavailable")))
-      if (valid.length === 0) return yield* failure("authentication", "Local device or membership is no longer active")
+      if (valid.length === 0)
+        return yield* failure("authentication", "Local principal or owner authority is no longer active")
     })
 
-    const actorFor = Effect.fn("LocalExecutor.actorFor")(function* (input: ProtocolAccess) {
+    const principalFor = Effect.fn("LocalExecutor.principalFor")(function* (input: ProtocolAccess) {
       const rows = yield* sql<{
-        readonly organizationId: string
         readonly deviceId: string
         readonly clientId: string
         readonly userId: string
-        readonly memberId: string
-      }>`SELECT organization_id AS "organizationId", device_id AS "deviceId", client_id AS "clientId", user_id AS "userId", member_id AS "memberId"
+      }>`SELECT device_id AS "deviceId", client_id AS "clientId", user_id AS "userId"
         FROM rika_hosted_local_executor_admissions
         WHERE assignment_id = ${input.fence.assignmentId} AND generation = ${input.fence.assignmentGeneration}
           AND device_id = ${input.fence.instanceId} AND process_incarnation = ${input.fence.processIncarnation}
@@ -154,28 +154,26 @@ export const layer = Layer.effect(
       const row = rows[0]
       if (row === undefined) return yield* failure("authentication", "Local admission binding is unavailable")
       return {
-        organizationIds: [row.organizationId],
         deviceId: row.deviceId,
         clientId: row.clientId,
         userId: row.userId,
-        memberId: row.memberId,
-      } satisfies LocalActor
+      } satisfies AuthenticatedPrincipal
     })
     const access = Effect.fn("LocalExecutor.access")(function* (
       input: ProtocolAccess,
-      actor: LocalActor,
+      principal: AuthenticatedPrincipal,
     ): Effect.fn.Return<Access, ControllerError> {
       if (input.fence.target !== "local_device") return yield* failure("fenced", "Executor target is not local")
       const assignment = yield* load(input.fence.assignmentId)
-      const placement = yield* local(assignment, actor)
-      yield* verifyActor(actor, assignment.organizationId)
+      const placement = yield* local(assignment, principal)
+      yield* verifyPrincipal(principal, assignment.ownerId)
       if (number(assignment.generation) !== input.fence.assignmentGeneration)
         return yield* failure("fenced", "Assignment generation is stale")
       if (input.fence.instanceId !== placement.deviceId)
         return yield* failure("fenced", "Executor instance is not the assigned device")
       const admitted = yield* sql<{ readonly id: string }>`SELECT id FROM rika_hosted_local_executor_admissions
-        WHERE assignment_id = ${assignment.id} AND organization_id = ${assignment.organizationId}
-          AND device_id = ${actor.deviceId} AND client_id = ${actor.clientId}
+        WHERE assignment_id = ${assignment.id} AND owner_id = ${assignment.ownerId}
+          AND device_id = ${principal.deviceId} AND client_id = ${principal.clientId}
           AND generation = ${assignment.generation} AND consumed_at IS NOT NULL
         LIMIT 1`.pipe(Effect.mapError(() => failure("repository", "Local admission binding is unavailable")))
       if (admitted.length === 0)
@@ -192,8 +190,6 @@ export const layer = Layer.effect(
     })
 
     const admit = Effect.fn("LocalExecutor.admit")(function* (input: Parameters<LocalExecutorAuthority["admit"]>[0]) {
-      if (!input.actor.organizationIds.includes(input.organizationId))
-        return yield* failure("authentication", "Authenticated membership is unavailable")
       const ticket = yield* secret("local-executor-ticket")
       const ticketDigest = yield* digest(Redacted.value(ticket))
       const admissionId = yield* crypto.randomUUIDv4.pipe(
@@ -202,11 +198,9 @@ export const layer = Layer.effect(
       return yield* sql
         .withTransaction(
           Effect.gen(function* () {
-            yield* verifyActor(input.actor, input.organizationId)
             const assignment = yield* load(input.threadId)
-            yield* local(assignment, input.actor)
-            if (assignment.organizationId !== input.organizationId)
-              return yield* failure("fenced", "Thread is outside the requested organization")
+            yield* local(assignment, input.principal)
+            yield* verifyPrincipal(input.principal, assignment.ownerId)
 
             let preparing: ExecutorAssignment
             if (assignment.lifecycle._tag === "Pending") {
@@ -249,16 +243,16 @@ export const layer = Layer.effect(
             }
 
             const awaiting = yield* assignments
-              .bindProviderInstance({ ...version(preparing), providerInstanceId: input.actor.deviceId })
+              .bindProviderInstance({ ...version(preparing), providerInstanceId: input.principal.deviceId })
               .pipe(Effect.mapError(assignmentFailure))
             const persisted = yield* sql<{
               readonly expiresAt: string
             }>`INSERT INTO rika_hosted_local_executor_admissions (
-            id, assignment_id, organization_id, device_id, client_id, user_id, member_id, generation,
+            id, assignment_id, owner_id, device_id, client_id, user_id, generation,
             workspace_fingerprint, ticket_digest, expires_at
           ) VALUES (
-            ${admissionId}, ${awaiting.id}, ${awaiting.organizationId}, ${input.actor.deviceId},
-            ${input.actor.clientId}, ${input.actor.userId}, ${input.actor.memberId}, ${awaiting.generation},
+            ${admissionId}, ${awaiting.id}, ${awaiting.ownerId}, ${input.principal.deviceId},
+            ${input.principal.clientId}, ${input.principal.userId}, ${awaiting.generation},
             ${input.workspaceFingerprint}, ${Redacted.value(ticketDigest)},
             clock_timestamp() + (${admissionLifetimeMillis} * interval '1 millisecond')
           )
@@ -289,8 +283,8 @@ export const layer = Layer.effect(
         .withTransaction(
           Effect.gen(function* () {
             const rows = yield* sql<AdmissionRow & { readonly ticketDigest: string }>`SELECT
-            id, assignment_id AS "assignmentId", organization_id AS "organizationId",
-            device_id AS "deviceId", client_id AS "clientId", user_id AS "userId", member_id AS "memberId",
+            id, assignment_id AS "assignmentId", owner_id AS "ownerId",
+            device_id AS "deviceId", client_id AS "clientId", user_id AS "userId",
             generation::text AS generation, workspace_fingerprint AS "workspaceFingerprint",
             ticket_digest AS "ticketDigest",
             to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt"
@@ -303,16 +297,16 @@ export const layer = Layer.effect(
             const admission = rows[0]
             if (admission === undefined || admission.ticketDigest !== Redacted.value(presented))
               return yield* failure("authentication", "Local admission is invalid, expired, or consumed")
-            const actor: LocalActor = {
-              organizationIds: [admission.organizationId],
+            const principal: AuthenticatedPrincipal = {
               deviceId: admission.deviceId,
               clientId: admission.clientId,
               userId: admission.userId,
-              memberId: admission.memberId,
             }
             const assignment = yield* load(admission.assignmentId)
-            const placement = yield* local(assignment, actor)
-            yield* verifyActor(actor, assignment.organizationId)
+            const placement = yield* local(assignment, principal)
+            if (assignment.ownerId !== admission.ownerId)
+              return yield* failure("fenced", "Local admission owner binding is no longer current")
+            yield* verifyPrincipal(principal, assignment.ownerId)
             if (
               number(assignment.generation) !== number(admission.generation) ||
               assignment.lifecycle._tag !== "AwaitingBootstrap"
@@ -367,7 +361,7 @@ export const layer = Layer.effect(
 
     const validateAccess = Effect.fn("LocalExecutor.validateAccess")(function* (input: ProtocolAccess) {
       yield* assignments
-        .authenticate(yield* access(input, yield* actorFor(input)))
+        .authenticate(yield* access(input, yield* principalFor(input)))
         .pipe(Effect.mapError(assignmentFailure))
     })
     const workspaceIdentity = Effect.fn("LocalExecutor.workspaceIdentity")(function* (input: ProtocolAccess) {
@@ -384,7 +378,7 @@ export const layer = Layer.effect(
       return rows[0].fingerprint
     })
     const reconnect = Effect.fn("LocalExecutor.reconnect")(function* (input: ProtocolAccess) {
-      const persisted = yield* access(input, yield* actorFor(input))
+      const persisted = yield* access(input, yield* principalFor(input))
       yield* assignments.authenticate(persisted).pipe(Effect.mapError(assignmentFailure))
       const active = yield* assignments
         .reconnect({ access: persisted, leaseLifetimeMillis })
@@ -403,7 +397,7 @@ export const layer = Layer.effect(
     const heartbeat = Effect.fn("LocalExecutor.heartbeat")(function* (input: Heartbeat) {
       const active = yield* assignments
         .heartbeat({
-          access: yield* access(input.access, yield* actorFor(input.access)),
+          access: yield* access(input.access, yield* principalFor(input.access)),
           leaseLifetimeMillis,
           cursor: { sequence: Sequence.make(String(input.cursor.sequence)), value: input.cursor.value },
         })
@@ -420,7 +414,7 @@ export const layer = Layer.effect(
     })
     const release = Effect.fn("LocalExecutor.release")(function* (input: ProtocolAccess) {
       yield* assignments
-        .release(yield* access(input, yield* actorFor(input)))
+        .release(yield* access(input, yield* principalFor(input)))
         .pipe(Effect.mapError(assignmentFailure))
     })
     return LocalExecutor.of({ admit, hello, reconnect, validateAccess, workspaceIdentity, heartbeat, release })

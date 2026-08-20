@@ -1,8 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
 import {
+  ActorAttribution,
   AuditEventId,
   BetterAuthMemberId,
+  BetterAuthUserId,
   ClientId,
   CommitCursor,
   CommandId,
@@ -12,9 +14,11 @@ import {
   ExecutorAssignmentId,
   ExecutorInstanceId,
   FencingGeneration,
+  HostedOwner,
   IdempotencyKey,
   LeaseId,
   OrganizationId,
+  OwnerId,
   ProjectId,
   Sequence,
   ThreadId,
@@ -30,13 +34,15 @@ const roundTrip = (schema: Schema.Constraint, value: unknown) => {
   return Schema.decodeUnknownSync(codec(schema))(JSON.parse(JSON.stringify(encoded)))
 }
 
-const organizationId = OrganizationId.make("org")
+const userId = BetterAuthUserId.make("user")
+const organizationId = OrganizationId.make("organization")
+const ownerId = OwnerId.make("owner")
+const membershipId = BetterAuthMemberId.make("membership")
+const deviceId = DeviceId.make("device")
+const clientId = ClientId.make("client")
 const projectId = ProjectId.make("project")
 const workspaceId = WorkspaceId.make("workspace")
 const threadId = ThreadId.make("thread")
-const memberId = BetterAuthMemberId.make("member")
-const deviceId = DeviceId.make("device")
-const clientId = ClientId.make("client")
 const assignmentId = ExecutorAssignmentId.make("assignment")
 const executorInstanceId = ExecutorInstanceId.make("executor")
 const leaseId = LeaseId.make("lease")
@@ -45,41 +51,48 @@ const sequence = Sequence.make("12")
 const commitCursor = CommitCursor.make("21")
 const now = Timestamp.make("2026-01-01T00:00:00.000Z")
 const expiresAt = Timestamp.make("2026-01-01T00:01:00.000Z")
-const actor = { _tag: "AuthenticatedMember" as const, organizationId, memberId, clientId, deviceId }
-const thread = {
-  id: threadId,
-  organizationId,
-  projectId,
-  workspaceId,
-  createdByMemberId: memberId,
-  executorKind: "e2b" as const,
-  inheritProjectGrants: true,
-  createdAt: now,
+const personalOwner = { _tag: "PersonalOwner" as const, userId }
+const organizationOwner = { _tag: "OrganizationOwner" as const, organizationId }
+const personalActor = { _tag: "PersonalActor" as const, owner: personalOwner, userId, clientId, deviceId }
+const organizationActor = {
+  _tag: "OrganizationActor" as const,
+  owner: organizationOwner,
+  userId,
+  membershipId,
+  clientId,
+  deviceId,
 }
 const workspace = {
   id: workspaceId,
-  organizationId,
+  ownerId,
+  createdByUserId: userId,
+  executorKind: "local_device" as const,
+  inheritProjectGrants: false,
+  createdAt: now,
+}
+const thread = {
+  id: threadId,
+  ownerId,
   projectId,
-  createdByMemberId: memberId,
+  workspaceId,
+  createdByUserId: userId,
   executorKind: "e2b" as const,
   inheritProjectGrants: true,
   createdAt: now,
 }
 const command = {
-  organizationId,
+  ownerId,
   threadId,
-  memberId,
-  clientId,
   commandId: CommandId.make("command"),
   idempotencyKey: IdempotencyKey.make("command-key"),
-  actor,
+  actor: organizationActor,
   sequence,
   commitCursor,
   command: { _tag: "SubmitPrompt", prompt: "hello" },
   admittedAt: now,
 }
 const event = {
-  organizationId,
+  ownerId,
   threadId,
   eventId: EventId.make("event"),
   idempotencyKey: IdempotencyKey.make("event-key"),
@@ -94,10 +107,9 @@ const event = {
   createdAt: now,
 }
 const writer = {
-  organizationId,
+  ownerId,
   threadId,
-  memberId,
-  clientId,
+  actor: organizationActor,
   leaseId,
   generation,
   acquiredAt: now,
@@ -105,59 +117,90 @@ const writer = {
   expiresAt,
 }
 const presence = {
-  organizationId,
+  ownerId,
   threadId,
-  memberId,
-  clientId,
+  actor: personalActor,
   status: "controlling" as const,
   lastSeenAt: now,
   expiresAt,
 }
 
+describe("hosted owner and actor attribution", () => {
+  it("round trips personal and organization attribution", () => {
+    expect(roundTrip(ActorAttribution, personalActor)).toEqual(personalActor)
+    expect(roundTrip(ActorAttribution, organizationActor)).toEqual(organizationActor)
+  })
+
+  it("rejects ownerless and mixed variants", () => {
+    expect(() => Schema.decodeUnknownSync(HostedOwner)({ _tag: "PersonalOwner" })).toThrow()
+    expect(() => Schema.decodeUnknownSync(HostedOwner)({ _tag: "PersonalOwner", userId, organizationId })).toThrow()
+    expect(() => Schema.decodeUnknownSync(ActorAttribution)({ ...personalActor, membershipId })).toThrow()
+    expect(() => Schema.decodeUnknownSync(ActorAttribution)({ ...organizationActor, owner: personalOwner })).toThrow()
+  })
+})
+
 describe("client api protocol", () => {
-  it("round trips every client request variant", () => {
-    const values = [
+  it("round trips every request variant for personal and organization owners", () => {
+    const requests = [
       {
         _tag: "CreateWorkspace",
-        organizationId,
-        projectId,
+        owner: personalOwner,
         workspaceId,
-        memberId,
-        clientId,
-        executorKind: "e2b",
-        inheritProjectGrants: true,
+        actor: personalActor,
+        executorKind: "local_device",
       },
       {
         _tag: "CreateThread",
-        organizationId,
+        owner: organizationOwner,
         projectId,
         workspaceId,
         threadId,
-        memberId,
-        clientId,
+        actor: organizationActor,
         executorKind: "e2b",
         inheritProjectGrants: true,
       },
       {
         _tag: "AdmitCommand",
-        organizationId,
+        owner: organizationOwner,
         threadId,
-        memberId,
-        clientId,
         commandId: command.commandId,
         idempotencyKey: command.idempotencyKey,
-        actor,
-        command: { _tag: "TerminalInput", data: "ls\n", writerLeaseId: leaseId, writerGeneration: generation },
+        actor: organizationActor,
+        command: {
+          _tag: "TerminalInput",
+          data: "ls\n",
+          writerLeaseId: leaseId,
+          writerGeneration: generation,
+        },
       },
-      { _tag: "SubscribeThread", organizationId, threadId, memberId, clientId, afterCommitCursor: commitCursor },
-      { _tag: "AcknowledgeCursor", organizationId, threadId, memberId, clientId, commitCursor },
-      { _tag: "AcquireTerminalWriter", organizationId, threadId, memberId, clientId, leaseId, now, expiresAt },
+      {
+        _tag: "SubscribeThread",
+        owner: personalOwner,
+        threadId,
+        actor: personalActor,
+        afterCommitCursor: commitCursor,
+      },
+      {
+        _tag: "AcknowledgeCursor",
+        owner: organizationOwner,
+        threadId,
+        actor: organizationActor,
+        commitCursor,
+      },
+      {
+        _tag: "AcquireTerminalWriter",
+        owner: organizationOwner,
+        threadId,
+        actor: organizationActor,
+        leaseId,
+        now,
+        expiresAt,
+      },
       {
         _tag: "RenewTerminalWriter",
-        organizationId,
+        owner: organizationOwner,
         threadId,
-        memberId,
-        clientId,
+        actor: organizationActor,
         leaseId,
         generation,
         now,
@@ -165,27 +208,26 @@ describe("client api protocol", () => {
       },
       {
         _tag: "PresenceHeartbeat",
-        organizationId,
+        owner: personalOwner,
         threadId,
-        memberId,
-        clientId,
+        actor: personalActor,
         status: "viewing",
         now,
         expiresAt,
       },
     ]
-    expect(values.map((value) => roundTrip(ClientRequest, value))).toEqual(values)
+    expect(requests.map((request) => roundTrip(ClientRequest, request))).toEqual(requests)
   })
 
-  it("round trips every api response variant including terminal output broadcast", () => {
-    const values = [
+  it("round trips every response variant", () => {
+    const responses = [
       { _tag: "WorkspaceCreated", workspace },
       { _tag: "ThreadCreated", thread },
       { _tag: "CommandAdmitted", command },
-      { _tag: "ThreadEventBatch", organizationId, threadId, events: [event], nextCursor: commitCursor },
+      { _tag: "ThreadEventBatch", owner: organizationOwner, threadId, events: [event], nextCursor: commitCursor },
       { _tag: "ThreadEventBroadcast", event },
       { _tag: "TerminalWriterGranted", lease: writer },
-      { _tag: "PresenceSnapshot", organizationId, threadId, presence: [presence] },
+      { _tag: "PresenceSnapshot", owner: personalOwner, threadId, presence: [presence] },
       {
         _tag: "Rejected",
         requestId: command.commandId,
@@ -193,7 +235,7 @@ describe("client api protocol", () => {
         details: { auditEventId: AuditEventId.make("audit") },
       },
     ]
-    expect(values.map((value) => roundTrip(ClientResponse, value))).toEqual(values)
+    expect(responses.map((response) => roundTrip(ClientResponse, response))).toEqual(responses)
   })
 })
 

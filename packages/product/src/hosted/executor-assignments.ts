@@ -14,7 +14,7 @@ import type {
   ExecutorInstanceId,
   FencingGeneration,
   JsonObject,
-  OrganizationId,
+  OwnerId,
   ThreadId,
 } from "./model"
 
@@ -29,17 +29,14 @@ export const AssignmentFailureReason = Schema.Literals([
 ])
 export type AssignmentFailureReason = typeof AssignmentFailureReason.Type
 
-export class AssignmentError extends Schema.TaggedError<AssignmentError>()(
-  "AssignmentError",
-  {
-    reason: AssignmentFailureReason,
-    message: Schema.String,
-  },
-) {}
+export class AssignmentError extends Schema.TaggedError<AssignmentError>()("AssignmentError", {
+  reason: AssignmentFailureReason,
+  message: Schema.String,
+}) {}
 
 export interface CreateInput {
   readonly id: ExecutorAssignmentId
-  readonly organizationId: OrganizationId
+  readonly ownerId: OwnerId
   readonly threadId: ThreadId
   readonly placement: ExecutorPlacement
   readonly checkout: RepositoryCheckout | null
@@ -121,48 +118,22 @@ export interface CommitCheckpointInput {
 }
 
 export interface AssignmentsService {
-  readonly create: (
-    input: CreateInput,
-  ) => Effect.Effect<ExecutorAssignment, AssignmentError>
-  readonly get: (
-    assignmentId: ExecutorAssignmentId,
-  ) => Effect.Effect<ExecutorAssignment | undefined, AssignmentError>
-  readonly beginProvisioning: (
-    input: BeginProvisioningInput,
-  ) => Effect.Effect<ExecutorAssignment, AssignmentError>
-  readonly beginReplacement: (
-    input: BeginReplacementInput,
-  ) => Effect.Effect<ExecutorAssignment, AssignmentError>
+  readonly create: (input: CreateInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
+  readonly get: (assignmentId: ExecutorAssignmentId) => Effect.Effect<ExecutorAssignment | undefined, AssignmentError>
+  readonly beginProvisioning: (input: BeginProvisioningInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
+  readonly beginReplacement: (input: BeginReplacementInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
   readonly bindProviderInstance: (
     input: BindProviderInstanceInput,
   ) => Effect.Effect<ExecutorAssignment, AssignmentError>
-  readonly openSession: (
-    input: OpenSessionInput,
-  ) => Effect.Effect<ExecutorAssignment, AssignmentError>
-  readonly reconnect: (
-    input: ReconnectInput,
-  ) => Effect.Effect<ExecutorAssignment, AssignmentError>
-  readonly heartbeat: (
-    input: HeartbeatInput,
-  ) => Effect.Effect<ExecutorAssignment, AssignmentError>
-  readonly authenticate: (
-    access: Access,
-  ) => Effect.Effect<ExecutorAssignment, AssignmentError>
-  readonly release: (
-    access: Access,
-  ) => Effect.Effect<ExecutorAssignment, AssignmentError>
-  readonly validateFence: (
-    fence: Fence,
-  ) => Effect.Effect<ExecutorAssignment, AssignmentError>
-  readonly pause: (
-    input: PauseInput,
-  ) => Effect.Effect<ExecutorAssignment, AssignmentError>
-  readonly resume: (
-    input: ResumeInput,
-  ) => Effect.Effect<ExecutorAssignment, AssignmentError>
-  readonly terminate: (
-    input: TerminateInput,
-  ) => Effect.Effect<ExecutorAssignment, AssignmentError>
+  readonly openSession: (input: OpenSessionInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
+  readonly reconnect: (input: ReconnectInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
+  readonly heartbeat: (input: HeartbeatInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
+  readonly authenticate: (access: Access) => Effect.Effect<ExecutorAssignment, AssignmentError>
+  readonly release: (access: Access) => Effect.Effect<ExecutorAssignment, AssignmentError>
+  readonly validateFence: (fence: Fence) => Effect.Effect<ExecutorAssignment, AssignmentError>
+  readonly pause: (input: PauseInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
+  readonly resume: (input: ResumeInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
+  readonly terminate: (input: TerminateInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
   readonly commitCheckpoint: (
     input: CommitCheckpointInput,
   ) => Effect.Effect<WorkspaceCheckpointManifest, AssignmentError>

@@ -134,8 +134,10 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
   }) {
     const digest = yield* requestDigest(input.code)
     yield* sql`INSERT INTO rika_hosted_executor_operations
-      (assignment_id, operation_key, request_digest, code, attempt, state)
-      VALUES (${input.assignmentId}, ${input.operationKey}, ${digest}, ${input.code}, 0, 'accepted')
+      (assignment_id, owner_id, operation_key, request_digest, code, attempt, state)
+      SELECT assignment.id, assignment.owner_id, ${input.operationKey}, ${digest}, ${input.code}, 0, 'accepted'
+      FROM rika_hosted_executor_assignments assignment
+      WHERE assignment.id = ${input.assignmentId}
       ON CONFLICT (assignment_id, operation_key) DO NOTHING`.pipe(
       Effect.mapError(() => failure("transport", "Could not persist local executor operation")),
     )
@@ -161,6 +163,7 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
             FROM rika_hosted_executor_assignments assignment
             JOIN rika_hosted_local_executor_admissions admission
               ON admission.assignment_id = assignment.id
+              AND admission.owner_id = assignment.owner_id
               AND admission.generation = assignment.generation
               AND admission.device_id = assignment.provider_instance_id
               AND admission.process_incarnation = assignment.process_incarnation
@@ -170,11 +173,17 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
               AND registration.device_id::text = admission.device_id
               AND registration.user_id = admission.user_id
               AND registration.revoked_at IS NULL
-            JOIN member membership
-              ON membership.id = admission.member_id
-              AND membership.organization_id = admission.organization_id
-              AND membership.user_id = admission.user_id
+            JOIN rika_hosted_owners owner_record
+              ON owner_record.id = assignment.owner_id
             WHERE assignment.id = ${input.session.access.fence.assignmentId}
+              AND (
+                (owner_record.kind = 'personal' AND owner_record.user_id = admission.user_id)
+                OR (owner_record.kind = 'organization' AND EXISTS (
+                  SELECT 1 FROM member membership
+                  WHERE membership.organization_id = owner_record.organization_id
+                    AND membership.user_id = admission.user_id
+                ))
+              )
               AND assignment.lifecycle = 'active'
               AND assignment.generation = ${input.session.access.fence.assignmentGeneration}::bigint
               AND assignment.lease_epoch = ${input.session.access.leaseEpoch}::bigint
@@ -289,7 +298,11 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
                 }
               return yield* failure("fenced", "Local executor operation already has a different terminal result")
             }
-            return { ...(input.access === undefined ? {} : { access: input.access }), response: previous, eventPersisted: true as const }
+            return {
+              ...(input.access === undefined ? {} : { access: input.access }),
+              response: previous,
+              eventPersisted: true as const,
+            }
           }
           if (current.state !== "dispatched")
             return yield* failure("fenced", "Local executor operation was not dispatched")
@@ -369,7 +382,11 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
             yield* store
               .appendEvent(event)
               .pipe(Effect.mapError(() => failure("transport", "Could not persist local executor event")))
-          return { ...(input.access === undefined ? {} : { access: input.access }), response: input.response, eventPersisted: true as const }
+          return {
+            ...(input.access === undefined ? {} : { access: input.access }),
+            response: input.response,
+            eventPersisted: true as const,
+          }
         }),
       )
       .pipe(
@@ -857,17 +874,17 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
       rows,
       (row) => {
         if (!current.has(row.assignmentId)) return Effect.void
-        return execute(row)
-          .pipe(Effect.catch(() => Effect.void), Effect.forkScoped, Effect.asVoid)
+        return execute(row).pipe(
+          Effect.catch(() => Effect.void),
+          Effect.forkScoped,
+          Effect.asVoid,
+        )
       },
       { discard: true },
     )
   })
 
-  const pollTick = Effect.sleep("100 millis").pipe(
-    Effect.andThen(pollAccepted()),
-    Effect.ignore,
-  )
+  const pollTick = Effect.sleep("100 millis").pipe(Effect.andThen(pollAccepted()), Effect.ignore)
   yield* Effect.forever(pollTick).pipe(Effect.forkScoped)
 
   return { receive, disconnected, execute }

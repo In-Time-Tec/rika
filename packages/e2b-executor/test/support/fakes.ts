@@ -1,7 +1,7 @@
 import { Crypto, Effect, Layer, Redacted } from "effect"
 import { type ExecutorAssignment } from "@rika/product/executor-assignment"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
-import { CheckpointId, ExecutorAssignmentId, OrganizationId, ThreadId } from "@rika/product/hosted-model"
+import { CheckpointId, ExecutorAssignmentId, OwnerId, ThreadId } from "@rika/product/hosted-model"
 import { layer as assignmentLayer } from "@rika/product-store/memory-assignments"
 import { Inspector } from "../../src/checkpoint"
 import {
@@ -153,7 +153,7 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
 
 export const assignmentInput = {
   id: ExecutorAssignmentId.make("assignment-1"),
-  organizationId: OrganizationId.make("organization-1"),
+  ownerId: OwnerId.make("owner-1"),
   threadId: ThreadId.make("thread-1"),
   placement: {
     _tag: "E2BPlacement" as const,

@@ -3,6 +3,7 @@ import { AssignmentRevision } from "@rika/product/executor-assignment"
 import { ExecutorAssignments, type Access, type Version } from "@rika/product/executor-assignments"
 import {
   BetterAuthMemberId,
+  BetterAuthUserId,
   ClientId,
   CommandId,
   DeviceId,
@@ -13,6 +14,7 @@ import {
   IdempotencyKey,
   AssignmentLeaseEpoch,
   OrganizationId,
+  OwnerId,
   ProjectId,
   Sequence,
   ThreadId,
@@ -33,7 +35,10 @@ const at = (second: number) => Timestamp.make(`2099-01-01T00:00:${String(second)
 const unknownEvent = {
   _tag: "CellResult",
   operationKey: "operation-recovered",
-  response: { _tag: "DomainFailure", failure: { kind: "unknown", message: "Local operation outcome is unknown after executor disconnect" } },
+  response: {
+    _tag: "DomainFailure",
+    failure: { kind: "unknown", message: "Local operation outcome is unknown after executor disconnect" },
+  },
 }
 
 const ids = {
@@ -42,8 +47,10 @@ const ids = {
   executor: ExecutorInstanceId.make("executor-recovery"),
   member: BetterAuthMemberId.make("member-recovery"),
   organization: OrganizationId.make("organization-recovery"),
+  owner: OwnerId.make("owner-recovery"),
   project: ProjectId.make("project-recovery"),
   thread: ThreadId.make("thread-recovery"),
+  user: BetterAuthUserId.make("user-recovery"),
   workspace: WorkspaceId.make("workspace-recovery"),
   assignment: ExecutorAssignmentId.make("thread-recovery"),
 }
@@ -58,7 +65,10 @@ const version = (assignment: {
   revision: AssignmentRevision.make(assignment.revision),
 })
 
-const apply = (pool: Pool, selected: ReadonlyArray<(typeof migrations)[number] | (typeof identityMigrations)[number]>) =>
+const apply = (
+  pool: Pool,
+  selected: ReadonlyArray<(typeof migrations)[number] | (typeof identityMigrations)[number]>,
+) =>
   Effect.gen(function* () {
     for (const migration of selected) {
       const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
@@ -109,17 +119,18 @@ it.effect.skipIf(!live)("applies local executor migrations idempotently and insp
         expect(yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })).toBe(false)
       }
       const constraints = yield* Effect.promise(() =>
-        pool.query(`SELECT conname FROM pg_constraint
+        pool.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
           WHERE conrelid = 'rika_hosted_executor_operations'::regclass
           ORDER BY conname`),
       )
-      expect(constraints.rows.map((row: { conname: string }) => row.conname)).toEqual(
-        expect.arrayContaining([
-          "rika_hosted_executor_operations_recovery_fence",
-          "rika_hosted_executor_operations_dispatch_deadline",
-          "rika_hosted_executor_operations_unknown_deadline",
-        ]),
+      const constraintDefinitions = constraints.rows.map((row: { definition: string }) => row.definition)
+      expect(
+        constraintDefinitions.some((definition) => definition.includes("dispatched_executor_instance_id IS NOT NULL")),
+      ).toBe(true)
+      expect(constraintDefinitions.some((definition) => definition.includes("dispatch_deadline_at IS NOT NULL"))).toBe(
+        true,
       )
+      expect(constraintDefinitions.some((definition) => definition.includes("dispatch_deadline_at IS NULL"))).toBe(true)
       const indexes = yield* Effect.promise(() =>
         pool.query(`SELECT indexname FROM pg_indexes
           WHERE tablename = 'rika_hosted_executor_operations'
@@ -138,193 +149,221 @@ it.effect.skipIf(!live)("applies local executor migrations idempotently and insp
   ),
 )
 
-it.effect.skipIf(!live)("fails closed when a legacy dispatched operation has no reconstructable fence", () =>
+it.effect.skipIf(!live)("fails closed when a dispatched operation has no reconstructable fence", () =>
   isolated(({ pool }) =>
     Effect.gen(function* () {
       yield* apply(pool, [...identityMigrations, ...migrations.slice(0, 4)])
       yield* seedIdentity(pool)
       yield* Effect.promise(() =>
-        pool.query(`INSERT INTO rika_hosted_organization_counters (organization_id) VALUES ('organization-recovery')`),
+        pool.query(`INSERT INTO rika_hosted_owners (id, kind, organization_id, created_at)
+          VALUES ('owner-recovery', 'organization', 'organization-recovery', now())`),
       )
       yield* Effect.promise(() =>
         pool.query(`INSERT INTO rika_hosted_projects
-          (id, organization_id, name, created_by_member_id, created_at, updated_at)
-          VALUES ('project-recovery', 'organization-recovery', 'Recovery', 'member-recovery', now(), now())`),
+          (id, owner_id, name, created_by_user_id, created_at, updated_at)
+          VALUES ('project-recovery', 'owner-recovery', 'Recovery', 'user-recovery', now(), now())`),
       )
       yield* Effect.promise(() =>
         pool.query(`INSERT INTO rika_hosted_workspaces
-          (id, organization_id, project_id, created_by_member_id, executor_kind, inherit_project_grants, created_at)
-          VALUES ('workspace-recovery', 'organization-recovery', 'project-recovery', 'member-recovery', 'local_device', false, now())`),
+          (id, owner_id, project_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
+          VALUES ('workspace-recovery', 'owner-recovery', 'project-recovery', 'user-recovery', 'local_device', false, now())`),
       )
       yield* Effect.promise(() =>
         pool.query(`INSERT INTO rika_hosted_threads
-          (id, organization_id, project_id, workspace_id, created_by_member_id, executor_kind, inherit_project_grants, created_at)
-          VALUES ('thread-recovery', 'organization-recovery', 'project-recovery', 'workspace-recovery', 'member-recovery', 'local_device', false, now())`),
+          (id, owner_id, project_id, workspace_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
+          VALUES ('thread-recovery', 'owner-recovery', 'project-recovery', 'workspace-recovery', 'user-recovery', 'local_device', false, now())`),
       )
       yield* Effect.promise(() =>
         pool.query(`INSERT INTO rika_hosted_executor_assignments
-          (id, organization_id, thread_id, executor_kind, placement, generation, revision, last_lease_epoch, lifecycle,
+          (id, owner_id, thread_id, executor_kind, placement, generation, revision, last_lease_epoch, lifecycle,
             provider_instance_id, executor_instance_id, process_incarnation, session_digest, lease_epoch, lease_expires_at)
-          VALUES ('thread-recovery', 'organization-recovery', 'thread-recovery', 'local_device',
+          VALUES ('thread-recovery', 'owner-recovery', 'thread-recovery', 'local_device',
             '{"_tag":"LocalDevicePlacement","deviceId":"device-recovery"}', 2, 1, 2, 'active',
             'device-recovery', 'executor-recovery', 'process-recovery', 'session-digest', 2, now() + interval '1 hour')`),
       )
-      yield* Effect.promise(() =>
-        pool.query(`INSERT INTO rika_hosted_executor_operations
-          (assignment_id, operation_key, request_digest, code, attempt, state, dispatched_generation, dispatched_lease_epoch)
-          VALUES ('thread-recovery', 'legacy-dispatch', 'digest', 'printf 1', 0, 'dispatched', 1, 1)`),
+      const failed = yield* Effect.promise(() =>
+        pool
+          .query(
+            `INSERT INTO rika_hosted_executor_operations
+          (assignment_id, owner_id, operation_key, request_digest, code, attempt, state, dispatched_generation, dispatched_lease_epoch)
+          VALUES ('thread-recovery', 'owner-recovery', 'unfenced-dispatch', 'digest', 'printf 1', 0, 'dispatched', 1, 1)`,
+          )
+          .then(
+            () => false,
+            () => true,
+          ),
       )
-      const failed = yield* apply(pool, [migrations[4]!]).pipe(Effect.result)
-      expect(failed._tag).toBe("Failure")
+      expect(failed).toBe(true)
     }),
   ),
 )
 
-it.effect.skipIf(!live)("accepts an exact old-fence recovered event and rejects the wrong generation, lease, executor, and process", () =>
-  isolated(({ url, pool }) =>
-    Effect.gen(function* () {
-      yield* apply(pool, [...identityMigrations, ...migrations])
-      yield* seedIdentity(pool)
-      const layer = HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 })
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const context = yield* Layer.build(layer)
-          yield* Effect.gen(function* () {
-            const store = yield* HostedStore
-            const assignments = yield* ExecutorAssignments
-            yield* store.createProject({
-              id: ids.project,
-              organizationId: ids.organization,
-              name: "Recovery",
-              createdByMemberId: ids.member,
-              now: at(0),
-            })
-            yield* store.registerDevice({
-              id: ids.device,
-              organizationId: ids.organization,
-              memberId: ids.member,
-              displayName: "Recovery",
-              publicKeyFingerprint: "sha256:recovery",
-              now: at(0),
-            })
-            yield* store.authenticateClient({
-              id: ids.client,
-              organizationId: ids.organization,
-              memberId: ids.member,
-              deviceId: ids.device,
-              now: at(0),
-              expiresAt: at(59),
-            })
-            yield* store.createWorkspace({
-              id: ids.workspace,
-              organizationId: ids.organization,
-              projectId: ids.project,
-              createdByMemberId: ids.member,
-              executorKind: "local_device",
-              now: at(0),
-            })
-            yield* store.createThread({
-              id: ids.thread,
-              organizationId: ids.organization,
-              projectId: ids.project,
-              workspaceId: ids.workspace,
-              createdByMemberId: ids.member,
-              executorKind: "local_device",
-              now: at(0),
-            })
-            yield* store.admitCommand({
-              organizationId: ids.organization,
-              threadId: ids.thread,
-              memberId: ids.member,
-              clientId: ids.client,
-              commandId: CommandId.make("operation-recovered"),
-              idempotencyKey: IdempotencyKey.make("operation-recovered"),
-              actor: {
-                _tag: "AuthenticatedMember",
-                organizationId: ids.organization,
-                memberId: ids.member,
-                clientId: ids.client,
+it.effect.skipIf(!live)(
+  "accepts an exact old-fence recovered event and rejects the wrong generation, lease, executor, and process",
+  () =>
+    isolated(({ url, pool }) =>
+      Effect.gen(function* () {
+        yield* apply(pool, [...identityMigrations, ...migrations])
+        yield* seedIdentity(pool)
+        const layer = HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 })
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const context = yield* Layer.build(layer)
+            yield* Effect.gen(function* () {
+              const store = yield* HostedStore
+              const assignments = yield* ExecutorAssignments
+              const owner = yield* store.putOwner({
+                id: ids.owner,
+                identity: { _tag: "OrganizationOwner", organizationId: ids.organization },
+                now: at(0),
+              })
+              expect(owner).toMatchObject({
+                id: ids.owner,
+                identity: { _tag: "OrganizationOwner", organizationId: ids.organization },
+              })
+              yield* store.createProject({
+                id: ids.project,
+                ownerId: ids.owner,
+                name: "Recovery",
+                createdByUserId: ids.user,
+                now: at(0),
+              })
+              yield* store.registerDevice({
+                id: ids.device,
+                userId: ids.user,
+                displayName: "Recovery",
+                publicKeyFingerprint: "sha256:recovery",
+                now: at(0),
+              })
+              yield* store.authenticateClient({
+                id: ids.client,
+                userId: ids.user,
                 deviceId: ids.device,
-              },
-              command: { _tag: "SubmitPrompt", prompt: "recover" },
-              admittedAt: at(1),
-            })
-            const created = yield* assignments.create({
-              id: ids.assignment,
-              organizationId: ids.organization,
-              threadId: ids.thread,
-              placement: { _tag: "LocalDevicePlacement", deviceId: ids.device },
-              checkout: null,
-            })
-            const provisioning = yield* assignments.beginProvisioning({
-              ...version(created),
-              bootstrapCredentialDigest: Redacted.make("bootstrap"),
-              bootstrapLifetimeMillis: 60_000,
-            })
-            const bound = yield* assignments.bindProviderInstance({
-              ...version(provisioning),
-              providerInstanceId: ids.device,
-            })
-            const active = yield* assignments.openSession({
-              ...version(bound),
-              providerInstanceId: ids.device,
-              executorInstanceId: ids.executor,
-              processIncarnation: "process-recovery",
-              presentedBootstrapCredentialDigest: Redacted.make("bootstrap"),
-              sessionCredentialDigest: Redacted.make("session"),
-              leaseLifetimeMillis: 60_000,
-            })
-            if (active.lifecycle._tag !== "Active") return yield* Effect.die("assignment did not become active")
-            const access: Access = {
-              assignmentId: active.id,
-              assignmentGeneration: active.generation,
-              providerInstanceId: active.lifecycle.providerInstanceId,
-              executorInstanceId: active.lifecycle.executorInstanceId,
-              processIncarnation: active.lifecycle.processIncarnation,
-              leaseEpoch: active.lifecycle.leaseEpoch,
-              presentedSessionCredentialDigest: Redacted.make("session"),
-            }
-            yield* Effect.promise(() =>
-              pool.query(
-                `INSERT INTO rika_hosted_executor_operations
-                (assignment_id, operation_key, request_digest, code, attempt, state, dispatched_generation,
+                now: at(0),
+                expiresAt: at(59),
+              })
+              yield* store.createWorkspace({
+                id: ids.workspace,
+                ownerId: ids.owner,
+                projectId: ids.project,
+                createdByUserId: ids.user,
+                executorKind: "local_device",
+                now: at(0),
+              })
+              yield* store.createThread({
+                id: ids.thread,
+                ownerId: ids.owner,
+                projectId: ids.project,
+                workspaceId: ids.workspace,
+                createdByUserId: ids.user,
+                executorKind: "local_device",
+                now: at(0),
+              })
+              yield* store.admitCommand({
+                ownerId: ids.owner,
+                threadId: ids.thread,
+                commandId: CommandId.make("operation-recovered"),
+                idempotencyKey: IdempotencyKey.make("operation-recovered"),
+                actor: {
+                  _tag: "OrganizationActor",
+                  owner: { _tag: "OrganizationOwner", organizationId: ids.organization },
+                  userId: ids.user,
+                  membershipId: ids.member,
+                  clientId: ids.client,
+                  deviceId: ids.device,
+                },
+                command: { _tag: "SubmitPrompt", prompt: "recover" },
+                admittedAt: at(1),
+              })
+              const created = yield* assignments.create({
+                id: ids.assignment,
+                ownerId: ids.owner,
+                threadId: ids.thread,
+                placement: { _tag: "LocalDevicePlacement", deviceId: ids.device },
+                checkout: null,
+              })
+              const provisioning = yield* assignments.beginProvisioning({
+                ...version(created),
+                bootstrapCredentialDigest: Redacted.make("bootstrap"),
+                bootstrapLifetimeMillis: 60_000,
+              })
+              const bound = yield* assignments.bindProviderInstance({
+                ...version(provisioning),
+                providerInstanceId: ids.device,
+              })
+              const active = yield* assignments.openSession({
+                ...version(bound),
+                providerInstanceId: ids.device,
+                executorInstanceId: ids.executor,
+                processIncarnation: "process-recovery",
+                presentedBootstrapCredentialDigest: Redacted.make("bootstrap"),
+                sessionCredentialDigest: Redacted.make("session"),
+                leaseLifetimeMillis: 60_000,
+              })
+              if (active.lifecycle._tag !== "Active") return yield* Effect.die("assignment did not become active")
+              const access: Access = {
+                assignmentId: active.id,
+                assignmentGeneration: active.generation,
+                providerInstanceId: active.lifecycle.providerInstanceId,
+                executorInstanceId: active.lifecycle.executorInstanceId,
+                processIncarnation: active.lifecycle.processIncarnation,
+                leaseEpoch: active.lifecycle.leaseEpoch,
+                presentedSessionCredentialDigest: Redacted.make("session"),
+              }
+              yield* Effect.promise(() =>
+                pool.query(
+                  `INSERT INTO rika_hosted_executor_operations
+                (assignment_id, owner_id, operation_key, request_digest, code, attempt, state, dispatched_generation,
                   dispatched_lease_epoch, dispatched_executor_instance_id, dispatched_process_incarnation, response)
-                VALUES ($1, 'operation-recovered', 'digest', 'printf recover', 0, 'unknown', $2, $3, $4, $5,
+                VALUES ($1, $2, 'operation-recovered', 'digest', 'printf recover', 0, 'unknown', $3, $4, $5, $6,
                   '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"Local operation outcome is unknown after executor disconnect"}}'::jsonb)`,
-                [
-                  access.assignmentId,
-                  access.assignmentGeneration,
-                  access.leaseEpoch,
-                  access.executorInstanceId,
-                  access.processIncarnation,
-                ],
-              ),
-            )
-            const recovered = {
-              eventId: EventId.make("operation-recovered"),
-              idempotencyKey: IdempotencyKey.make("operation-recovered"),
-              assignmentId: access.assignmentId,
-              assignmentGeneration: access.assignmentGeneration,
-              leaseEpoch: access.leaseEpoch,
-              commandSequence: Sequence.make("1"),
-              event: unknownEvent,
-              executorInstanceId: String(access.executorInstanceId),
-              processIncarnation: access.processIncarnation,
-            }
-            const first = yield* store.appendRecoveredEvent(recovered)
-            expect(first.event).toEqual(unknownEvent)
-            expect(yield* store.appendRecoveredEvent(recovered)).toEqual(first)
-            expect(
-              (yield* Effect.result(store.appendRecoveredEvent({ ...recovered, assignmentGeneration: FencingGeneration.make("9") })))._tag,
-            ).toBe("Failure")
-            expect(
-              (yield* Effect.result(store.appendRecoveredEvent({ ...recovered, leaseEpoch: AssignmentLeaseEpoch.make("9") })))._tag,
-            ).toBe("Failure")
-            expect((yield* Effect.result(store.appendRecoveredEvent({ ...recovered, executorInstanceId: "other-executor" })))._tag).toBe("Failure")
-            expect((yield* Effect.result(store.appendRecoveredEvent({ ...recovered, processIncarnation: "other-process" })))._tag).toBe("Failure")
-          }).pipe(Effect.provideContext(context))
-        }),
-      )
-    }),
-  ),
+                  [
+                    access.assignmentId,
+                    ids.owner,
+                    access.assignmentGeneration,
+                    access.leaseEpoch,
+                    access.executorInstanceId,
+                    access.processIncarnation,
+                  ],
+                ),
+              )
+              const recovered = {
+                eventId: EventId.make("operation-recovered"),
+                idempotencyKey: IdempotencyKey.make("operation-recovered"),
+                assignmentId: access.assignmentId,
+                assignmentGeneration: access.assignmentGeneration,
+                leaseEpoch: access.leaseEpoch,
+                commandSequence: Sequence.make("1"),
+                event: unknownEvent,
+                executorInstanceId: String(access.executorInstanceId),
+                processIncarnation: access.processIncarnation,
+              }
+              const first = yield* store.appendRecoveredEvent(recovered)
+              expect(first.event).toEqual(unknownEvent)
+              expect(yield* store.appendRecoveredEvent(recovered)).toEqual(first)
+              expect(
+                (yield* Effect.result(
+                  store.appendRecoveredEvent({ ...recovered, assignmentGeneration: FencingGeneration.make("9") }),
+                ))._tag,
+              ).toBe("Failure")
+              expect(
+                (yield* Effect.result(
+                  store.appendRecoveredEvent({ ...recovered, leaseEpoch: AssignmentLeaseEpoch.make("9") }),
+                ))._tag,
+              ).toBe("Failure")
+              expect(
+                (yield* Effect.result(
+                  store.appendRecoveredEvent({ ...recovered, executorInstanceId: "other-executor" }),
+                ))._tag,
+              ).toBe("Failure")
+              expect(
+                (yield* Effect.result(
+                  store.appendRecoveredEvent({ ...recovered, processIncarnation: "other-process" }),
+                ))._tag,
+              ).toBe("Failure")
+            }).pipe(Effect.provideContext(context))
+          }),
+        )
+      }),
+    ),
 )

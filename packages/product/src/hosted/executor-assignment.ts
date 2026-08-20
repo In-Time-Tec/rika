@@ -8,7 +8,7 @@ import {
   ExecutorKind,
   FencingGeneration,
   JsonObject,
-  OrganizationId,
+  OwnerId,
   Sequence,
   ThreadId,
   Timestamp,
@@ -93,7 +93,7 @@ export type AssignmentLifecycle = typeof AssignmentLifecycle.Type
 
 export const ExecutorAssignment = Schema.Struct({
   id: ExecutorAssignmentId,
-  organizationId: OrganizationId,
+  ownerId: OwnerId,
   threadId: ThreadId,
   executorKind: ExecutorKind,
   placement: ExecutorPlacement,
@@ -112,7 +112,7 @@ export type ExecutorAssignment = typeof ExecutorAssignment.Type
 
 export const WorkspaceCheckpointManifest = Schema.Struct({
   id: CheckpointId,
-  organizationId: OrganizationId,
+  ownerId: OwnerId,
   threadId: ThreadId,
   assignmentId: ExecutorAssignmentId,
   executorInstanceId: ExecutorInstanceId,

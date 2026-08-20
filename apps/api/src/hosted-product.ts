@@ -5,14 +5,17 @@ import { ExecutorAssignments } from "@rika/product/executor-assignments"
 import {
   AssignmentLeaseEpoch,
   BetterAuthMemberId,
+  BetterAuthUserId,
   ClientId,
   CommandId,
   DeviceId,
   EventId,
   ExecutorAssignmentId,
   FencingGeneration,
+  type HostedOwner,
   IdempotencyKey,
   OrganizationId,
+  OwnerId,
   ProjectId,
   type Sequence,
   ThreadId,
@@ -22,19 +25,21 @@ import { HostedStore, StoreError } from "@rika/product/hosted-store"
 import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
 import { CellResponse as CellResponseSchema, type AccessWire, type CellResponse } from "@rika/remote-execution/protocol"
 
-export interface ProjectContext {
-  readonly id: string
-  readonly organizationId: string
-  readonly name: string
-  readonly role: "viewer" | "controller" | "operator" | "owner"
-}
-
-export interface ConnectionAuthority {
-  readonly organizationId: string
-  readonly memberId: string
+export interface AuthenticatedPrincipal {
+  readonly userId: string
   readonly deviceId: string
   readonly clientId: string
   readonly dpopJkt?: string
+}
+
+export type OwnerSelection = HostedOwner
+
+export interface ProjectContext {
+  readonly id: string
+  readonly ownerId: string
+  readonly owner: HostedOwner
+  readonly name: string
+  readonly role: "viewer" | "controller" | "operator" | "owner"
 }
 
 export interface AdmittedRun {
@@ -52,7 +57,10 @@ export class HostedProductError extends Schema.TaggedError<HostedProductError>()
 const unavailable = () =>
   HostedProductError.make({ kind: "unavailable", message: "Hosted product service is unavailable" })
 
+const forbidden = (message = "Resource is unavailable") => HostedProductError.make({ kind: "forbidden", message })
+
 const storeFailure = (error: unknown) => {
+  if (Schema.is(HostedProductError)(error)) return error
   if (!Schema.is(StoreError)(error)) return unavailable()
   let kind: NonNullable<HostedProductError["kind"]> = "unavailable"
   if (error.reason === "conflict" || error.reason === "stale-fence") kind = "conflict"
@@ -64,15 +72,16 @@ const storeFailure = (error: unknown) => {
 export interface HostedProductService {
   readonly ready: Effect.Effect<void, HostedProductError>
   readonly projects: (
-    memberIds: ReadonlyArray<string>,
+    principal: AuthenticatedPrincipal,
   ) => Effect.Effect<ReadonlyArray<ProjectContext>, HostedProductError>
   readonly createConnection: (input: {
-    readonly authority: ConnectionAuthority
+    readonly principal: AuthenticatedPrincipal
+    readonly owner: OwnerSelection
     readonly projectId?: string
     readonly placement: "local" | "e2b"
   }) => Effect.Effect<{ readonly threadId: string }, HostedProductError>
   readonly admitRun: (input: {
-    readonly authority: ConnectionAuthority
+    readonly principal: AuthenticatedPrincipal
     readonly threadId: string
     readonly operationKey: string
     readonly prompt: string
@@ -98,141 +107,278 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
       const policy = yield* AuthorizationPolicy
       const crypto = yield* Crypto.Crypto
 
-      const projects = Effect.fn("HostedProduct.projects")(function* (memberIds: ReadonlyArray<string>) {
-        if (memberIds.length === 0) return []
-        const rows = yield* sql<{
-          readonly id: string
-          readonly organizationId: string
-          readonly name: string
-          readonly role: ProjectContext["role"]
-        }>`SELECT project.id, project.organization_id AS "organizationId", project.name, grant_record.role
-          FROM rika_hosted_projects project
-          JOIN rika_hosted_project_grants grant_record
-            ON grant_record.organization_id = project.organization_id AND grant_record.project_id = project.id
-          WHERE grant_record.member_id IN ${sql.in(memberIds)}
-          ORDER BY project.created_at, project.id`.pipe(Effect.mapError(unavailable))
-        return rows
+      const activateClient = Effect.fn("HostedProduct.activateClient")(function* (
+        principal: AuthenticatedPrincipal,
+        userId: BetterAuthUserId,
+      ) {
+        const currentTime = yield* Clock.currentTimeMillis
+        const now = DateTime.formatIso(DateTime.makeUnsafe(currentTime))
+        const deviceId = DeviceId.make(principal.deviceId)
+        yield* store.registerDevice({
+          id: deviceId,
+          userId,
+          displayName: "Rika CLI",
+          publicKeyFingerprint: principal.dpopJkt ?? principal.clientId,
+          now,
+        })
+        yield* store.authenticateClient({
+          id: ClientId.make(principal.clientId),
+          userId,
+          deviceId,
+          now,
+          expiresAt: DateTime.formatIso(DateTime.makeUnsafe(currentTime + 60 * 60 * 1000)),
+        })
+        return deviceId
       })
 
-      const createConnection = Effect.fn("HostedProduct.createConnection")(function* (input: {
-        readonly authority: ConnectionAuthority
-        readonly projectId?: string
-        readonly placement: "local" | "e2b"
-      }) {
-        return yield* sql.withTransaction(
-          Effect.gen(function* () {
-            const existing = yield* projects([input.authority.memberId])
-            const selected =
-              input.projectId === undefined
-                ? existing.find((project) => project.organizationId === input.authority.organizationId)
-                : existing.find(
-                    (project) =>
-                      project.id === input.projectId && project.organizationId === input.authority.organizationId,
-                  )
-            if (input.projectId !== undefined && selected === undefined)
-              return yield* HostedProductError.make({ message: "Project is unavailable" })
-            const currentTime = yield* Clock.currentTimeMillis
-            const timestamp = DateTime.formatIso(DateTime.makeUnsafe(currentTime))
-            const organizationId = OrganizationId.make(input.authority.organizationId)
-            const memberId = BetterAuthMemberId.make(input.authority.memberId)
-            const deviceId = DeviceId.make(input.authority.deviceId)
-            const created =
-              selected === undefined
-                ? yield* store.createProject({
-                    id: ProjectId.make(yield* crypto.randomUUIDv4),
-                    organizationId,
-                    name: "Rika",
-                    createdByMemberId: memberId,
+      const resolveOwner = Effect.fn("HostedProduct.resolveOwner")(function* (
+        principal: AuthenticatedPrincipal,
+        selection: OwnerSelection,
+      ) {
+        const userId = BetterAuthUserId.make(principal.userId)
+        const now = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+        let membershipId: BetterAuthMemberId | undefined
+        if (selection._tag === "PersonalOwner") {
+          if (selection.userId !== userId) return yield* forbidden()
+          const identities = yield* sql<{
+            readonly id: string
+          }>`SELECT id FROM "user" WHERE id = ${userId} FOR UPDATE`.pipe(Effect.mapError(unavailable))
+          if (identities[0] === undefined) return yield* forbidden()
+        } else {
+          const identities = yield* sql<{ readonly membershipId: string }>`SELECT membership.id AS "membershipId"
+            FROM "organization" organization_record
+            JOIN "member" membership ON membership.organization_id = organization_record.id
+              AND membership.user_id = ${userId}
+            WHERE organization_record.id = ${selection.organizationId}
+            FOR UPDATE OF organization_record`.pipe(Effect.mapError(unavailable))
+          if (identities[0] === undefined) return yield* forbidden()
+          membershipId = BetterAuthMemberId.make(identities[0].membershipId)
+        }
+        const rows = yield* sql<{ readonly id: string }>`SELECT id FROM rika_hosted_owners
+          WHERE user_id = ${selection._tag === "PersonalOwner" ? userId : null}
+            OR organization_id = ${selection._tag === "OrganizationOwner" ? selection.organizationId : null}`.pipe(
+          Effect.mapError(unavailable),
+        )
+        const owner = yield* store.putOwner({
+          id: OwnerId.make(rows[0]?.id ?? (yield* crypto.randomUUIDv4)),
+          identity: selection,
+          now,
+        })
+        if (selection._tag === "PersonalOwner") return { owner, userId } as const
+        return { owner, userId, membershipId: membershipId! } as const
+      })
+
+      const projects: HostedProductService["projects"] = Effect.fn("HostedProduct.projects")(function* (principal) {
+        return yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const personal = yield* resolveOwner(principal, {
+                _tag: "PersonalOwner",
+                userId: BetterAuthUserId.make(principal.userId),
+              })
+              const organizationRows = yield* sql<{
+                readonly organizationId: string
+              }>`SELECT organization_id AS "organizationId"
+              FROM "member" WHERE user_id = ${principal.userId} ORDER BY organization_id`.pipe(
+                Effect.mapError(unavailable),
+              )
+              for (const row of organizationRows) {
+                yield* resolveOwner(principal, {
+                  _tag: "OrganizationOwner",
+                  organizationId: OrganizationId.make(row.organizationId),
+                })
+              }
+              return yield* sql<ProjectContext>`SELECT project.id, owner_record.id AS "ownerId", project.name,
+                CASE WHEN owner_record.kind = 'personal' OR project.created_by_user_id = ${principal.userId}
+                  THEN 'owner' ELSE grant_record.role END AS role,
+                CASE WHEN owner_record.kind = 'personal'
+                  THEN jsonb_build_object('_tag', 'PersonalOwner', 'userId', owner_record.user_id)
+                  ELSE jsonb_build_object('_tag', 'OrganizationOwner', 'organizationId', owner_record.organization_id)
+                END AS owner
+              FROM rika_hosted_projects project
+              JOIN rika_hosted_owners owner_record ON owner_record.id = project.owner_id
+              LEFT JOIN "member" membership ON membership.organization_id = owner_record.organization_id
+                AND membership.user_id = ${principal.userId}
+              LEFT JOIN rika_hosted_project_grants grant_record ON grant_record.owner_id = project.owner_id
+                AND grant_record.project_id = project.id AND grant_record.membership_id = membership.id
+              WHERE (owner_record.kind = 'personal' AND owner_record.id = ${personal.owner.id})
+                OR (owner_record.kind = 'organization' AND membership.id IS NOT NULL
+                  AND (project.created_by_user_id = ${principal.userId} OR grant_record.role IS NOT NULL))
+              ORDER BY project.created_at, project.id`.pipe(Effect.mapError(unavailable))
+            }),
+          )
+          .pipe(Effect.mapError(storeFailure))
+      })
+
+      const createConnection: HostedProductService["createConnection"] = Effect.fn("HostedProduct.createConnection")(
+        function* (input) {
+          return yield* sql
+            .withTransaction(
+              Effect.gen(function* () {
+                const authority = yield* resolveOwner(input.principal, input.owner)
+                const membershipId = "membershipId" in authority ? authority.membershipId : undefined
+                const currentTime = yield* Clock.currentTimeMillis
+                const timestamp = DateTime.formatIso(DateTime.makeUnsafe(currentTime))
+                const selected =
+                  input.projectId === undefined
+                    ? undefined
+                    : (yield* sql<{ readonly role: ProjectContext["role"] }>`SELECT
+                    CASE WHEN project.created_by_user_id = ${authority.userId} THEN 'owner' ELSE grant_record.role END AS role
+                  FROM rika_hosted_projects project
+                  LEFT JOIN rika_hosted_project_grants grant_record ON grant_record.owner_id = project.owner_id
+                    AND grant_record.project_id = project.id
+                    AND grant_record.membership_id = ${membershipId ?? null}
+                  WHERE project.id = ${input.projectId} AND project.owner_id = ${authority.owner.id}
+                    AND (${input.owner._tag} = 'PersonalOwner' OR project.created_by_user_id = ${authority.userId}
+                      OR grant_record.role IS NOT NULL)`.pipe(Effect.mapError(unavailable)))[0]
+                if (input.projectId !== undefined && selected === undefined)
+                  return yield* HostedProductError.make({ kind: "not-found", message: "Project is unavailable" })
+                if (input.owner._tag === "OrganizationOwner" && selected !== undefined) {
+                  if (membershipId === undefined) return yield* forbidden()
+                  yield* policy
+                    .authorize("project:update", {
+                      memberId: membershipId,
+                      projectRole: selected.role,
+                    })
+                    .pipe(Effect.mapError(() => forbidden()))
+                }
+                const deviceId = yield* activateClient(input.principal, authority.userId)
+                const executorKind = input.placement === "e2b" ? "e2b" : "local_device"
+                const projectId = input.projectId === undefined ? undefined : ProjectId.make(input.projectId)
+                const workspaceId = WorkspaceId.make(yield* crypto.randomUUIDv4)
+                yield* store.createWorkspace({
+                  id: workspaceId,
+                  ownerId: authority.owner.id,
+                  ...(projectId === undefined ? {} : { projectId }),
+                  createdByUserId: authority.userId,
+                  executorKind,
+                  inheritProjectGrants: executorKind === "e2b" && projectId !== undefined,
+                  now: timestamp,
+                })
+                const threadId = ThreadId.make(
+                  `${executorKind === "e2b" ? "e2b" : "local"}_${yield* crypto.randomUUIDv4}`,
+                )
+                const thread = yield* store.createThread({
+                  id: threadId,
+                  ownerId: authority.owner.id,
+                  ...(projectId === undefined ? {} : { projectId }),
+                  workspaceId,
+                  createdByUserId: authority.userId,
+                  executorKind,
+                  inheritProjectGrants: executorKind === "e2b" && projectId !== undefined,
+                  now: timestamp,
+                })
+                if (input.owner._tag === "OrganizationOwner" && selected === undefined) {
+                  if (membershipId === undefined) return yield* forbidden()
+                  yield* store.putThreadGrant({
+                    ownerId: authority.owner.id,
+                    threadId: thread.id,
+                    membershipId,
+                    role: "owner",
+                    grantedByUserId: authority.userId,
                     now: timestamp,
                   })
-                : undefined
-            const projectId = selected?.id ?? created!.id
-            const projectRole = selected?.role ?? "owner"
-            yield* policy.authorize("project:update", { memberId, projectRole })
-            const executorKind = input.placement === "e2b" ? "e2b" : "local_device"
-            yield* store.registerDevice({
-              id: deviceId,
-              organizationId,
-              memberId,
-              displayName: "Rika CLI",
-              publicKeyFingerprint: input.authority.dpopJkt ?? input.authority.clientId,
-              now: timestamp,
-            })
-            yield* store.authenticateClient({
-              id: ClientId.make(input.authority.clientId),
-              organizationId,
-              memberId,
-              deviceId,
-              now: timestamp,
-              expiresAt: DateTime.formatIso(DateTime.makeUnsafe(currentTime + 60 * 60 * 1000)),
-            })
-            const workspaceId = WorkspaceId.make(yield* crypto.randomUUIDv4)
-            yield* store.createWorkspace({
-              id: workspaceId,
-              organizationId,
-              projectId: ProjectId.make(projectId),
-              createdByMemberId: memberId,
-              executorKind,
-              inheritProjectGrants: executorKind === "e2b",
-              now: timestamp,
-            })
-            const threadId = ThreadId.make(`${executorKind === "e2b" ? "e2b" : "local"}_${yield* crypto.randomUUIDv4}`)
-            const thread = yield* store.createThread({
-              id: threadId,
-              organizationId,
-              projectId: ProjectId.make(projectId),
-              workspaceId,
-              createdByMemberId: memberId,
-              executorKind,
-              inheritProjectGrants: executorKind === "e2b",
-              now: timestamp,
-            })
-            yield* assignments.create({
-              id: ExecutorAssignmentId.make(thread.id),
-              organizationId,
-              threadId: thread.id,
-              placement:
-                executorKind === "e2b"
-                  ? {
-                      _tag: "E2BPlacement",
-                      templateBuildId: options.templateBuildId,
-                      providerScope: options.providerScope,
-                    }
-                  : { _tag: "LocalDevicePlacement", deviceId },
-              checkout: null,
-            })
-            return { threadId: String(thread.id) }
-          }),
-        )
-      }, Effect.mapError(unavailable))
+                }
+                yield* assignments.create({
+                  id: ExecutorAssignmentId.make(thread.id),
+                  ownerId: authority.owner.id,
+                  threadId: thread.id,
+                  placement:
+                    executorKind === "e2b"
+                      ? {
+                          _tag: "E2BPlacement",
+                          templateBuildId: options.templateBuildId,
+                          providerScope: options.providerScope,
+                        }
+                      : { _tag: "LocalDevicePlacement", deviceId },
+                  checkout: null,
+                })
+                return { threadId: String(thread.id) }
+              }),
+            )
+            .pipe(Effect.mapError(storeFailure))
+        },
+      )
 
       const admitRun: HostedProductService["admitRun"] = Effect.fn("HostedProduct.admitRun")(function* (input) {
-        const organizationId = OrganizationId.make(input.authority.organizationId)
-        const memberId = BetterAuthMemberId.make(input.authority.memberId)
-        const clientId = ClientId.make(input.authority.clientId)
+        const threadRows = yield* sql<{
+          readonly ownerId: string
+          readonly kind: "personal" | "organization"
+          readonly userId: string | null
+          readonly organizationId: string | null
+          readonly membershipId: string | null
+          readonly createdByUserId: string
+          readonly executorKind: "local_device" | "e2b"
+          readonly inheritProjectGrants: boolean
+          readonly threadRole: "viewer" | "controller" | "operator" | "owner" | null
+          readonly projectRole: "viewer" | "controller" | "operator" | "owner" | null
+        }>`SELECT thread.owner_id AS "ownerId", owner_record.kind, owner_record.user_id AS "userId",
+            owner_record.organization_id AS "organizationId", membership.id AS "membershipId",
+            thread.created_by_user_id AS "createdByUserId", thread.executor_kind AS "executorKind",
+            thread.inherit_project_grants AS "inheritProjectGrants",
+            thread_grant.role AS "threadRole", project_grant.role AS "projectRole"
+          FROM rika_hosted_threads thread
+          JOIN rika_hosted_owners owner_record ON owner_record.id = thread.owner_id
+          LEFT JOIN "member" membership ON membership.organization_id = owner_record.organization_id
+            AND membership.user_id = ${input.principal.userId}
+          LEFT JOIN rika_hosted_thread_grants thread_grant ON thread_grant.owner_id = thread.owner_id
+            AND thread_grant.thread_id = thread.id AND thread_grant.membership_id = membership.id
+          LEFT JOIN rika_hosted_project_grants project_grant ON project_grant.owner_id = thread.owner_id
+            AND project_grant.project_id = thread.project_id AND project_grant.membership_id = membership.id
+          WHERE thread.id = ${input.threadId}`.pipe(Effect.mapError(unavailable))
+        const resolved = threadRows[0]
+        if (resolved === undefined)
+          return yield* HostedProductError.make({ kind: "not-found", message: "Thread is unavailable" })
+        const userId = BetterAuthUserId.make(input.principal.userId)
+        if (resolved.kind === "personal" && resolved.userId !== input.principal.userId) return yield* forbidden()
+        if (resolved.kind === "organization" && resolved.membershipId === null) return yield* forbidden()
+        if (resolved.kind === "organization") {
+          const membershipId = BetterAuthMemberId.make(resolved.membershipId!)
+          yield* policy
+            .authorize("thread:operate", {
+              memberId: membershipId,
+              ...(resolved.createdByUserId === input.principal.userId ? { threadCreatorMemberId: membershipId } : {}),
+              executorKind: resolved.executorKind,
+              inheritProjectGrants: resolved.inheritProjectGrants,
+              ...(resolved.threadRole === null ? {} : { threadRole: resolved.threadRole }),
+              ...(resolved.projectRole === null ? {} : { projectRole: resolved.projectRole }),
+            })
+            .pipe(Effect.mapError(() => forbidden()))
+        }
+        const owner =
+          resolved.kind === "personal"
+            ? ({ _tag: "PersonalOwner", userId } as const)
+            : ({ _tag: "OrganizationOwner", organizationId: OrganizationId.make(resolved.organizationId!) } as const)
+        const actor =
+          owner._tag === "PersonalOwner"
+            ? ({
+                _tag: "PersonalActor",
+                owner,
+                userId,
+                clientId: ClientId.make(input.principal.clientId),
+                deviceId: DeviceId.make(input.principal.deviceId),
+              } as const)
+            : ({
+                _tag: "OrganizationActor",
+                owner,
+                userId,
+                membershipId: BetterAuthMemberId.make(resolved.membershipId!),
+                clientId: ClientId.make(input.principal.clientId),
+                deviceId: DeviceId.make(input.principal.deviceId),
+              } as const)
+        yield* activateClient(input.principal, userId)
         const command = yield* store.admitCommand({
-          organizationId,
+          ownerId: OwnerId.make(resolved.ownerId),
           threadId: ThreadId.make(input.threadId),
-          memberId,
-          clientId,
           commandId: CommandId.make(input.operationKey),
           idempotencyKey: IdempotencyKey.make(input.operationKey),
-          actor: {
-            _tag: "AuthenticatedMember",
-            organizationId,
-            memberId,
-            clientId,
-            deviceId: DeviceId.make(input.authority.deviceId),
-          },
+          actor,
           command: { _tag: "SubmitPrompt", prompt: input.prompt },
           admittedAt: DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis)),
         })
-        const previousRows = yield* sql<{ readonly event: unknown }>`SELECT event
-          FROM rika_hosted_thread_events
-          WHERE organization_id = ${organizationId}
-            AND thread_id = ${ThreadId.make(input.threadId)}
-            AND idempotency_key = ${command.idempotencyKey}
-          LIMIT 1`.pipe(Effect.mapError(unavailable))
+        const previousRows = yield* sql<{ readonly event: unknown }>`SELECT event FROM rika_hosted_thread_events
+          WHERE owner_id = ${resolved.ownerId} AND thread_id = ${input.threadId}
+            AND idempotency_key = ${command.idempotencyKey} LIMIT 1`.pipe(Effect.mapError(unavailable))
         const previousEvent = previousRows[0]?.event
         const previous =
           typeof previousEvent === "object" &&
@@ -262,16 +408,12 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
           assignmentGeneration: FencingGeneration.make(String(input.access.fence.assignmentGeneration)),
           leaseEpoch: AssignmentLeaseEpoch.make(String(input.access.leaseEpoch)),
           commandSequence: input.run.commandSequence,
-          event: {
-            _tag: "CellResult",
-            operationKey: input.run.operationKey,
-            response: input.response,
-          },
+          event: { _tag: "CellResult", operationKey: input.run.operationKey, response: input.response },
         })
       }, Effect.mapError(storeFailure))
 
       return HostedProduct.of({
-        ready: sql`SELECT 1 FROM rika_hosted_projects LIMIT 1`.pipe(Effect.asVoid, Effect.mapError(unavailable)),
+        ready: sql`SELECT 1 FROM rika_hosted_owners LIMIT 1`.pipe(Effect.asVoid, Effect.mapError(unavailable)),
         projects,
         createConnection,
         admitRun,

@@ -21,7 +21,7 @@ type AssignmentLifecycle = "active" | "awaiting_bootstrap" | "paused" | "pending
 
 interface AssignmentRow {
   readonly id: string
-  readonly organizationId: string
+  readonly ownerId: string
   readonly threadId: string
   readonly executorKind: "e2b" | "local_device"
   readonly placement: unknown
@@ -50,7 +50,7 @@ interface AssignmentRow {
 
 interface CheckpointRow {
   readonly id: string
-  readonly organizationId: string
+  readonly ownerId: string
   readonly threadId: string
   readonly assignmentId: string
   readonly executorInstanceId: string
@@ -113,7 +113,7 @@ const lifecycle = (row: AssignmentRow): unknown => {
 const decodeAssignment = (row: AssignmentRow) =>
   Schema.decodeUnknownEffect(ExecutorAssignment)({
     id: row.id,
-    organizationId: row.organizationId,
+    ownerId: row.ownerId,
     threadId: row.threadId,
     executorKind: row.executorKind,
     placement: row.placement,
@@ -132,7 +132,7 @@ const decodeAssignment = (row: AssignmentRow) =>
 const decodeCheckpoint = (row: CheckpointRow) =>
   Schema.decodeUnknownEffect(WorkspaceCheckpointManifest)({
     id: row.id,
-    organizationId: row.organizationId,
+    ownerId: row.ownerId,
     threadId: row.threadId,
     assignmentId: row.assignmentId,
     executorInstanceId: row.executorInstanceId,
@@ -178,7 +178,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
   const sql = yield* PgClient.PgClient
 
   const select = (assignmentId: string) =>
-    query(sql<AssignmentRow>`SELECT id, organization_id AS "organizationId", thread_id AS "threadId",
+    query(sql<AssignmentRow>`SELECT id, owner_id AS "ownerId", thread_id AS "threadId",
       executor_kind AS "executorKind", placement, checkout, generation::text AS generation,
       revision::text AS revision, last_lease_epoch::text AS "lastLeaseEpoch", lifecycle,
       provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",
@@ -199,7 +199,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
 
   const selectLocked = (assignmentId: string, lock: "SHARE" | "UPDATE") =>
     lock === "UPDATE"
-      ? query(sql<AssignmentRow>`SELECT id, organization_id AS "organizationId", thread_id AS "threadId",
+      ? query(sql<AssignmentRow>`SELECT id, owner_id AS "ownerId", thread_id AS "threadId",
           executor_kind AS "executorKind", placement, checkout, generation::text AS generation,
           revision::text AS revision, last_lease_epoch::text AS "lastLeaseEpoch", lifecycle,
           provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",
@@ -217,7 +217,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
           to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",
           to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"
           FROM rika_hosted_executor_assignments WHERE id = ${assignmentId} FOR UPDATE`)
-      : query(sql<AssignmentRow>`SELECT id, organization_id AS "organizationId", thread_id AS "threadId",
+      : query(sql<AssignmentRow>`SELECT id, owner_id AS "ownerId", thread_id AS "threadId",
           executor_kind AS "executorKind", placement, checkout, generation::text AS generation,
           revision::text AS revision, last_lease_epoch::text AS "lastLeaseEpoch", lifecycle,
           provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",
@@ -260,7 +260,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
         const kind = input.placement._tag === "E2BPlacement" ? "e2b" : "local_device"
         const threads = yield* query(sql<{ readonly executorKind: string }>`SELECT executor_kind AS "executorKind"
           FROM rika_hosted_threads
-          WHERE id = ${input.threadId} AND organization_id = ${input.organizationId}
+          WHERE id = ${input.threadId} AND owner_id = ${input.ownerId}
           FOR KEY SHARE`)
         if (threads[0]?.executorKind !== kind)
           return yield* failure(
@@ -268,9 +268,9 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
             "Assignment placement does not match the immutable thread placement",
           )
         const rows = yield* query(sql`INSERT INTO rika_hosted_executor_assignments
-          (id, organization_id, thread_id, executor_kind, placement, checkout, generation, revision,
+          (id, owner_id, thread_id, executor_kind, placement, checkout, generation, revision,
             last_lease_epoch, lifecycle)
-          VALUES (${input.id}, ${input.organizationId}, ${input.threadId}, ${kind}, ${sql.json(input.placement)},
+          VALUES (${input.id}, ${input.ownerId}, ${input.threadId}, ${kind}, ${sql.json(input.placement)},
             ${input.checkout === null ? null : sql.json(input.checkout)}, 1, 0, 0, 'pending')
           ON CONFLICT DO NOTHING RETURNING id`)
         if (rows[0] === undefined) return yield* failure("conflict", "Thread already has an executor assignment")
@@ -536,7 +536,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
   })
 
   const checkpointById = (checkpointId: string) =>
-    query(sql<CheckpointRow>`SELECT id, organization_id AS "organizationId", thread_id AS "threadId",
+    query(sql<CheckpointRow>`SELECT id, owner_id AS "ownerId", thread_id AS "threadId",
       assignment_id AS "assignmentId", executor_instance_id AS "executorInstanceId",
       assignment_generation::text AS "assignmentGeneration", lease_epoch::text AS "leaseEpoch",
       object_key AS "objectKey", content_digest AS "contentDigest", size_bytes::float8 AS "sizeBytes", format,
@@ -576,9 +576,9 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
               : yield* failure("conflict", "Checkpoint identity has different content")
           }
           const inserted = yield* query(sql`INSERT INTO rika_hosted_checkpoints
-        (id, organization_id, thread_id, assignment_id, executor_instance_id, assignment_generation,
+        (id, owner_id, thread_id, assignment_id, executor_instance_id, assignment_generation,
           lease_epoch, object_key, content_digest, size_bytes, format, cursor_sequence, cursor_value, metadata)
-        VALUES (${input.id}, ${row.organizationId}, ${row.threadId}, ${row.id}, ${row.executorInstanceId},
+        VALUES (${input.id}, ${row.ownerId}, ${row.threadId}, ${row.id}, ${row.executorInstanceId},
           ${row.generation}::bigint, ${row.leaseEpoch}::bigint, ${input.objectKey}, ${input.contentDigest},
           ${input.sizeBytes}, ${input.format}, ${input.cursor.sequence}::bigint, ${input.cursor.value},
           ${sql.json(input.metadata)}) ON CONFLICT (id) DO NOTHING RETURNING id`)
@@ -600,7 +600,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
   })
 
   const listManaged: AssignmentsService["listManaged"] = query(
-    sql<AssignmentRow>`SELECT id, organization_id AS "organizationId", thread_id AS "threadId",
+    sql<AssignmentRow>`SELECT id, owner_id AS "ownerId", thread_id AS "threadId",
         executor_kind AS "executorKind", placement, checkout, generation::text AS generation,
         revision::text AS revision, last_lease_epoch::text AS "lastLeaseEpoch", lifecycle,
         provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",

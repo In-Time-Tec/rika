@@ -7,6 +7,7 @@ import {
   type AuthenticatedClient,
   type AuthenticatedDevice,
   type BetterAuthMemberId,
+  type BetterAuthUserId,
   type AssignmentLeaseEpoch,
   type ClientId,
   type CommitCursor,
@@ -21,12 +22,14 @@ import {
   type FencingGeneration,
   type GrantRole,
   type HostedThread,
+  type HostedOwner,
+  type HostedOwnerRecord,
   type HostedWorkspace,
   type IdempotencyKey,
   type JsonObject,
   type LeaseId,
   type LocalWorkspaceBinding,
-  type OrganizationId,
+  type OwnerId,
   type Presence,
   type PresenceStatus,
   type Project,
@@ -61,26 +64,32 @@ export class StoreError extends Schema.TaggedError<StoreError>()("HostedStoreErr
 
 export interface CreateProjectInput {
   readonly id: ProjectId
-  readonly organizationId: OrganizationId
+  readonly ownerId: OwnerId
   readonly name: string
-  readonly createdByMemberId: BetterAuthMemberId
+  readonly createdByUserId: BetterAuthUserId
+  readonly now: Timestamp
+}
+
+export interface PutOwnerInput {
+  readonly id: OwnerId
+  readonly identity: HostedOwner
   readonly now: Timestamp
 }
 
 export interface PutProjectGrantInput {
-  readonly organizationId: OrganizationId
+  readonly ownerId: OwnerId
   readonly projectId: ProjectId
-  readonly memberId: BetterAuthMemberId
+  readonly membershipId: BetterAuthMemberId
   readonly role: GrantRole
-  readonly grantedByMemberId: BetterAuthMemberId
+  readonly grantedByUserId: BetterAuthUserId
   readonly now: Timestamp
 }
 
 export interface CreateWorkspaceInput {
   readonly id: WorkspaceId
-  readonly organizationId: OrganizationId
-  readonly projectId: ProjectId
-  readonly createdByMemberId: BetterAuthMemberId
+  readonly ownerId: OwnerId
+  readonly projectId?: ProjectId
+  readonly createdByUserId: BetterAuthUserId
   readonly executorKind: ExecutorKind
   readonly inheritProjectGrants?: boolean
   readonly now: Timestamp
@@ -88,28 +97,27 @@ export interface CreateWorkspaceInput {
 
 export interface CreateThreadInput {
   readonly id: ThreadId
-  readonly organizationId: OrganizationId
-  readonly projectId: ProjectId
+  readonly ownerId: OwnerId
+  readonly projectId?: ProjectId
   readonly workspaceId: WorkspaceId
-  readonly createdByMemberId: BetterAuthMemberId
+  readonly createdByUserId: BetterAuthUserId
   readonly executorKind: ExecutorKind
   readonly inheritProjectGrants?: boolean
   readonly now: Timestamp
 }
 
 export interface PutThreadGrantInput {
-  readonly organizationId: OrganizationId
+  readonly ownerId: OwnerId
   readonly threadId: ThreadId
-  readonly memberId: BetterAuthMemberId
+  readonly membershipId: BetterAuthMemberId
   readonly role: GrantRole
-  readonly grantedByMemberId: BetterAuthMemberId
+  readonly grantedByUserId: BetterAuthUserId
   readonly now: Timestamp
 }
 
 export interface RegisterDeviceInput {
   readonly id: DeviceId
-  readonly organizationId: OrganizationId
-  readonly memberId: BetterAuthMemberId
+  readonly userId: BetterAuthUserId
   readonly displayName: string
   readonly publicKeyFingerprint: string
   readonly now: Timestamp
@@ -117,18 +125,15 @@ export interface RegisterDeviceInput {
 
 export interface AuthenticateClientInput {
   readonly id: ClientId
-  readonly organizationId: OrganizationId
-  readonly memberId: BetterAuthMemberId
+  readonly userId: BetterAuthUserId
   readonly deviceId: DeviceId
   readonly now: Timestamp
   readonly expiresAt: Timestamp
 }
 
 export interface AdmitCommandInput {
-  readonly organizationId: OrganizationId
+  readonly ownerId: OwnerId
   readonly threadId: ThreadId
-  readonly memberId: BetterAuthMemberId
-  readonly clientId: ClientId
   readonly commandId: CommandId
   readonly idempotencyKey: IdempotencyKey
   readonly actor: ActorAttribution
@@ -154,10 +159,9 @@ export interface AppendRecoveredEventInput extends AppendEventInput {
 }
 
 export interface ThreadCursorInput {
-  readonly organizationId: OrganizationId
+  readonly ownerId: OwnerId
   readonly threadId: ThreadId
-  readonly memberId: BetterAuthMemberId
-  readonly clientId: ClientId
+  readonly actor: ActorAttribution
 }
 
 export interface ReadThreadLogInput extends ThreadCursorInput {
@@ -191,9 +195,9 @@ export interface UpsertPresenceInput extends ThreadCursorInput {
 
 export interface BindLocalWorkspaceInput {
   readonly id: WorkspaceBindingId
-  readonly organizationId: OrganizationId
+  readonly ownerId: OwnerId
   readonly threadId: ThreadId
-  readonly memberId: BetterAuthMemberId
+  readonly userId: BetterAuthUserId
   readonly deviceId: DeviceId
   readonly rootPath: string
   readonly workspaceFingerprint: string
@@ -202,9 +206,8 @@ export interface BindLocalWorkspaceInput {
 
 export interface RecordAuditEventInput {
   readonly id: AuditEventId
-  readonly organizationId: OrganizationId
-  readonly actorMemberId: BetterAuthMemberId
-  readonly actorClientId: ClientId
+  readonly ownerId: OwnerId
+  readonly actor: ActorAttribution
   readonly action: string
   readonly resourceKind: string
   readonly resourceId: string
@@ -214,48 +217,39 @@ export interface RecordAuditEventInput {
 
 export interface PutCredentialReferenceInput {
   readonly id: CredentialReferenceId
-  readonly organizationId: OrganizationId
-  readonly projectId: ProjectId | null
+  readonly ownerId: OwnerId
+  readonly projectId?: ProjectId
   readonly provider: string
   readonly purpose: string
   readonly externalReference: string
   readonly metadata: CredentialReferenceMetadata
-  readonly createdByMemberId: BetterAuthMemberId
+  readonly createdByUserId: BetterAuthUserId
   readonly now: Timestamp
 }
 
 export interface StoreService {
+  readonly putOwner: (input: PutOwnerInput) => Effect.Effect<HostedOwnerRecord, StoreError>
   readonly createProject: (input: CreateProjectInput) => Effect.Effect<Project, StoreError>
   readonly putProjectGrant: (input: PutProjectGrantInput) => Effect.Effect<ProjectGrant, StoreError>
   readonly createWorkspace: (input: CreateWorkspaceInput) => Effect.Effect<HostedWorkspace, StoreError>
   readonly createThread: (input: CreateThreadInput) => Effect.Effect<HostedThread, StoreError>
   readonly putThreadGrant: (input: PutThreadGrantInput) => Effect.Effect<ThreadGrant, StoreError>
   readonly registerDevice: (input: RegisterDeviceInput) => Effect.Effect<AuthenticatedDevice, StoreError>
-  readonly authenticateClient: (
-    input: AuthenticateClientInput,
-  ) => Effect.Effect<AuthenticatedClient, StoreError>
+  readonly authenticateClient: (input: AuthenticateClientInput) => Effect.Effect<AuthenticatedClient, StoreError>
   readonly admitCommand: (input: AdmitCommandInput) => Effect.Effect<ThreadCommand, StoreError>
-  readonly readCommands: (
-    input: ReadThreadLogInput,
-  ) => Effect.Effect<ReadonlyArray<ThreadCommand>, StoreError>
+  readonly readCommands: (input: ReadThreadLogInput) => Effect.Effect<ReadonlyArray<ThreadCommand>, StoreError>
   readonly appendEvent: (input: AppendEventInput) => Effect.Effect<ThreadEvent, StoreError>
   /** Append a terminal recovery event without requiring the expired dispatch lease. */
   readonly appendRecoveredEvent: (input: AppendRecoveredEventInput) => Effect.Effect<ThreadEvent, StoreError>
   readonly readEvents: (input: ReadThreadLogInput) => Effect.Effect<ReadonlyArray<ThreadEvent>, StoreError>
   readonly acknowledgeCursor: (input: AcknowledgeCursorInput) => Effect.Effect<ResumableCursor, StoreError>
-  readonly acquireTerminalWriter: (
-    input: AcquireTerminalWriterInput,
-  ) => Effect.Effect<TerminalWriterLease, StoreError>
-  readonly renewTerminalWriter: (
-    input: RenewTerminalWriterInput,
-  ) => Effect.Effect<TerminalWriterLease, StoreError>
+  readonly acquireTerminalWriter: (input: AcquireTerminalWriterInput) => Effect.Effect<TerminalWriterLease, StoreError>
+  readonly renewTerminalWriter: (input: RenewTerminalWriterInput) => Effect.Effect<TerminalWriterLease, StoreError>
   readonly upsertPresence: (input: UpsertPresenceInput) => Effect.Effect<Presence, StoreError>
   readonly listPresence: (
     input: ThreadCursorInput & { readonly now: Timestamp },
   ) => Effect.Effect<ReadonlyArray<Presence>, StoreError>
-  readonly bindLocalWorkspace: (
-    input: BindLocalWorkspaceInput,
-  ) => Effect.Effect<LocalWorkspaceBinding, StoreError>
+  readonly bindLocalWorkspace: (input: BindLocalWorkspaceInput) => Effect.Effect<LocalWorkspaceBinding, StoreError>
   readonly recordAuditEvent: (input: RecordAuditEventInput) => Effect.Effect<AuditEvent, StoreError>
   readonly putCredentialReference: (
     input: PutCredentialReferenceInput,

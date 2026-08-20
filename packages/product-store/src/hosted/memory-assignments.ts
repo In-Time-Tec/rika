@@ -96,11 +96,7 @@ const make = Effect.gen(function* () {
       return fail("authentication", "Executor session credential is invalid")
     return undefined
   }
-  const fence = (
-    assignment: ExecutorAssignment | undefined,
-    input: Fence,
-    now: string,
-  ): FailedMutation | undefined => {
+  const fence = (assignment: ExecutorAssignment | undefined, input: Fence, now: string): FailedMutation | undefined => {
     if (assignment === undefined) return fail("not-found", "Executor assignment does not exist")
     const lifecycle = assignment.lifecycle
     if (
@@ -132,7 +128,7 @@ const make = Effect.gen(function* () {
         const executorKind = input.placement._tag === "E2BPlacement" ? "e2b" : "local_device"
         const assignment: ExecutorAssignment = {
           id: input.id,
-          organizationId: input.organizationId,
+          ownerId: input.ownerId,
           threadId: input.threadId,
           executorKind,
           placement: input.placement,
@@ -168,7 +164,9 @@ const make = Effect.gen(function* () {
           lifecycle: {
             _tag: "Provisioning",
             providerInstanceId,
-            bootstrapExpiresAt: timestamp(DateTime.toEpochMillis(DateTime.makeUnsafe(now)) + input.bootstrapLifetimeMillis),
+            bootstrapExpiresAt: timestamp(
+              DateTime.toEpochMillis(DateTime.makeUnsafe(now)) + input.bootstrapLifetimeMillis,
+            ),
           },
         })
         return succeed(
@@ -181,15 +179,16 @@ const make = Effect.gen(function* () {
         const assignment = load(current, input.assignmentId)
         const invalid = version(assignment, input)
         if (invalid !== undefined) return invalid
-        if (assignment!.lifecycle._tag === "Terminated")
-          return fail("invalid-state", "Assignment cannot be replaced")
+        if (assignment!.lifecycle._tag === "Terminated") return fail("invalid-state", "Assignment cannot be replaced")
         const next = revised(assignment!, now, {
           generation: FencingGeneration.make(increment(assignment!.generation)),
           lastLeaseEpoch: Sequence.make("0"),
           lifecycle: {
             _tag: "Provisioning",
             providerInstanceId: null,
-            bootstrapExpiresAt: timestamp(DateTime.toEpochMillis(DateTime.makeUnsafe(now)) + input.bootstrapLifetimeMillis),
+            bootstrapExpiresAt: timestamp(
+              DateTime.toEpochMillis(DateTime.makeUnsafe(now)) + input.bootstrapLifetimeMillis,
+            ),
           },
         })
         return succeed(
@@ -229,8 +228,7 @@ const make = Effect.gen(function* () {
           Redacted.value(credentials.bootstrap) !== Redacted.value(input.presentedBootstrapCredentialDigest)
         )
           return fail("authentication", "Executor bootstrap credential is invalid")
-        if (lifecycle.bootstrapExpiresAt <= now)
-          return fail("stale-fence", "Executor bootstrap is expired or consumed")
+        if (lifecycle.bootstrapExpiresAt <= now) return fail("stale-fence", "Executor bootstrap is expired or consumed")
         const leaseEpoch = AssignmentLeaseEpoch.make(increment(assignment!.lastLeaseEpoch))
         const next = revised(assignment!, now, {
           lastLeaseEpoch: Sequence.make(leaseEpoch),
@@ -244,10 +242,7 @@ const make = Effect.gen(function* () {
           },
           lastActiveAt: now,
         })
-        return succeed(
-          next,
-          saveCredentials(save(current, next), next.id, { session: input.sessionCredentialDigest }),
-        )
+        return succeed(next, saveCredentials(save(current, next), next.id, { session: input.sessionCredentialDigest }))
       }),
     reconnect: (input) =>
       mutation((current, now) => {
@@ -349,7 +344,9 @@ const make = Effect.gen(function* () {
           lifecycle: {
             _tag: "Provisioning",
             providerInstanceId: assignment!.lifecycle.providerInstanceId,
-            bootstrapExpiresAt: timestamp(DateTime.toEpochMillis(DateTime.makeUnsafe(now)) + input.bootstrapLifetimeMillis),
+            bootstrapExpiresAt: timestamp(
+              DateTime.toEpochMillis(DateTime.makeUnsafe(now)) + input.bootstrapLifetimeMillis,
+            ),
           },
         })
         return succeed(
@@ -388,7 +385,7 @@ const make = Effect.gen(function* () {
         if (lifecycle._tag !== "Active") return fail("invalid-state", "Assignment is not active")
         const checkpoint: WorkspaceCheckpointManifest = {
           id: input.id,
-          organizationId: assignment!.organizationId,
+          ownerId: assignment!.ownerId,
           threadId: assignment!.threadId,
           assignmentId: assignment!.id,
           executorInstanceId: lifecycle.executorInstanceId,

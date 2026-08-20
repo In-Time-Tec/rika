@@ -1,12 +1,14 @@
 import { Schema } from "effect"
 
-const OpaqueId = Schema.String.check(
-  Schema.isPattern(/^[\x21-\x7e]{1,255}$/),
-)
+const OpaqueId = Schema.String.check(Schema.isPattern(/^[\x21-\x7e]{1,255}$/))
 const Decimal = Schema.String.check(Schema.isPattern(/^(0|[1-9][0-9]*)$/))
 
 export const OrganizationId = OpaqueId.pipe(Schema.brand("HostedOrganizationId"))
 export type OrganizationId = typeof OrganizationId.Type
+export const OwnerId = OpaqueId.pipe(Schema.brand("HostedOwnerId"))
+export type OwnerId = typeof OwnerId.Type
+export const BetterAuthUserId = OpaqueId.pipe(Schema.brand("BetterAuthUserId"))
+export type BetterAuthUserId = typeof BetterAuthUserId.Type
 export const BetterAuthMemberId = OpaqueId.pipe(Schema.brand("BetterAuthMemberId"))
 export type BetterAuthMemberId = typeof BetterAuthMemberId.Type
 export const ProjectId = OpaqueId.pipe(Schema.brand("HostedProjectId"))
@@ -74,19 +76,49 @@ export type GrantRole = typeof GrantRole.Type
 export const PresenceStatus = Schema.Literals(["viewing", "controlling", "away"])
 export type PresenceStatus = typeof PresenceStatus.Type
 
-export const ActorAttribution = Schema.TaggedStruct("AuthenticatedMember", {
-  organizationId: OrganizationId,
-  memberId: BetterAuthMemberId,
-  clientId: ClientId,
-  deviceId: DeviceId,
+export const PersonalOwner = Schema.TaggedStruct("PersonalOwner", {
+  userId: BetterAuthUserId,
+  organizationId: Schema.optionalKey(Schema.Never),
 })
+export type PersonalOwner = typeof PersonalOwner.Type
+export const OrganizationOwner = Schema.TaggedStruct("OrganizationOwner", {
+  organizationId: OrganizationId,
+  userId: Schema.optionalKey(Schema.Never),
+})
+export type OrganizationOwner = typeof OrganizationOwner.Type
+export const HostedOwner = Schema.Union([PersonalOwner, OrganizationOwner])
+export type HostedOwner = typeof HostedOwner.Type
+
+export const HostedOwnerRecord = Schema.Struct({
+  id: OwnerId,
+  identity: HostedOwner,
+  createdAt: Timestamp,
+})
+export type HostedOwnerRecord = typeof HostedOwnerRecord.Type
+
+export const ActorAttribution = Schema.Union([
+  Schema.TaggedStruct("PersonalActor", {
+    owner: PersonalOwner,
+    userId: BetterAuthUserId,
+    membershipId: Schema.optionalKey(Schema.Never),
+    clientId: ClientId,
+    deviceId: DeviceId,
+  }),
+  Schema.TaggedStruct("OrganizationActor", {
+    owner: OrganizationOwner,
+    userId: BetterAuthUserId,
+    membershipId: BetterAuthMemberId,
+    clientId: ClientId,
+    deviceId: DeviceId,
+  }),
+])
 export type ActorAttribution = typeof ActorAttribution.Type
 
 export const Project = Schema.Struct({
   id: ProjectId,
-  organizationId: OrganizationId,
+  ownerId: OwnerId,
   name: Schema.NonEmptyString,
-  createdByMemberId: BetterAuthMemberId,
+  createdByUserId: BetterAuthUserId,
   createdAt: Timestamp,
   updatedAt: Timestamp,
 })
@@ -94,9 +126,9 @@ export type Project = typeof Project.Type
 
 export const HostedWorkspace = Schema.Struct({
   id: WorkspaceId,
-  organizationId: OrganizationId,
-  projectId: ProjectId,
-  createdByMemberId: BetterAuthMemberId,
+  ownerId: OwnerId,
+  projectId: Schema.optionalKey(ProjectId),
+  createdByUserId: BetterAuthUserId,
   executorKind: ExecutorKind,
   inheritProjectGrants: Schema.Boolean,
   createdAt: Timestamp,
@@ -104,11 +136,11 @@ export const HostedWorkspace = Schema.Struct({
 export type HostedWorkspace = typeof HostedWorkspace.Type
 
 export const ProjectGrant = Schema.Struct({
-  organizationId: OrganizationId,
+  ownerId: OwnerId,
   projectId: ProjectId,
-  memberId: BetterAuthMemberId,
+  membershipId: BetterAuthMemberId,
   role: GrantRole,
-  grantedByMemberId: BetterAuthMemberId,
+  grantedByUserId: BetterAuthUserId,
   createdAt: Timestamp,
   updatedAt: Timestamp,
 })
@@ -116,10 +148,10 @@ export type ProjectGrant = typeof ProjectGrant.Type
 
 export const HostedThread = Schema.Struct({
   id: ThreadId,
-  organizationId: OrganizationId,
-  projectId: ProjectId,
+  ownerId: OwnerId,
+  projectId: Schema.optionalKey(ProjectId),
   workspaceId: WorkspaceId,
-  createdByMemberId: BetterAuthMemberId,
+  createdByUserId: BetterAuthUserId,
   executorKind: ExecutorKind,
   inheritProjectGrants: Schema.Boolean,
   createdAt: Timestamp,
@@ -127,11 +159,11 @@ export const HostedThread = Schema.Struct({
 export type HostedThread = typeof HostedThread.Type
 
 export const ThreadGrant = Schema.Struct({
-  organizationId: OrganizationId,
+  ownerId: OwnerId,
   threadId: ThreadId,
-  memberId: BetterAuthMemberId,
+  membershipId: BetterAuthMemberId,
   role: GrantRole,
-  grantedByMemberId: BetterAuthMemberId,
+  grantedByUserId: BetterAuthUserId,
   createdAt: Timestamp,
   updatedAt: Timestamp,
 })
@@ -139,8 +171,7 @@ export type ThreadGrant = typeof ThreadGrant.Type
 
 export const AuthenticatedDevice = Schema.Struct({
   id: DeviceId,
-  organizationId: OrganizationId,
-  memberId: BetterAuthMemberId,
+  userId: BetterAuthUserId,
   displayName: Schema.NonEmptyString,
   publicKeyFingerprint: Schema.NonEmptyString,
   createdAt: Timestamp,
@@ -151,8 +182,7 @@ export type AuthenticatedDevice = typeof AuthenticatedDevice.Type
 
 export const AuthenticatedClient = Schema.Struct({
   id: ClientId,
-  organizationId: OrganizationId,
-  memberId: BetterAuthMemberId,
+  userId: BetterAuthUserId,
   deviceId: DeviceId,
   authenticatedAt: Timestamp,
   lastSeenAt: Timestamp,
@@ -162,10 +192,8 @@ export const AuthenticatedClient = Schema.Struct({
 export type AuthenticatedClient = typeof AuthenticatedClient.Type
 
 export const ThreadCommand = Schema.Struct({
-  organizationId: OrganizationId,
+  ownerId: OwnerId,
   threadId: ThreadId,
-  memberId: BetterAuthMemberId,
-  clientId: ClientId,
   commandId: CommandId,
   idempotencyKey: IdempotencyKey,
   actor: ActorAttribution,
@@ -177,7 +205,7 @@ export const ThreadCommand = Schema.Struct({
 export type ThreadCommand = typeof ThreadCommand.Type
 
 export const ThreadEvent = Schema.Struct({
-  organizationId: OrganizationId,
+  ownerId: OwnerId,
   threadId: ThreadId,
   eventId: EventId,
   idempotencyKey: IdempotencyKey,
@@ -194,20 +222,18 @@ export const ThreadEvent = Schema.Struct({
 export type ThreadEvent = typeof ThreadEvent.Type
 
 export const ResumableCursor = Schema.Struct({
-  organizationId: OrganizationId,
+  ownerId: OwnerId,
   threadId: ThreadId,
-  memberId: BetterAuthMemberId,
-  clientId: ClientId,
+  actor: ActorAttribution,
   commitCursor: CommitCursor,
   updatedAt: Timestamp,
 })
 export type ResumableCursor = typeof ResumableCursor.Type
 
 export const TerminalWriterLease = Schema.Struct({
-  organizationId: OrganizationId,
+  ownerId: OwnerId,
   threadId: ThreadId,
-  memberId: BetterAuthMemberId,
-  clientId: ClientId,
+  actor: ActorAttribution,
   leaseId: LeaseId,
   generation: FencingGeneration,
   acquiredAt: Timestamp,
@@ -217,10 +243,9 @@ export const TerminalWriterLease = Schema.Struct({
 export type TerminalWriterLease = typeof TerminalWriterLease.Type
 
 export const Presence = Schema.Struct({
-  organizationId: OrganizationId,
+  ownerId: OwnerId,
   threadId: ThreadId,
-  memberId: BetterAuthMemberId,
-  clientId: ClientId,
+  actor: ActorAttribution,
   status: PresenceStatus,
   lastSeenAt: Timestamp,
   expiresAt: Timestamp,
@@ -229,9 +254,9 @@ export type Presence = typeof Presence.Type
 
 export const LocalWorkspaceBinding = Schema.Struct({
   id: WorkspaceBindingId,
-  organizationId: OrganizationId,
+  ownerId: OwnerId,
   threadId: ThreadId,
-  memberId: BetterAuthMemberId,
+  userId: BetterAuthUserId,
   deviceId: DeviceId,
   rootPath: Schema.NonEmptyString,
   workspaceFingerprint: Schema.NonEmptyString,
@@ -242,9 +267,8 @@ export type LocalWorkspaceBinding = typeof LocalWorkspaceBinding.Type
 
 export const AuditEvent = Schema.Struct({
   id: AuditEventId,
-  organizationId: OrganizationId,
-  actorMemberId: BetterAuthMemberId,
-  actorClientId: ClientId,
+  ownerId: OwnerId,
+  actor: ActorAttribution,
   action: Schema.NonEmptyString,
   resourceKind: Schema.NonEmptyString,
   resourceId: Schema.NonEmptyString,
@@ -256,13 +280,13 @@ export type AuditEvent = typeof AuditEvent.Type
 
 export const CredentialReference = Schema.Struct({
   id: CredentialReferenceId,
-  organizationId: OrganizationId,
-  projectId: Schema.NullOr(ProjectId),
+  ownerId: OwnerId,
+  projectId: Schema.optionalKey(ProjectId),
   provider: Schema.NonEmptyString,
   purpose: Schema.NonEmptyString,
   externalReference: Schema.NonEmptyString,
   metadata: CredentialReferenceMetadata,
-  createdByMemberId: BetterAuthMemberId,
+  createdByUserId: BetterAuthUserId,
   createdAt: Timestamp,
   updatedAt: Timestamp,
 })

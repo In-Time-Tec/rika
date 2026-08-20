@@ -103,7 +103,7 @@ const response = (path: string, deps = dependencies(), options?: RequestInit) =>
   if (!isRikaApiPath(new URL(input.url).pathname)) return handleRequest({ request: input, dependencies: deps })
   return Effect.acquireUseRelease(
     Effect.sync(() => makeRikaApiHandler(deps)),
-    (api) => Effect.promise(() => api.handler(input)),
+    (api) => Effect.promise(() => api.handler(input, undefined)),
     (api) => Effect.promise(api.dispose),
   )
 }
@@ -308,19 +308,41 @@ describe("api HTTP", () => {
 
   it.effect("returns product projects visible to the authenticated memberships", () =>
     Effect.gen(function* () {
+      const base = dependencies({ userId: "user-1", account })
       const result = yield* response("/api/v1/me/context", {
-        ...dependencies({ userId: "user-1", account }),
+        ...base,
+        identity: {
+          ...base.identity,
+          identify: () => Effect.succeed({ userId: "user-1", clientId: "client-1" }),
+        },
+        devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
         product: {
           ...product,
-          projects: (memberIds) => {
-            expect(memberIds).toEqual(["member-1"])
-            return Effect.succeed([{ id: "project-1", organizationId: "organization-1", name: "API", role: "owner" }])
+          projects: (principal) => {
+            expect(principal).toEqual({ userId: "user-1", clientId: "client-1", deviceId: "device-1" })
+            return Effect.succeed([
+              {
+                id: "project-1",
+                ownerId: "owner-1",
+                owner: { _tag: "OrganizationOwner", organizationId: "organization-1" as never },
+                name: "API",
+                role: "owner",
+              },
+            ])
           },
         },
       })
       expect(result.status).toBe(200)
       const body = yield* Effect.promise(() => result.json() as Promise<{ readonly projects: unknown }>)
-      expect(body.projects).toEqual([{ id: "project-1", organizationId: "organization-1", name: "API", slug: "api" }])
+      expect(body.projects).toEqual([
+        {
+          id: "project-1",
+          ownerId: "owner-1",
+          owner: { kind: "organization", organizationId: "organization-1" },
+          name: "API",
+          slug: "api",
+        },
+      ])
     }),
   )
 
@@ -378,21 +400,154 @@ describe("api HTTP", () => {
         },
         {
           method: "POST",
-          body: encodeJson({ organization_id: "organization-1", project_id: "project-1", placement: "e2b" }),
+          body: encodeJson({
+            owner: { kind: "organization", organization_id: "organization-1" },
+            project_id: "project-1",
+            placement: "e2b",
+          }),
         },
       )
       expect(result.status).toBe(201)
       expect(input).toEqual({
-        authority: {
-          organizationId: "organization-1",
-          memberId: "member-1",
+        principal: {
+          userId: "user-1",
           deviceId: "device-1",
           clientId: "client-1",
           dpopJkt: "thumbprint-1",
         },
+        owner: { _tag: "OrganizationOwner", organizationId: "organization-1" },
         projectId: "project-1",
         placement: "e2b",
       })
+    }),
+  )
+
+  it.effect("supports context and personal connections for a CLI user with no organizations", () =>
+    Effect.gen(function* () {
+      const personalAccount = { ...account, memberships: [] }
+      const base = dependencies({ account: personalAccount })
+      let connection: Parameters<HostedProductService["createConnection"]>[0] | undefined
+      const deps: HttpDependencies = {
+        ...base,
+        identity: {
+          ...base.identity,
+          identify: () => Effect.succeed({ userId: "user-1", clientId: "client-1" }),
+        },
+        devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
+        product: {
+          ...product,
+          projects: () => Effect.succeed([]),
+          createConnection: (input) => {
+            connection = input
+            return Effect.succeed({ threadId: "thread-1" })
+          },
+        },
+      }
+      const context = yield* response("/api/v1/me/context", deps)
+      const created = yield* response("/api/v1/connections", deps, {
+        method: "POST",
+        body: encodeJson({ owner: { kind: "personal" } }),
+      })
+      expect(context.status).toBe(200)
+      expect(yield* Effect.promise(() => context.json())).toEqual({
+        account: { id: "user-1", email: "rika@example.com", name: "Rika User" },
+        organizations: [],
+        projects: [],
+      })
+      expect(created.status).toBe(201)
+      expect(connection).toEqual({
+        principal: { userId: "user-1", clientId: "client-1", deviceId: "device-1" },
+        owner: { _tag: "PersonalOwner", userId: "user-1" },
+        placement: "local",
+      })
+    }),
+  )
+
+  it.effect("rejects a mixed personal and organization owner selector", () =>
+    Effect.gen(function* () {
+      const base = dependencies({ account })
+      const result = yield* response(
+        "/api/v1/connections",
+        {
+          ...base,
+          identity: {
+            ...base.identity,
+            identify: () => Effect.succeed({ userId: "user-1", clientId: "client-1" }),
+          },
+          devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
+        },
+        {
+          method: "POST",
+          body: encodeJson({ owner: { kind: "personal", organization_id: "organization-1" } }),
+        },
+      )
+      expect(result.status).toBe(400)
+    }),
+  )
+
+  it.effect("forwards an organization selector without membership identity", () =>
+    Effect.gen(function* () {
+      const base = dependencies({ account })
+      let input: Parameters<HostedProductService["createConnection"]>[0] | undefined
+      const result = yield* response(
+        "/api/v1/connections",
+        {
+          ...base,
+          identity: {
+            ...base.identity,
+            identify: () => Effect.succeed({ userId: "user-1", clientId: "client-1" }),
+          },
+          devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
+          product: {
+            ...product,
+            createConnection: (value) => Effect.sync(() => ((input = value), { threadId: "thread-1" })),
+          },
+        },
+        {
+          method: "POST",
+          body: encodeJson({ owner: { kind: "organization", organization_id: "organization-1" } }),
+        },
+      )
+      expect(result.status).toBe(201)
+      expect(input).toEqual({
+        principal: { userId: "user-1", clientId: "client-1", deviceId: "device-1" },
+        owner: { _tag: "OrganizationOwner", organizationId: "organization-1" },
+        placement: "local",
+      })
+      expect(input).not.toHaveProperty("membershipId")
+    }),
+  )
+
+  it.effect("rejects client-supplied ownership fields for local admission and runs", () =>
+    Effect.gen(function* () {
+      const operationKey = "019d1a56-286d-7000-8000-000000000005"
+      const base = dependencies({ account })
+      const deps: HttpDependencies = {
+        ...base,
+        identity: {
+          ...base.identity,
+          identify: () => Effect.succeed({ userId: "user-1", clientId: "client-1" }),
+        },
+        devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
+      }
+      for (const body of [
+        { workspace_fingerprint: "workspace-1", organization_id: "organization-1" },
+        { workspace_fingerprint: "workspace-1", member_id: "member-1" },
+      ]) {
+        const result = yield* response("/api/v1/threads/local_thread-1/local-executor-admissions", deps, {
+          method: "POST",
+          body: encodeJson(body),
+        })
+        expect(result.status).toBe(400)
+      }
+      for (const obsolete of [{ organization_id: "organization-1" }, { member_id: "member-1" }]) {
+        const result = yield* response("/api/v1/threads/e2b_thread-1/operations", deps, {
+          method: "POST",
+          headers: { "idempotency-key": operationKey },
+          body: encodeJson({ kind: "run", prompt: ["echo clean"], ...obsolete }),
+        })
+        expect(result.status).toBe(400)
+      }
     }),
   )
 
@@ -449,15 +604,14 @@ describe("api HTTP", () => {
         {
           method: "POST",
           headers: { "idempotency-key": operationKey },
-          body: encodeJson({ kind: "run", organization_id: "organization-1", prompt: ["echo hosted-mvp"] }),
+          body: encodeJson({ kind: "run", prompt: ["echo hosted-mvp"] }),
         },
       )
       expect(result.status).toBe(200)
       expect(yield* Effect.promise(() => result.json())).toEqual({ output: "hosted-mvp\n", exitCode: 0 })
       expect(admitted).toEqual({
-        authority: {
-          organizationId: "organization-1",
-          memberId: "member-1",
+        principal: {
+          userId: "user-1",
           deviceId: "device-1",
           clientId: "client-1",
           dpopJkt: "thumbprint-1",
@@ -514,7 +668,7 @@ describe("api HTTP", () => {
         {
           method: "POST",
           headers: { "idempotency-key": operationKey },
-          body: encodeJson({ kind: "run", organization_id: "organization-1", prompt: ["echo hosted-mvp"] }),
+          body: encodeJson({ kind: "run", prompt: ["echo hosted-mvp"] }),
         },
       )
       expect(result.status).toBe(200)
@@ -554,7 +708,7 @@ describe("api HTTP", () => {
         {
           method: "POST",
           headers: { "idempotency-key": operationKey },
-          body: encodeJson({ kind: "run", organization_id: "organization-1", prompt: ["different"] }),
+          body: encodeJson({ kind: "run", prompt: ["different"] }),
         },
       )
       expect(result.status).toBe(409)

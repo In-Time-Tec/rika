@@ -1,4 +1,5 @@
 import { Context, Effect, Layer, Schema } from "effect"
+import { BetterAuthUserId, OrganizationId } from "@rika/product/hosted-model"
 import { HttpRouter, HttpServer, HttpServerRequest } from "effect/unstable/http"
 import {
   HttpApi,
@@ -29,6 +30,11 @@ export class ServiceUnavailable extends Schema.TaggedError<ServiceUnavailable>()
 }) {}
 
 const Status = Schema.Struct({ status: Schema.String })
+const strict = <S extends Schema.Top>(schema: S) => schema.annotate({ parseOptions: { onExcessProperty: "error" } })
+const WireOwner = Schema.Union([
+  strict(Schema.Struct({ kind: Schema.Literal("personal"), userId: Schema.String })),
+  strict(Schema.Struct({ kind: Schema.Literal("organization"), organizationId: Schema.String })),
+])
 const ContextResponse = Schema.Struct({
   account: Schema.Struct({ id: Schema.String, email: Schema.String, name: Schema.String }),
   organizations: Schema.Array(
@@ -37,22 +43,30 @@ const ContextResponse = Schema.Struct({
   projects: Schema.Array(
     Schema.Struct({
       id: Schema.String,
-      organizationId: Schema.String,
+      ownerId: Schema.String,
+      owner: WireOwner,
       name: Schema.String,
       slug: Schema.String,
     }),
   ),
 })
-const ConnectionRequest = Schema.Struct({
-  organization_id: Schema.NonEmptyString,
-  project_id: Schema.optionalKey(Schema.NonEmptyString),
-  placement: Schema.optionalKey(Schema.Literals(["local", "e2b"])),
-})
+const ConnectionOwner = Schema.Union([
+  strict(Schema.Struct({ kind: Schema.Literal("personal") })),
+  strict(Schema.Struct({ kind: Schema.Literal("organization"), organization_id: Schema.NonEmptyString })),
+])
+const ConnectionRequest = strict(
+  Schema.Struct({
+    owner: ConnectionOwner,
+    project_id: Schema.optionalKey(Schema.NonEmptyString),
+    placement: Schema.optionalKey(Schema.Literals(["local", "e2b"])),
+  }),
+)
 const ConnectionResponse = Schema.Struct({ threadId: Schema.String }).pipe(HttpApiSchema.status(201))
-const LocalExecutorAdmissionRequest = Schema.Struct({
-  organization_id: Schema.NonEmptyString,
-  workspace_fingerprint: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
-})
+const LocalExecutorAdmissionRequest = strict(
+  Schema.Struct({
+    workspace_fingerprint: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
+  }),
+)
 const LocalExecutorAdmissionResponse = Schema.Struct({
   admissionId: Schema.String,
   ticket: Schema.String,
@@ -64,12 +78,13 @@ const ThreadId = Schema.String.check(Schema.isPattern(/^(local|e2b)_[A-Za-z0-9_-
 const OperationKey = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
 )
-const OperationRequest = Schema.Struct({
-  kind: Schema.Literal("run"),
-  organization_id: Schema.NonEmptyString,
-  prompt: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
-  mode: Schema.optionalKey(Schema.String),
-})
+const OperationRequest = strict(
+  Schema.Struct({
+    kind: Schema.Literal("run"),
+    prompt: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+    mode: Schema.optionalKey(Schema.String),
+  }),
+)
 const OperationResponse = Schema.Struct({ output: Schema.String, exitCode: Schema.optionalKey(Schema.Int) })
 
 export class CurrentAccess extends Context.Service<
@@ -157,6 +172,13 @@ const publicHandlers = (dependencies: HttpDependencies) =>
     }),
   )
 
+const authenticatedPrincipal = (access: CurrentAccess["Service"]) => ({
+  userId: access.principal.userId,
+  deviceId: access.deviceId!,
+  clientId: access.principal.clientId!,
+  ...(access.principal.dpopJkt === undefined ? {} : { dpopJkt: access.principal.dpopJkt }),
+})
+
 const productHandlers = (dependencies: HttpDependencies) =>
   HttpApiBuilder.group(RikaApi, "product", (handlers) =>
     handlers.handleAll({
@@ -172,8 +194,10 @@ const productHandlers = (dependencies: HttpDependencies) =>
       context: () =>
         Effect.gen(function* () {
           const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
           const projects = yield* dependencies.product
-            .projects(access.account.memberships.map((membership) => membership.id))
+            .projects(authenticatedPrincipal(access))
             .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Product service unavailable" })))
           return {
             account: {
@@ -184,7 +208,11 @@ const productHandlers = (dependencies: HttpDependencies) =>
             organizations: access.account.memberships.map((membership) => membership.organization),
             projects: projects.map((project) => ({
               id: project.id,
-              organizationId: project.organizationId,
+              ownerId: project.ownerId,
+              owner:
+                project.owner._tag === "PersonalOwner"
+                  ? { kind: "personal" as const, userId: project.owner.userId }
+                  : { kind: "organization" as const, organizationId: project.owner.organizationId },
               name: project.name,
               slug: project.name
                 .toLowerCase()
@@ -198,19 +226,16 @@ const productHandlers = (dependencies: HttpDependencies) =>
           const access = yield* CurrentAccess
           if (access.deviceId === undefined || access.principal.clientId === undefined)
             return yield* Unauthorized.make({ message: "CLI device authentication required" })
-          const membership = access.account.memberships.find(
-            (candidate) => candidate.organization.id === payload.organization_id,
-          )
-          if (membership === undefined) return yield* NotFound.make({ message: "Organization is unavailable" })
           return yield* dependencies.product
             .createConnection({
-              authority: {
-                organizationId: membership.organization.id,
-                memberId: membership.id,
-                deviceId: access.deviceId,
-                clientId: access.principal.clientId,
-                ...(access.principal.dpopJkt === undefined ? {} : { dpopJkt: access.principal.dpopJkt }),
-              },
+              principal: authenticatedPrincipal(access),
+              owner:
+                payload.owner.kind === "personal"
+                  ? { _tag: "PersonalOwner", userId: BetterAuthUserId.make(access.principal.userId) }
+                  : {
+                      _tag: "OrganizationOwner",
+                      organizationId: OrganizationId.make(payload.owner.organization_id),
+                    },
               ...(payload.project_id === undefined ? {} : { projectId: payload.project_id }),
               placement: payload.placement ?? "local",
             })
@@ -221,10 +246,6 @@ const productHandlers = (dependencies: HttpDependencies) =>
           const access = yield* CurrentAccess
           if (access.deviceId === undefined || access.principal.clientId === undefined)
             return yield* Unauthorized.make({ message: "CLI device authentication required" })
-          const membership = access.account.memberships.find(
-            (candidate) => candidate.organization.id === payload.organization_id,
-          )
-          if (membership === undefined) return yield* NotFound.make({ message: "Organization is unavailable" })
           const serverRequest = yield* HttpServerRequest.HttpServerRequest
           const request = yield* HttpServerRequest.toWeb(serverRequest).pipe(
             Effect.mapError(() => ServiceUnavailable.make({ message: "Request is unavailable" })),
@@ -234,16 +255,9 @@ const productHandlers = (dependencies: HttpDependencies) =>
           return yield* dependencies.executor
             .admitLocal({
               threadId: params.threadId,
-              organizationId: membership.organization.id,
               workspaceFingerprint: payload.workspace_fingerprint,
               executorUrl: executorUrl.toString(),
-              actor: {
-                organizationIds: access.account.memberships.map((candidate) => candidate.organization.id),
-                deviceId: access.deviceId,
-                clientId: access.principal.clientId,
-                userId: access.principal.userId,
-                memberId: membership.id,
-              },
+              principal: authenticatedPrincipal(access),
             })
             .pipe(
               Effect.mapError((error) => {
@@ -259,19 +273,9 @@ const productHandlers = (dependencies: HttpDependencies) =>
           const access = yield* CurrentAccess
           if (access.deviceId === undefined || access.principal.clientId === undefined)
             return yield* Unauthorized.make({ message: "CLI device authentication required" })
-          const membership = access.account.memberships.find(
-            (candidate) => candidate.organization.id === payload.organization_id,
-          )
-          if (membership === undefined) return yield* NotFound.make({ message: "Organization is unavailable" })
           const run = yield* dependencies.product
             .admitRun({
-              authority: {
-                organizationId: membership.organization.id,
-                memberId: membership.id,
-                deviceId: access.deviceId,
-                clientId: access.principal.clientId,
-                ...(access.principal.dpopJkt === undefined ? {} : { dpopJkt: access.principal.dpopJkt }),
-              },
+              principal: authenticatedPrincipal(access),
               threadId: params.threadId,
               operationKey: headers["idempotency-key"],
               prompt: payload.prompt.join("\n"),
@@ -295,7 +299,9 @@ const productHandlers = (dependencies: HttpDependencies) =>
               yield* dependencies.product
                 .completeRun({ run, access: result.access, response: result.response })
                 .pipe(
-                  Effect.mapError(() => ServiceUnavailable.make({ message: "Operation result could not be persisted" })),
+                  Effect.mapError(() =>
+                    ServiceUnavailable.make({ message: "Operation result could not be persisted" }),
+                  ),
                 )
             }
             response = result.response

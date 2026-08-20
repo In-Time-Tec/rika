@@ -8,7 +8,9 @@ import {
   CommitCursor,
   type CredentialReference,
   FencingGeneration,
+  HostedOwner,
   type HostedThread,
+  type HostedOwnerRecord,
   type HostedWorkspace,
   type LocalWorkspaceBinding,
   type Presence,
@@ -22,12 +24,7 @@ import {
   type ThreadGrant,
   Timestamp,
 } from "@rika/product/hosted-model"
-import {
-  HostedStore,
-  StoreError,
-  type StoreFailureReason,
-  type StoreService,
-} from "@rika/product/hosted-store"
+import { HostedStore, StoreError, type StoreFailureReason, type StoreService } from "@rika/product/hosted-store"
 import { layer as assignmentLayer } from "./memory-assignments"
 
 interface ThreadState {
@@ -37,6 +34,7 @@ interface ThreadState {
 }
 
 interface State {
+  readonly owners: Map<string, HostedOwnerRecord>
   readonly projects: Map<string, Project>
   readonly projectGrants: Map<string, ProjectGrant>
   readonly workspaces: Map<string, HostedWorkspace>
@@ -52,7 +50,7 @@ interface State {
   readonly bindings: Map<string, LocalWorkspaceBinding>
   readonly auditEvents: Map<string, AuditEvent>
   readonly credentialReferences: Map<string, CredentialReference>
-  readonly organizationCounters: Map<string, bigint>
+  readonly ownerCounters: Map<string, bigint>
 }
 
 type Mutation<A> =
@@ -60,6 +58,7 @@ type Mutation<A> =
   | { readonly _tag: "Failure"; readonly error: StoreError }
 
 const emptyState = (): State => ({
+  owners: new Map(),
   projects: new Map(),
   projectGrants: new Map(),
   workspaces: new Map(),
@@ -75,7 +74,7 @@ const emptyState = (): State => ({
   bindings: new Map(),
   auditEvents: new Map(),
   credentialReferences: new Map(),
-  organizationCounters: new Map(),
+  ownerCounters: new Map(),
 })
 
 const fail = (reason: StoreFailureReason, message: string): Mutation<never> => ({
@@ -95,19 +94,18 @@ const projectGrantKey = (projectId: string, memberId: string) => `${projectId}\u
 const threadGrantKey = (threadId: string, memberId: string) => `${threadId}\u0000${memberId}`
 const cursorKey = (threadId: string, clientId: string) => `${threadId}\u0000${clientId}`
 const bindingKey = (threadId: string, deviceId: string) => `${threadId}\u0000${deviceId}`
-const allocateCommitCursor = (current: State, organizationId: string) => {
-  const next = current.organizationCounters.get(organizationId) ?? 1n
+const ownerEquivalent = Schema.toEquivalence(HostedOwner)
+const allocateCommitCursor = (current: State, ownerId: string) => {
+  const next = current.ownerCounters.get(ownerId) ?? 1n
   return {
     commitCursor: CommitCursor.make(String(next)),
-    organizationCounters: replace(current.organizationCounters, organizationId, next + 1n),
+    ownerCounters: replace(current.ownerCounters, ownerId, next + 1n),
   }
 }
 const commandEquivalent = Schema.toEquivalence(
   Schema.Struct({
-    organizationId: Schema.String,
+    ownerId: Schema.String,
     threadId: Schema.String,
-    memberId: Schema.String,
-    clientId: Schema.String,
     commandId: Schema.String,
     idempotencyKey: Schema.String,
     actor: ActorAttribution,
@@ -116,7 +114,7 @@ const commandEquivalent = Schema.toEquivalence(
 )
 const eventEquivalent = Schema.toEquivalence(
   Schema.Struct({
-    organizationId: Schema.String,
+    ownerId: Schema.String,
     threadId: Schema.String,
     eventId: Schema.String,
     idempotencyKey: Schema.String,
@@ -137,13 +135,16 @@ const make = Effect.gen(function* () {
 
   const requireClient = (
     current: State,
-    input: { organizationId: string; memberId: string; clientId: string },
+    input: { ownerId: string; actor: ActorAttribution },
     at?: string,
   ) => {
-    const client = current.clients.get(input.clientId)
+    const owner = current.owners.get(input.ownerId)
+    const client = current.clients.get(input.actor.clientId)
     return client !== undefined &&
-      client.organizationId === input.organizationId &&
-      client.memberId === input.memberId &&
+      owner !== undefined &&
+      ownerEquivalent(input.actor.owner, owner.identity) &&
+      client.userId === input.actor.userId &&
+      client.deviceId === input.actor.deviceId &&
       client.revokedAt === null &&
       (at === undefined || client.expiresAt > at)
       ? client
@@ -151,39 +152,47 @@ const make = Effect.gen(function* () {
   }
 
   return HostedStore.of({
+    putOwner: (input) =>
+      mutation(state, (current) => {
+        const previous = current.owners.get(input.id)
+        if (previous !== undefined) {
+          return ownerEquivalent(previous.identity, input.identity)
+            ? succeed(previous, current)
+            : fail("conflict", "Owner identity cannot be reassigned")
+        }
+        if ([...current.owners.values()].some((owner) => ownerEquivalent(owner.identity, input.identity))) {
+          return fail("conflict", "Owner identity already has a stable owner ID")
+        }
+        const owner: HostedOwnerRecord = { id: input.id, identity: input.identity, createdAt: input.now }
+        return succeed(owner, { ...current, owners: replace(current.owners, input.id, owner) })
+      }),
     createProject: (input) =>
       mutation(state, (current) => {
+        if (!current.owners.has(input.ownerId)) return fail("not-found", "Owner does not exist")
         if (current.projects.has(input.id)) return fail("conflict", "Project identity already exists")
         const project: Project = {
           id: input.id,
-          organizationId: input.organizationId,
+          ownerId: input.ownerId,
           name: input.name,
-          createdByMemberId: input.createdByMemberId,
-          createdAt: input.now,
-          updatedAt: input.now,
-        }
-        const owner: ProjectGrant = {
-          organizationId: input.organizationId,
-          projectId: input.id,
-          memberId: input.createdByMemberId,
-          role: "owner",
-          grantedByMemberId: input.createdByMemberId,
+          createdByUserId: input.createdByUserId,
           createdAt: input.now,
           updatedAt: input.now,
         }
         return succeed(project, {
           ...current,
           projects: replace(current.projects, input.id, project),
-          projectGrants: replace(current.projectGrants, projectGrantKey(input.id, input.createdByMemberId), owner),
         })
       }),
     putProjectGrant: (input) =>
       mutation(state, (current) => {
         const project = current.projects.get(input.projectId)
-        if (project === undefined || project.organizationId !== input.organizationId) {
-          return fail("not-found", "Project does not exist in the organization")
+        const owner = current.owners.get(input.ownerId)
+        if (owner?.identity._tag !== "OrganizationOwner")
+          return fail("invalid-authority", "Project grants require an organization owner")
+        if (project === undefined || project.ownerId !== input.ownerId) {
+          return fail("not-found", "Project does not exist for the owner")
         }
-        const key = projectGrantKey(input.projectId, input.memberId)
+        const key = projectGrantKey(input.projectId, input.membershipId)
         const previous = current.projectGrants.get(key)
         const grant: ProjectGrant = {
           ...input,
@@ -194,9 +203,11 @@ const make = Effect.gen(function* () {
       }),
     createWorkspace: (input) =>
       mutation(state, (current) => {
-        const project = current.projects.get(input.projectId)
-        if (project === undefined || project.organizationId !== input.organizationId) {
-          return fail("not-found", "Project does not exist in the organization")
+        if (!current.owners.has(input.ownerId)) return fail("not-found", "Owner does not exist")
+        if (input.projectId !== undefined) {
+          const project = current.projects.get(input.projectId)
+          if (project === undefined || project.ownerId !== input.ownerId)
+            return fail("not-found", "Project does not exist for the owner")
         }
         if (current.workspaces.has(input.id)) return fail("conflict", "Workspace identity already exists")
         if (input.executorKind === "local_device" && input.inheritProjectGrants === true) {
@@ -204,9 +215,9 @@ const make = Effect.gen(function* () {
         }
         const workspace: HostedWorkspace = {
           id: input.id,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          createdByMemberId: input.createdByMemberId,
+          ownerId: input.ownerId,
+          ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+          createdByUserId: input.createdByUserId,
           executorKind: input.executorKind,
           inheritProjectGrants: input.executorKind === "e2b" ? (input.inheritProjectGrants ?? true) : false,
           createdAt: input.now,
@@ -218,16 +229,8 @@ const make = Effect.gen(function* () {
       }),
     createThread: (input) =>
       mutation(state, (current) => {
-        const project = current.projects.get(input.projectId)
         const workspace = current.workspaces.get(input.workspaceId)
-        if (project === undefined || project.organizationId !== input.organizationId) {
-          return fail("not-found", "Project does not exist in the organization")
-        }
-        if (
-          workspace === undefined ||
-          workspace.organizationId !== input.organizationId ||
-          workspace.projectId !== input.projectId
-        ) {
+        if (workspace === undefined || workspace.ownerId !== input.ownerId || workspace.projectId !== input.projectId) {
           return fail("not-found", "Workspace does not belong to the project and organization")
         }
         if (workspace.executorKind !== input.executorKind) {
@@ -239,23 +242,14 @@ const make = Effect.gen(function* () {
         }
         const thread: HostedThread = {
           id: input.id,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
+          ownerId: input.ownerId,
+          ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
           workspaceId: input.workspaceId,
-          createdByMemberId: input.createdByMemberId,
+          createdByUserId: input.createdByUserId,
           executorKind: input.executorKind,
           inheritProjectGrants:
             input.executorKind === "e2b" ? (input.inheritProjectGrants ?? workspace.inheritProjectGrants) : false,
           createdAt: input.now,
-        }
-        const owner: ThreadGrant = {
-          organizationId: input.organizationId,
-          threadId: input.id,
-          memberId: input.createdByMemberId,
-          role: "owner",
-          grantedByMemberId: input.createdByMemberId,
-          createdAt: input.now,
-          updatedAt: input.now,
         }
         return succeed(thread, {
           ...current,
@@ -264,16 +258,18 @@ const make = Effect.gen(function* () {
             nextCommandSequence: 1n,
             nextEventSequence: 1n,
           }),
-          threadGrants: replace(current.threadGrants, threadGrantKey(input.id, input.createdByMemberId), owner),
         })
       }),
     putThreadGrant: (input) =>
       mutation(state, (current) => {
         const thread = current.threads.get(input.threadId)?.thread
-        if (thread === undefined || thread.organizationId !== input.organizationId) {
-          return fail("not-found", "Thread does not exist in the organization")
+        const owner = current.owners.get(input.ownerId)
+        if (owner?.identity._tag !== "OrganizationOwner")
+          return fail("invalid-authority", "Thread grants require an organization owner")
+        if (thread === undefined || thread.ownerId !== input.ownerId) {
+          return fail("not-found", "Thread does not exist for the owner")
         }
-        const key = threadGrantKey(input.threadId, input.memberId)
+        const key = threadGrantKey(input.threadId, input.membershipId)
         const previous = current.threadGrants.get(key)
         const grant: ThreadGrant = {
           ...input,
@@ -285,18 +281,12 @@ const make = Effect.gen(function* () {
     registerDevice: (input) =>
       mutation(state, (current) => {
         const previous = current.devices.get(input.id)
-        if (
-          previous !== undefined &&
-          (previous.organizationId !== input.organizationId ||
-            previous.memberId !== input.memberId ||
-            previous.revokedAt !== null)
-        ) {
+        if (previous !== undefined && (previous.userId !== input.userId || previous.revokedAt !== null)) {
           return fail("invalid-authority", "Device identity cannot be reassigned")
         }
         const device: AuthenticatedDevice = {
           id: input.id,
-          organizationId: input.organizationId,
-          memberId: input.memberId,
+          userId: input.userId,
           displayName: input.displayName,
           publicKeyFingerprint: input.publicKeyFingerprint,
           createdAt: previous?.createdAt ?? input.now,
@@ -308,28 +298,19 @@ const make = Effect.gen(function* () {
     authenticateClient: (input) =>
       mutation(state, (current) => {
         const device = current.devices.get(input.deviceId)
-        if (
-          device === undefined ||
-          device.organizationId !== input.organizationId ||
-          device.memberId !== input.memberId ||
-          device.revokedAt !== null
-        ) {
+        if (device === undefined || device.userId !== input.userId || device.revokedAt !== null) {
           return fail("invalid-authority", "Client device is inactive or foreign")
         }
         const previous = current.clients.get(input.id)
         if (
           previous !== undefined &&
-          (previous.organizationId !== input.organizationId ||
-            previous.memberId !== input.memberId ||
-            previous.deviceId !== input.deviceId ||
-            previous.revokedAt !== null)
+          (previous.userId !== input.userId || previous.deviceId !== input.deviceId || previous.revokedAt !== null)
         ) {
           return fail("invalid-authority", "Client identity cannot be reassigned")
         }
         const client: AuthenticatedClient = {
           id: input.id,
-          organizationId: input.organizationId,
-          memberId: input.memberId,
+          userId: input.userId,
           deviceId: input.deviceId,
           authenticatedAt: previous?.authenticatedAt ?? input.now,
           lastSeenAt: input.now,
@@ -341,17 +322,11 @@ const make = Effect.gen(function* () {
     admitCommand: (input) =>
       mutation(state, (current) => {
         const threadState = current.threads.get(input.threadId)
-        if (threadState === undefined || threadState.thread.organizationId !== input.organizationId) {
+        if (threadState === undefined || threadState.thread.ownerId !== input.ownerId) {
           return fail("not-found", "Thread does not exist in the organization")
         }
         const client = requireClient(current, input, input.admittedAt)
-        if (
-          client === undefined ||
-          input.actor.organizationId !== input.organizationId ||
-          input.actor.memberId !== input.memberId ||
-          input.actor.clientId !== input.clientId ||
-          input.actor.deviceId !== client.deviceId
-        ) {
+        if (client === undefined || input.actor.deviceId !== client.deviceId) {
           return fail("invalid-authority", "Command actor attribution does not match the authenticated client")
         }
         const commands = current.commands.get(input.threadId) ?? []
@@ -367,9 +342,8 @@ const make = Effect.gen(function* () {
           const writer = current.writers.get(input.threadId)
           if (
             writer === undefined ||
-            writer.organizationId !== input.organizationId ||
-            writer.memberId !== input.memberId ||
-            writer.clientId !== input.clientId ||
+            writer.ownerId !== input.ownerId ||
+            writer.actor.clientId !== input.actor.clientId ||
             writer.leaseId !== input.command.writerLeaseId ||
             writer.generation !== input.command.writerGeneration ||
             writer.expiresAt <= input.admittedAt
@@ -377,7 +351,7 @@ const make = Effect.gen(function* () {
             return fail("stale-fence", "Terminal writer lease is expired or fenced")
           }
         }
-        const allocated = allocateCommitCursor(current, input.organizationId)
+        const allocated = allocateCommitCursor(current, input.ownerId)
         const command: ThreadCommand = {
           ...input,
           sequence: Sequence.make(String(threadState.nextCommandSequence)),
@@ -385,7 +359,7 @@ const make = Effect.gen(function* () {
         }
         return succeed(command, {
           ...current,
-          organizationCounters: allocated.organizationCounters,
+          ownerCounters: allocated.ownerCounters,
           threads: replace(current.threads, input.threadId, {
             ...threadState,
             nextCommandSequence: threadState.nextCommandSequence + 1n,
@@ -397,14 +371,8 @@ const make = Effect.gen(function* () {
       Ref.get(state).pipe(
         Effect.flatMap((current) => {
           const thread = current.threads.get(input.threadId)?.thread
-          if (
-            requireClient(current, input) === undefined ||
-            thread === undefined ||
-            thread.organizationId !== input.organizationId
-          ) {
-            return Effect.fail(
-              StoreError.make({ reason: "invalid-authority", message: "Client is foreign" }),
-            )
+          if (requireClient(current, input) === undefined || thread === undefined || thread.ownerId !== input.ownerId) {
+            return Effect.fail(StoreError.make({ reason: "invalid-authority", message: "Client is foreign" }))
           }
           return Effect.succeed(
             (current.commands.get(input.threadId) ?? [])
@@ -425,10 +393,7 @@ const make = Effect.gen(function* () {
             Effect.flatMap((millis) =>
               mutation(state, (current) => {
                 const threadState = current.threads.get(assignment.threadId)
-                if (
-                  threadState === undefined ||
-                  threadState.thread.organizationId !== assignment.organizationId
-                ) {
+                if (threadState === undefined || threadState.thread.ownerId !== assignment.ownerId) {
                   return fail("not-found", "Thread does not exist in the organization")
                 }
                 const events = current.events.get(assignment.threadId) ?? []
@@ -437,7 +402,7 @@ const make = Effect.gen(function* () {
                 )
                 const comparable = {
                   ...input,
-                  organizationId: assignment.organizationId,
+                  ownerId: assignment.ownerId,
                   threadId: assignment.threadId,
                   executorInstanceId: lifecycle.executorInstanceId,
                 }
@@ -446,7 +411,7 @@ const make = Effect.gen(function* () {
                     ? succeed(previous, current)
                     : fail("conflict", "Event identity or idempotency key was reused with different content")
                 }
-                const allocated = allocateCommitCursor(current, assignment.organizationId)
+                const allocated = allocateCommitCursor(current, assignment.ownerId)
                 const event: ThreadEvent = {
                   ...comparable,
                   sequence: Sequence.make(String(threadState.nextEventSequence)),
@@ -455,7 +420,7 @@ const make = Effect.gen(function* () {
                 }
                 return succeed(event, {
                   ...current,
-                  organizationCounters: allocated.organizationCounters,
+                  ownerCounters: allocated.ownerCounters,
                   threads: replace(current.threads, assignment.threadId, {
                     ...threadState,
                     nextEventSequence: threadState.nextEventSequence + 1n,
@@ -478,14 +443,8 @@ const make = Effect.gen(function* () {
       Ref.get(state).pipe(
         Effect.flatMap((current) => {
           const thread = current.threads.get(input.threadId)?.thread
-          if (
-            requireClient(current, input) === undefined ||
-            thread === undefined ||
-            thread.organizationId !== input.organizationId
-          ) {
-            return Effect.fail(
-              StoreError.make({ reason: "invalid-authority", message: "Client is foreign" }),
-            )
+          if (requireClient(current, input) === undefined || thread === undefined || thread.ownerId !== input.ownerId) {
+            return Effect.fail(StoreError.make({ reason: "invalid-authority", message: "Client is foreign" }))
           }
           return Effect.succeed(
             (current.events.get(input.threadId) ?? [])
@@ -497,7 +456,7 @@ const make = Effect.gen(function* () {
     acknowledgeCursor: (input) =>
       mutation(state, (current) => {
         const threadState = current.threads.get(input.threadId)
-        if (threadState === undefined || threadState.thread.organizationId !== input.organizationId) {
+        if (threadState === undefined || threadState.thread.ownerId !== input.ownerId) {
           return fail("not-found", "Thread does not exist in the organization")
         }
         if (requireClient(current, input, input.now) === undefined) {
@@ -509,7 +468,7 @@ const make = Effect.gen(function* () {
         if (!eventExists) {
           return fail("conflict", "Cursor must reference a persisted thread event")
         }
-        const key = cursorKey(input.threadId, input.clientId)
+        const key = cursorKey(input.threadId, input.actor.clientId)
         const previous = current.cursors.get(key)
         const commitCursor =
           previous !== undefined && BigInt(previous.commitCursor) > BigInt(input.commitCursor)
@@ -524,7 +483,7 @@ const make = Effect.gen(function* () {
           return fail("invalid-authority", "Client is inactive or foreign")
         }
         const thread = current.threads.get(input.threadId)?.thread
-        if (thread === undefined || thread.organizationId !== input.organizationId) {
+        if (thread === undefined || thread.ownerId !== input.ownerId) {
           return fail("not-found", "Thread does not exist in the organization")
         }
         const previous = current.writers.get(input.threadId)
@@ -550,9 +509,8 @@ const make = Effect.gen(function* () {
         const previous = current.writers.get(input.threadId)
         if (
           previous === undefined ||
-          previous.organizationId !== input.organizationId ||
-          previous.memberId !== input.memberId ||
-          previous.clientId !== input.clientId ||
+          previous.ownerId !== input.ownerId ||
+          previous.actor.clientId !== input.actor.clientId ||
           previous.leaseId !== input.leaseId ||
           previous.generation !== input.generation ||
           previous.expiresAt <= input.now
@@ -570,7 +528,7 @@ const make = Effect.gen(function* () {
         const presence: Presence = { ...input, lastSeenAt: input.now }
         return succeed(presence, {
           ...current,
-          presence: replace(current.presence, cursorKey(input.threadId, input.clientId), presence),
+          presence: replace(current.presence, cursorKey(input.threadId, input.actor.clientId), presence),
         })
       }),
     listPresence: (input) =>
@@ -581,7 +539,7 @@ const make = Effect.gen(function* () {
             : Effect.succeed(
                 [...current.presence.values()].filter(
                   (presence) =>
-                    presence.organizationId === input.organizationId &&
+                    presence.ownerId === input.ownerId &&
                     presence.threadId === input.threadId &&
                     presence.expiresAt > input.now,
                 ),
@@ -594,11 +552,10 @@ const make = Effect.gen(function* () {
         const device = current.devices.get(input.deviceId)
         if (
           thread === undefined ||
-          thread.organizationId !== input.organizationId ||
+          thread.ownerId !== input.ownerId ||
           thread.executorKind !== "local_device" ||
           device === undefined ||
-          device.organizationId !== input.organizationId ||
-          device.memberId !== input.memberId
+          device.userId !== input.userId
         ) {
           return fail("invalid-authority", "Workspace binding requires the member's local thread and device")
         }
@@ -615,54 +572,45 @@ const make = Effect.gen(function* () {
     recordAuditEvent: (input) =>
       mutation(state, (current) => {
         if (current.auditEvents.has(input.id)) return fail("conflict", "Audit event identity already exists")
-        if (
-          requireClient(
-            current,
-            {
-              organizationId: input.organizationId,
-              memberId: input.actorMemberId,
-              clientId: input.actorClientId,
-            },
-            input.occurredAt,
-          ) === undefined
-        ) {
+        if (requireClient(current, input, input.occurredAt) === undefined) {
           return fail("invalid-authority", "Audit actor is inactive or foreign")
         }
-        const allocated = allocateCommitCursor(current, input.organizationId)
+        const allocated = allocateCommitCursor(current, input.ownerId)
         const event: AuditEvent = { ...input, commitCursor: allocated.commitCursor }
         return succeed(event, {
           ...current,
           auditEvents: replace(current.auditEvents, input.id, event),
-          organizationCounters: allocated.organizationCounters,
+          ownerCounters: allocated.ownerCounters,
         })
       }),
     putCredentialReference: (input) =>
       mutation(state, (current) => {
-        if (input.projectId !== null) {
+        if (!current.owners.has(input.ownerId)) return fail("not-found", "Owner does not exist")
+        if (input.projectId !== undefined) {
           const project = current.projects.get(input.projectId)
-          if (project === undefined || project.organizationId !== input.organizationId) {
+          if (project === undefined || project.ownerId !== input.ownerId) {
             return fail("not-found", "Credential project does not exist in the organization")
           }
         }
         const previous = current.credentialReferences.get(input.id)
         if (
           previous !== undefined &&
-          (previous.organizationId !== input.organizationId ||
+          (previous.ownerId !== input.ownerId ||
             previous.projectId !== input.projectId ||
             previous.provider !== input.provider ||
-            previous.createdByMemberId !== input.createdByMemberId)
+            previous.createdByUserId !== input.createdByUserId)
         ) {
           return fail("invalid-authority", "Credential reference identity cannot be reassigned")
         }
         const reference: CredentialReference = {
           id: input.id,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
+          ownerId: input.ownerId,
+          ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
           provider: input.provider,
           purpose: input.purpose,
           externalReference: input.externalReference,
           metadata: input.metadata,
-          createdByMemberId: input.createdByMemberId,
+          createdByUserId: input.createdByUserId,
           createdAt: previous?.createdAt ?? input.now,
           updatedAt: input.now,
         }

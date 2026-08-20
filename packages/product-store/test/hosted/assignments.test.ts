@@ -2,16 +2,12 @@ import { expect, it } from "@effect/vitest"
 import { Effect, Redacted } from "effect"
 import { TestClock } from "effect/testing"
 import { AssignmentRevision, type ExecutorAssignment } from "@rika/product/executor-assignment"
-import {
-  ExecutorAssignments,
-  type Access,
-  type Version,
-} from "@rika/product/executor-assignments"
+import { ExecutorAssignments, type Access, type Version } from "@rika/product/executor-assignments"
 import {
   CheckpointId,
   ExecutorAssignmentId,
   ExecutorInstanceId,
-  OrganizationId,
+  OwnerId,
   Sequence,
   ThreadId,
 } from "@rika/product/hosted-model"
@@ -20,7 +16,7 @@ import { layer } from "../../src/hosted/memory-assignments"
 const ids = {
   checkpoint: CheckpointId.make("checkpoint"),
   executor: ExecutorInstanceId.make("executor"),
-  organization: OrganizationId.make("organization"),
+  owner: OwnerId.make("owner"),
 }
 
 const version = (assignment: ExecutorAssignment): Version => ({
@@ -34,7 +30,7 @@ const open = (suffix: string) =>
     const assignments = yield* ExecutorAssignments
     const created = yield* assignments.create({
       id: ExecutorAssignmentId.make(`assignment-${suffix}`),
-      organizationId: ids.organization,
+      ownerId: ids.owner,
       threadId: ThreadId.make(`thread-${suffix}`),
       placement: { _tag: "E2BPlacement", templateBuildId: "template", providerScope: "scope" },
       checkout: null,

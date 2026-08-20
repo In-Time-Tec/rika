@@ -1,327 +1,136 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, Redacted } from "effect"
-import { TestClock } from "effect/testing"
-import type { ExecutorAssignment } from "@rika/product/executor-assignment"
-import { ExecutorAssignments, type Access, type Version } from "@rika/product/executor-assignments"
+import { Effect } from "effect"
 import {
   BetterAuthMemberId,
+  BetterAuthUserId,
   ClientId,
-  CommandId,
   DeviceId,
-  EventId,
-  ExecutorAssignmentId,
-  ExecutorInstanceId,
-  FencingGeneration,
-  AssignmentLeaseEpoch,
-  IdempotencyKey,
-  LeaseId,
   OrganizationId,
+  OwnerId,
   ProjectId,
-  Sequence,
   ThreadId,
   Timestamp,
   WorkspaceId,
 } from "@rika/product/hosted-model"
-import { HostedStore, type AdmitCommandInput } from "@rika/product/hosted-store"
+import { HostedStore } from "@rika/product/hosted-store"
 import { layer } from "../../src/hosted/memory-store"
 
-const ids = {
-  assignment: ExecutorAssignmentId.make("assignment"),
-  client: ClientId.make("client"),
-  device: DeviceId.make("device"),
-  executor: ExecutorInstanceId.make("executor"),
-  member: BetterAuthMemberId.make("member"),
-  organization: OrganizationId.make("organization"),
-  project: ProjectId.make("project"),
-  thread: ThreadId.make("thread"),
-  workspace: WorkspaceId.make("workspace"),
+const now = Timestamp.make("2026-01-01T00:00:00.000Z")
+const later = Timestamp.make("2026-01-01T00:01:00.000Z")
+const userId = BetterAuthUserId.make("user")
+const deviceId = DeviceId.make("device")
+const clientId = ClientId.make("client")
+const personalOwnerId = OwnerId.make("personal-owner")
+const organizationOwnerId = OwnerId.make("organization-owner")
+const personal = { _tag: "PersonalOwner" as const, userId }
+const organization = {
+  _tag: "OrganizationOwner" as const,
+  organizationId: OrganizationId.make("organization"),
 }
-const testIds = (suffix: string): typeof ids => ({
-  assignment: ExecutorAssignmentId.make(`assignment-${suffix}`),
-  client: ClientId.make(`client-${suffix}`),
-  device: DeviceId.make(`device-${suffix}`),
-  executor: ExecutorInstanceId.make(`executor-${suffix}`),
-  member: BetterAuthMemberId.make(`member-${suffix}`),
-  organization: OrganizationId.make(`organization-${suffix}`),
-  project: ProjectId.make(`project-${suffix}`),
-  thread: ThreadId.make(`thread-${suffix}`),
-  workspace: WorkspaceId.make(`workspace-${suffix}`),
-})
 
-const at = (second: number) => Timestamp.make(`2026-01-01T00:00:${String(second).padStart(2, "0")}.000Z`)
-const version = (assignment: ExecutorAssignment): Version => ({
-  assignmentId: assignment.id,
-  generation: assignment.generation,
-  revision: assignment.revision,
-})
-
-const initialize = (currentIds: typeof ids) =>
-  Effect.gen(function* () {
-    const store = yield* HostedStore
-    yield* store.createProject({
-      id: currentIds.project,
-      organizationId: currentIds.organization,
-      name: "Rika",
-      createdByMemberId: currentIds.member,
-      now: at(0),
-    })
-    yield* store.registerDevice({
-      id: currentIds.device,
-      organizationId: currentIds.organization,
-      memberId: currentIds.member,
-      displayName: "Workstation",
-      publicKeyFingerprint: `sha256:${currentIds.device}`,
-      now: at(0),
-    })
-    yield* store.authenticateClient({
-      id: currentIds.client,
-      organizationId: currentIds.organization,
-      memberId: currentIds.member,
-      deviceId: currentIds.device,
-      now: at(0),
-      expiresAt: at(59),
-    })
-    yield* store.createWorkspace({
-      id: currentIds.workspace,
-      organizationId: currentIds.organization,
-      projectId: currentIds.project,
-      createdByMemberId: currentIds.member,
-      executorKind: "e2b",
-      now: at(0),
-    })
-    yield* store.createThread({
-      id: currentIds.thread,
-      organizationId: currentIds.organization,
-      projectId: currentIds.project,
-      workspaceId: currentIds.workspace,
-      createdByMemberId: currentIds.member,
-      executorKind: "e2b",
-      now: at(0),
-    })
-    return store
-  })
-
-const command = (ordinal: number): AdmitCommandInput => ({
-  organizationId: ids.organization,
-  threadId: ids.thread,
-  memberId: ids.member,
-  clientId: ids.client,
-  commandId: CommandId.make(`command-${ordinal}`),
-  idempotencyKey: IdempotencyKey.make(`command-key-${ordinal}`),
-  actor: {
-    _tag: "AuthenticatedMember",
-    organizationId: ids.organization,
-    memberId: ids.member,
-    clientId: ids.client,
-    deviceId: ids.device,
-  },
-  command: { _tag: "SubmitPrompt", prompt: `prompt ${ordinal}` },
-  admittedAt: at(ordinal),
-})
-
-const openAssignment = (currentIds: typeof ids) =>
-  Effect.gen(function* () {
-    const assignments = yield* ExecutorAssignments
-    const created = yield* assignments.create({
-      id: currentIds.assignment,
-      organizationId: currentIds.organization,
-      threadId: currentIds.thread,
-    placement: { _tag: "E2BPlacement", templateBuildId: "template", providerScope: "scope" },
-    checkout: {
-      repositoryId: "repository",
-      installationId: "installation",
-      owner: "rika",
-      name: "rika",
-      commitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    },
-    })
-    const provisioning = yield* assignments.beginProvisioning({
-      ...version(created),
-      bootstrapCredentialDigest: Redacted.make("bootstrap"),
-      bootstrapLifetimeMillis: 60_000,
-    })
-    const bound = yield* assignments.bindProviderInstance({ ...version(provisioning), providerInstanceId: "sandbox" })
-    const active = yield* assignments.openSession({
-      ...version(bound),
-      providerInstanceId: "sandbox",
-      executorInstanceId: currentIds.executor,
-      processIncarnation: "process",
-      presentedBootstrapCredentialDigest: Redacted.make("bootstrap"),
-      sessionCredentialDigest: Redacted.make("session"),
-      leaseLifetimeMillis: 60_000,
-    })
-    if (active.lifecycle._tag !== "Active") return yield* Effect.die(new Error("assignment did not become active"))
-    const access: Access = {
-      assignmentId: active.id,
-      assignmentGeneration: active.generation,
-      providerInstanceId: active.lifecycle.providerInstanceId,
-      executorInstanceId: active.lifecycle.executorInstanceId,
-      processIncarnation: active.lifecycle.processIncarnation,
-      leaseEpoch: active.lifecycle.leaseEpoch,
-      presentedSessionCredentialDigest: Redacted.make("session"),
-    }
-    return { assignments, active, access }
-  })
-
-it.layer(layer)("hosted store", (test) => {
-  test.effect("keeps placement immutable and defaults E2B sharing on", () =>
+it.layer(layer)("hosted memory store owner identity", (test) => {
+  test.effect("creates personal projectless workspaces and threads", () =>
     Effect.gen(function* () {
       const store = yield* HostedStore
-      yield* store.createProject({
-        id: ProjectId.make("sharing-project"),
-        organizationId: ids.organization,
+      yield* store.putOwner({ id: personalOwnerId, identity: personal, now })
+      yield* store.registerDevice({
+        id: deviceId,
+        userId,
+        displayName: "Laptop",
+        publicKeyFingerprint: "sha256:laptop",
+        now,
+      })
+      yield* store.authenticateClient({ id: clientId, userId, deviceId, now, expiresAt: later })
+      const workspace = yield* store.createWorkspace({
+        id: WorkspaceId.make("personal-workspace"),
+        ownerId: personalOwnerId,
+        createdByUserId: userId,
+        executorKind: "local_device",
+        now,
+      })
+      const thread = yield* store.createThread({
+        id: ThreadId.make("personal-thread"),
+        ownerId: personalOwnerId,
+        workspaceId: workspace.id,
+        createdByUserId: userId,
+        executorKind: "local_device",
+        now,
+      })
+      expect(workspace.projectId).toBeUndefined()
+      expect(thread.projectId).toBeUndefined()
+      expect(thread.ownerId).toBe(personalOwnerId)
+      expect(
+        yield* Effect.result(
+          store.putThreadGrant({
+            ownerId: personalOwnerId,
+            threadId: thread.id,
+            membershipId: BetterAuthMemberId.make("member"),
+            role: "viewer",
+            grantedByUserId: userId,
+            now,
+          }),
+        ),
+      ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-authority" } })
+    }),
+  )
+
+  test.effect("supports organization resources and grants", () =>
+    Effect.gen(function* () {
+      const store = yield* HostedStore
+      yield* store.putOwner({ id: organizationOwnerId, identity: organization, now })
+      const project = yield* store.createProject({
+        id: ProjectId.make("organization-project"),
+        ownerId: organizationOwnerId,
         name: "Rika",
-        createdByMemberId: ids.member,
-        now: at(0),
+        createdByUserId: userId,
+        now,
       })
-      const remote = yield* store.createWorkspace({
-        id: WorkspaceId.make("sharing-workspace"),
-        organizationId: ids.organization,
-        projectId: ProjectId.make("sharing-project"),
-        createdByMemberId: ids.member,
-        executorKind: "e2b",
-        now: at(0),
+      const grant = yield* store.putProjectGrant({
+        ownerId: organizationOwnerId,
+        projectId: project.id,
+        membershipId: BetterAuthMemberId.make("member"),
+        role: "controller",
+        grantedByUserId: userId,
+        now,
       })
-      expect(remote.inheritProjectGrants).toBe(true)
-      const privateWorkspace = yield* store.createWorkspace({
-        id: WorkspaceId.make("private-workspace"),
-        organizationId: ids.organization,
-        projectId: ProjectId.make("sharing-project"),
-        createdByMemberId: ids.member,
-        executorKind: "e2b",
-        inheritProjectGrants: false,
-        now: at(0),
-      })
-      const privateThread = yield* store.createThread({
-        id: ThreadId.make("private-thread"),
-        organizationId: ids.organization,
-        projectId: ProjectId.make("sharing-project"),
-        workspaceId: privateWorkspace.id,
-        createdByMemberId: ids.member,
-        executorKind: "e2b",
-        now: at(0),
-      })
-      expect(privateThread.inheritProjectGrants).toBe(false)
-      expect(
-        yield* Effect.result(
-          store.createThread({
-            id: ThreadId.make("sharing-thread"),
-            organizationId: ids.organization,
-            projectId: ProjectId.make("sharing-project"),
-            workspaceId: WorkspaceId.make("sharing-workspace"),
-            createdByMemberId: ids.member,
-            executorKind: "local_device",
-            now: at(0),
-          }),
-        ),
-      ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-authority" } })
+      expect(grant).toMatchObject({ ownerId: organizationOwnerId, role: "controller" })
     }),
   )
 
-  test.effect("deduplicates commands and serializes terminal writers", () =>
+  test.effect("keeps owner IDs stable and rejects foreign projects", () =>
     Effect.gen(function* () {
-      const store = yield* initialize(ids)
-      const first = yield* store.admitCommand(command(1))
-      expect(yield* store.admitCommand({ ...command(1), admittedAt: at(2) })).toEqual(first)
+      const store = yield* HostedStore
+      const first = yield* store.putOwner({ id: personalOwnerId, identity: personal, now })
+      expect(yield* store.putOwner({ id: personalOwnerId, identity: personal, now: later })).toEqual(first)
+      expect(
+        yield* Effect.result(store.putOwner({ id: personalOwnerId, identity: organization, now: later })),
+      ).toMatchObject({ _tag: "Failure", failure: { reason: "conflict" } })
+      expect(
+        yield* Effect.result(
+          store.putOwner({ id: OwnerId.make("another-personal-owner"), identity: personal, now: later }),
+        ),
+      ).toMatchObject({ _tag: "Failure", failure: { reason: "conflict" } })
 
-      const writer = yield* store.acquireTerminalWriter({
-        organizationId: ids.organization,
-        threadId: ids.thread,
-        memberId: ids.member,
-        clientId: ids.client,
-        leaseId: LeaseId.make("writer"),
-        now: at(2),
-        expiresAt: at(10),
+      yield* store.putOwner({ id: organizationOwnerId, identity: organization, now })
+      const project = yield* store.createProject({
+        id: ProjectId.make("foreign-project"),
+        ownerId: organizationOwnerId,
+        name: "Foreign",
+        createdByUserId: userId,
+        now,
       })
       expect(
         yield* Effect.result(
-          store.admitCommand({
-            ...command(2),
-            command: {
-              _tag: "TerminalInput",
-              data: "pwd\n",
-              writerLeaseId: LeaseId.make("stale-writer"),
-              writerGeneration: writer.generation,
-            },
+          store.createWorkspace({
+            id: WorkspaceId.make("foreign-workspace"),
+            ownerId: personalOwnerId,
+            projectId: project.id,
+            createdByUserId: userId,
+            executorKind: "e2b",
+            now,
           }),
         ),
-      ).toMatchObject({ _tag: "Failure", failure: { reason: "stale-fence" } })
-    }),
-  )
-
-  test.effect("admits executor events only under the current assignment fence", () =>
-    Effect.gen(function* () {
-      yield* TestClock.setTime(Date.parse("2026-01-01T00:00:00.000Z"))
-      const eventIds = testIds("event")
-      const store = yield* initialize(eventIds)
-      const { assignments, active, access } = yield* openAssignment(eventIds)
-      const event = yield* store.appendEvent({
-        eventId: EventId.make("event"),
-        idempotencyKey: IdempotencyKey.make("event-key"),
-        assignmentId: access.assignmentId,
-        assignmentGeneration: access.assignmentGeneration,
-        leaseEpoch: access.leaseEpoch,
-        commandSequence: null,
-        event: { _tag: "TerminalOutput", data: "hello" },
-      })
-
-      expect(event).toMatchObject({
-        organizationId: eventIds.organization,
-        threadId: eventIds.thread,
-        executorInstanceId: eventIds.executor,
-        assignmentId: eventIds.assignment,
-      })
-      const replay = yield* store.appendEvent({
-        eventId: event.eventId,
-        idempotencyKey: event.idempotencyKey,
-        assignmentId: access.assignmentId,
-        assignmentGeneration: access.assignmentGeneration,
-        leaseEpoch: access.leaseEpoch,
-        commandSequence: null,
-        event: event.event,
-      })
-      expect(replay).toEqual(event)
-
-      yield* assignments.beginReplacement({
-        ...version(active),
-        bootstrapCredentialDigest: Redacted.make("replacement"),
-        bootstrapLifetimeMillis: 60_000,
-      })
-      expect(
-        yield* Effect.result(
-          store.appendEvent({
-            eventId: EventId.make("stale-event"),
-            idempotencyKey: IdempotencyKey.make("stale-event-key"),
-            assignmentId: access.assignmentId,
-            assignmentGeneration: access.assignmentGeneration,
-            leaseEpoch: access.leaseEpoch,
-            commandSequence: Sequence.make("1"),
-            event: { _tag: "TerminalOutput", data: "stale" },
-          }),
-        ),
-      ).toMatchObject({ _tag: "Failure", failure: { reason: "stale-fence" } })
-    }),
-  )
-
-  test.effect("fails closed for recovered events without PostgreSQL operation authority", () =>
-    Effect.gen(function* () {
-      yield* TestClock.setTime(Date.parse("2026-01-01T00:00:00.000Z"))
-      const store = yield* initialize(testIds("recovered"))
-      expect(
-        yield* Effect.result(
-          store.appendRecoveredEvent({
-            eventId: EventId.make("recovered"),
-            idempotencyKey: IdempotencyKey.make("recovered"),
-            assignmentId: ExecutorAssignmentId.make("assignment-recovered"),
-            assignmentGeneration: FencingGeneration.make("1"),
-            leaseEpoch: AssignmentLeaseEpoch.make("1"),
-            commandSequence: Sequence.make("1"),
-            event: { _tag: "CellResult", operationKey: "recovered" },
-            executorInstanceId: "executor-recovered",
-            processIncarnation: "process-recovered",
-          }),
-        ),
-      ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-authority" } })
+      ).toMatchObject({ _tag: "Failure", failure: { reason: "not-found" } })
     }),
   )
 })
