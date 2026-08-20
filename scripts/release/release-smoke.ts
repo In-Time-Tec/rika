@@ -18,6 +18,45 @@ const ThreadsJson = Schema.fromJsonString(Schema.Array(Schema.Struct({ id: Schem
 const UnknownJson = Schema.fromJsonString(Schema.Unknown)
 const PackageManifestJson = Schema.fromJsonString(Schema.Struct({ version: Schema.String }))
 
+const commandSurfaces: ReadonlyArray<ReadonlyArray<string>> = [
+  [],
+  ["run"],
+  ["review"],
+  ...[
+    "new",
+    "continue",
+    "list",
+    "search",
+    "rename",
+    "label",
+    "pin",
+    "archive",
+    "unarchive",
+    "delete",
+    "usage",
+    "fork",
+    "export",
+  ].map((command) => ["thread", command]),
+  ["last"],
+  ["top"],
+  ...["list", "edit", "keymap"].map((command) => ["config", command]),
+  ...["list", "use", "invite"].map((command) => ["org", command]),
+  ...["login", "status", "logout", "devices", "revoke-device"].map((command) => ["auth", command]),
+  ...["set", "list", "rotate", "revoke"].map((command) => ["credential", command]),
+  ...["path", "status", "export", "performance"].map((command) => ["diagnostics", command]),
+  ...["list", "show"].map((command) => ["tools", command]),
+  ...["list", "inspect", "add", "remove"].map((command) => ["skills", command]),
+  ...["list", "add", "remove", "enable", "disable", "doctor"].map((command) => ["mcp", command]),
+  ...["login", "logout", "status"].map((command) => ["mcp", "oauth", command]),
+  ...["list", "create-skill", "create-plugin", "enable", "disable", "rollback"].map((command) => [
+    "extensions",
+    command,
+  ]),
+  ["doctor"],
+  ["update"],
+  ["version"],
+]
+
 const program = Effect.scoped(
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
@@ -144,6 +183,10 @@ const program = Effect.scoped(
       yield* Effect.log(`Release boot smoke passed for ${target}`)
       return
     }
+    yield* Effect.forEach(commandSurfaces, (command) => output([...command, "--help"]), {
+      concurrency: 4,
+      discard: true,
+    })
     const listed = yield* output(["tools", "list"])
     const tools = yield* Schema.decodeUnknownEffect(NamedItemsJson)(listed).pipe(mapFailure("decode tools list"))
     if (!tools.some((tool) => tool.name === "read"))
