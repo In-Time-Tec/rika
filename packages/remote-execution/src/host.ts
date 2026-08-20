@@ -59,6 +59,13 @@ const cellStateDirectory = `${executorStateDirectory}/cells`
 const directoryMode = 0o700
 const fileMode = 0o600
 const maximumOutputLength = 1_000_000
+const sandboxIdPath = "/run/e2b/.E2B_SANDBOX_ID"
+
+const sandboxInstanceId = () =>
+  Bun.file(sandboxIdPath)
+    .text()
+    .then((value) => value.trim())
+    .catch(() => Bun.env.E2B_SANDBOX_ID ?? "")
 
 const required = (name: string) => {
   const value = Bun.env[name]
@@ -314,17 +321,20 @@ const receiveBootstrap = Effect.callback<Bootstrap, HostError>((resume) => {
       return request
         .json()
         .then((input) =>
-          Effect.runPromise(
-            decodeBootstrap(input).pipe(
-              Effect.match({
-                onFailure: () => undefined,
-                onSuccess: (value) => value,
-              }),
+          Promise.all([
+            Effect.runPromise(
+              decodeBootstrap(input).pipe(
+                Effect.match({
+                  onFailure: () => undefined,
+                  onSuccess: (value) => value,
+                }),
+              ),
             ),
-          ),
+            sandboxInstanceId(),
+          ]),
         )
-        .then((body) => {
-          if (body === undefined || body.identity.instanceId !== Bun.env.E2B_SANDBOX_ID)
+        .then(([body, instanceId]) => {
+          if (body === undefined || instanceId.length === 0 || body.identity.instanceId !== instanceId)
             return new Response("invalid", { status: 400 })
           if (consumed) return new Response("not found", { status: 404 })
           consumed = true
