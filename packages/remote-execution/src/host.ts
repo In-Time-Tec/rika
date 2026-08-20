@@ -371,7 +371,7 @@ const executeCell = (workspace: string, code: string) =>
   Effect.acquireUseRelease(
     Effect.try({
       try: () =>
-        Bun.spawn(["sudo", "-n", "-u", "rika-workspace", "--", "/bin/sh", "-lc", code], {
+        Bun.spawn(["sudo", "-n", "-H", "-u", "rika-workspace", "--", "/bin/sh", "-c", code], {
           cwd: workspace,
           env: {
             HOME: "/home/rika-workspace",

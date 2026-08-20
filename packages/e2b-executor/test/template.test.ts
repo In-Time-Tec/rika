@@ -31,6 +31,8 @@ describe("E2B template", () => {
       expect(host).toContain("decodeBootstrap(input)")
       expect(host).toContain("capabilities: { cells: true, checkpoints: false, pty: false }")
       expect(host).toContain('HOME: "/home/rika-workspace"')
+      expect(host).toContain('["sudo", "-n", "-H", "-u", "rika-workspace", "--", "/bin/sh", "-c", code]')
+      expect(host).not.toContain('["/bin/sh", "-lc", code]')
     }),
   )
 })
