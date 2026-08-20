@@ -6,9 +6,16 @@ const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown
 
 const bootstrapProof = `
 import { Effect, Redacted } from "effect"
+import { createConnection } from "node:net"
 import { testing } from "./src/host.ts"
 const received = Effect.runPromise(testing.receiveBootstrap)
 await Bun.sleep(20)
+const hanging = createConnection({ host: "127.0.0.1", port: 7070 })
+hanging.on("error", () => {})
+await new Promise((resolve) => hanging.once("connect", resolve))
+hanging.write(
+  "POST /.rika/bootstrap HTTP/1.1\\r\\nHost: 127.0.0.1:7070\\r\\nContent-Type: application/json\\r\\nContent-Length: 100\\r\\nConnection: keep-alive\\r\\n\\r\\n{",
+)
 const malformed = await Bun.fetch("http://127.0.0.1:7070/.rika/bootstrap", {
   method: "POST",
   headers: { "content-type": "application/json" },
@@ -43,6 +50,7 @@ const responses = await Promise.all([
 const accepted = responses.find((response) => response.status === 202)
 const body = await accepted.text()
 const bootstrap = await received
+hanging.destroy()
 const credential = Redacted.value(bootstrap.credential)
 console.log(
   JSON.stringify({

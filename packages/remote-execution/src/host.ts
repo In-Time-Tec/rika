@@ -302,16 +302,15 @@ const connect = Effect.fn("Host.connect")(function* (
 })
 
 const receiveBootstrap = Effect.callback<Bootstrap, HostError>((resume) => {
-  let state: "open" | "parsing" | "consumed" = "open"
+  let consumed = false
   const server = Bun.serve({
     hostname: "0.0.0.0",
     port: 7070,
     fetch: (request) => {
       const path = new URL(request.url).pathname
       if (path === "/health") return new Response("ready")
-      if (path !== "/.rika/bootstrap" || request.method !== "POST" || state !== "open")
+      if (path !== "/.rika/bootstrap" || request.method !== "POST" || consumed)
         return new Response("not found", { status: 404 })
-      state = "parsing"
       return request
         .json()
         .then((input) =>
@@ -325,18 +324,17 @@ const receiveBootstrap = Effect.callback<Bootstrap, HostError>((resume) => {
           ),
         )
         .then((body) => {
-          if (body === undefined || body.identity.instanceId !== Bun.env.E2B_SANDBOX_ID) {
-            state = "open"
+          if (body === undefined || body.identity.instanceId !== Bun.env.E2B_SANDBOX_ID)
             return new Response("invalid", { status: 400 })
-          }
-          state = "consumed"
+          if (consumed) return new Response("not found", { status: 404 })
+          consumed = true
           const identity: Identity = {
             ...body.identity,
             stateDirectory: executorStateDirectory,
           }
           Effect.runFork(
             Effect.sleep("10 millis").pipe(
-              Effect.andThen(Effect.promise(() => server.stop(false))),
+              Effect.andThen(Effect.promise(() => server.stop(true))),
               Effect.andThen(
                 Effect.sync(() =>
                   resume(
@@ -351,10 +349,7 @@ const receiveBootstrap = Effect.callback<Bootstrap, HostError>((resume) => {
           )
           return new Response("accepted", { status: 202 })
         })
-        .catch(() => {
-          if (state === "parsing") state = "open"
-          return new Response("invalid", { status: 400 })
-        })
+        .catch(() => new Response("invalid", { status: 400 }))
     },
   })
   return Effect.promise(() => server.stop(true))
