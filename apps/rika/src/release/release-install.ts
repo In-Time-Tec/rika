@@ -11,7 +11,6 @@ export interface InstallLayout {
   readonly installRoot: string
   readonly binary: string
   readonly interactive: string
-  readonly server: string
 }
 
 const platformFailure = (operation: string) => (error: PlatformError.PlatformError) => {
@@ -57,7 +56,6 @@ export const installLayout = Effect.fn("ReleaseInstall.layout")(function* (execu
     installRoot,
     binary: path.join(installRoot, "bin", "rika"),
     interactive: path.join(installRoot, "bin", ".rika-interactive"),
-    server: path.join(installRoot, "bin", ".rika-server"),
   }
   const present = yield* Effect.all([fileSystem.exists(layout.binary), fileSystem.exists(layout.interactive)], {
     concurrency: 2,

@@ -155,7 +155,6 @@ const program = Effect.gen(function* () {
             const { identity } = yield* buildIdentity()
             yield* checkedBuild("client-main.ts", path.join(bin, "rika"), target, identity)
             yield* checkedBuild("interactive-main.ts", path.join(bin, ".rika-interactive"), target, identity)
-            yield* checkedBuild("server-main.ts", path.join(bin, ".rika-server"), target, identity)
             yield* checkedBuild("performance-main.ts", path.join(bin, ".rika-performance"), target, identity)
             /**
              * A kernel is spawned as a file, and a compiled executable has no file for the module it

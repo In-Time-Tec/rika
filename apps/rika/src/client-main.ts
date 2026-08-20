@@ -2,6 +2,8 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Context, Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
+import { isServerProcessLaunch } from "./private-runtime-role"
+import { start as startServer } from "./server/process/server-process-launch"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -18,7 +20,7 @@ const provideLayerScoped =
 import { clientProcessExitCode } from "./client/client-process-exit"
 import { installClientSigintHandler, isInteractiveClientLaunch, run } from "./client/client-process"
 
-if (import.meta.main) {
+const startClient = () => {
   let interruptedBySigint = false
   let rootFiber: ReturnType<typeof Effect.runFork> | undefined
   const removeSigintHandler = installClientSigintHandler({
@@ -34,4 +36,9 @@ if (import.meta.main) {
     removeSigintHandler()
     process.exit(clientProcessExitCode({ exit, interruptedBySigint }))
   })
+}
+
+if (import.meta.main) {
+  if (isServerProcessLaunch()) startServer()
+  else startClient()
 }

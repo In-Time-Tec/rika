@@ -16,6 +16,7 @@ import { globalPaths, workspacePaths } from "@rika/configuration/configuration-p
 import { provideLayerScoped } from "./process-layer"
 import { makeDispatcherLayer } from "./process-startup-dispatcher"
 import { saveModePreference } from "./mode-preference"
+import { serverProcessRuntime } from "../../private-runtime-role"
 
 const main = Command.run(command, { version }).pipe(
   Effect.catchTags({
@@ -71,9 +72,12 @@ export const start = () => {
   let editor: string | undefined
   if (environment.visual._tag === "Some") editor = environment.visual.value
   else if (environment.editor._tag === "Some") editor = environment.editor.value
-  const serverRuntime = import.meta.path.startsWith("/$bunfs/")
-    ? { executable: join(dirname(process.execPath), ".rika-server"), arguments: [] }
-    : { executable: process.execPath, arguments: [join(import.meta.dir, "..", "..", "server-main.ts")] }
+  const serverRuntime = serverProcessRuntime({
+    packaged: import.meta.path.startsWith("/$bunfs/"),
+    executable: process.execPath,
+    packagedEntrypoint: join(dirname(process.execPath), "rika"),
+    sourceEntrypoint: join(import.meta.dir, "..", "..", "client-main.ts"),
+  })
   let clientModeConfiguration: ModeConfiguration | undefined
   const clientOwnedInteractiveFunction = interactiveTui({
     editor,

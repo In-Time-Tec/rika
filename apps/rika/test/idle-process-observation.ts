@@ -1,5 +1,6 @@
 import { Data, Effect, FileSystem, Path } from "effect"
 import { descendants, readProcessRows, type PsRow } from "../src/platform/performance-process-table"
+import { serverProcessRole } from "../src/private-runtime-role"
 import { parsePhysicalFootprintMebibytes } from "./idle-physical-footprint"
 
 export type IdleRole = "client" | "interactive" | "server"
@@ -19,7 +20,7 @@ export class IdleFixtureError extends Data.TaggedError("IdleFixtureError")<{
 const roleMarkers: Readonly<Record<IdleRole, string>> = {
   client: "apps/rika/src/client-main.ts",
   interactive: "apps/rika/src/interactive-main.ts",
-  server: "apps/rika/src/server-main.ts",
+  server: "apps/rika/src/client-main.ts",
 }
 
 const running = (pid: number) => {
@@ -40,8 +41,8 @@ const signal = (pid: number, value: NodeJS.Signals) => {
 const roleOf = (row: PsRow, executableName: string): IdleRole | undefined => {
   const executable = row.command.split(/\s+/, 1)[0] ?? ""
   if (executable.slice(executable.lastIndexOf("/") + 1) !== executableName) return undefined
-  for (const role of ["client", "interactive", "server"] as const)
-    if (row.command.includes(roleMarkers[role])) return role
+  if (row.command.split(/\s+/).includes(serverProcessRole)) return "server"
+  for (const role of ["client", "interactive"] as const) if (row.command.includes(roleMarkers[role])) return role
   return undefined
 }
 

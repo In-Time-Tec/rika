@@ -68,7 +68,6 @@ const installedRoot = Effect.fn("ReleaseUpdateTest.installedRoot")(function* (pr
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", "rika"), "installed rika")
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-performance"), "installed performance")
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-interactive"), "installed interactive")
-  yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-server"), "installed server")
   return { root, installRoot, binary: path.join(installRoot, "bin", "rika") }
 })
 
@@ -314,7 +313,6 @@ it.effect("refuses to replace an install this binary does not own", () =>
       yield* fileSystem.writeFileString(path.join(packaged, "bin", "rika"), "npm rika")
       yield* fileSystem.writeFileString(path.join(packaged, "bin", ".rika-performance"), "npm performance")
       yield* fileSystem.writeFileString(path.join(packaged, "bin", ".rika-interactive"), "npm interactive")
-      yield* fileSystem.writeFileString(path.join(packaged, "bin", ".rika-server"), "npm server")
       const fromNpm = yield* runUpdate({
         currentVersion: "0.0.3",
         executable: path.join(packaged, "bin", "rika"),
@@ -333,7 +331,6 @@ it.effect("refuses to replace an install this binary does not own", () =>
       yield* fileSystem.writeFileString(path.join(development, "bin", "rika"), "dev rika")
       yield* fileSystem.writeFileString(path.join(development, "bin", ".rika-performance"), "dev performance")
       yield* fileSystem.writeFileString(path.join(development, "bin", ".rika-interactive"), "dev interactive")
-      yield* fileSystem.writeFileString(path.join(development, "bin", ".rika-server"), "dev server")
       const fromSource = yield* runUpdate({
         currentVersion: "0.0.3",
         executable: path.join(development, "bin", "rika"),

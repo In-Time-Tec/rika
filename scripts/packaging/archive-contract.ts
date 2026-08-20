@@ -10,7 +10,6 @@ export const packageEntries = (root: string) =>
     { name: `${root}/bin/.rika-kernel-worker.js`, type: "-", executable: false },
     { name: `${root}/bin/text-result.js`, type: "-", executable: false },
     { name: `${root}/bin/.rika-performance`, type: "-", executable: true },
-    { name: `${root}/bin/.rika-server`, type: "-", executable: true },
     { name: `${root}/bin/rika`, type: "-", executable: true },
   ] as const
 
