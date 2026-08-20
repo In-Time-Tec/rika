@@ -42,7 +42,6 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
           return Effect.succeed(
             response(request, {
               access_token: "new-access",
-              refresh_token: "new-refresh",
               expires_in: 600,
               token_type: "DPoP",
             }),
@@ -86,7 +85,7 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
       ).toBe("Pending")
       expect(yield* http.refresh(origin, "install-client", Redacted.make("refresh"), privateJwk)).toEqual({
         accessToken: "new-access",
-        refreshToken: "new-refresh",
+        refreshToken: "refresh",
         expiresIn: 600,
       })
       expect((yield* http.context(origin, session)).account.email).toBe("dev@example.test")
