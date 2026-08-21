@@ -1,10 +1,9 @@
 import { Config, Effect, Option, Path } from "effect"
-import { serverProcessRuntime } from "../private-runtime-role"
+import { localExecutorProcessRole, serverProcessRuntime, tuiControllerProcessRole } from "../private-runtime-role"
 
 export interface RuntimeLaunch {
   readonly executable: string
   readonly prefixArguments: ReadonlyArray<string>
-  readonly replaceProcess: boolean
 }
 
 export const privateRuntime = Effect.fn("ClientProcess.privateRuntime")(function* (
@@ -12,8 +11,7 @@ export const privateRuntime = Effect.fn("ClientProcess.privateRuntime")(function
 ) {
   const path = yield* Path.Path
   const testExecutable = yield* Config.option(Config.string("RIKA_TEST_RUNTIME_EXECUTABLE"))
-  if (Option.isSome(testExecutable))
-    return { executable: testExecutable.value, prefixArguments: [], replaceProcess: false }
+  if (Option.isSome(testExecutable)) return { executable: testExecutable.value, prefixArguments: [] }
   if (role === "server") {
     const runtime = serverProcessRuntime({
       packaged: import.meta.path.startsWith("/$bunfs/"),
@@ -21,26 +19,23 @@ export const privateRuntime = Effect.fn("ClientProcess.privateRuntime")(function
       packagedEntrypoint: path.join(path.dirname(process.execPath), "rika"),
       sourceEntrypoint: path.join(import.meta.dir, "..", "client-main.ts"),
     })
-    return { executable: runtime.executable, prefixArguments: runtime.arguments, replaceProcess: false }
+    return { executable: runtime.executable, prefixArguments: runtime.arguments }
   }
   if (role === "client")
     return import.meta.path.startsWith("/$bunfs/")
-      ? { executable: process.execPath, prefixArguments: [], replaceProcess: false }
+      ? { executable: process.execPath, prefixArguments: [localExecutorProcessRole] }
       : {
           executable: process.execPath,
-          prefixArguments: [path.join(import.meta.dir, "..", "client-main.ts")],
-          replaceProcess: false,
+          prefixArguments: [path.join(import.meta.dir, "..", "client-main.ts"), localExecutorProcessRole],
         }
   return import.meta.path.startsWith("/$bunfs/")
     ? {
-        executable: path.join(path.dirname(process.execPath), ".rika-interactive"),
-        prefixArguments: [],
-        replaceProcess: true,
+        executable: process.execPath,
+        prefixArguments: [tuiControllerProcessRole],
       }
     : {
         executable: process.execPath,
         prefixArguments: [path.join(import.meta.dir, "..", "interactive-main.ts")],
-        replaceProcess: false,
       }
 })
 

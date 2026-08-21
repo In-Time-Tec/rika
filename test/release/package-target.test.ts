@@ -47,14 +47,15 @@ describe("release target construction", () => {
     )
   })
 
-  test("builds the public client and private interactive runtime", async () => {
+  test("builds one public executable containing the interactive runtime", async () => {
     const packaging = await readFile(
       join(fileURLToPath(new URL("../..", import.meta.url)), "scripts/packaging/package-target.ts"),
       "utf8",
     )
     expect(packaging).toContain('checkedBuild("client-main.ts", path.join(bin, "rika")')
-    expect(packaging).toContain('checkedBuild("interactive-main.ts", path.join(bin, ".rika-interactive")')
     for (const forbidden of [
+      "interactive-main.ts",
+      ".rika-interactive",
       "performance-main.ts",
       ".rika-kernel-runtime",
       ".rika-kernel-worker.js",

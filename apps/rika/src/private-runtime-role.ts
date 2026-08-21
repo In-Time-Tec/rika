@@ -19,7 +19,11 @@ export const serverProcessRuntime = (input: {
     ? { executable: input.packagedEntrypoint, arguments: [serverProcessRole] }
     : { executable: input.executable, arguments: [input.sourceEntrypoint, serverProcessRole] }
 
-export const isServerProcessLaunch = Config.option(Config.string("RIKA_INTERNAL_SERVER_HOST")).pipe(
-  Effect.map((value) => Option.contains(value, "1")),
-  Effect.orDie,
-)
+const isInternalProcessLaunch = (environmentVariable: string) =>
+  Config.option(Config.string(environmentVariable)).pipe(
+    Effect.map((value) => Option.contains(value, "1")),
+    Effect.orDie,
+  )
+
+export const isServerProcessLaunch = isInternalProcessLaunch("RIKA_INTERNAL_SERVER_HOST")
+export const isTuiControllerProcessLaunch = isInternalProcessLaunch("RIKA_INTERNAL_CLIENT_RUNTIME")

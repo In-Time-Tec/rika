@@ -6,7 +6,6 @@ export const packageEntries = (root: string) =>
     { name: `${root}/INSTALL`, type: "-", executable: false },
     { name: `${root}/bin/`, type: "d", executable: true },
     { name: `${root}/bin/rika`, type: "-", executable: true },
-    { name: `${root}/bin/.rika-interactive`, type: "-", executable: true },
   ] as const
 
 export const validatePackageArchive: {

@@ -153,7 +153,6 @@ const program = Effect.gen(function* () {
             yield* assertInstalledDependencies()
             const { identity } = yield* buildIdentity()
             yield* checkedBuild("client-main.ts", path.join(bin, "rika"), target, identity)
-            yield* checkedBuild("interactive-main.ts", path.join(bin, ".rika-interactive"), target, identity)
             yield* fileSystem.writeFileString(path.join(stage, "INSTALL"), "Install bin/rika on PATH.\n")
             const exitCode = yield* spawner.exitCode(
               ChildProcess.make(

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 import { matchesRole, roleRuntimes } from "../src/platform/performance-platform"
-import { serverProcessRole } from "../src/private-runtime-role"
+import { localExecutorProcessRole, serverProcessRole, tuiControllerProcessRole } from "../src/private-runtime-role"
 
 describe("performance role runtime resolution", () => {
   test("locates source role entrypoints from the performance source directory", () => {
@@ -27,7 +27,11 @@ describe("performance role runtime resolution", () => {
       executable: "/install/bin/.rika-performance",
       sourceDirectory: "/install/bin",
     })
-    expect(runtimes.interactive.executable).toBe("/install/bin/.rika-interactive")
+    expect(runtimes.interactive).toEqual({
+      executable: "/install/bin/rika",
+      arguments: [tuiControllerProcessRole],
+      evidencePath: "/install/bin/rika",
+    })
     expect(runtimes.server).toEqual({
       executable: "/install/bin/rika",
       arguments: [serverProcessRole],
@@ -43,7 +47,16 @@ describe("performance role runtime resolution", () => {
       sourceDirectory: "/install/bin",
     })
     expect(matchesRole({ command: "/install/bin/rika", runtime: runtimes.launcher })).toBe(true)
+    expect(matchesRole({ command: `/install/bin/rika ${tuiControllerProcessRole}`, runtime: runtimes.launcher })).toBe(
+      false,
+    )
+    expect(
+      matchesRole({ command: `/install/bin/rika ${tuiControllerProcessRole}`, runtime: runtimes.interactive }),
+    ).toBe(true)
     expect(matchesRole({ command: `/install/bin/rika ${serverProcessRole}`, runtime: runtimes.launcher })).toBe(false)
+    expect(matchesRole({ command: `/install/bin/rika ${localExecutorProcessRole}`, runtime: runtimes.launcher })).toBe(
+      false,
+    )
     expect(matchesRole({ command: `/install/bin/rika ${serverProcessRole}`, runtime: runtimes.server })).toBe(true)
     expect(matchesRole({ command: "/install/bin/rika", runtime: runtimes.server })).toBe(false)
   })

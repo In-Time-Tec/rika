@@ -12,14 +12,8 @@ const headers = entries
   .join("\n")
 
 describe("package archive contract", () => {
-  test("accepts the launcher and interactive runtime", () => {
-    expect(entries.map(({ name }) => name)).toEqual([
-      `${root}/`,
-      `${root}/INSTALL`,
-      `${root}/bin/`,
-      `${root}/bin/rika`,
-      `${root}/bin/.rika-interactive`,
-    ])
+  test("accepts one public executable", () => {
+    expect(entries.map(({ name }) => name)).toEqual([`${root}/`, `${root}/INSTALL`, `${root}/bin/`, `${root}/bin/rika`])
     expect(() => validatePackageArchive(root, names, headers)).not.toThrow()
   })
 

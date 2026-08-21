@@ -10,7 +10,6 @@ export const releaseTargets = ["darwin-arm64", "linux-arm64", "linux-x64"] as co
 export interface InstallLayout {
   readonly installRoot: string
   readonly binary: string
-  readonly interactive: string
 }
 
 const platformFailure = (operation: string) => (error: PlatformError.PlatformError) => {
@@ -55,15 +54,14 @@ export const installLayout = Effect.fn("ReleaseInstall.layout")(function* (execu
   const layout: InstallLayout = {
     installRoot,
     binary: path.join(installRoot, "bin", "rika"),
-    interactive: path.join(installRoot, "bin", ".rika-interactive"),
   }
-  const present = yield* Effect.all([fileSystem.exists(layout.binary), fileSystem.exists(layout.interactive)], {
-    concurrency: 2,
-  }).pipe(Effect.mapError(platformFailure("inspect the current install")))
-  if (present.includes(false))
+  const present = yield* fileSystem
+    .exists(layout.binary)
+    .pipe(Effect.mapError(platformFailure("inspect the current install")))
+  if (!present)
     return yield* failWith(
       "unmanaged-install",
-      `${installRoot} does not contain the released Rika executables, so it is not a released install. Install a release with: curl -fsSL https://raw.githubusercontent.com/${releaseRepository}/main/install.sh | sh`,
+      `${installRoot} does not contain the released Rika executable, so it is not a released install. Install a release with: curl -fsSL https://raw.githubusercontent.com/${releaseRepository}/main/install.sh | sh`,
     )
   return layout
 })
@@ -94,17 +92,13 @@ export const publishInstall = Effect.fn("ReleaseInstall.publish")(function* (opt
   if (Number(exitCode) !== 0)
     return yield* failWith("install-failed", `Cannot extract ${options.archiveFile}: tar exited with ${exitCode}.`)
   const payload = path.join(staging, options.archiveRoot)
-  const payloadPresent = yield* Effect.all(
-    [
-      fileSystem.exists(path.join(payload, "bin", "rika")),
-      fileSystem.exists(path.join(payload, "bin", ".rika-interactive")),
-    ],
-    { concurrency: 2 },
-  ).pipe(Effect.mapError(platformFailure(`inspect ${options.archiveFile}`)))
-  if (payloadPresent.includes(false))
+  const payloadPresent = yield* fileSystem
+    .exists(path.join(payload, "bin", "rika"))
+    .pipe(Effect.mapError(platformFailure(`inspect ${options.archiveFile}`)))
+  if (!payloadPresent)
     return yield* failWith(
       "install-failed",
-      `${options.archiveFile} does not contain the released Rika executables; the install was left unchanged.`,
+      `${options.archiveFile} does not contain the released Rika executable; the install was left unchanged.`,
     )
   const previous = path.join(parent, `${path.basename(options.layout.installRoot)}.previous-${process.pid}`)
   const installExists = yield* fileSystem

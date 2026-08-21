@@ -30,8 +30,6 @@ const makeArchive = async (directory: string, marker: string) => {
   await writeFile(join(payload, "INSTALL"), "install fixture\n")
   await writeFile(join(payload, "bin", "rika"), marker)
   await chmod(join(payload, "bin", "rika"), 0o755)
-  await writeFile(join(payload, "bin", ".rika-interactive"), `interactive ${marker}`)
-  await chmod(join(payload, "bin", ".rika-interactive"), 0o755)
   const child = Bun.spawn(["tar", "-czf", archive, `rika-${version}-${target}`], { cwd: directory })
   expect(await child.exited).toBe(0)
 }
@@ -55,16 +53,15 @@ test("installs, upgrades, and uninstalls the packaged runtimes without deleting 
     await run("scripts/installation/install-local.ts", environment)
     expect(await readlink(join(binDir, "rika-dev"))).toBe(join(installRoot, "bin", "rika"))
     expect(await readFile(join(installRoot, "bin", "rika"), "utf8")).toBe("first")
-    expect(await readFile(join(installRoot, "bin", ".rika-interactive"), "utf8")).toBe("interactive first")
-    expect((await readdir(join(installRoot, "bin"))).toSorted()).toEqual([".rika-interactive", "rika"])
+    expect(await readdir(join(installRoot, "bin"))).toEqual(["rika"])
 
+    await writeFile(join(installRoot, "bin", ".rika-interactive"), "stale")
     await writeFile(join(installRoot, "bin", ".rika-performance"), "stale")
     await writeFile(join(installRoot, "bin", ".rika-kernel-runtime"), "stale")
     await makeArchive(home, "second")
     await run("scripts/installation/install-local.ts", environment)
     expect(await readFile(join(installRoot, "bin", "rika"), "utf8")).toBe("second")
-    expect(await readFile(join(installRoot, "bin", ".rika-interactive"), "utf8")).toBe("interactive second")
-    expect((await readdir(join(installRoot, "bin"))).toSorted()).toEqual([".rika-interactive", "rika"])
+    expect(await readdir(join(installRoot, "bin"))).toEqual(["rika"])
     expect(await readFile(state, "utf8")).toBe("preserve")
 
     await run("scripts/installation/uninstall-local.ts", environment)

@@ -1,4 +1,9 @@
-import { serverProcessRole, serverProcessRuntime } from "../private-runtime-role"
+import {
+  localExecutorProcessRole,
+  serverProcessRole,
+  serverProcessRuntime,
+  tuiControllerProcessRole,
+} from "../private-runtime-role"
 
 export type PerformanceRole = "launcher" | "interactive" | "server"
 
@@ -48,7 +53,7 @@ export const roleRuntimes = (input: {
       evidencePath: input.packaged ? sibling("rika") : source("client"),
     },
     interactive: input.packaged
-      ? { executable: sibling(".rika-interactive"), arguments: [], evidencePath: sibling(".rika-interactive") }
+      ? { executable: sibling("rika"), arguments: [tuiControllerProcessRole], evidencePath: sibling("rika") }
       : { executable: input.executable, arguments: [source("interactive")], evidencePath: source("interactive") },
     server: { ...server, evidencePath: input.packaged ? sibling("rika") : source("client") },
   }
@@ -60,10 +65,18 @@ const executableName = (command: string) => {
 }
 
 const containsServerRole = (command: string) => command.trim().split(/\s+/).includes(serverProcessRole)
+const containsTuiControllerRole = (command: string) => command.trim().split(/\s+/).includes(tuiControllerProcessRole)
+const containsLocalExecutorRole = (command: string) => command.trim().split(/\s+/).includes(localExecutorProcessRole)
 
 export const matchesRole = (input: { readonly command: string; readonly runtime: RoleRuntime }): boolean => {
   if (input.runtime.arguments.includes(serverProcessRole)) return containsServerRole(input.command)
-  if (containsServerRole(input.command)) return false
+  if (input.runtime.arguments.includes(tuiControllerProcessRole)) return containsTuiControllerRole(input.command)
+  if (
+    containsServerRole(input.command) ||
+    containsTuiControllerRole(input.command) ||
+    containsLocalExecutorRole(input.command)
+  )
+    return false
   return input.runtime.evidencePath === input.runtime.executable
     ? executableName(input.command) === executableName(input.runtime.executable)
     : input.command.includes(input.runtime.evidencePath)

@@ -2,6 +2,7 @@ import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Data, Effect, FileSystem, Layer, Path, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { localExecutorProcessRole, tuiControllerProcessRole } from "../../apps/rika/src/private-runtime-role"
 import { validatePackageArchive } from "../packaging/archive-contract"
 
 class ReleaseSmokeError extends Data.TaggedError("ReleaseSmokeError")<{
@@ -52,7 +53,7 @@ const program = Effect.scoped(
       .pipe(mapFailure("extract archive"))
     if (Number(extracted) !== 0) return yield* failure("extract archive", `tar exited with code ${extracted}`)
     const binary = path.join(temporary, archiveRoot, "bin", "rika")
-    const runPublic = (arguments_: ReadonlyArray<string>) =>
+    const runBinary = (arguments_: ReadonlyArray<string>, environment: Readonly<Record<string, string>> = {}) =>
       Effect.scoped(
         Effect.gen(function* () {
           const step = `run rika ${arguments_.join(" ")}`
@@ -61,7 +62,7 @@ const program = Effect.scoped(
               ChildProcess.make(binary, arguments_, {
                 cwd: temporary,
                 extendEnv: false,
-                env: { PATH: "/usr/bin:/bin", HOME: temporary, TERM: "dumb" },
+                env: { PATH: "/usr/bin:/bin", HOME: temporary, TERM: "dumb", ...environment },
                 stdin: "ignore",
                 stdout: "pipe",
                 stderr: "pipe",
@@ -81,12 +82,21 @@ const program = Effect.scoped(
           return stdout
         }),
       )
-    const versionOutput = yield* runPublic(["--version"])
+    const versionOutput = yield* runBinary(["--version"])
     if (!versionOutput.includes(version))
       return yield* failure("version", `Expected ${version}, received: ${versionOutput}`)
-    const helpOutput = yield* runPublic(["--help"])
+    const helpOutput = yield* runBinary(["--help"])
     if (/relay/i.test(helpOutput) || !/rika/i.test(helpOutput))
       return yield* failure("help", `Unexpected public help output: ${helpOutput.slice(0, 2_000)}`)
+    if (helpOutput.includes(tuiControllerProcessRole) || helpOutput.includes(localExecutorProcessRole))
+      return yield* failure("help", "Internal process roles are exposed in public help")
+    yield* runBinary([localExecutorProcessRole, "--help"], { RIKA_INTERNAL_LOCAL_EXECUTOR: "1" })
+    const interactiveProbe = yield* runBinary([tuiControllerProcessRole], {
+      RIKA_INTERNAL_CLIENT_RUNTIME: "1",
+      RIKA_INTERNAL_OPENTUI_NATIVE_PROBE: "1",
+    })
+    if (!interactiveProbe.includes("RIKA_OPENTUI_NATIVE_OK"))
+      return yield* failure("interactive runtime", "The packaged executable does not contain the OpenTUI runtime")
     yield* Effect.log(`Release smoke passed for ${target}: one public executable, no hidden runtime artifacts`)
   }),
 )

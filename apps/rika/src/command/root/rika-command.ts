@@ -18,6 +18,7 @@ import { executeRun, runCommand } from "./noninteractive-run-command"
 import * as LocalRunnerCommand from "./local-runner-command"
 import * as ReleaseUpdate from "../../release/release-update"
 import { version } from "../../platform/application-version"
+import { localExecutorProcessRole, tuiControllerProcessRole } from "../../private-runtime-role"
 
 export { version }
 
@@ -86,6 +87,8 @@ export const command = Command.make(
     noTui: Flag.boolean("no-tui"),
     allowRemoteThreadCreation: Flag.boolean("allow-remote-thread-creation"),
     denyRemoteThreadCreation: Flag.boolean("deny-remote-thread-creation"),
+    internalTuiController: Flag.boolean(tuiControllerProcessRole.slice(2)).pipe(Flag.withHidden),
+    internalLocalExecutor: Flag.boolean(localExecutorProcessRole.slice(2)).pipe(Flag.withHidden),
     ...streamFlags,
     prompt,
   },
@@ -123,7 +126,7 @@ export const command = Command.make(
     return interactiveCommand(values)
   },
 ).pipe(
-  Command.withDescription("Local durable coding agent"),
+  Command.withDescription("Hosted durable coding agent"),
   Command.withSubcommands([
     runCommand,
     reviewCommand,

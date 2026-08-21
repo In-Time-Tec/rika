@@ -2,7 +2,8 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Context, Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { isServerProcessLaunch } from "./private-runtime-role"
+import { isServerProcessLaunch, isTuiControllerProcessLaunch } from "./private-runtime-role"
+import { start as startInteractive } from "./interactive/process/process-start"
 import { start as startServer } from "./server/process/server-process-launch"
 
 const provideLayerScoped =
@@ -40,5 +41,6 @@ const startClient = () => {
 
 if (import.meta.main) {
   if (Effect.runSync(isServerProcessLaunch)) startServer()
+  else if (Effect.runSync(isTuiControllerProcessLaunch)) startInteractive()
   else startClient()
 }

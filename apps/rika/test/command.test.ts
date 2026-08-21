@@ -13,6 +13,7 @@ import { parseJsonLines, readStreamInput } from "../src/command/root/noninteract
 import { run } from "../src/command/root/rika-command"
 import * as HostedCommand from "../src/command/root/hosted-command-dispatch"
 import * as LocalRunnerCommand from "../src/command/root/local-runner-command"
+import { localExecutorProcessRole, tuiControllerProcessRole } from "../src/private-runtime-role"
 
 const workspace = process.cwd()
 type Input = ProductInput | HostedCommand.Input | LocalRunnerCommand.Input
@@ -147,8 +148,10 @@ it.effect("renders help without dispatching an operation", () =>
       }),
       layer,
     )
-    expect(output.join("\n")).toContain("Local durable coding agent")
+    expect(output.join("\n")).toContain("Hosted durable coding agent")
     expect(output.join("\n")).toContain("diagnostics")
+    expect(output.join("\n")).not.toContain(tuiControllerProcessRole)
+    expect(output.join("\n")).not.toContain(localExecutorProcessRole)
     yield* execute(run(["diagnostics", "--help"]), layer)
     expect((yield* TestConsole.logLines).join("\n")).toContain("performance")
     expect(yield* Ref.get(calls)).toEqual([])
@@ -293,6 +296,8 @@ it.effect("routes headless runner mode and keeps remote Thread creation opt in",
 
 it.effect("dispatches interactive and execute inputs", () =>
   Effect.gen(function* () {
+    expect(yield* capture([tuiControllerProcessRole])).toEqual([{ _tag: "Interactive", prompt: [], ephemeral: false }])
+    expect(yield* capture([localExecutorProcessRole, "--no-tui", "--workspace", "."])).toEqual([{ workspace }])
     expect(yield* capture(["hello", "world", "--mode", "high", "--ephemeral"])).toEqual([
       { _tag: "Interactive", prompt: ["hello", "world"], mode: "high", ephemeral: true },
     ])
