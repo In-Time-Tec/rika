@@ -29,6 +29,22 @@ test(
         yield* app.setConnectionStatus("connected")
         yield* app.waitGone("Reconnecting")
         yield* app.waitFrame("WORK_CONTINUED")
+
+        for (const [status, label] of [
+          ["personal-owner", "Owner: Personal"],
+          ["local-placement", "Placement: this local checkout"],
+          ["executor-waiting", "Waiting for the selected executor; placement will not change"],
+          ["workspace-setup", "Setting up Workspace"],
+          ["workspace-resuming", "Resuming Workspace"],
+          ["lease-active", "Executor lease active"],
+          ["retrying", "Retry available"],
+          ["approval-required", "Approval required"],
+          ["unknown-operation", "Operation outcome unknown"],
+          ["terminal", "Thread terminal"],
+        ] as const) {
+          yield* app.setConnectionStatus(status)
+          yield* app.waitFrame(label)
+        }
         yield* app.quit
       }),
     ),

@@ -7,7 +7,9 @@ export interface RuntimeLaunch {
   readonly replaceProcess: boolean
 }
 
-export const privateRuntime = Effect.fn("ClientProcess.privateRuntime")(function* (role: "interactive" | "server") {
+export const privateRuntime = Effect.fn("ClientProcess.privateRuntime")(function* (
+  role: "client" | "interactive" | "server",
+) {
   const path = yield* Path.Path
   const testExecutable = yield* Config.option(Config.string("RIKA_TEST_RUNTIME_EXECUTABLE"))
   if (Option.isSome(testExecutable))
@@ -21,6 +23,14 @@ export const privateRuntime = Effect.fn("ClientProcess.privateRuntime")(function
     })
     return { executable: runtime.executable, prefixArguments: runtime.arguments, replaceProcess: false }
   }
+  if (role === "client")
+    return import.meta.path.startsWith("/$bunfs/")
+      ? { executable: process.execPath, prefixArguments: [], replaceProcess: false }
+      : {
+          executable: process.execPath,
+          prefixArguments: [path.join(import.meta.dir, "..", "client-main.ts")],
+          replaceProcess: false,
+        }
   return import.meta.path.startsWith("/$bunfs/")
     ? {
         executable: path.join(path.dirname(process.execPath), ".rika-interactive"),

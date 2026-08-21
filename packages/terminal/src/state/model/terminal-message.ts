@@ -30,7 +30,7 @@ type Message =
   | { readonly _tag: "ModeCommitted"; readonly selected?: number }
   | { readonly _tag: "ModeHovered"; readonly selected: number }
   | { readonly _tag: "ContextUsageReplaced"; readonly contextUsage: ContextUsage }
-  | { readonly _tag: "ConnectionStatusChanged"; readonly status?: "Connecting" | "Reconnecting" }
+  | { readonly _tag: "ConnectionStatusChanged"; readonly status?: string }
   | { readonly _tag: "GoalChanged"; readonly goal?: GoalIndicator }
   | { readonly _tag: "CompactionChanged"; readonly status: "running" | "complete" | "failed" | "cancelled" }
   | { readonly _tag: "AnimationTicked" }

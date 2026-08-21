@@ -105,17 +105,16 @@ const refresh = Effect.fn("HostedAccount.refresh")(function* (profile: Profile, 
   )
 })
 
-const authenticated = <A>(
+export const authenticated = Effect.fn("HostedAccount.authenticated")(function* <A>(
   profile: Profile,
   request: (session: Session) => Effect.Effect<A, HostedError>,
-): Effect.Effect<A, HostedError, Http | CredentialStore> =>
-  Effect.gen(function* () {
-    const store = yield* CredentialStore
-    const current = yield* store.load(profile.origin, profile.deviceId)
-    if (Option.isNone(current)) return yield* failure("login-required", "Run rika auth login first")
-    const session = yield* refresh(profile, current.value)
-    return yield* request(session)
-  })
+) {
+  const store = yield* CredentialStore
+  const current = yield* store.load(profile.origin, profile.deviceId)
+  if (Option.isNone(current)) return yield* failure("login-required", "Run rika auth login first")
+  const session = yield* refresh(profile, current.value)
+  return yield* request(session)
+})
 
 const json = (value: unknown) =>
   Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(value).pipe(

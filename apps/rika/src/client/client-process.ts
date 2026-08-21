@@ -5,7 +5,7 @@ import * as ServerHandshake from "@rika/product/server-service-handshake"
 import * as ServerService from "@rika/product/server-service"
 import { Config, Console, Context, Crypto, Effect, FileSystem, Layer, Option, Path, Schema, Stdio } from "effect"
 import { HttpClient } from "effect/unstable/http"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import { Command } from "effect/unstable/cli"
 import { command, version } from "../command/root/rika-command"
 import * as Logging from "../diagnostics/diagnostic-file-logging"
@@ -13,11 +13,12 @@ import { layer as serverLayer } from "../transport/client/server-client-transpor
 import { spawn as spawnServer } from "../server/process/server-process-spawn"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
 import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
-import { inheritedEnvironment, privateRuntime } from "./private-runtime-launch"
+import { privateRuntime } from "./private-runtime-launch"
 import * as HostedCommand from "../command/root/hosted-command-dispatch"
 import * as LocalRunnerCommand from "../command/root/local-runner-command"
 import * as LocalRunner from "../local-executor/local-runner"
-import * as HostedProfileStore from "../hosted/hosted-profile-store"
+import * as HostedCli from "../hosted/hosted-cli"
+import { processRoleLaunch, superviseLocalRoles } from "./local-role-supervisor"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -81,7 +82,6 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
     Operation.Service,
     Effect.gen(function* () {
       const server = yield* ServerService.Service
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const stdio = yield* Stdio.Stdio
       const platform = yield* Effect.context<
         Crypto.Crypto | FileSystem.FileSystem | Path.Path | Stdio.Stdio | ChildProcessSpawner.ChildProcessSpawner
@@ -100,41 +100,30 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
             return yield* Effect.scoped(
               Effect.gen(function* () {
                 if (input._tag === "Interactive") {
-                  const runtime = yield* privateRuntime("interactive")
-                  if (runtime.replaceProcess) {
-                    const environment: Record<string, string> = {
-                      ...inheritedEnvironment(),
-                      RIKA_INTERNAL_CLIENT_RUNTIME: "1",
-                    }
-                    const execve = process.execve
-                    if (execve === undefined)
-                      return yield* ProductOperation.OperationUnavailable.make({
-                        operation: "Interactive",
-                        message: "This platform cannot start the packaged interactive runtime.",
-                      })
-                    execve(runtime.executable, [runtime.executable, ...forwardedArguments], environment)
-                  }
-                  const handle = yield* spawner.spawn(
-                    ChildProcess.make(runtime.executable, [...runtime.prefixArguments, ...forwardedArguments], {
-                      detached: false,
-                      stdin: "inherit",
-                      stdout: "inherit",
-                      stderr: "inherit",
-                      extendEnv: true,
-                      env: { RIKA_INTERNAL_CLIENT_RUNTIME: "1" },
-                    }),
-                  )
-                  const forwardHangup = () => {
-                    try {
-                      process.kill(Number(handle.pid), "SIGHUP")
-                    } catch {}
-                  }
-                  process.on("SIGHUP", forwardHangup)
-                  const exitCode = Number(
-                    yield* handle.exitCode.pipe(
-                      Effect.ensuring(Effect.sync(() => process.off("SIGHUP", forwardHangup))),
-                    ),
-                  )
+                  const controller = yield* privateRuntime("interactive")
+                  const executor = yield* privateRuntime("client")
+                  const workspace = input.workspace ?? process.cwd()
+                  const launch = yield* processRoleLaunch({
+                    "tui-controller": {
+                      executable: controller.executable,
+                      arguments: [...controller.prefixArguments, ...forwardedArguments],
+                      environment: { RIKA_INTERNAL_CLIENT_RUNTIME: "1" },
+                    },
+                    "local-executor": {
+                      executable: executor.executable,
+                      arguments: [...executor.prefixArguments, "--no-tui", "--workspace", workspace],
+                      environment: { RIKA_INTERNAL_LOCAL_EXECUTOR: "1" },
+                    },
+                  })
+                  const exitCode = yield* superviseLocalRoles({
+                    headless: false,
+                    launch,
+                    status: {
+                      localExecutorWaiting: Console.error(
+                        "Local executor disconnected. The hosted Thread is waiting for this checkout; no E2B fallback was selected.",
+                      ),
+                    },
+                  })
                   if (cleanInteractiveRuntimeExit(exitCode)) return
                   return yield* ProductOperation.OperationUnavailable.make({
                     operation: "Interactive",
@@ -209,24 +198,25 @@ const localRunnerCommandLayer = Layer.effect(
   LocalRunnerCommand.Service,
   Effect.gen(function* () {
     const platform = yield* Effect.context<
-      Crypto.Crypto | FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
+      | Crypto.Crypto
+      | FileSystem.FileSystem
+      | Path.Path
+      | ChildProcessSpawner.ChildProcessSpawner
+      | HttpClient.HttpClient
     >()
     return LocalRunnerCommand.Service.of({
       run: (input) =>
         Effect.gen(function* () {
           const home = yield* Config.string("HOME").pipe(Config.withDefault(process.cwd()))
           const preferencePath = yield* LocalRunner.preferencePath
+          const hosted = HostedCli.liveLayer(home)
           return yield* LocalRunner.runLocalRunner({
             workspace: input.workspace ?? process.cwd(),
             preferencePath,
-            ...(input.remoteThreadCreation === undefined
-              ? {}
-              : { requestedPreference: input.remoteThreadCreation }),
+            ...(input.remoteThreadCreation === undefined ? {} : { requestedPreference: input.remoteThreadCreation }),
           }).pipe(
             Effect.scoped,
-            provideLayerScoped(
-              Layer.merge(HostedProfileStore.layer({ home }), LocalRunner.unavailableAdmissionLayer),
-            ),
+            provideLayerScoped(Layer.merge(hosted, LocalRunner.liveAdmissionLayer.pipe(Layer.provide(hosted)))),
           )
         }).pipe(
           Effect.provide(platform),
@@ -256,7 +246,11 @@ export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<s
   )
   return yield* program.pipe(
     provideLayerScoped(
-      Layer.mergeAll(dispatcherLayer(argv).pipe(Layer.provide(serverLayer)), hostedCommandLayer, localRunnerCommandLayer),
+      Layer.mergeAll(
+        dispatcherLayer(argv).pipe(Layer.provide(serverLayer)),
+        hostedCommandLayer,
+        localRunnerCommandLayer,
+      ),
     ),
   )
 })

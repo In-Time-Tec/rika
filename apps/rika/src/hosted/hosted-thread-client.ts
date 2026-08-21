@@ -30,7 +30,7 @@ const rejection = (payload: Extract<ServerFrameValue["payload"], { readonly _tag
   return failure(kind, payload.message)
 }
 
-const connect = Effect.fn("HostedThreadClient.connect")(function* (ticket: ClientTicketResponse) {
+export const connect = Effect.fn("HostedThreadClient.connect")(function* (ticket: ClientTicketResponse) {
   const socket = yield* Socket.makeWebSocket(ticket.websocketUrl, {
     protocols: [ticket.protocol, `rika.ticket.${ticket.ticket}`],
     openTimeout: "30 seconds",

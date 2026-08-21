@@ -7,7 +7,7 @@ import * as InteractiveFeed from "@rika/product/server-interactive-feed"
 import type * as ServerInteractiveConnection from "@rika/product/server-interactive-connection"
 import * as Turn from "@rika/product/turn-record"
 import { create as createTui } from "@rika/terminal/opentui-surface"
-import { Model, initial, withModeConfiguration, type ModeConfiguration } from "@rika/terminal/terminal-state"
+import { initial, withModeConfiguration, type ModeConfiguration } from "@rika/terminal/terminal-state"
 import { update } from "@rika/terminal/terminal-state-reducer"
 import type { ThreadItem } from "@rika/terminal/terminal-state"
 import { Crypto, Deferred, Effect, Exit, Fiber, FiberHandle, FiberSet, Scope, Stream, SubscriptionRef } from "effect"
@@ -25,6 +25,35 @@ export interface InteractiveTuiOptions {
   readonly rememberMode?: ((mode: string) => Effect.Effect<void, never, BunServices.BunServices>) | undefined
   readonly makeRenderer?: NonNullable<Parameters<typeof createTui>[0]["makeRenderer"]>
   readonly writeTerminalTitle?: (sequence: string) => void
+}
+
+const connectionLabel = (status: ServerInteractiveConnection.Status): string | undefined => {
+  if (status === "connected") return undefined
+  if (status === "connecting") return "Connecting to hosted Rika"
+  if (status === "reconnecting") return "Reconnecting to hosted Rika"
+  const labels: Record<
+    Exclude<ServerInteractiveConnection.Status, "connected" | "connecting" | "reconnecting">,
+    string
+  > = {
+    authenticating: "Authenticating with hosted Rika",
+    "personal-owner": "Owner: Personal",
+    "organization-owner": "Owner: Organization",
+    "local-placement": "Placement: this local checkout",
+    "e2b-placement": "Placement: E2B",
+    "executor-waiting": "Waiting for the selected executor; placement will not change",
+    "executor-connecting": "Connecting the selected executor",
+    "executor-connected": "Selected executor connected",
+    "workspace-preparing": "Preparing Workspace",
+    "workspace-setup": "Setting up Workspace",
+    "workspace-resuming": "Resuming Workspace",
+    "lease-active": "Executor lease active",
+    retrying: "Retry available",
+    "approval-required": "Approval required",
+    "unknown-operation": "Operation outcome unknown",
+    terminal: "Thread terminal",
+    presence: "Another controller is attached",
+  }
+  return labels[status]
 }
 
 export const interactiveTui =
@@ -58,9 +87,7 @@ export const interactiveTui =
           : undefined
       return yield* Effect.callback<void, ProductOperation.OperationUnavailable>((resume) => {
         let renderPending = false
-        let initialConnectionStatus: Model["connectionStatus"]
-        if (connection.initialStatus === "connecting") initialConnectionStatus = "Connecting"
-        else if (connection.initialStatus === "reconnecting") initialConnectionStatus = "Reconnecting"
+        const initialConnectionStatus = connectionLabel(connection.initialStatus)
         const loop: InteractiveLoop = {
           model: {
             ...initial(
@@ -172,9 +199,7 @@ export const interactiveTui =
           connection.statusChanges.pipe(
             Stream.runForEach((status) =>
               Effect.sync(() => {
-                let connectionStatus: Model["connectionStatus"]
-                if (status === "connecting") connectionStatus = "Connecting"
-                else if (status === "reconnecting") connectionStatus = "Reconnecting"
+                const connectionStatus = connectionLabel(status)
                 loop.model = update(loop.model, {
                   _tag: "ConnectionStatusChanged",
                   ...(connectionStatus === undefined ? {} : { status: connectionStatus }),

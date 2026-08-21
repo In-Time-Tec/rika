@@ -1,22 +1,22 @@
 #!/usr/bin/env bun
-import * as ProductOperation from "@rika/product/product-operation"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
+import * as BunSocket from "@effect/platform-bun/BunSocket"
+import * as Operation from "@rika/product/product-operation-service"
+import * as ProductOperation from "@rika/product/product-operation"
 import { probeNativeAsset } from "@rika/terminal/opentui-surface"
-import type { ModeConfiguration } from "@rika/terminal/terminal-state"
-import { FetchHttpClient } from "effect/unstable/http"
-import { Config, Console, Context, Effect, Layer, Option, Path } from "effect"
+import { Config, Console, Effect, Layer, Option } from "effect"
 import { Command } from "effect/unstable/cli"
+import { FetchHttpClient } from "effect/unstable/http"
+import * as Socket from "effect/unstable/socket/Socket"
 import { command, version } from "../../command/root/rika-command"
-import { interactiveTui } from "./interactive-process-loop"
-import { layer as serverLayer } from "../../transport/client/server-client-transport"
-import { globalPaths, workspacePaths } from "@rika/configuration/configuration-paths"
+import { runHostedInteractive } from "../../hosted/hosted-interactive-controller"
+import { CredentialStore, Http, ProfileStore, ThreadClient } from "../../hosted/hosted-contract"
+import * as HostedCli from "../../hosted/hosted-cli"
+import { LocalRunnerAdmission } from "../../local-executor/local-runner-contract"
+import * as LocalRunner from "../../local-executor/local-runner"
 import { provideLayerScoped } from "./process-layer"
-import { makeDispatcherLayer } from "./process-startup-dispatcher"
-import { saveModePreference } from "./mode-preference"
-import { serverProcessRuntime } from "../../private-runtime-role"
 
 const main = Command.run(command, { version }).pipe(
   Effect.catchTags({
@@ -27,11 +27,32 @@ const main = Command.run(command, { version }).pipe(
   }),
 )
 
-const startupPathService = Effect.runSync(Effect.scoped(Layer.build(Path.layer))).pipe((context) =>
-  Context.get(context, Path.Path),
-)
-const dirname = startupPathService.dirname
-const join = startupPathService.join
+const dispatcherLayer = (editor: string | undefined) =>
+  Layer.effect(
+    Operation.Service,
+    Effect.gen(function* () {
+      const context = yield* Effect.context<
+        | BunServices.BunServices
+        | CredentialStore
+        | Http
+        | LocalRunnerAdmission
+        | ProfileStore
+        | Socket.WebSocketConstructor
+        | ThreadClient
+      >()
+      return Operation.Service.of({
+        run: (input) =>
+          input._tag === "Interactive"
+            ? Effect.scoped(runHostedInteractive(input, { editor })).pipe(Effect.provideContext(context))
+            : Effect.fail(
+                ProductOperation.OperationUnavailable.make({
+                  operation: input._tag,
+                  message: "The hosted TUI controller accepts only interactive operations",
+                }),
+              ),
+      })
+    }),
+  )
 
 export const start = () => {
   const nativeProbe = Effect.runSync(Config.option(Config.string("RIKA_INTERNAL_OPENTUI_NATIVE_PROBE")))
@@ -41,71 +62,22 @@ export const start = () => {
   }
   const environment = Effect.runSync(
     Config.all({
-      hostDataRoot: Config.option(Config.string("RIKA_INTERNAL_SERVER_DATA_ROOT")),
       home: Config.option(Config.string("HOME")),
-      database: Config.option(Config.string("RIKA_DATABASE")),
       visual: Config.option(Config.string("VISUAL")),
       editor: Config.option(Config.string("EDITOR")),
-      testModelResponse: Config.option(Config.string("RIKA_TEST_MODEL_RESPONSE")),
-      testModelScript: Config.option(Config.string("RIKA_TEST_MODEL_SCRIPT")),
-      testMediaAnalyzerResponse: Config.option(Config.string("RIKA_TEST_MEDIA_ANALYZER_RESPONSE")),
-      testMediaAnalyzerError: Config.option(Config.string("RIKA_TEST_MEDIA_ANALYZER_ERROR")),
-      serverProfile: Config.option(Config.string("RIKA_INTERNAL_SERVER_PROFILE")),
-      serverGrace: Config.option(Config.string("RIKA_INTERNAL_SERVER_GRACE")),
-      recoveryAbandon: Config.option(Config.string("RIKA_INTERNAL_RECOVERY_ABANDON")),
-      serverStartupHold: Config.option(Config.string("RIKA_INTERNAL_SERVER_STARTUP_HOLD")),
-      serverHost: Config.option(Config.string("RIKA_INTERNAL_SERVER_HOST")),
     }),
   )
-  const hostDataRoot = environment.hostDataRoot._tag === "Some" ? environment.hostDataRoot.value : undefined
-  const home = environment.home._tag === "Some" ? environment.home.value : process.cwd()
-  const paths = resolveProfileDataPaths({
-    home,
-    hostDataRoot,
-    productDatabase: environment.database._tag === "Some" ? environment.database.value : undefined,
-  })
-  const database = paths.database
-  const globalLayout = globalPaths(home)
-  const workspaceLayout = workspacePaths(process.cwd())
-  const globalConfig = globalLayout.settings
-  const workspaceConfig = workspaceLayout.settings
-  let editor: string | undefined
-  if (environment.visual._tag === "Some") editor = environment.visual.value
-  else if (environment.editor._tag === "Some") editor = environment.editor.value
-  const serverRuntime = serverProcessRuntime({
-    packaged: import.meta.path.startsWith("/$bunfs/"),
-    executable: process.execPath,
-    packagedEntrypoint: join(dirname(process.execPath), "rika"),
-    sourceEntrypoint: join(import.meta.dir, "..", "..", "client-main.ts"),
-  })
-  let clientModeConfiguration: ModeConfiguration | undefined
-  const clientOwnedInteractiveFunction = interactiveTui({
-    editor,
-    modeConfiguration: () => clientModeConfiguration,
-    rememberMode: (mode) => saveModePreference(paths.dataRoot, mode).pipe(Effect.ignore),
-  })
-
-  const dispatcherLayer = makeDispatcherLayer({
-    database,
-    globalConfig,
-    workspaceConfig,
-    serverRuntime,
-    environment,
-    version,
-    clientOwnedInteractiveFunction,
-    setClientModeConfiguration: (configuration) => {
-      clientModeConfiguration = configuration
-    },
-  })
-  const clientProgram = main.pipe(
-    provideLayerScoped(
-      Layer.mergeAll(
-        BunServices.layer,
-        BunCrypto.layer,
-        FetchHttpClient.layer,
-        dispatcherLayer.pipe(Layer.provide(serverLayer)),
-      ),
-    ),
+  const home = Option.getOrElse(environment.home, () => process.cwd())
+  const editor = Option.getOrUndefined(environment.visual) ?? Option.getOrUndefined(environment.editor)
+  const platform = Layer.mergeAll(
+    BunServices.layer,
+    BunCrypto.layer,
+    FetchHttpClient.layer,
+    BunSocket.layerWebSocketConstructor,
   )
-  BunRuntime.runMain(clientProgram)
+  const hosted = HostedCli.liveLayer(home).pipe(Layer.provide(platform))
+  const admission = LocalRunner.liveAdmissionLayer.pipe(Layer.provide(hosted))
+  const dependencies = Layer.mergeAll(platform, hosted, admission)
+  const program = main.pipe(provideLayerScoped(dispatcherLayer(editor).pipe(Layer.provideMerge(dependencies))))
+  BunRuntime.runMain(program)
 }

@@ -144,7 +144,7 @@ export const Model = Schema.Struct({
   cancelPending: Schema.Boolean,
   busy: Schema.Boolean,
   activity: Schema.optional(Activity),
-  connectionStatus: Schema.optional(Schema.Literals(["Connecting", "Reconnecting"])),
+  connectionStatus: Schema.optional(Schema.String),
   contextUsage: Schema.optional(ContextUsage),
   goal: Schema.optional(GoalIndicator),
   contextAnimation: ContextAnimationSchema,
