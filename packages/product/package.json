@@ -30,6 +30,7 @@
     "./hosted-authorization": "./src/hosted/authorization.ts",
     "./hosted-model": "./src/hosted/model.ts",
     "./hosted-store": "./src/hosted/hosted-store.ts",
+    "./thread-protocol-store": "./src/hosted/thread-protocol-store.ts",
     "./client-protocol": "./src/hosted/protocol/client-protocol.ts",
     "./interactive-command": "./src/operation/interactive/command.ts",
     "./interactive-event": "./src/operation/interactive/event.ts",

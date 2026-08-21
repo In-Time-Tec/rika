@@ -65,4 +65,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "ce55d4ca510832e84ac77f80a245fdcd8b9818c932b7cd283d8c8eb442bdbc47",
     url: new URL("../../migrations/postgres/0012-executor-operation-lifecycle.sql", import.meta.url),
   },
+  {
+    id: "product/0013_thread_protocol",
+    checksum: "8030a7e690ce8ff46aba12667c820fa083482922f8785e09c86da86fb03ee948",
+    url: new URL("../../migrations/postgres/0013-thread-protocol.sql", import.meta.url),
+  },
 ]

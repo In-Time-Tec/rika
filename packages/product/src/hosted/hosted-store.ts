@@ -1,7 +1,6 @@
 import { Context, Effect, Schema } from "effect"
 import type { ExecutionRouteSnapshot } from "../execution/contract/execution-route-snapshot"
 import type { TurnId } from "../thread/model/turn-record"
-import type { ClientCommand } from "./protocol/client-protocol"
 import {
   type ActorAttribution,
   type AuditEvent,
@@ -52,6 +51,7 @@ import {
 export const StoreFailureReason = Schema.Literals([
   "not-found",
   "conflict",
+  "stale-version",
   "invalid-authority",
   "lease-unavailable",
   "stale-fence",
@@ -139,7 +139,16 @@ export interface AdmitCommandInput {
   readonly commandId: CommandId
   readonly idempotencyKey: IdempotencyKey
   readonly actor: ActorAttribution
-  readonly command: ClientCommand
+  readonly command:
+    | { readonly _tag: "SubmitPrompt"; readonly prompt: string; readonly mode?: string }
+    | { readonly _tag: "Steer"; readonly text: string }
+    | { readonly _tag: "Cancel" }
+    | {
+        readonly _tag: "TerminalInput"
+        readonly data: string
+        readonly writerLeaseId: LeaseId
+        readonly writerGeneration: FencingGeneration
+      }
   readonly admittedAt: Timestamp
 }
 

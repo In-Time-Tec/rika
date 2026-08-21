@@ -2,30 +2,23 @@ import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
 import {
   ActorAttribution,
-  AuditEventId,
   BetterAuthMemberId,
   BetterAuthUserId,
   ClientId,
-  CommitCursor,
   CommandId,
   CredentialReferenceMetadata,
   DeviceId,
-  EventId,
-  ExecutorAssignmentId,
-  ExecutorInstanceId,
-  FencingGeneration,
   HostedOwner,
   IdempotencyKey,
-  LeaseId,
   OrganizationId,
-  OwnerId,
   ProjectId,
-  Sequence,
+  RequestId,
+  ThreadEventCursor,
   ThreadId,
+  ThreadVersion,
   Timestamp,
-  WorkspaceId,
 } from "../../src/hosted/model"
-import { ClientRequest, ClientResponse } from "../../src/hosted/protocol/client-protocol"
+import { ClientMessage, ServerFrame, protocolVersion } from "../../src/hosted/protocol/client-protocol"
 
 const codec = <S extends Schema.Constraint>(schema: S) =>
   schema as unknown as Schema.Codec<unknown, unknown, never, never>
@@ -36,21 +29,18 @@ const roundTrip = (schema: Schema.Constraint, value: unknown) => {
 
 const userId = BetterAuthUserId.make("user")
 const organizationId = OrganizationId.make("organization")
-const ownerId = OwnerId.make("owner")
 const membershipId = BetterAuthMemberId.make("membership")
 const deviceId = DeviceId.make("device")
 const clientId = ClientId.make("client")
 const projectId = ProjectId.make("project")
-const workspaceId = WorkspaceId.make("workspace")
 const threadId = ThreadId.make("thread")
-const assignmentId = ExecutorAssignmentId.make("assignment")
-const executorInstanceId = ExecutorInstanceId.make("executor")
-const leaseId = LeaseId.make("lease")
-const generation = FencingGeneration.make("7")
-const sequence = Sequence.make("12")
-const commitCursor = CommitCursor.make("21")
+const requestId = RequestId.make("request")
+const commandId = CommandId.make("command")
+const idempotencyKey = IdempotencyKey.make("command-key")
+const expectedThreadVersion = ThreadVersion.make("3")
+const cursor = ThreadEventCursor.make("8")
 const now = Timestamp.make("2026-01-01T00:00:00.000Z")
-const expiresAt = Timestamp.make("2026-01-01T00:01:00.000Z")
+const checkpoint = { version: 4 as const, cursor: "projector-cursor", state: "{}" }
 const personalOwner = { _tag: "PersonalOwner" as const, userId }
 const organizationOwner = { _tag: "OrganizationOwner" as const, organizationId }
 const personalActor = { _tag: "PersonalActor" as const, owner: personalOwner, userId, clientId, deviceId }
@@ -62,68 +52,8 @@ const organizationActor = {
   clientId,
   deviceId,
 }
-const workspace = {
-  id: workspaceId,
-  ownerId,
-  createdByUserId: userId,
-  executorKind: "local_device" as const,
-  inheritProjectGrants: false,
-  createdAt: now,
-}
-const thread = {
-  id: threadId,
-  ownerId,
-  projectId,
-  workspaceId,
-  createdByUserId: userId,
-  executorKind: "e2b" as const,
-  inheritProjectGrants: true,
-  createdAt: now,
-}
-const command = {
-  ownerId,
-  threadId,
-  commandId: CommandId.make("command"),
-  idempotencyKey: IdempotencyKey.make("command-key"),
-  actor: organizationActor,
-  sequence,
-  commitCursor,
-  command: { _tag: "SubmitPrompt", prompt: "hello" },
-  admittedAt: now,
-}
-const event = {
-  ownerId,
-  threadId,
-  eventId: EventId.make("event"),
-  idempotencyKey: IdempotencyKey.make("event-key"),
-  assignmentId,
-  executorInstanceId,
-  assignmentGeneration: generation,
-  leaseEpoch: generation,
-  sequence,
-  commitCursor,
-  commandSequence: sequence,
-  event: { _tag: "TerminalOutput", data: "hello" },
-  createdAt: now,
-}
-const writer = {
-  ownerId,
-  threadId,
-  actor: organizationActor,
-  leaseId,
-  generation,
-  acquiredAt: now,
-  renewedAt: now,
-  expiresAt,
-}
-const presence = {
-  ownerId,
-  threadId,
-  actor: personalActor,
-  status: "controlling" as const,
-  lastSeenAt: now,
-  expiresAt,
-}
+const envelope = (command: unknown) => ({ protocolVersion, requestId, command })
+const mutation = { commandId, idempotencyKey, expectedThreadVersion }
 
 describe("hosted owner and actor attribution", () => {
   it("round trips personal and organization attribution", () => {
@@ -139,103 +69,100 @@ describe("hosted owner and actor attribution", () => {
   })
 })
 
-describe("client api protocol", () => {
-  it("round trips every request variant for personal and organization owners", () => {
-    const requests = [
-      {
-        _tag: "CreateWorkspace",
-        owner: personalOwner,
-        workspaceId,
-        actor: personalActor,
-        executorKind: "local_device",
-      },
-      {
+describe("hosted Thread client protocol", () => {
+  it("round trips every interactive command through one versioned envelope", () => {
+    const messages = [
+      envelope({ _tag: "CreateThread", ...mutation, owner: { kind: "personal" }, placement: "local" }),
+      envelope({
         _tag: "CreateThread",
-        owner: organizationOwner,
+        ...mutation,
+        owner: { kind: "organization", organizationId },
         projectId,
-        workspaceId,
-        threadId,
-        actor: organizationActor,
-        executorKind: "e2b",
-        inheritProjectGrants: true,
-      },
+        placement: "e2b",
+        repositoryRef: { repositoryId: "repository", ref: "refs/heads/main" },
+      }),
+      envelope({ _tag: "AttachThread", threadId, afterCursor: cursor }),
+      envelope({
+        _tag: "SubmitPrompt",
+        ...mutation,
+        text: "hello",
+        mode: "high",
+        attachments: [{ mediaType: "image/png", data: "aW1hZ2U", filename: "image.png" }],
+      }),
+      envelope({ _tag: "Steer", ...mutation, text: "focus", targetTurnId: "turn" }),
+      envelope({ _tag: "InterruptAndSend", ...mutation, text: "stop and do this" }),
+      envelope({ _tag: "Cancel", ...mutation }),
+      envelope({ _tag: "Approve", ...mutation, turnId: "turn", authorizationId: "authorization", checkpoint }),
+      envelope({ _tag: "Deny", ...mutation, turnId: "turn", authorizationId: "authorization", checkpoint }),
+      envelope({ _tag: "AcknowledgeCursor", cursor }),
+      envelope({ _tag: "Detach" }),
+    ]
+    expect(messages.map((message) => roundTrip(ClientMessage, message))).toEqual(messages)
+  })
+
+  it("rejects malformed variants and every client-supplied trusted identity field", () => {
+    const base = envelope({ _tag: "SubmitPrompt", ...mutation, text: "hello" })
+    for (const forged of [
+      { ...base, actor: personalActor },
+      { ...base, userId },
+      { ...base, membershipId },
+      { ...base, ownerId: "owner" },
+      { ...base, command: { ...base.command, actor: personalActor } },
+      { ...base, command: { ...base.command, membershipId } },
+    ]) {
+      expect(() => Schema.decodeUnknownSync(ClientMessage)(forged)).toThrow()
+    }
+    expect(() => Schema.decodeUnknownSync(ClientMessage)({ ...base, protocolVersion: 2 })).toThrow()
+    expect(() =>
+      Schema.decodeUnknownSync(ClientMessage)(envelope({ _tag: "Cancel", ...mutation, extra: true })),
+    ).toThrow()
+  })
+
+  it("round trips accepted, rejected, event, and heartbeat server frames", () => {
+    const frames = [
       {
-        _tag: "AdmitCommand",
-        owner: organizationOwner,
-        threadId,
-        commandId: command.commandId,
-        idempotencyKey: command.idempotencyKey,
-        actor: organizationActor,
-        command: {
-          _tag: "TerminalInput",
-          data: "ls\n",
-          writerLeaseId: leaseId,
-          writerGeneration: generation,
+        protocolVersion,
+        payload: {
+          _tag: "CommandAccepted",
+          requestId,
+          commandId,
+          threadId,
+          threadVersion: ThreadVersion.make("4"),
+          cursor,
+          result: { _tag: "Applied" },
         },
       },
       {
-        _tag: "SubscribeThread",
-        owner: personalOwner,
-        threadId,
-        actor: personalActor,
-        afterCommitCursor: commitCursor,
+        protocolVersion,
+        payload: {
+          _tag: "CommandRejected",
+          requestId,
+          commandId,
+          threadId,
+          reason: "stale-version",
+          currentThreadVersion: ThreadVersion.make("4"),
+          currentCursor: cursor,
+          message: "Thread version is stale",
+          details: {},
+        },
       },
       {
-        _tag: "AcknowledgeCursor",
-        owner: organizationOwner,
-        threadId,
-        actor: organizationActor,
-        commitCursor,
+        protocolVersion,
+        payload: {
+          _tag: "ThreadEvent",
+          event: {
+            threadId,
+            sequence: "1",
+            cursor,
+            threadVersion: ThreadVersion.make("4"),
+            event: { _tag: "ExecutionControlled", action: "cancelled" },
+            createdAt: now,
+          },
+        },
       },
-      {
-        _tag: "AcquireTerminalWriter",
-        owner: organizationOwner,
-        threadId,
-        actor: organizationActor,
-        leaseId,
-        now,
-        expiresAt,
-      },
-      {
-        _tag: "RenewTerminalWriter",
-        owner: organizationOwner,
-        threadId,
-        actor: organizationActor,
-        leaseId,
-        generation,
-        now,
-        expiresAt,
-      },
-      {
-        _tag: "PresenceHeartbeat",
-        owner: personalOwner,
-        threadId,
-        actor: personalActor,
-        status: "viewing",
-        now,
-        expiresAt,
-      },
+      { protocolVersion, payload: { _tag: "Heartbeat", at: now } },
     ]
-    expect(requests.map((request) => roundTrip(ClientRequest, request))).toEqual(requests)
-  })
-
-  it("round trips every response variant", () => {
-    const responses = [
-      { _tag: "WorkspaceCreated", workspace },
-      { _tag: "ThreadCreated", thread },
-      { _tag: "CommandAdmitted", command },
-      { _tag: "ThreadEventBatch", owner: organizationOwner, threadId, events: [event], nextCursor: commitCursor },
-      { _tag: "ThreadEventBroadcast", event },
-      { _tag: "TerminalWriterGranted", lease: writer },
-      { _tag: "PresenceSnapshot", owner: personalOwner, threadId, presence: [presence] },
-      {
-        _tag: "Rejected",
-        requestId: command.commandId,
-        reason: "denied",
-        details: { auditEventId: AuditEventId.make("audit") },
-      },
-    ]
-    expect(responses.map((response) => roundTrip(ClientResponse, response))).toEqual(responses)
+    expect(frames.map((frame) => roundTrip(ServerFrame, frame))).toEqual(frames)
   })
 })
 
