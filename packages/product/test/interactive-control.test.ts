@@ -1,5 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
@@ -7,6 +8,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import type * as RootTurnOwner from "@rika/product/root-turn-owner"
 import { Effect } from "effect"
+import type { InteractiveEvent } from "../src/operation/interactive/session-event"
 import { makeInteractiveControl } from "../src/operation/interactive/turn/control"
 import { operationError } from "../src/operation/operation-error"
 import type * as TurnQueue from "../src/thread/repository/turn-repository-queue"
@@ -198,5 +200,55 @@ it.effect("admits a queued prompt longer than the composer convenience limit", (
 
     expect(prepared).toBe(1)
     expect(failures).toEqual([])
+  }),
+)
+
+it.effect("rejects a stale checkpoint and delivers a typed denial for the exact operation", () =>
+  Effect.gen(function* () {
+    const checkpoint = {
+      version: ExecutionProjection.projectionVersion,
+      cursor: "authorization-cursor",
+      state: "authorization-state",
+    }
+    const turn = {
+      _tag: "AgentExecution" as const,
+      id: Turn.TurnId.make("turn-1"),
+      threadId: Thread.ThreadId.make("thread-1"),
+      executionLink: { runId: "run-1", turnId: "turn-1", threadId: "thread-1" },
+    }
+    const events: Array<InteractiveEvent> = []
+    const responses: Array<unknown> = []
+    const control = makeInteractiveControl({
+      turns: { get: () => Effect.succeed(turn) } as never,
+      transcripts: { get: () => Effect.succeed({ projectorCheckpoint: checkpoint }) } as never,
+      backend: {
+        approveTurn: (_link: unknown, input: unknown) => Effect.sync(() => responses.push(["approve", input])),
+        denyTurn: (_link: unknown, input: unknown) => Effect.sync(() => responses.push(["deny", input])),
+      } as never,
+      rootTurnOwner: {} as never,
+      active: Effect.succeed(turn as never),
+      dispatch: (event) => events.push(event),
+      queueMutation: () => Effect.die("unused") as never,
+      notifyTurnChanged: () => Effect.void,
+      fail: operationError,
+    })
+
+    yield* control.approveAuthorization("turn-1", "authorization-1", {
+      ...checkpoint,
+      cursor: "stale-cursor",
+    })
+    expect(responses).toEqual([])
+    expect(events).toMatchObject([
+      {
+        _tag: "ExecutionControlFailed",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        action: "approve",
+        failure: { message: "Authorization checkpoint is stale" },
+      },
+    ])
+
+    yield* control.denyAuthorization("turn-1", "authorization-1", checkpoint)
+    expect(responses).toEqual([["deny", { authorizationId: "authorization-1", checkpoint }]])
   }),
 )

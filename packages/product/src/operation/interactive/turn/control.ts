@@ -1,15 +1,18 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import type * as RootTurnOwner from "../../../thread/queue/root-turn-owner"
 import * as TurnQueuePromotion from "../../../thread/repository/turn-repository-queue"
-import { Clock, Effect, Ref } from "effect"
+import { Cause, Clock, Effect, Ref, Schema } from "effect"
 import { type InteractiveEvent } from "../session-event"
 import { OperationError, operationError } from "../../operation-error"
 import { makeFailure } from "../../operation-failure"
 import { type InteractiveSession, type InteractiveSessionControlsInput } from "../session"
 import { OperationUnavailable } from "../../contract/product-operation"
+
+const checkpointEquivalent = Schema.toEquivalence(ExecutionProjection.Checkpoint)
 
 export const makeInteractiveControl = (input: {
   readonly turns: TurnRepository.Interface
@@ -103,7 +106,12 @@ export const makeInteractiveControl = (input: {
         )
       }).pipe(Effect.catch((error) => Effect.sync(() => steeringFailed(error, requestId, target))))
     })
-  const respondToAuthorization = (decision: "approve" | "deny", id: string, authorizationId: string) =>
+  const respondToAuthorization = (
+    decision: "approve" | "deny",
+    id: string,
+    authorizationId: string,
+    expectedCheckpoint?: ExecutionProjection.Checkpoint,
+  ) =>
     Effect.gen(function* () {
       let threadId: Turn.Turn["threadId"] | undefined
       const turnId = Turn.TurnId.make(id)
@@ -119,14 +127,22 @@ export const makeInteractiveControl = (input: {
               kind: "stale",
               message: "Authorization is no longer pending",
             })
+          if (
+            expectedCheckpoint !== undefined &&
+            !checkpointEquivalent(projection.projectorCheckpoint, expectedCheckpoint)
+          )
+            return yield* ExecutionGateway.ApprovalResponseFailure.make({
+              kind: "stale",
+              message: "Authorization checkpoint is stale",
+            })
           yield* decision === "approve"
             ? input.backend.approveTurn(turn.executionLink, {
                 authorizationId,
-                checkpoint: projection.projectorCheckpoint,
+                checkpoint: expectedCheckpoint ?? projection.projectorCheckpoint,
               })
             : input.backend.denyTurn(turn.executionLink, {
                 authorizationId,
-                checkpoint: projection.projectorCheckpoint,
+                checkpoint: expectedCheckpoint ?? projection.projectorCheckpoint,
               })
           yield* input.notifyTurnChanged(turn)
         }),
@@ -138,7 +154,7 @@ export const makeInteractiveControl = (input: {
           ...(threadId === undefined ? {} : { threadId }),
           turnId,
           action: decision,
-          failure: makeFailure(outcome.cause),
+          failure: makeFailure(Cause.squash(outcome.cause)),
         })
     })
   return {
@@ -146,10 +162,10 @@ export const makeInteractiveControl = (input: {
     dequeue,
     steerQueued,
     steer,
-    approveAuthorization: (turnId: string, authorizationId: string) =>
-      respondToAuthorization("approve", turnId, authorizationId),
-    denyAuthorization: (turnId: string, authorizationId: string) =>
-      respondToAuthorization("deny", turnId, authorizationId),
+    approveAuthorization: (turnId: string, authorizationId: string, checkpoint?: ExecutionProjection.Checkpoint) =>
+      respondToAuthorization("approve", turnId, authorizationId, checkpoint),
+    denyAuthorization: (turnId: string, authorizationId: string, checkpoint?: ExecutionProjection.Checkpoint) =>
+      respondToAuthorization("deny", turnId, authorizationId, checkpoint),
   }
 }
 
@@ -247,7 +263,7 @@ export const makeInteractiveSessionControls = (
           threadId: turn.threadId,
           turnId: turn.id,
           action: "cancel",
-          failure: makeFailure(outcome.cause),
+          failure: makeFailure(Cause.squash(outcome.cause)),
         })
       if (beforeStart) {
         const cancelled = yield* turns.get(turn.id)

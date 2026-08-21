@@ -1,6 +1,7 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import { identityMigrations, runMigration } from "@rika/identity"
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import {
   BetterAuthUserId,
   ClientId,
@@ -15,12 +16,22 @@ import {
   WorkspaceId,
 } from "@rika/product/hosted-model"
 import { HostedStore } from "@rika/product/hosted-store"
+import type { HostedThreadSnapshot } from "@rika/product/client-protocol"
+import type { InteractiveCommand } from "@rika/product/interactive-command"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
+import { TurnId } from "@rika/product/turn-record"
 import { migrations } from "@rika/product-store/migrations"
 import { layer } from "@rika/product-store/postgres-layer"
-import { Effect, Layer, Random, Redacted } from "effect"
+import { Context, Effect, Layer, Random, Redacted } from "effect"
 import { Pool } from "pg"
+import { HostedOperations, type HostedOperationsService } from "../src/hosted-operations"
+import { HostedProduct, type HostedProductService } from "../src/hosted-product"
+import {
+  HostedThreadProtocol,
+  layer as hostedThreadProtocolLayer,
+  threadWebSocketAudience,
+} from "../src/hosted-thread-protocol"
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined
@@ -281,6 +292,369 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
           .redeemTicket({ ticketDigest: "expired-digest", audience: "/api/v1/threads/socket", redeemedAt: later })
           .pipe(Effect.result),
       ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-authority" } })
+    }),
+  ),
+)
+
+it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller frames with durable decisions", () =>
+  withDatabase((pool) =>
+    Effect.gen(function* () {
+      const protocolStore = yield* setup(pool)
+      const checkpoint = {
+        version: ExecutionProjection.projectionVersion,
+        cursor: "authorization-cursor",
+        state: '{"operation":"shell","arguments":"bun test"}',
+      }
+      let currentSnapshot: HostedThreadSnapshot = snapshot
+      const effects: Array<InteractiveCommand> = []
+      const product: HostedProductService = {
+        ready: Effect.void,
+        projects: () => Effect.succeed([]),
+        activatePrincipal: () => Effect.void,
+        createConnection: () => Effect.die("unused"),
+        authorizeThread: () => Effect.succeed({ ownerId, actor }),
+        threadExecutionContext: () =>
+          Effect.succeed({
+            repository: {
+              repositoryId: "repository-1",
+              owner: "In-Time-Tec",
+              name: "rika",
+              branch: "feature/thread-controls",
+            },
+            branch: "feature/thread-controls",
+            executor: {
+              assignmentId: threadId,
+              kind: "e2b",
+              generation: "7",
+              lifecycle: "active",
+              executorInstanceId: "executor-1",
+            },
+          }),
+        registerLocalRunner: () => Effect.die("unused"),
+        setRemoteThreadCreation: () => Effect.die("unused"),
+        pollLocalRunner: () => Effect.die("unused"),
+        admitRun: () => Effect.die("unused"),
+      }
+      const operations: HostedOperationsService = {
+        run: () => Effect.void,
+        thread: () => Effect.succeed(currentSnapshot.thread),
+        snapshot: () => Effect.succeed(currentSnapshot),
+        interactive: (input) =>
+          Effect.sync(() => {
+            effects.push(input.command)
+            if (input.command._tag === "ApproveAuthorization" || input.command._tag === "DenyAuthorization") {
+              currentSnapshot = { ...currentSnapshot, pendingAuthorizations: [] }
+              return []
+            }
+            return [{ _tag: "ExecutionControlled" as const, selectionEpoch: 0, action: "cancelled" as const }]
+          }),
+      }
+      const dependencies = Layer.mergeAll(
+        Layer.succeed(HostedProduct, product),
+        Layer.succeed(HostedOperations, operations),
+        Layer.succeed(ThreadProtocolStore, protocolStore),
+        BunCrypto.layer,
+      )
+      const protocol = Context.get(
+        yield* Layer.build(hostedThreadProtocolLayer.pipe(Layer.provide(dependencies))),
+        HostedThreadProtocol,
+      )
+      const principal = { userId, clientId, deviceId }
+      const open = Effect.gen(function* () {
+        const ticket = yield* protocol.issueTicket(principal)
+        return yield* protocol.connect(ticket.ticket, threadWebSocketAudience)
+      })
+      const [controllerA, controllerB] = yield* Effect.all([open, open], { concurrency: "unbounded" })
+      for (const [session, requestId] of [
+        [controllerA, "attach-a"],
+        [controllerB, "attach-b"],
+      ] as const)
+        expect(
+          yield* session.receive({
+            protocolVersion: 1,
+            requestId: requestId as never,
+            command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
+          }),
+        ).toMatchObject([{ payload: { _tag: "ThreadSnapshot", threadVersion: "0", cursor: "0" } }])
+
+      const duplicate = {
+        protocolVersion: 1 as const,
+        requestId: "duplicate-a" as never,
+        command: {
+          _tag: "SubmitPrompt" as const,
+          commandId: CommandId.make("duplicate-submit"),
+          idempotencyKey: IdempotencyKey.make("duplicate-submit-key"),
+          expectedThreadVersion: ThreadVersion.make("0"),
+          text: "queue once",
+        },
+      }
+      const duplicateResponses = yield* Effect.all(
+        [controllerA.receive(duplicate), controllerB.receive({ ...duplicate, requestId: "duplicate-b" as never })],
+        { concurrency: "unbounded" },
+      )
+      expect(
+        duplicateResponses
+          .flat()
+          .filter((frame) => frame.payload._tag === "CommandAccepted" || frame.payload._tag === "CommandRejected"),
+      ).toHaveLength(2)
+      expect(
+        effects.filter((input) => input._tag === "Submit" && input.submissionId === "duplicate-submit"),
+      ).toHaveLength(1)
+      expect(
+        yield* controllerA.receive({ ...duplicate, requestId: "duplicate-after-completion" as never }),
+      ).toMatchObject([{ payload: { _tag: "CommandAccepted", threadVersion: "1", cursor: "1" } }])
+      expect(effects).toHaveLength(1)
+
+      const contender = (id: string, requestId: string) => ({
+        protocolVersion: 1 as const,
+        requestId: requestId as never,
+        command: {
+          _tag: "SubmitPrompt" as const,
+          commandId: CommandId.make(id),
+          idempotencyKey: IdempotencyKey.make(`${id}-key`),
+          expectedThreadVersion: ThreadVersion.make("1"),
+          text: id,
+        },
+      })
+      const contenders = [
+        contender("controller-a", "controller-a-request"),
+        contender("controller-b", "controller-b-request"),
+      ]
+      const raced = yield* Effect.all([controllerA.receive(contenders[0]!), controllerB.receive(contenders[1]!)], {
+        concurrency: "unbounded",
+      })
+      const racedPayloads = raced.flat().map((frame) => frame.payload)
+      expect(racedPayloads.filter((payload) => payload._tag === "CommandAccepted")).toHaveLength(1)
+      const stale = racedPayloads.find((payload) => payload._tag === "CommandRejected")
+      expect(stale).toMatchObject({
+        _tag: "CommandRejected",
+        reason: "stale-version",
+        currentThreadVersion: "2",
+        currentCursor: "1",
+      })
+      const staleIndex = stale?.requestId === "controller-a-request" ? 0 : 1
+      const delayed = contenders[staleIndex]!
+      const delayedSession = staleIndex === 0 ? controllerA : controllerB
+      expect(
+        yield* delayedSession.receive({
+          ...delayed,
+          requestId: "delayed-resync" as never,
+          command: { ...delayed.command, expectedThreadVersion: ThreadVersion.make("2") },
+        }),
+      ).toMatchObject([{ payload: { _tag: "CommandAccepted", threadVersion: "3", cursor: "3" } }])
+      expect(
+        effects.filter(
+          (input) =>
+            input._tag === "Submit" && (input.submissionId === "controller-a" || input.submissionId === "controller-b"),
+        ),
+      ).toHaveLength(2)
+
+      currentSnapshot = {
+        ...currentSnapshot,
+        pendingAuthorizations: [
+          {
+            threadId,
+            turnId: TurnId.make("approval-turn"),
+            authorizationId: "authorization-1",
+            operation: "shell",
+            capability: "process",
+            input: "bun test",
+            inputTruncated: false,
+            checkpoint,
+          },
+        ],
+      }
+      const approvalController = yield* open
+      expect(
+        yield* approvalController.receive({
+          protocolVersion: 1,
+          requestId: "approval-attach" as never,
+          command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("3") },
+        }),
+      ).toMatchObject([
+        {
+          payload: {
+            _tag: "ThreadSnapshot",
+            threadVersion: "3",
+            cursor: "3",
+            snapshot: { pendingAuthorizations: [{ authorizationId: "authorization-1", checkpoint }] },
+          },
+        },
+      ])
+      const approval = {
+        protocolVersion: 1 as const,
+        requestId: "approval-request" as never,
+        command: {
+          _tag: "Approve" as const,
+          commandId: CommandId.make("approval-command"),
+          idempotencyKey: IdempotencyKey.make("approval-key"),
+          expectedThreadVersion: ThreadVersion.make("3"),
+          turnId: TurnId.make("approval-turn"),
+          authorizationId: "authorization-1",
+          checkpoint,
+        },
+      }
+      expect(yield* approvalController.receive(approval)).toMatchObject([
+        { payload: { _tag: "CommandAccepted", threadVersion: "4", result: { _tag: "Applied" } } },
+      ])
+      expect(yield* approvalController.receive({ ...approval, requestId: "approval-retry" as never })).toMatchObject([
+        { payload: { _tag: "CommandAccepted", threadVersion: "4" } },
+      ])
+      expect(
+        effects.filter((input) => input._tag === "ApproveAuthorization" && input.authorizationId === "authorization-1"),
+      ).toHaveLength(1)
+
+      currentSnapshot = {
+        ...currentSnapshot,
+        pendingAuthorizations: [
+          {
+            threadId: ThreadId.make("cross-thread"),
+            turnId: approval.command.turnId,
+            authorizationId: approval.command.authorizationId,
+            operation: "shell",
+            capability: "process",
+            input: "bun test",
+            inputTruncated: false,
+            checkpoint,
+          },
+        ],
+      }
+      expect(
+        yield* approvalController.receive({
+          ...approval,
+          requestId: "cross-thread-approval" as never,
+          command: {
+            ...approval.command,
+            commandId: CommandId.make("cross-thread-approval"),
+            idempotencyKey: IdempotencyKey.make("cross-thread-approval-key"),
+            expectedThreadVersion: ThreadVersion.make("4"),
+          },
+        }),
+      ).toMatchObject([{ payload: { _tag: "CommandRejected", reason: "conflict" } }])
+      expect(effects.filter((input) => input._tag === "ApproveAuthorization")).toHaveLength(1)
+
+      const denialCheckpoint = { ...checkpoint, cursor: "denial-cursor" }
+      currentSnapshot = {
+        ...currentSnapshot,
+        pendingAuthorizations: [
+          {
+            threadId,
+            turnId: TurnId.make("denial-turn"),
+            authorizationId: "authorization-2",
+            operation: "write-file",
+            capability: "filesystem",
+            input: '{"path":"README.md"}',
+            inputTruncated: false,
+            checkpoint: denialCheckpoint,
+          },
+        ],
+      }
+      expect(
+        yield* approvalController.receive({
+          protocolVersion: 1,
+          requestId: "denial-request" as never,
+          command: {
+            _tag: "Deny",
+            commandId: CommandId.make("denial-command"),
+            idempotencyKey: IdempotencyKey.make("denial-key"),
+            expectedThreadVersion: ThreadVersion.make("5"),
+            turnId: TurnId.make("denial-turn"),
+            authorizationId: "authorization-2",
+            checkpoint: denialCheckpoint,
+          },
+        }),
+      ).toMatchObject([{ payload: { _tag: "CommandAccepted", threadVersion: "6" } }])
+      expect(
+        effects.filter((input) => input._tag === "DenyAuthorization" && input.authorizationId === "authorization-2"),
+      ).toHaveLength(1)
+
+      const audit = yield* query(
+        pool,
+        `SELECT actor, command, result FROM rika_hosted_thread_protocol_commands WHERE command_id = $1`,
+        ["approval-command"],
+      )
+      expect(audit.rows).toMatchObject([
+        {
+          actor,
+          command: {
+            _tag: "Approve",
+            turnId: "approval-turn",
+            authorizationId: "authorization-1",
+            checkpoint,
+          },
+          result: {
+            _tag: "Applied",
+            authorization: {
+              actor,
+              turnId: "approval-turn",
+              authorizationId: "authorization-1",
+              checkpoint,
+              operation: "shell",
+              capability: "process",
+              arguments: "bun test",
+              repository: {
+                repositoryId: "repository-1",
+                owner: "In-Time-Tec",
+                name: "rika",
+                branch: "feature/thread-controls",
+              },
+              branch: "feature/thread-controls",
+              executor: {
+                assignmentId: threadId,
+                kind: "e2b",
+                generation: "7",
+                lifecycle: "active",
+                executorInstanceId: "executor-1",
+              },
+              decision: "approve",
+              result: { _tag: "Delivered" },
+            },
+          },
+        },
+      ])
+      const denialAudit = yield* query(
+        pool,
+        `SELECT result FROM rika_hosted_thread_protocol_commands WHERE command_id = $1`,
+        ["denial-command"],
+      )
+      expect(denialAudit.rows).toMatchObject([
+        {
+          result: {
+            _tag: "Applied",
+            authorization: {
+              actor,
+              turnId: "denial-turn",
+              authorizationId: "authorization-2",
+              checkpoint: denialCheckpoint,
+              operation: "write-file",
+              capability: "filesystem",
+              arguments: '{"path":"README.md"}',
+              repository: { repositoryId: "repository-1", branch: "feature/thread-controls" },
+              branch: "feature/thread-controls",
+              executor: { assignmentId: threadId, generation: "7", executorInstanceId: "executor-1" },
+              decision: "deny",
+              result: { _tag: "Delivered" },
+            },
+          },
+        },
+      ])
+
+      yield* protocolStore.appendEvents({
+        ownerId,
+        threadId,
+        events: [{ _tag: "ExecutionControlled", action: "cancelled" }],
+        createdAt: later,
+      })
+      const replayController = yield* open
+      const replay = yield* replayController.receive({
+        protocolVersion: 1,
+        requestId: "replay-attach" as never,
+        command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
+      })
+      expect(replay).toMatchObject([
+        { payload: { _tag: "ThreadSnapshot", threadVersion: "6", cursor: "3" } },
+        { payload: { _tag: "ThreadEvent", event: { cursor: "4", threadVersion: "6" } } },
+      ])
     }),
   ),
 )

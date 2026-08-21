@@ -135,10 +135,20 @@ const productCommand = (command: MutatingThreadCommand) => {
       value = { _tag: "Cancel" }
       break
     case "Approve":
-      value = { _tag: "ApproveAuthorization", turnId: command.turnId, authorizationId: command.authorizationId }
+      value = {
+        _tag: "ApproveAuthorization",
+        turnId: command.turnId,
+        authorizationId: command.authorizationId,
+        checkpoint: command.checkpoint,
+      }
       break
     case "Deny":
-      value = { _tag: "DenyAuthorization", turnId: command.turnId, authorizationId: command.authorizationId }
+      value = {
+        _tag: "DenyAuthorization",
+        turnId: command.turnId,
+        authorizationId: command.authorizationId,
+        checkpoint: command.checkpoint,
+      }
       break
   }
   return Schema.decodeUnknownEffect(InteractiveCommand)(value).pipe(
@@ -436,6 +446,21 @@ export const layer = Layer.effect(
           }
 
           const applied = yield* Effect.gen(function* () {
+            let authorization:
+              | {
+                  readonly actor: ThreadAuthority["actor"]
+                  readonly turnId: string
+                  readonly authorizationId: string
+                  readonly checkpoint: ExecutionProjection.Checkpoint
+                  readonly operation: string
+                  readonly capability: string
+                  readonly arguments: string
+                  readonly repository: JsonObject | null
+                  readonly branch: string | null
+                  readonly executor: JsonObject
+                  readonly decision: "approve" | "deny"
+                }
+              | undefined
             if (command._tag === "Approve" || command._tag === "Deny") {
               const snapshot = yield* operations
                 .snapshot(authority.ownerId, ProductThreadId.make(attached!.threadId))
@@ -452,6 +477,22 @@ export const layer = Layer.effect(
                   kind: "conflict",
                   message: "Authorization checkpoint is stale or does not belong to this Thread",
                 })
+              const execution = yield* product
+                .threadExecutionContext(authority.ownerId, attached!.threadId)
+                .pipe(Effect.mapError(productFailure))
+              authorization = {
+                actor: authority.actor,
+                turnId: pending.turnId,
+                authorizationId: pending.authorizationId,
+                checkpoint: pending.checkpoint,
+                operation: pending.operation,
+                capability: pending.capability,
+                arguments: pending.input,
+                repository: execution.repository,
+                branch: execution.branch,
+                executor: execution.executor,
+                decision: command._tag === "Approve" ? "approve" : "deny",
+              }
             }
             const events = yield* operations
               .interactive({
@@ -461,7 +502,33 @@ export const layer = Layer.effect(
                 command: yield* productCommand(command),
               })
               .pipe(Effect.mapError(operationFailure))
-            return { result: { _tag: "Applied" } as const, events: events.filter(isDurableThreadEvent) }
+            let controlFailure: Extract<InteractiveEvent, { readonly _tag: "ExecutionControlFailed" }> | undefined
+            if (command._tag === "Approve" || command._tag === "Deny") {
+              const action = command._tag === "Approve" ? "approve" : "deny"
+              for (const event of events)
+                if (event._tag === "ExecutionControlFailed" && event.action === action) {
+                  controlFailure = event
+                  break
+                }
+            }
+            const result =
+              controlFailure === undefined
+                ? {
+                    _tag: "Applied" as const,
+                    ...(authorization === undefined
+                      ? {}
+                      : { authorization: { ...authorization, result: { _tag: "Delivered" as const } } }),
+                  }
+                : {
+                    _tag: "Rejected" as const,
+                    reason: "conflict",
+                    message: controlFailure.failure.message,
+                    authorization: {
+                      ...authorization!,
+                      result: { _tag: "Rejected" as const, failure: controlFailure.failure },
+                    },
+                  }
+            return { result, events: events.filter(isDurableThreadEvent) }
           }).pipe(
             Effect.catch((error) =>
               Effect.succeed({

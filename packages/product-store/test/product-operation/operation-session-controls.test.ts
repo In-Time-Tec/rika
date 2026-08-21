@@ -78,7 +78,7 @@ describe("Operation", () => {
     }),
   )
 
-  it.effect("attributes an active interrupt to the user and shutdown cancellation to the server", () =>
+  it.effect("keeps steering distinct from an attributed interrupt and shutdown cancellation", () =>
     Effect.gen(function* () {
       const thread: Thread.Thread = {
         id: Thread.ThreadId.make("interrupt-attribution"),
@@ -110,11 +110,16 @@ describe("Operation", () => {
       ])
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const cancellationReasons = yield* Ref.make<ReadonlyArray<string>>([])
+      const steeringRequests = yield* Ref.make<ReadonlyArray<unknown>>([])
       const interruptBackend = ExecutionGateway.Service.of({
         ...backend,
         inspectTurn: () => Effect.succeed({ status: "running", cursor: "synthetic-running-cursor" }),
         watchTurn: () => Stream.never,
         cancelTurn: (_link, reason) => Ref.update(cancellationReasons, (reasons) => [...reasons, reason]),
+        steerTurn: (_link, request) =>
+          Ref.update(steeringRequests, (requests) => [...requests, request]).pipe(
+            Effect.as({ entryId: "steering-entry", sequence: 0 }),
+          ),
       })
       yield* Effect.gen(function* () {
         const session = yield* openInteractiveSession(sessions, {
@@ -123,6 +128,9 @@ describe("Operation", () => {
           ephemeral: false,
         })
         yield* session.selectThread(thread.id)
+        yield* session.steer("keep going", "steering-request")
+        while ((yield* Ref.get(steeringRequests)).length === 0) yield* Effect.yieldNow
+        expect(yield* Ref.get(cancellationReasons)).toEqual([])
         yield* session.interruptAndSend("replacement")
         yield* session.quit
       }).pipe(
@@ -139,6 +147,7 @@ describe("Operation", () => {
           }),
         ),
       )
+      expect(yield* Ref.get(steeringRequests)).toEqual([{ text: "keep going", idempotencyKey: "steering-request" }])
       expect(yield* Ref.get(cancellationReasons)).toEqual(["Cancelled by user", "Cancelled: server shutdown"])
     }),
   )

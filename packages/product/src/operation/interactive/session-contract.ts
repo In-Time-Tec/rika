@@ -1,5 +1,6 @@
 import type * as Thread from "@rika/product/thread-record"
 import type * as ExecutionRequest from "@rika/product/execution-request"
+import type * as ExecutionProjection from "@rika/product/execution-projection"
 import type { ModeId } from "@rika/configuration/behavior-mode"
 import type { Context, Deferred, Effect, PlatformError, PubSub, Semaphore } from "effect"
 import type { OperationUnavailable } from "../contract/product-operation"
@@ -26,8 +27,16 @@ export interface InteractiveSession {
   readonly dequeue: (turnId: string) => Effect.Effect<void, OperationUnavailable>
   readonly steerQueued: (turnId: string, text: string, requestId: string) => Effect.Effect<void, OperationUnavailable>
   readonly steer: (text: string, requestId: string, targetTurnId?: string) => Effect.Effect<void, OperationUnavailable>
-  readonly approveAuthorization: (turnId: string, authorizationId: string) => Effect.Effect<void, OperationUnavailable>
-  readonly denyAuthorization: (turnId: string, authorizationId: string) => Effect.Effect<void, OperationUnavailable>
+  readonly approveAuthorization: (
+    turnId: string,
+    authorizationId: string,
+    checkpoint?: ExecutionProjection.Checkpoint,
+  ) => Effect.Effect<void, OperationUnavailable>
+  readonly denyAuthorization: (
+    turnId: string,
+    authorizationId: string,
+    checkpoint?: ExecutionProjection.Checkpoint,
+  ) => Effect.Effect<void, OperationUnavailable>
   readonly interruptAndSend: (prompt: string) => Effect.Effect<void, OperationUnavailable>
   readonly cancel: Effect.Effect<void, OperationUnavailable>
   readonly quit: Effect.Effect<void, OperationUnavailable>

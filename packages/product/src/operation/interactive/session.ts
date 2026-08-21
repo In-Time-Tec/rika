@@ -253,10 +253,10 @@ export const makeInteractiveSessionEvents = (
     dequeue: (id) => input.safe(input.sessionDispatch, input.control.dequeue(id)),
     steerQueued: (id, text, requestId) =>
       input.safe(input.sessionDispatch, input.control.steerQueued(id, text, requestId)),
-    approveAuthorization: (turnId, authorizationId) =>
-      input.safe(input.sessionDispatch, input.control.approveAuthorization(turnId, authorizationId)),
-    denyAuthorization: (turnId, authorizationId) =>
-      input.safe(input.sessionDispatch, input.control.denyAuthorization(turnId, authorizationId)),
+    approveAuthorization: (turnId, authorizationId, checkpoint) =>
+      input.safe(input.sessionDispatch, input.control.approveAuthorization(turnId, authorizationId, checkpoint)),
+    denyAuthorization: (turnId, authorizationId, checkpoint) =>
+      input.safe(input.sessionDispatch, input.control.denyAuthorization(turnId, authorizationId, checkpoint)),
   }
 }
 export type InteractiveImplementationInput = InteractiveRuntimeContext &
@@ -350,10 +350,10 @@ export const makeInteractiveSession = (
         state.composition.admitLocal(implementation.steerQueued(turnId, text, requestId)),
       steer: (text, requestId, targetTurnId) =>
         state.composition.admitLocal(implementation.steer(text, requestId, targetTurnId)),
-      approveAuthorization: (turnId, authorizationId) =>
-        state.composition.admitLocal(implementation.approveAuthorization(turnId, authorizationId)),
-      denyAuthorization: (turnId, authorizationId) =>
-        state.composition.admitLocal(implementation.denyAuthorization(turnId, authorizationId)),
+      approveAuthorization: (turnId, authorizationId, checkpoint) =>
+        state.composition.admitLocal(implementation.approveAuthorization(turnId, authorizationId, checkpoint)),
+      denyAuthorization: (turnId, authorizationId, checkpoint) =>
+        state.composition.admitLocal(implementation.denyAuthorization(turnId, authorizationId, checkpoint)),
       interruptAndSend: (prompt) => state.composition.admitLocal(implementation.interruptAndSend(prompt)),
       cancel: state.composition.admitLocal(implementation.cancel),
       quit: implementation.quit,

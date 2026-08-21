@@ -12,6 +12,7 @@ import {
   type ActorAttribution,
   type HostedOwner,
   IdempotencyKey,
+  JsonObject,
   OrganizationId,
   OwnerId,
   ProjectId,
@@ -58,6 +59,12 @@ export interface AdmittedRun {
 export interface ThreadAuthority {
   readonly ownerId: OwnerId
   readonly actor: ActorAttribution
+}
+
+export interface ThreadExecutionContext {
+  readonly repository: JsonObject | null
+  readonly branch: string | null
+  readonly executor: JsonObject
 }
 
 export class HostedProductError extends Schema.TaggedError<HostedProductError>()("HostedProductError", {
@@ -124,6 +131,10 @@ export interface HostedProductService {
     principal: AuthenticatedPrincipal,
     threadId: string,
   ) => Effect.Effect<ThreadAuthority, HostedProductError>
+  readonly threadExecutionContext: (
+    ownerId: OwnerId,
+    threadId: ThreadId,
+  ) => Effect.Effect<ThreadExecutionContext, HostedProductError>
   readonly activatePrincipal: (principal: AuthenticatedPrincipal) => Effect.Effect<void, HostedProductError>
 }
 
@@ -441,11 +452,10 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
           return yield* HostedProductError.make({ kind: "not-found", message: "Local runner is unavailable" })
       }, Effect.mapError(storeFailure))
 
-      const pollLocalRunner: HostedProductService["pollLocalRunner"] = Effect.fn(
-        "HostedProduct.pollLocalRunner",
-      )(function* (input) {
-        yield* activateClient(input.principal, BetterAuthUserId.make(input.principal.userId))
-        const rows = yield* sql<{ readonly threadId: string; readonly workspaceId: string }>`SELECT
+      const pollLocalRunner: HostedProductService["pollLocalRunner"] = Effect.fn("HostedProduct.pollLocalRunner")(
+        function* (input) {
+          yield* activateClient(input.principal, BetterAuthUserId.make(input.principal.userId))
+          const rows = yield* sql<{ readonly threadId: string; readonly workspaceId: string }>`SELECT
               assignment.thread_id AS "threadId", assignment.workspace_id AS "workspaceId"
             FROM rika_hosted_executor_assignments assignment
             JOIN rika_hosted_local_runner_registrations registration
@@ -458,10 +468,12 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
               AND (assignment.placement ->> 'requestingDeviceId' = registration.device_id
                 OR registration.remote_thread_creation_allowed = TRUE)
             ORDER BY assignment.created_at, assignment.id LIMIT 1 FOR UPDATE OF assignment SKIP LOCKED`.pipe(
-          Effect.mapError(unavailable),
-        )
-        return rows[0]
-      }, Effect.mapError(storeFailure))
+            Effect.mapError(unavailable),
+          )
+          return rows[0]
+        },
+        Effect.mapError(storeFailure),
+      )
 
       const authorizeThread: HostedProductService["authorizeThread"] = Effect.fn("HostedProduct.authorizeThread")(
         function* (principal, threadId) {
@@ -536,6 +548,57 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
         Effect.mapError(storeFailure),
       )
 
+      const threadExecutionContext: HostedProductService["threadExecutionContext"] = Effect.fn(
+        "HostedProduct.threadExecutionContext",
+      )(function* (ownerId, threadId) {
+        const rows = yield* sql<{
+          readonly assignmentId: string
+          readonly executorKind: "local_device" | "e2b"
+          readonly generation: string
+          readonly lifecycle: string
+          readonly executorInstanceId: string | null
+          readonly providerInstanceId: string | null
+          readonly checkout: unknown | null
+          readonly localRepository: unknown | null
+        }>`SELECT assignment.id AS "assignmentId", assignment.executor_kind AS "executorKind",
+            assignment.generation::text AS generation, assignment.lifecycle,
+            assignment.executor_instance_id AS "executorInstanceId",
+            assignment.provider_instance_id AS "providerInstanceId", assignment.checkout,
+            registration.repository AS "localRepository"
+          FROM rika_hosted_executor_assignments assignment
+          LEFT JOIN rika_hosted_local_runner_registrations registration
+            ON assignment.executor_kind = 'local_device'
+            AND registration.device_id = assignment.placement ->> 'deviceId'
+            AND registration.checkout_fingerprint = assignment.placement ->> 'checkoutFingerprint'
+          WHERE assignment.owner_id = ${ownerId} AND assignment.thread_id = ${threadId}`.pipe(
+          Effect.mapError(unavailable),
+        )
+        const row = rows[0]
+        if (row === undefined)
+          return yield* HostedProductError.make({ kind: "not-found", message: "Thread executor is unavailable" })
+        const repositoryValue = row.checkout ?? row.localRepository
+        const repository =
+          repositoryValue === null
+            ? null
+            : yield* Schema.decodeUnknownEffect(JsonObject)(repositoryValue).pipe(Effect.mapError(unavailable))
+        const branch =
+          repository !== null && typeof repository.branch === "string" && repository.branch.length > 0
+            ? repository.branch
+            : null
+        return {
+          repository,
+          branch,
+          executor: {
+            assignmentId: row.assignmentId,
+            kind: row.executorKind,
+            generation: row.generation,
+            lifecycle: row.lifecycle,
+            executorInstanceId: row.executorInstanceId,
+            providerInstanceId: row.providerInstanceId,
+          },
+        }
+      }, Effect.mapError(storeFailure))
+
       const activatePrincipal: HostedProductService["activatePrincipal"] = Effect.fn("HostedProduct.activatePrincipal")(
         function* (principal) {
           yield* activateClient(principal, BetterAuthUserId.make(principal.userId))
@@ -576,6 +639,7 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
         pollLocalRunner,
         admitRun,
         authorizeThread,
+        threadExecutionContext,
         activatePrincipal,
       })
     }),

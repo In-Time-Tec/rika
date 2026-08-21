@@ -2,7 +2,7 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import { identityMigrations, runMigration } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
-import { BetterAuthUserId, OrganizationId } from "@rika/product/hosted-model"
+import { BetterAuthUserId, OrganizationId, ThreadId } from "@rika/product/hosted-model"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { layer as productPostgres } from "@rika/product-store/postgres-layer"
 import type { Access } from "@rika/remote-execution/protocol"
@@ -68,7 +68,7 @@ const localConnection = (
       checkoutFingerprint,
       registration: {
         workspaceIdentity: `${checkoutFingerprint}-identity` as never,
-        repository: { identity: `repository-${checkoutFingerprint}` },
+        repository: { identity: `repository-${checkoutFingerprint}`, branch: "main" },
         kernel: { runtime: "bun", runtimeVersion: Bun.version, trustMode: "trusted-local" },
         capabilities: { cells: true, checkpoints: false, pty: false },
       },
@@ -144,6 +144,15 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
       yield* seedPrincipal(pool, owner)
       const authority = yield* LocalExecutor
       const connection = yield* localConnection(owner, personal(owner.userId), "personal-workspace")
+      const product = yield* HostedProduct
+      const threadAuthority = yield* product.authorizeThread(owner, connection.threadId)
+      expect(
+        yield* product.threadExecutionContext(threadAuthority.ownerId, ThreadId.make(connection.threadId)),
+      ).toMatchObject({
+        repository: { identity: "repository-personal-workspace", branch: "main" },
+        branch: "main",
+        executor: { assignmentId: connection.threadId, kind: "local_device", generation: "1", lifecycle: "pending" },
+      })
       expect((yield* query(pool, `SELECT count(*)::int AS count FROM member`)).rows).toEqual([{ count: 0 }])
       const admission = yield* authority.admit({
         threadId: connection.threadId,

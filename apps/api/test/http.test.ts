@@ -63,6 +63,7 @@ const product: HostedProductService = {
   ready: Effect.void,
   activatePrincipal: () => Effect.void,
   authorizeThread: () => Effect.fail(HostedProductError.make({ kind: "not-found", message: "Thread unavailable" })),
+  threadExecutionContext: () => Effect.die("unused"),
   projects: () => Effect.succeed([]),
   registerLocalRunner: () => Effect.die("unused"),
   setRemoteThreadCreation: () => Effect.die("unused"),

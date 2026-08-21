@@ -1,5 +1,6 @@
 import * as Thread from "@rika/product/thread-record"
 import * as ExecutionRequest from "@rika/product/execution-request"
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import { Effect, Function, Schema } from "effect"
 import { ModeId } from "@rika/configuration/behavior-mode"
 import { OperationUnavailable } from "../contract/product-operation"
@@ -40,8 +41,18 @@ export const InteractiveCommand = Schema.Union([
     requestId: Schema.String,
     turnId: Schema.optionalKey(Schema.String),
   }),
-  Schema.Struct({ _tag: Schema.tag("ApproveAuthorization"), turnId: Schema.String, authorizationId: Schema.String }),
-  Schema.Struct({ _tag: Schema.tag("DenyAuthorization"), turnId: Schema.String, authorizationId: Schema.String }),
+  Schema.Struct({
+    _tag: Schema.tag("ApproveAuthorization"),
+    turnId: Schema.String,
+    authorizationId: Schema.String,
+    checkpoint: Schema.optionalKey(ExecutionProjection.Checkpoint),
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("DenyAuthorization"),
+    turnId: Schema.String,
+    authorizationId: Schema.String,
+    checkpoint: Schema.optionalKey(ExecutionProjection.Checkpoint),
+  }),
   Schema.Struct({ _tag: Schema.tag("InterruptAndSend"), prompt: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("Cancel") }),
   Schema.Struct({ _tag: Schema.tag("Quit") }),
@@ -79,9 +90,9 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
     case "Steer":
       return session.steer(command.text, command.requestId, command.turnId)
     case "ApproveAuthorization":
-      return session.approveAuthorization(command.turnId, command.authorizationId)
+      return session.approveAuthorization(command.turnId, command.authorizationId, command.checkpoint)
     case "DenyAuthorization":
-      return session.denyAuthorization(command.turnId, command.authorizationId)
+      return session.denyAuthorization(command.turnId, command.authorizationId, command.checkpoint)
     case "InterruptAndSend":
       return session.interruptAndSend(command.prompt)
     case "Cancel":
