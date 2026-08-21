@@ -9,6 +9,7 @@ import {
   CommandId,
   DeviceId,
   ExecutorAssignmentId,
+  type ActorAttribution,
   type HostedOwner,
   IdempotencyKey,
   OrganizationId,
@@ -49,6 +50,11 @@ export interface AdmittedRun {
   readonly status: "queued"
 }
 
+export interface ThreadAuthority {
+  readonly ownerId: OwnerId
+  readonly actor: ActorAttribution
+}
+
 export class HostedProductError extends Schema.TaggedError<HostedProductError>()("HostedProductError", {
   kind: Schema.optionalKey(Schema.Literals(["conflict", "not-found", "forbidden", "invalid", "unavailable"])),
   message: Schema.String,
@@ -85,6 +91,7 @@ export interface HostedProductService {
     readonly owner: OwnerSelection
     readonly projectId?: string
     readonly placement: "local" | "e2b"
+    readonly threadId?: string
   }) => Effect.Effect<{ readonly threadId: string }, HostedProductError>
   readonly admitRun: (input: {
     readonly principal: AuthenticatedPrincipal
@@ -93,6 +100,11 @@ export interface HostedProductService {
     readonly prompt: string
     readonly mode?: string
   }) => Effect.Effect<AdmittedRun, HostedProductError>
+  readonly authorizeThread: (
+    principal: AuthenticatedPrincipal,
+    threadId: string,
+  ) => Effect.Effect<ThreadAuthority, HostedProductError>
+  readonly activatePrincipal: (principal: AuthenticatedPrincipal) => Effect.Effect<void, HostedProductError>
 }
 
 export class HostedProduct extends Context.Service<HostedProduct, HostedProductService>()(
@@ -248,7 +260,33 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
                 const deviceId = yield* activateClient(input.principal, authority.userId)
                 const executorKind = input.placement === "e2b" ? "e2b" : "local_device"
                 const projectId = input.projectId === undefined ? undefined : ProjectId.make(input.projectId)
-                const workspaceId = WorkspaceId.make(yield* crypto.randomUUIDv4)
+                const threadId = ThreadId.make(input.threadId ?? (yield* crypto.randomUUIDv4))
+                const existingRows = yield* sql<{
+                  readonly ownerId: string
+                  readonly projectId: string | null
+                  readonly createdByUserId: string
+                  readonly executorKind: "local_device" | "e2b"
+                }>`SELECT owner_id AS "ownerId", project_id AS "projectId",
+                    created_by_user_id AS "createdByUserId", executor_kind AS "executorKind"
+                  FROM rika_hosted_threads WHERE id = ${threadId}`.pipe(Effect.mapError(unavailable))
+                const existing = existingRows[0]
+                if (existing !== undefined) {
+                  if (
+                    existing.ownerId !== authority.owner.id ||
+                    existing.projectId !== (projectId ?? null) ||
+                    existing.createdByUserId !== authority.userId ||
+                    existing.executorKind !== executorKind
+                  ) {
+                    return yield* HostedProductError.make({
+                      kind: "conflict",
+                      message: "Thread identity was reused with incompatible input",
+                    })
+                  }
+                  return { threadId: String(threadId) }
+                }
+                const workspaceId = WorkspaceId.make(
+                  input.threadId === undefined ? yield* crypto.randomUUIDv4 : `${input.threadId}-workspace`,
+                )
                 yield* store.createWorkspace({
                   id: workspaceId,
                   ownerId: authority.owner.id,
@@ -260,7 +298,6 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
                 })
                 yield* sql`INSERT INTO rika_workspaces (owner_id, path, created_at)
                   VALUES (${authority.owner.id}, ${workspaceId}, ${currentTime})`.pipe(Effect.mapError(unavailable))
-                const threadId = ThreadId.make(yield* crypto.randomUUIDv4)
                 const thread = yield* store.createThread({
                   id: threadId,
                   ownerId: authority.owner.id,
@@ -309,19 +346,20 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
         },
       )
 
-      const admitRun: HostedProductService["admitRun"] = Effect.fn("HostedProduct.admitRun")(function* (input) {
-        const threadRows = yield* sql<{
-          readonly ownerId: string
-          readonly kind: "personal" | "organization"
-          readonly userId: string | null
-          readonly organizationId: string | null
-          readonly membershipId: string | null
-          readonly createdByUserId: string
-          readonly executorKind: "local_device" | "e2b"
-          readonly inheritProjectGrants: boolean
-          readonly threadRole: "viewer" | "controller" | "operator" | "owner" | null
-          readonly projectRole: "viewer" | "controller" | "operator" | "owner" | null
-        }>`SELECT thread.owner_id AS "ownerId", owner_record.kind, owner_record.user_id AS "userId",
+      const authorizeThread: HostedProductService["authorizeThread"] = Effect.fn("HostedProduct.authorizeThread")(
+        function* (principal, threadId) {
+          const threadRows = yield* sql<{
+            readonly ownerId: string
+            readonly kind: "personal" | "organization"
+            readonly userId: string | null
+            readonly organizationId: string | null
+            readonly membershipId: string | null
+            readonly createdByUserId: string
+            readonly executorKind: "local_device" | "e2b"
+            readonly inheritProjectGrants: boolean
+            readonly threadRole: "viewer" | "controller" | "operator" | "owner" | null
+            readonly projectRole: "viewer" | "controller" | "operator" | "owner" | null
+          }>`SELECT thread.owner_id AS "ownerId", owner_record.kind, owner_record.user_id AS "userId",
             owner_record.organization_id AS "organizationId", membership.id AS "membershipId",
             thread.created_by_user_id AS "createdByUserId", thread.executor_kind AS "executorKind",
             thread.inherit_project_grants AS "inheritProjectGrants",
@@ -329,63 +367,77 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
           FROM rika_hosted_threads thread
           JOIN rika_hosted_owners owner_record ON owner_record.id = thread.owner_id
           LEFT JOIN "member" membership ON membership.organization_id = owner_record.organization_id
-            AND membership.user_id = ${input.principal.userId}
+            AND membership.user_id = ${principal.userId}
           LEFT JOIN rika_hosted_thread_grants thread_grant ON thread_grant.owner_id = thread.owner_id
             AND thread_grant.thread_id = thread.id AND thread_grant.membership_id = membership.id
           LEFT JOIN rika_hosted_project_grants project_grant ON project_grant.owner_id = thread.owner_id
             AND project_grant.project_id = thread.project_id AND project_grant.membership_id = membership.id
-          WHERE thread.id = ${input.threadId}`.pipe(Effect.mapError(unavailable))
-        const resolved = threadRows[0]
-        if (resolved === undefined)
-          return yield* HostedProductError.make({ kind: "not-found", message: "Thread is unavailable" })
-        const userId = BetterAuthUserId.make(input.principal.userId)
-        if (resolved.kind === "personal" && resolved.userId !== input.principal.userId) return yield* forbidden()
-        if (resolved.kind === "organization" && resolved.membershipId === null) return yield* forbidden()
-        if (resolved.kind === "organization") {
-          const membershipId = BetterAuthMemberId.make(resolved.membershipId!)
-          yield* policy
-            .authorize("thread:operate", {
-              memberId: membershipId,
-              ...(resolved.createdByUserId === input.principal.userId ? { threadCreatorMemberId: membershipId } : {}),
-              executorKind: resolved.executorKind,
-              inheritProjectGrants: resolved.inheritProjectGrants,
-              ...(resolved.threadRole === null ? {} : { threadRole: resolved.threadRole }),
-              ...(resolved.projectRole === null ? {} : { projectRole: resolved.projectRole }),
-            })
-            .pipe(Effect.mapError(() => forbidden()))
-        }
-        const owner =
-          resolved.kind === "personal"
-            ? ({ _tag: "PersonalOwner", userId } as const)
-            : ({ _tag: "OrganizationOwner", organizationId: OrganizationId.make(resolved.organizationId!) } as const)
-        const actor =
-          owner._tag === "PersonalOwner"
-            ? ({
-                _tag: "PersonalActor",
-                owner,
-                userId,
-                clientId: ClientId.make(input.principal.clientId),
-                deviceId: DeviceId.make(input.principal.deviceId),
-              } as const)
-            : ({
-                _tag: "OrganizationActor",
-                owner,
-                userId,
-                membershipId: BetterAuthMemberId.make(resolved.membershipId!),
-                clientId: ClientId.make(input.principal.clientId),
-                deviceId: DeviceId.make(input.principal.deviceId),
-              } as const)
-        yield* activateClient(input.principal, userId)
+          WHERE thread.id = ${threadId}`.pipe(Effect.mapError(unavailable))
+          const resolved = threadRows[0]
+          if (resolved === undefined)
+            return yield* HostedProductError.make({ kind: "not-found", message: "Thread is unavailable" })
+          const userId = BetterAuthUserId.make(principal.userId)
+          if (resolved.kind === "personal" && resolved.userId !== principal.userId) return yield* forbidden()
+          if (resolved.kind === "organization" && resolved.membershipId === null) return yield* forbidden()
+          if (resolved.kind === "organization") {
+            const membershipId = BetterAuthMemberId.make(resolved.membershipId!)
+            yield* policy
+              .authorize("thread:operate", {
+                memberId: membershipId,
+                ...(resolved.createdByUserId === principal.userId ? { threadCreatorMemberId: membershipId } : {}),
+                executorKind: resolved.executorKind,
+                inheritProjectGrants: resolved.inheritProjectGrants,
+                ...(resolved.threadRole === null ? {} : { threadRole: resolved.threadRole }),
+                ...(resolved.projectRole === null ? {} : { projectRole: resolved.projectRole }),
+              })
+              .pipe(Effect.mapError(() => forbidden()))
+          }
+          const owner =
+            resolved.kind === "personal"
+              ? ({ _tag: "PersonalOwner", userId } as const)
+              : ({ _tag: "OrganizationOwner", organizationId: OrganizationId.make(resolved.organizationId!) } as const)
+          const actor =
+            owner._tag === "PersonalOwner"
+              ? ({
+                  _tag: "PersonalActor",
+                  owner,
+                  userId,
+                  clientId: ClientId.make(principal.clientId),
+                  deviceId: DeviceId.make(principal.deviceId),
+                } as const)
+              : ({
+                  _tag: "OrganizationActor",
+                  owner,
+                  userId,
+                  membershipId: BetterAuthMemberId.make(resolved.membershipId!),
+                  clientId: ClientId.make(principal.clientId),
+                  deviceId: DeviceId.make(principal.deviceId),
+                } as const)
+          yield* activateClient(principal, userId)
+          return { ownerId: OwnerId.make(resolved.ownerId), actor }
+        },
+        Effect.mapError(storeFailure),
+      )
+
+      const activatePrincipal: HostedProductService["activatePrincipal"] = Effect.fn("HostedProduct.activatePrincipal")(
+        function* (principal) {
+          yield* activateClient(principal, BetterAuthUserId.make(principal.userId))
+        },
+        Effect.mapError(storeFailure),
+      )
+
+      const admitRun: HostedProductService["admitRun"] = Effect.fn("HostedProduct.admitRun")(function* (input) {
+        const authority = yield* authorizeThread(input.principal, input.threadId)
         const executionRoute = yield* modelRegistry
-          .resolve(resolved.ownerId, input.mode)
+          .resolve(authority.ownerId, input.mode)
           .pipe(Effect.mapError(modelFailure))
         const admitted = yield* store.admitPrompt({
-          ownerId: OwnerId.make(resolved.ownerId),
+          ownerId: authority.ownerId,
           threadId: ThreadId.make(input.threadId),
           commandId: CommandId.make(input.operationKey),
           idempotencyKey: IdempotencyKey.make(input.operationKey),
           turnId: TurnId.make(yield* crypto.randomUUIDv4),
-          actor,
+          actor: authority.actor,
           prompt: input.prompt,
           executionRoute,
           admittedAt: DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis)),
@@ -403,6 +455,8 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
         projects,
         createConnection,
         admitRun,
+        authorizeThread,
+        activatePrincipal,
       })
     }),
   )

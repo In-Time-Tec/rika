@@ -8,6 +8,7 @@ import type {
   IdentityRuntimeError,
 } from "@rika/identity"
 import type { HostedProductService } from "./hosted-product"
+import type { HostedThreadProtocolService } from "./hosted-thread-protocol"
 import type { HostedModelRegistryService } from "./hosted-model-registry"
 import type { HostedProviderCredentialsService } from "./hosted-provider-credentials"
 import type { Runtime as Executor } from "./executor"
@@ -18,6 +19,7 @@ export interface HttpDependencies {
   readonly directory: IdentityDirectory
   readonly devices: CliDeviceDirectory
   readonly product: HostedProductService
+  readonly threads?: HostedThreadProtocolService
   readonly credentials?: HostedProviderCredentialsService
   readonly models?: HostedModelRegistryService
   readonly executor: Executor

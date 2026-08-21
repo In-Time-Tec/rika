@@ -1,6 +1,7 @@
 import { expect, it } from "@effect/vitest"
-import { Deferred, Effect, Exit, Fiber, Redacted, Scope } from "effect"
+import { Deferred, Effect, Exit, Fiber, Redacted, Schema, Scope } from "effect"
 import type { CliDeviceDirectory, IdentityConfig, IdentityDirectory, IdentityRuntime } from "@rika/identity"
+import { ServerFrame } from "@rika/product/client-protocol"
 import type { HostedProductService } from "../src/hosted-product"
 import type { Runtime as ExecutorRuntime } from "../src/executor"
 import type { HttpDependencies } from "../src/http"
@@ -27,6 +28,8 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
     const release = yield* Deferred.make<void>()
     const product: HostedProductService = {
       ready: Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
+      activatePrincipal: () => Effect.die("unused"),
+      authorizeThread: () => Effect.die("unused"),
       projects: () => Effect.die("unused"),
       createConnection: () => Effect.die("unused"),
       admitRun: () => Effect.die("unused"),
@@ -150,6 +153,8 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
       },
       product: {
         ready: Effect.void,
+        activatePrincipal: () => Effect.die("unused"),
+        authorizeThread: () => Effect.die("unused"),
         projects: () => Effect.die("unused"),
         createConnection: () => Effect.die("unused"),
         admitRun: () => Effect.die("unused"),
@@ -194,5 +199,98 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
     yield* Scope.close(resourceScope, Exit.void)
     expect(response.status).toBe(200)
     expect(handledUrl).toBe("https://api.example.test/api/auth/session?proof=1")
+  }),
+)
+
+it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges canonical frames", () =>
+  Effect.gen(function* () {
+    let connected: ReadonlyArray<string> | undefined
+    let received: unknown
+    const dependencies: HttpDependencies = {
+      identity: {
+        handle: () => Effect.die("unused"),
+        identify: () => Effect.die("unused"),
+        protectedResourceMetadata: Effect.die("unused"),
+      },
+      directory: { ready: Effect.void, account: () => Effect.die("unused") },
+      devices: {
+        register: () => Effect.die("unused"),
+        discard: () => Effect.die("unused"),
+        authenticate: () => Effect.die("unused"),
+        list: () => Effect.die("unused"),
+        revoke: () => Effect.die("unused"),
+        revokeAll: () => Effect.die("unused"),
+      },
+      product: {
+        ready: Effect.void,
+        activatePrincipal: () => Effect.die("unused"),
+        authorizeThread: () => Effect.die("unused"),
+        projects: () => Effect.die("unused"),
+        createConnection: () => Effect.die("unused"),
+        admitRun: () => Effect.die("unused"),
+      },
+      threads: {
+        issueTicket: () => Effect.die("unused"),
+        connect: (ticket, audience) => {
+          connected = [ticket, audience]
+          return Effect.succeed({
+            receive: (message) => {
+              received = message
+              return Effect.succeed([
+                {
+                  protocolVersion: 1 as const,
+                  payload: { _tag: "Heartbeat" as const, at: "2026-08-21T00:00:00.000Z" as never },
+                },
+              ])
+            },
+            detach: Effect.void,
+          })
+        },
+      },
+      executor: {
+        controller: undefined as never,
+        gateway: {
+          receive: () => Effect.void,
+          disconnected: () => Effect.void,
+          execute: () => Effect.die("unused"),
+          cancel: () => Effect.void,
+        },
+        localGateway: {
+          receive: () => Effect.void,
+          disconnected: () => Effect.void,
+          execute: () => Effect.die("unused"),
+          cancel: () => Effect.void,
+        },
+        admitLocal: () => Effect.die("unused"),
+        run: () => Effect.die("unused"),
+        ready: Effect.void,
+      },
+      execution: { check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }) },
+      production: false,
+    }
+    const resourceScope = yield* Scope.make()
+    const running = yield* serveApi({ config, dependencies }).pipe(Effect.provideService(Scope.Scope, resourceScope))
+    const baseUrl = `http://127.0.0.1:${running.server.port}`
+    const queryCredential = yield* Effect.promise(() => Bun.fetch(`${baseUrl}/api/v1/threads/socket?ticket=secret`))
+    expect(queryCredential.status).toBe(401)
+
+    const reply = yield* Effect.callback<string>((resume) => {
+      const socket = new WebSocket(`${baseUrl.replace("http:", "ws:")}/api/v1/threads/socket`, [
+        "rika.thread.v1",
+        "rika.ticket.secret",
+      ])
+      socket.onopen = () => socket.send('{"protocolVersion":1,"requestId":"request-1","command":{"_tag":"Detach"}}')
+      socket.onmessage = (event) => resume(Effect.succeed(String(event.data)))
+      socket.onerror = () => resume(Effect.die("Thread WebSocket failed"))
+      return Effect.sync(() => socket.close())
+    })
+    yield* Effect.promise(() => running.server.stop(true))
+    yield* Scope.close(resourceScope, Exit.void)
+    expect(connected).toEqual(["secret", "/api/v1/threads/socket"])
+    expect(received).toEqual({ protocolVersion: 1, requestId: "request-1", command: { _tag: "Detach" } })
+    expect(yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ServerFrame))(reply)).toEqual({
+      protocolVersion: 1,
+      payload: { _tag: "Heartbeat", at: "2026-08-21T00:00:00.000Z" },
+    })
   }),
 )

@@ -5,6 +5,7 @@ import { identityMigrations, runMigration } from "@rika/identity"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import { OwnerId } from "@rika/product/hosted-model"
+import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
 import { ThreadId } from "@rika/product/thread-record"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { Context, Effect, Layer, Random, Redacted } from "effect"
@@ -51,6 +52,17 @@ it.effect.skipIf(databaseUrl === undefined)("admits and reads an owner-scoped Po
                 BunCrypto.layer,
                 ExecutionGateway.layerTest(),
                 ExecutionSessionLifecycle.layerTest(),
+                Layer.succeed(ThreadProtocolStore, {
+                  initializeThread: () => Effect.die("unused"),
+                  admitCommand: () => Effect.die("unused"),
+                  completeCommand: () => Effect.die("unused"),
+                  appendEvents: () => Effect.die("unused"),
+                  replay: () => Effect.die("unused"),
+                  acknowledgeCursor: () => Effect.die("unused"),
+                  issueTicket: () => Effect.die("unused"),
+                  redeemTicket: () => Effect.die("unused"),
+                  revokeTicket: () => Effect.die("unused"),
+                }),
               ),
             ),
           ),

@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, Schema } from "effect"
 import { BetterAuthUserId, OrganizationId, ThreadId } from "@rika/product/hosted-model"
+import { ClientTicketResponse } from "@rika/product/client-protocol"
 import { HttpRouter, HttpServer, HttpServerRequest } from "effect/unstable/http"
 import {
   HttpApi,
@@ -55,14 +56,7 @@ const ConnectionOwner = Schema.Union([
   strict(Schema.Struct({ kind: Schema.Literal("personal") })),
   strict(Schema.Struct({ kind: Schema.Literal("organization"), organization_id: Schema.NonEmptyString })),
 ])
-const ConnectionRequest = strict(
-  Schema.Struct({
-    owner: ConnectionOwner,
-    project_id: Schema.optionalKey(Schema.NonEmptyString),
-    placement: Schema.optionalKey(Schema.Literals(["local", "e2b"])),
-  }),
-)
-const ConnectionResponse = Schema.Struct({ threadId: Schema.String }).pipe(HttpApiSchema.status(201))
+const ThreadTicketResponse = ClientTicketResponse.pipe(HttpApiSchema.status(201))
 const LocalExecutorAdmissionRequest = strict(
   Schema.Struct({
     workspace_fingerprint: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
@@ -75,21 +69,6 @@ const LocalExecutorAdmissionResponse = Schema.Struct({
   executorUrl: Schema.String,
   workspaceIdentity: Schema.String,
 }).pipe(HttpApiSchema.status(201))
-const OperationKey = Schema.String.check(
-  Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
-)
-const OperationRequest = strict(
-  Schema.Struct({
-    kind: Schema.Literal("run"),
-    prompt: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
-    mode: Schema.optionalKey(Schema.String),
-  }),
-)
-const OperationResponse = Schema.Struct({
-  commandId: Schema.String,
-  turnId: Schema.String,
-  status: Schema.Literal("queued"),
-}).pipe(HttpApiSchema.status(202))
 const ModelsResponse = Schema.Struct({ modes: Schema.Array(Schema.String) })
 const ProviderCredentialRequest = strict(
   Schema.Struct({
@@ -133,23 +112,15 @@ class ProductGroup extends HttpApiGroup.make("product", { topLevel: true })
       success: ContextResponse,
       error: ServiceUnavailable,
     }),
-    HttpApiEndpoint.post("createConnection", "/api/v1/connections", {
-      payload: ConnectionRequest,
-      success: ConnectionResponse,
-      error: [Forbidden, NotFound, ServiceUnavailable],
+    HttpApiEndpoint.post("issueThreadTicket", "/api/v1/thread-sessions", {
+      success: ThreadTicketResponse,
+      error: [Unauthorized, ServiceUnavailable],
     }),
     HttpApiEndpoint.post("admitLocalExecutor", "/api/v1/threads/:threadId/local-executor-admissions", {
       params: { threadId: ThreadId },
       payload: LocalExecutorAdmissionRequest,
       success: LocalExecutorAdmissionResponse,
       error: [Forbidden, NotFound, Conflict, ServiceUnavailable],
-    }),
-    HttpApiEndpoint.post("run", "/api/v1/threads/:threadId/operations", {
-      params: { threadId: ThreadId },
-      headers: { "idempotency-key": OperationKey },
-      payload: OperationRequest,
-      success: OperationResponse,
-      error: [Forbidden, NotFound, Conflict, Unprocessable, ServiceUnavailable],
     }),
     HttpApiEndpoint.get("models", "/api/v1/models", {
       success: ModelsResponse,
@@ -277,25 +248,27 @@ const productHandlers = (dependencies: HttpDependencies) =>
             })),
           }
         }),
-      createConnection: ({ payload }) =>
+      issueThreadTicket: () =>
         Effect.gen(function* () {
           const access = yield* CurrentAccess
           if (access.deviceId === undefined || access.principal.clientId === undefined)
             return yield* Unauthorized.make({ message: "CLI device authentication required" })
-          return yield* dependencies.product
-            .createConnection({
-              principal: authenticatedPrincipal(access),
-              owner:
-                payload.owner.kind === "personal"
-                  ? { _tag: "PersonalOwner", userId: BetterAuthUserId.make(access.principal.userId) }
-                  : {
-                      _tag: "OrganizationOwner",
-                      organizationId: OrganizationId.make(payload.owner.organization_id),
-                    },
-              ...(payload.project_id === undefined ? {} : { projectId: payload.project_id }),
-              placement: payload.placement ?? "local",
-            })
-            .pipe(Effect.mapError(() => Forbidden.make({ message: "Connection could not be created" })))
+          if (dependencies.threads === undefined)
+            return yield* ServiceUnavailable.make({ message: "Hosted Thread service unavailable" })
+          const serverRequest = yield* HttpServerRequest.HttpServerRequest
+          const request = yield* HttpServerRequest.toWeb(serverRequest).pipe(
+            Effect.mapError(() => ServiceUnavailable.make({ message: "Request is unavailable" })),
+          )
+          const websocketUrl = new URL("/api/v1/threads/socket", request.url)
+          websocketUrl.protocol = "wss:"
+          const issued = yield* dependencies.threads
+            .issueTicket(authenticatedPrincipal(access))
+            .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Thread ticket issuance failed" })))
+          return {
+            ...issued,
+            websocketUrl: websocketUrl.toString(),
+            protocol: "rika.thread.v1" as const,
+          }
         }),
       admitLocalExecutor: ({ params, payload }) =>
         Effect.gen(function* () {
@@ -323,30 +296,6 @@ const productHandlers = (dependencies: HttpDependencies) =>
                 return Forbidden.make({ message: "Local executor admission was rejected" })
               }),
             )
-        }),
-      run: ({ headers, params, payload }) =>
-        Effect.gen(function* () {
-          const access = yield* CurrentAccess
-          if (access.deviceId === undefined || access.principal.clientId === undefined)
-            return yield* Unauthorized.make({ message: "CLI device authentication required" })
-          const run = yield* dependencies.product
-            .admitRun({
-              principal: authenticatedPrincipal(access),
-              threadId: params.threadId,
-              operationKey: headers["idempotency-key"],
-              prompt: payload.prompt.join("\n"),
-              ...(payload.mode === undefined ? {} : { mode: payload.mode }),
-            })
-            .pipe(
-              Effect.mapError((error) => {
-                if (error.kind === "conflict") return Conflict.make({ message: "Operation identity conflicts" })
-                if (error.kind === "not-found") return NotFound.make({ message: "Thread is unavailable" })
-                if (error.kind === "forbidden") return Forbidden.make({ message: "Operation was not admitted" })
-                if (error.kind === "invalid") return Unprocessable.make({ message: "Operation is invalid" })
-                return ServiceUnavailable.make({ message: "Product service unavailable" })
-              }),
-            )
-          return run
         }),
       models: () =>
         dependencies.models === undefined
@@ -412,11 +361,11 @@ export const isRikaApiPath = (pathname: string) =>
   pathname === "/readyz" ||
   pathname === "/api/v1/auth/cli/devices/revoke-all" ||
   pathname === "/api/v1/me/context" ||
-  pathname === "/api/v1/connections" ||
+  pathname === "/api/v1/thread-sessions" ||
   pathname === "/api/v1/models" ||
   pathname === "/api/v1/provider-credentials/list" ||
   /^\/api\/v1\/provider-credentials\/[^/]+$/.test(pathname) ||
-  /^\/api\/v1\/threads\/[^/]+\/(operations|local-executor-admissions)$/.test(pathname)
+  /^\/api\/v1\/threads\/[^/]+\/local-executor-admissions$/.test(pathname)
 
 export const makeRikaApiHandler = (dependencies: HttpDependencies) =>
   HttpRouter.toWebHandler(

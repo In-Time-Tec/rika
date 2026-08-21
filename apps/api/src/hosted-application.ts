@@ -13,6 +13,7 @@ import * as ExecutionPostgres from "@rika/execution/postgres"
 import * as RemoteCells from "@rika/execution/remote-cells"
 import { type ExecutorConfig, Executor, layer as executorLayer, service as executorService } from "./executor"
 import { HostedOperations, layer as hostedOperationsLayer } from "./hosted-operations"
+import { HostedThreadProtocol, layer as hostedThreadProtocolLayer } from "./hosted-thread-protocol"
 import { HostedModelRegistry, layer as hostedModelRegistryLayer } from "./hosted-model-registry"
 import { HostedProduct, layer as hostedProductLayer } from "./hosted-product"
 import {
@@ -27,6 +28,7 @@ import { layer as localExecutorLayer } from "./local-executor"
 export interface HostedApplicationService {
   readonly product: HostedProduct["Service"]
   readonly operations: HostedOperations["Service"]
+  readonly threads: HostedThreadProtocol["Service"]
   readonly credentials: HostedProviderCredentials["Service"]
   readonly models: HostedModelRegistry["Service"]
   readonly executor: Executor["Service"]
@@ -133,9 +135,17 @@ export const layer = (options: {
       const operationsContext = yield* Layer.build(
         hostedOperationsLayer.pipe(Layer.provide(Layer.succeedContext(hostedContext))),
       )
+      const threadProtocolContext = yield* Layer.build(
+        hostedThreadProtocolLayer.pipe(
+          Layer.provide(
+            Layer.succeedContext(Context.merge(hostedContext, Context.merge(productContext, operationsContext))),
+          ),
+        ),
+      )
       return HostedApplication.of({
         product: Context.get(productContext, HostedProduct),
         operations: Context.get(operationsContext, HostedOperations),
+        threads: Context.get(threadProtocolContext, HostedThreadProtocol),
         credentials: Context.get(credentialContext, HostedProviderCredentials),
         models: Context.get(modelContext, HostedModelRegistry),
         executor,

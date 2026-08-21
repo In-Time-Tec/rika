@@ -1,7 +1,9 @@
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import type { IdentityConfig } from "@rika/identity"
+import { ClientMessage, ServerFrame } from "@rika/product/client-protocol"
 import type { Gateway, Socket } from "../executor-gateway"
 import { isRikaApiPath, makeRikaApiHandler } from "../api"
+import { threadWebSocketAudience, type HostedThreadConnection } from "../hosted-thread-protocol"
 import { makeSupplementalApiRequestHandler, secureResponse, type HttpDependencies } from "../http"
 
 export const canonicalPublicRequest = (input: { readonly request: Request; readonly baseUrl: string }): Request => {
@@ -53,6 +55,53 @@ const session = (gateway: SessionGateway): Session => {
   }
 }
 
+const decodeThreadMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(ClientMessage))
+const encodeThreadFrame = Schema.encodeSync(Schema.fromJsonString(ServerFrame))
+
+const threadSession = (connection: HostedThreadConnection): Session => {
+  let pending: Promise<unknown> = Promise.resolve()
+  let activeSocket: Bun.ServerWebSocket<Session> | undefined
+  let draining = false
+  return {
+    attach: (socket) => {
+      activeSocket = socket
+    },
+    receive: (socket, message) => {
+      if (draining) return
+      const body = typeof message === "string" ? message : Buffer.from(message as Uint8Array).toString("utf8")
+      pending = pending
+        .then(() =>
+          Effect.runPromise(
+            decodeThreadMessage(body).pipe(
+              Effect.flatMap(connection.receive),
+              Effect.tap((frames) =>
+                Effect.sync(() => frames.forEach((current) => socket.send(encodeThreadFrame(current)))),
+              ),
+            ),
+          ),
+        )
+        .catch(() => socket.close(1003, "invalid Thread protocol frame"))
+    },
+    disconnected: () => {
+      pending = pending.then(() => Effect.runPromise(connection.detach)).catch(() => undefined)
+    },
+    drain: () => {
+      draining = true
+      return pending.then(() => undefined)
+    },
+    close: () => activeSocket?.close(1001, "server draining"),
+  }
+}
+
+const threadTicket = (request: Request) => {
+  const offered = request.headers
+    .get("sec-websocket-protocol")
+    ?.split(",")
+    .map((value) => value.trim())
+  if (offered?.includes("rika.thread.v1") !== true) return undefined
+  return offered.find((value) => value.startsWith("rika.ticket."))?.slice("rika.ticket.".length)
+}
+
 export const serveApi = (input: { readonly config: IdentityConfig; readonly dependencies: HttpDependencies }) =>
   Effect.acquireRelease(
     Effect.sync(() => {
@@ -60,7 +109,7 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
       const sessions = new Set<Session>()
       const idleWaiters = new Set<() => void>()
       let activeRequests = 0
-      const track = (response: Promise<Response>) => {
+      const track = <A>(response: Promise<A>) => {
         activeRequests += 1
         return response.finally(() => {
           activeRequests -= 1
@@ -87,9 +136,30 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
         port: input.config.port,
         fetch: (request, bunServer) => {
           const pathname = new URL(request.url).pathname
+          if (pathname === threadWebSocketAudience) {
+            if (request.method !== "GET") return new Response("Method not allowed", { status: 405 })
+            const ticket = threadTicket(request)
+            if (ticket === undefined || input.dependencies.threads === undefined)
+              return new Response("WebSocket authentication required", { status: 401 })
+            return track(
+              Effect.runPromise(input.dependencies.threads.connect(ticket, threadWebSocketAudience))
+                .then((connection) =>
+                  bunServer.upgrade(request, {
+                    data: threadSession(connection),
+                    headers: { "sec-websocket-protocol": "rika.thread.v1" },
+                  })
+                    ? undefined
+                    : new Response("WebSocket upgrade required", { status: 426 }),
+                )
+                .catch(() => new Response("WebSocket authentication required", { status: 401 })),
+            )
+          }
           if (pathname === "/api/v1/executors" || pathname === "/api/v1/local-executors") {
             if (request.method !== "GET") return new Response("Method not allowed", { status: 405 })
-            const gateway = pathname === "/api/v1/executors" ? input.dependencies.executor.gateway : input.dependencies.executor.localGateway
+            const gateway =
+              pathname === "/api/v1/executors"
+                ? input.dependencies.executor.gateway
+                : input.dependencies.executor.localGateway
             return bunServer.upgrade(request, { data: session(gateway) })
               ? undefined
               : new Response("WebSocket upgrade required", { status: 426 })

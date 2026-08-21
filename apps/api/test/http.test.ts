@@ -40,7 +40,7 @@ const account: Account = {
 }
 
 const runtime = (userId: string | undefined): IdentityRuntime => ({
-  handle: () => Effect.succeed(new Response("delegated", { status: 204 })),
+  handle: () => Effect.succeed(new Response(null, { status: 204 })),
   identify: () => Effect.succeed(userId === undefined ? undefined : { userId }),
   protectedResourceMetadata: Effect.succeed({
     resource: "https://api.example.com/api/v1",
@@ -59,6 +59,8 @@ const devices: CliDeviceDirectory = {
 
 const product: HostedProductService = {
   ready: Effect.void,
+  activatePrincipal: () => Effect.void,
+  authorizeThread: () => Effect.fail(HostedProductError.make({ kind: "not-found", message: "Thread unavailable" })),
   projects: () => Effect.succeed([]),
   createConnection: () => Effect.succeed({ threadId: "thread-1" }),
   admitRun: () => Effect.die("unused"),
@@ -96,7 +98,11 @@ const dependencies = (
   production: true,
 })
 
-const request = (path: string, options?: RequestInit) => new Request(`https://api.example.com${path}`, options)
+const request = (path: string, options?: RequestInit) => {
+  const headers = new Headers(options?.headers)
+  if (options?.body !== undefined && !headers.has("content-type")) headers.set("content-type", "application/json")
+  return new Request(`https://api.example.com${path}`, { ...options, headers })
+}
 
 const response = (path: string, deps = dependencies(), options?: RequestInit) => {
   const input = request(path, options)
@@ -432,148 +438,61 @@ describe("api HTTP", () => {
     }),
   )
 
-  it.effect("creates connections from authenticated membership and device authority", () =>
+  it.effect("issues a single-use Thread socket ticket from authenticated device authority", () =>
     Effect.gen(function* () {
-      let input: Parameters<HostedProductService["createConnection"]>[0] | undefined
       const principal: IdentityPrincipal = { userId: "user-1", clientId: "client-1", dpopJkt: "thumbprint-1" }
       const base = dependencies({ userId: "user-1", account })
+      let received: unknown
       const result = yield* response(
-        "/api/v1/connections",
+        "/api/v1/thread-sessions",
         {
           ...base,
           identity: { ...base.identity, identify: () => Effect.succeed(principal) },
           devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
-          product: {
-            ...product,
-            createConnection: (value) => {
-              input = value
-              return Effect.succeed({ threadId: "thread-1" })
+          threads: {
+            issueTicket: (value) => {
+              received = value
+              return Effect.succeed({ ticket: "socket-ticket", expiresAt: "2026-08-19T00:01:00.000Z" })
             },
+            connect: () => Effect.die("unused"),
           },
         },
-        {
-          method: "POST",
-          body: encodeJson({
-            owner: { kind: "organization", organization_id: "organization-1" },
-            project_id: "project-1",
-            placement: "e2b",
-          }),
-        },
+        { method: "POST" },
       )
       expect(result.status).toBe(201)
-      expect(input).toEqual({
-        principal: {
-          userId: "user-1",
-          deviceId: "device-1",
-          clientId: "client-1",
-          dpopJkt: "thumbprint-1",
-        },
-        owner: { _tag: "OrganizationOwner", organizationId: "organization-1" },
-        projectId: "project-1",
-        placement: "e2b",
+      expect(received).toEqual({
+        userId: "user-1",
+        deviceId: "device-1",
+        clientId: "client-1",
+        dpopJkt: "thumbprint-1",
+      })
+      expect(yield* Effect.promise(() => result.json())).toEqual({
+        ticket: "socket-ticket",
+        expiresAt: "2026-08-19T00:01:00.000Z",
+        websocketUrl: "wss://api.example.com/api/v1/threads/socket",
+        protocol: "rika.thread.v1",
       })
     }),
   )
 
-  it.effect("supports context and personal connections for a CLI user with no organizations", () =>
+  it.effect("does not expose the replaced connection and operation endpoints", () =>
     Effect.gen(function* () {
-      const personalAccount = { ...account, memberships: [] }
-      const base = dependencies({ account: personalAccount })
-      let connection: Parameters<HostedProductService["createConnection"]>[0] | undefined
-      const deps: HttpDependencies = {
-        ...base,
-        identity: {
-          ...base.identity,
-          identify: () => Effect.succeed({ userId: "user-1", clientId: "client-1" }),
-        },
-        devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
-        product: {
-          ...product,
-          projects: () => Effect.succeed([]),
-          createConnection: (input) => {
-            connection = input
-            return Effect.succeed({ threadId: "thread-1" })
-          },
-        },
-      }
-      const context = yield* response("/api/v1/me/context", deps)
-      const created = yield* response("/api/v1/connections", deps, {
+      const deps = dependencies({ userId: "user-1", account })
+      const connection = yield* response("/api/v1/connections", deps, {
         method: "POST",
-        body: encodeJson({ owner: { kind: "personal" } }),
+        body: encodeJson({}),
       })
-      expect(context.status).toBe(200)
-      expect(yield* Effect.promise(() => context.json())).toEqual({
-        account: { id: "user-1", email: "rika@example.com", name: "Rika User" },
-        organizations: [],
-        projects: [],
+      const operation = yield* response("/api/v1/threads/thread-1/operations", deps, {
+        method: "POST",
+        body: encodeJson({}),
       })
-      expect(created.status).toBe(201)
-      expect(connection).toEqual({
-        principal: { userId: "user-1", clientId: "client-1", deviceId: "device-1" },
-        owner: { _tag: "PersonalOwner", userId: "user-1" },
-        placement: "local",
-      })
+      expect(connection.status).toBe(404)
+      expect(operation.status).toBe(404)
     }),
   )
 
-  it.effect("rejects a mixed personal and organization owner selector", () =>
+  it.effect("rejects client-supplied ownership fields for local admission", () =>
     Effect.gen(function* () {
-      const base = dependencies({ account })
-      const result = yield* response(
-        "/api/v1/connections",
-        {
-          ...base,
-          identity: {
-            ...base.identity,
-            identify: () => Effect.succeed({ userId: "user-1", clientId: "client-1" }),
-          },
-          devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
-        },
-        {
-          method: "POST",
-          body: encodeJson({ owner: { kind: "personal", organization_id: "organization-1" } }),
-        },
-      )
-      expect(result.status).toBe(400)
-    }),
-  )
-
-  it.effect("forwards an organization selector without membership identity", () =>
-    Effect.gen(function* () {
-      const base = dependencies({ account })
-      let input: Parameters<HostedProductService["createConnection"]>[0] | undefined
-      const result = yield* response(
-        "/api/v1/connections",
-        {
-          ...base,
-          identity: {
-            ...base.identity,
-            identify: () => Effect.succeed({ userId: "user-1", clientId: "client-1" }),
-          },
-          devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
-          product: {
-            ...product,
-            createConnection: (value) => Effect.sync(() => ((input = value), { threadId: "thread-1" })),
-          },
-        },
-        {
-          method: "POST",
-          body: encodeJson({ owner: { kind: "organization", organization_id: "organization-1" } }),
-        },
-      )
-      expect(result.status).toBe(201)
-      expect(input).toEqual({
-        principal: { userId: "user-1", clientId: "client-1", deviceId: "device-1" },
-        owner: { _tag: "OrganizationOwner", organizationId: "organization-1" },
-        placement: "local",
-      })
-      expect(input).not.toHaveProperty("membershipId")
-    }),
-  )
-
-  it.effect("rejects client-supplied ownership fields for local admission and runs", () =>
-    Effect.gen(function* () {
-      const operationKey = "019d1a56-286d-7000-8000-000000000005"
       const base = dependencies({ account })
       const deps: HttpDependencies = {
         ...base,
@@ -593,149 +512,6 @@ describe("api HTTP", () => {
         })
         expect(result.status).toBe(400)
       }
-      for (const obsolete of [{ organization_id: "organization-1" }, { member_id: "member-1" }]) {
-        const result = yield* response("/api/v1/threads/thread-1/operations", deps, {
-          method: "POST",
-          headers: { "idempotency-key": operationKey },
-          body: encodeJson({ kind: "run", prompt: ["echo clean"], ...obsolete }),
-        })
-        expect(result.status).toBe(400)
-      }
-    }),
-  )
-
-  it.effect("acknowledges durable admission without executing in the HTTP request", () =>
-    Effect.gen(function* () {
-      const operationKey = "019d1a56-286d-7000-8000-000000000002"
-      const principal: IdentityPrincipal = { userId: "user-1", clientId: "client-1", dpopJkt: "thumbprint-1" }
-      const base = dependencies({ userId: "user-1", account })
-      let admitted: Parameters<HostedProductService["admitRun"]>[0] | undefined
-      let executed = false
-      const result = yield* response(
-        "/api/v1/threads/thread-1/operations",
-        {
-          ...base,
-          identity: { ...base.identity, identify: () => Effect.succeed(principal) },
-          devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
-          product: {
-            ...product,
-            admitRun: (input) => {
-              admitted = input
-              return Effect.succeed({ commandId: operationKey, turnId: "turn-1", status: "queued" })
-            },
-          },
-          executor: {
-            ...executor,
-            run: () => {
-              executed = true
-              return Effect.die("HTTP must not execute admitted work")
-            },
-          },
-        },
-        {
-          method: "POST",
-          headers: { "idempotency-key": operationKey },
-          body: encodeJson({ kind: "run", prompt: ["echo hosted-mvp"] }),
-        },
-      )
-      expect(result.status).toBe(202)
-      expect(yield* Effect.promise(() => result.json())).toEqual({
-        commandId: operationKey,
-        turnId: "turn-1",
-        status: "queued",
-      })
-      expect(admitted).toEqual({
-        principal: {
-          userId: "user-1",
-          deviceId: "device-1",
-          clientId: "client-1",
-          dpopJkt: "thumbprint-1",
-        },
-        threadId: "thread-1",
-        operationKey,
-        prompt: "echo hosted-mvp",
-      })
-      expect(executed).toBe(false)
-    }),
-  )
-
-  it.effect("returns the original durable admission without redispatching", () =>
-    Effect.gen(function* () {
-      const operationKey = "019d1a56-286d-7000-8000-000000000004"
-      const base = dependencies({ userId: "user-1", account })
-      let dispatched = false
-      const result = yield* response(
-        "/api/v1/threads/thread-1/operations",
-        {
-          ...base,
-          identity: {
-            ...base.identity,
-            identify: () => Effect.succeed({ userId: "user-1", clientId: "client-1" }),
-          },
-          devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
-          product: {
-            ...product,
-            admitRun: () => Effect.succeed({ commandId: operationKey, turnId: "original-turn", status: "queued" }),
-          },
-          executor: {
-            ...executor,
-            run: () => {
-              dispatched = true
-              return Effect.die("must not redispatch")
-            },
-          },
-        },
-        {
-          method: "POST",
-          headers: { "idempotency-key": operationKey },
-          body: encodeJson({ kind: "run", prompt: ["echo hosted-mvp"] }),
-        },
-      )
-      expect(result.status).toBe(202)
-      expect(yield* Effect.promise(() => result.json())).toEqual({
-        commandId: operationKey,
-        turnId: "original-turn",
-        status: "queued",
-      })
-      expect(dispatched).toBe(false)
-    }),
-  )
-
-  it.effect("reports an idempotency conflict without dispatching", () =>
-    Effect.gen(function* () {
-      const operationKey = "019d1a56-286d-7000-8000-000000000003"
-      const base = dependencies({ userId: "user-1", account })
-      let dispatched = false
-      const result = yield* response(
-        "/api/v1/threads/thread-1/operations",
-        {
-          ...base,
-          identity: {
-            ...base.identity,
-            identify: () => Effect.succeed({ userId: "user-1", clientId: "client-1" }),
-          },
-          devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
-          product: {
-            ...product,
-            admitRun: () =>
-              Effect.fail(HostedProductError.make({ kind: "conflict", message: "conflicting operation" })),
-          },
-          executor: {
-            ...executor,
-            run: () => {
-              dispatched = true
-              return Effect.die("must not dispatch")
-            },
-          },
-        },
-        {
-          method: "POST",
-          headers: { "idempotency-key": operationKey },
-          body: encodeJson({ kind: "run", prompt: ["different"] }),
-        },
-      )
-      expect(result.status).toBe(409)
-      expect(dispatched).toBe(false)
     }),
   )
 
