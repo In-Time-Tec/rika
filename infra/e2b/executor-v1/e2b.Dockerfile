@@ -40,19 +40,19 @@ RUN export DEBIAN_FRONTEND=noninteractive \
   && rm -rf /var/lib/apt/lists/* \
   && sed -i 's/^# en_US.UTF-8 UTF-8$/en_US.UTF-8 UTF-8/' /etc/locale.gen \
   && locale-gen \
-  && curl -fsSLo /tmp/bun.zip "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip" \
+  && curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /tmp/bun.zip "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip" \
   && echo "${BUN_SHA256}  /tmp/bun.zip" | sha256sum -c - \
   && unzip -q /tmp/bun.zip -d /tmp/bun && install -m 0755 /tmp/bun/bun-linux-x64/bun /usr/local/bin/bun \
   && ln -s bun /usr/local/bin/bunx \
-  && curl -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+  && curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
   && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
   && tar -xJf /tmp/node.tar.xz --strip-components=1 -C /usr/local \
   && npm install --global "agent-browser@${AGENT_BROWSER_VERSION}" "corepack@${COREPACK_VERSION}" \
   && corepack enable && corepack prepare "pnpm@${PNPM_VERSION}" "yarn@${YARN_VERSION}" --activate \
-  && curl -fsSLo /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64" \
+  && curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64" \
   && echo "${YQ_SHA256}  /usr/local/bin/yq" | sha256sum -c - \
   && chmod 0755 /usr/local/bin/yq \
-  && curl -fsSLo /tmp/websocat "https://github.com/vi/websocat/releases/download/v${WEBSOCAT_VERSION}/websocat.x86_64-unknown-linux-musl" \
+  && curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /tmp/websocat "https://github.com/vi/websocat/releases/download/v${WEBSOCAT_VERSION}/websocat.x86_64-unknown-linux-musl" \
   && echo "${WEBSOCAT_SHA256}  /tmp/websocat" | sha256sum -c - \
   && install -m 0755 /tmp/websocat /usr/local/bin/websocat \
   && python3 -m venv /opt/rika-python \

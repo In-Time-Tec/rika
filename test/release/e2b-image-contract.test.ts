@@ -38,6 +38,10 @@ describe("E2B image source contract", () => {
       expect(dockerfile).toContain(item.version)
       expect(dockerfile).toContain(item.sha256)
     }
+    const downloads = dockerfile.split("\n").filter((line) => line.includes("&& curl"))
+    expect(downloads).toHaveLength(manifest.downloads.length)
+    for (const download of downloads)
+      expect(download).toContain("curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o")
     for (const item of manifest.aptPackages) expect(dockerfile).toContain(`${item.name}=${item.version}`)
     expect(manifest.tools.every(({ expect }) => typeof expect === "string" && expect.length > 0)).toBe(true)
     const tools = new Set(manifest.tools.map(({ name }) => name))
