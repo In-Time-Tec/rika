@@ -2,7 +2,7 @@ import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import type { Change } from "@rika/product/execution-projection"
 import type { Unit } from "@rika/product/execution-transcript-contract"
-import { Runtime } from "tenetkit/runtime"
+import { LocalScheduler, RunStore, Runtime } from "tenetkit/runtime"
 import { Context, Effect, Layer, Random, Schedule, Schema, Stream } from "effect"
 import { sqliteLayer as layer } from "./test-adapters"
 import { laneExecutionRoute, makeLaneModels, step as model, type LaneModels, type Profile } from "../src/test-harness"
@@ -44,6 +44,16 @@ const waitForRecursiveSuspension = (runtime: Runtime.Interface, rootRunId: strin
           runs.find(({ depth }) => depth === 2)?.status === "queued"
         )
       },
+      () => "pending" as const,
+    ),
+    Effect.retry({ schedule: Schedule.spaced("2 millis"), times: 5_000 }),
+    Effect.asVoid,
+  )
+
+const waitForChildQueue = (runtime: Runtime.Interface, rootRunId: string) =>
+  runtime.inspectTree(rootRunId).pipe(
+    Effect.filterOrFail(
+      (inspection) => inspection.runs.some(({ run }) => run.depth === 1 && run.status === "queued"),
       () => "pending" as const,
     ),
     Effect.retry({ schedule: Schedule.spaced("2 millis"), times: 5_000 }),
@@ -103,10 +113,16 @@ it.live(
         const link = yield* Effect.scoped(
           Effect.gen(function* () {
             const context = yield* Layer.build(
-              layer({ filename, modelServices: models.registryLayer, scheduler: { concurrency: 1 } }),
+              layer({
+                filename,
+                modelServices: models.registryLayer,
+                scheduler: { concurrency: 1, pollInterval: "1 hour" },
+              }),
             )
             const gateway = Context.get(context, ExecutionGateway.Service)
             const runtime = Context.get(context, Runtime.Runtime)
+            const scheduler = Context.getUnsafe(context, LocalScheduler.LocalScheduler)
+            const store = Context.getUnsafe(context, RunStore.RunStore)
             const admitted = yield* gateway.startTurn({
               threadId: "recursive-recovery-thread",
               turnId: "recursive-recovery-turn",
@@ -114,8 +130,13 @@ it.live(
               prompt: "Recover recursive work",
               executionRoute: route,
             })
+            yield* scheduler.tick.pipe(Effect.provideService(RunStore.RunStore, store))
+            yield* waitForChildQueue(runtime, admitted.runId)
+            yield* scheduler.idle
+            yield* scheduler.tick.pipe(Effect.provideService(RunStore.RunStore, store))
             yield* waitForRequests(models, "Task", 1)
             yield* waitForRecursiveSuspension(runtime, admitted.runId)
+            yield* scheduler.idle
             return admitted
           }),
         )
