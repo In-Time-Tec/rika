@@ -1,5 +1,5 @@
 import { RunSchema, layerPostgres as upstreamLayer } from "@tenetkit/pg"
-import { Cause, Context, Effect, Layer, Schema } from "effect"
+import { Cause, Context, Effect, Layer, Ref, Schedule, Schema } from "effect"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import {
   Errors,
@@ -41,14 +41,28 @@ export const Options = Schema.Struct({
 
 export type Options = typeof Options.Type
 
-export class InvalidOptions extends Schema.TaggedError<InvalidOptions>()(
-  "@rika/execution/postgres/InvalidOptions",
-  { message: Schema.String },
-) {}
+export class InvalidOptions extends Schema.TaggedError<InvalidOptions>()("@rika/execution/postgres/InvalidOptions", {
+  message: Schema.String,
+}) {}
 
 export class RuntimeUnavailable extends Schema.TaggedError<RuntimeUnavailable>()(
   "@rika/execution/postgres/RuntimeUnavailable",
   { message: Schema.String },
+) {}
+
+export class WorkerUnavailable extends Schema.TaggedError<WorkerUnavailable>()(
+  "@rika/execution/postgres/WorkerUnavailable",
+  { message: Schema.String },
+) {}
+
+export interface WorkerHealthInterface {
+  readonly check: Effect.Effect<void, WorkerUnavailable>
+  readonly healthy: Effect.Effect<void>
+  readonly failed: Effect.Effect<void>
+}
+
+export class WorkerHealth extends Context.Service<WorkerHealth, WorkerHealthInterface>()(
+  "@rika/execution/postgres/WorkerHealth",
 ) {}
 
 export const ReadinessProof = Schema.Struct({
@@ -60,7 +74,7 @@ export const ReadinessProof = Schema.Struct({
 export type ReadinessProof = typeof ReadinessProof.Type
 
 export interface ReadinessInterface {
-  readonly check: Effect.Effect<ReadinessProof, SchemaError>
+  readonly check: Effect.Effect<ReadinessProof, SchemaError | WorkerUnavailable>
 }
 
 export class Readiness extends Context.Service<Readiness, ReadinessInterface>()("@rika/execution/postgres/Readiness") {}
@@ -73,9 +87,7 @@ export const validateOptions = Effect.fn("Postgres.validateOptions")(function* (
   )
 })
 
-export const validateWorkerOptions = Effect.fn("Postgres.validateWorkerOptions")(function* (
-  input: unknown,
-) {
+export const validateWorkerOptions = Effect.fn("Postgres.validateWorkerOptions")(function* (input: unknown) {
   return yield* Schema.decodeUnknownEffect(WorkerOptions, { onExcessProperty: "error" })(input).pipe(
     Effect.mapError(invalidOptions),
   )
@@ -89,9 +101,7 @@ export const toWorkerOptions = (options: WorkerOptions): RuntimeWorker.WorkerOpt
   cancellationInterval: options.cancellationIntervalMillis,
 })
 
-export const applySchema = Effect.fn("Postgres.applySchema")(function* (
-  input: Pick<Options, "url" | "source">,
-) {
+export const applySchema = Effect.fn("Postgres.applySchema")(function* (input: Pick<Options, "url" | "source">) {
   return yield* Effect.scoped(
     Layer.build(RunSchema.layerClient(input.url)).pipe(
       Effect.flatMap((context) => RunSchema.apply(input.source).pipe(Effect.provide(context))),
@@ -99,9 +109,7 @@ export const applySchema = Effect.fn("Postgres.applySchema")(function* (
   ) as Effect.Effect<undefined, SchemaError>
 })
 
-export const checkSchema = Effect.fn("Postgres.checkSchema")(function* (
-  input: Pick<Options, "url" | "source">,
-) {
+export const checkSchema = Effect.fn("Postgres.checkSchema")(function* (input: Pick<Options, "url" | "source">) {
   return yield* Effect.scoped(
     Layer.build(RunSchema.layerClient(input.url)).pipe(
       Effect.flatMap((context) => RunSchema.check(input.source).pipe(Effect.provide(context))),
@@ -112,13 +120,65 @@ export const checkSchema = Effect.fn("Postgres.checkSchema")(function* (
 export const workerLayer = (
   options: WorkerOptions,
 ): Layer.Layer<
-  RuntimeWorker.RuntimeWorker,
+  RuntimeWorker.RuntimeWorker | WorkerHealth,
   InvalidOptions,
   RunClaims.RunClaims | ExecutionHost.ExecutionHost | RunStore.RunStore
 > =>
   Layer.unwrap(
     validateWorkerOptions(options).pipe(
-      Effect.map((validated) => RuntimeWorker.layerWorkerLoop(toWorkerOptions(validated))),
+      Effect.map((validated) => {
+        const worker = RuntimeWorker.layerWorker(toWorkerOptions(validated))
+        const health = Layer.effect(
+          WorkerHealth,
+          Ref.make<"starting" | "healthy" | "failed">("starting").pipe(
+            Effect.map((state) =>
+              WorkerHealth.of({
+                check: Ref.get(state).pipe(
+                  Effect.flatMap((status) =>
+                    status === "healthy"
+                      ? Effect.void
+                      : Effect.fail(
+                          WorkerUnavailable.make({
+                            message:
+                              status === "starting"
+                                ? "Hosted execution worker has not completed its first poll"
+                                : "Hosted execution worker is unavailable",
+                          }),
+                        ),
+                  ),
+                ),
+                healthy: Ref.set(state, "healthy"),
+                failed: Ref.set(state, "failed"),
+              }),
+            ),
+          ),
+        )
+        const services = Layer.merge(worker, health)
+        const loop = Layer.effectDiscard(
+          Effect.gen(function* () {
+            const runtimeWorker = yield* RuntimeWorker.RuntimeWorker
+            const workerHealth = yield* WorkerHealth
+            const poll = runtimeWorker.execute.pipe(
+              Effect.matchCauseEffect({
+                onFailure: (cause) =>
+                  Cause.hasInterrupts(cause)
+                    ? Effect.failCause(cause)
+                    : workerHealth.failed.pipe(
+                        Effect.andThen(
+                          Effect.logError("hosted-execution.worker.failed").pipe(
+                            Effect.annotateLogs("rika.worker.id", runtimeWorker.workerId),
+                          ),
+                        ),
+                      ),
+                onSuccess: () => workerHealth.healthy,
+              }),
+              Effect.repeat(Schedule.spaced(validated.pollIntervalMillis)),
+            )
+            yield* Effect.forkScoped(poll)
+          }),
+        ).pipe(Layer.provide(services))
+        return Layer.merge(services, loop)
+      }),
     ),
   )
 
@@ -136,6 +196,7 @@ export const layer = (
   options: LayerOptions,
 ): Layer.Layer<
   | Readiness
+  | WorkerHealth
   | Runtime.Runtime
   | RuntimeWorker.RuntimeWorker
   | RunStore.RunStore
@@ -165,8 +226,10 @@ export const layer = (
           Readiness,
           Effect.gen(function* () {
             const runtimeWorker = yield* RuntimeWorker.RuntimeWorker
+            const workerHealth = yield* WorkerHealth
             return Readiness.of({
               check: checkSchema(postgres).pipe(
+                Effect.andThen(workerHealth.check),
                 Effect.andThen(runtimeWorker.claimed),
                 Effect.as(
                   ReadinessProof.make({
