@@ -1,6 +1,6 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Template } from "e2b"
+import { defaultBuildLogger, Template } from "e2b"
 import { Config, Effect, FileSystem, Layer, Redacted, Schema } from "effect"
 import { Argument, Command } from "effect/unstable/cli"
 
@@ -23,8 +23,15 @@ export const createImageTemplate = Effect.fn("ExecutorImageTemplate.create")(fun
     .fromImage(image, { username, password: Redacted.value(password) })
     .setStartCmd("/opt/rika/start.sh", "curl --fail --silent http://127.0.0.1:7070/health")
   const built = yield* Effect.tryPromise({
-    try: () => Template.build(template, alias, { apiKey: Redacted.value(apiKey) }),
-    catch: () => ImageTemplateError.make({ message: "E2B private image template build failed" }),
+    try: () =>
+      Template.build(template, alias, {
+        apiKey: Redacted.value(apiKey),
+        onBuildLogs: defaultBuildLogger({ minLevel: "debug" }),
+      }),
+    catch: (cause) =>
+      ImageTemplateError.make({
+        message: cause instanceof Error ? cause.message : "E2B private image template build failed",
+      }),
   })
   const identity = yield* Schema.decodeUnknownEffect(TemplateIdentity)(built)
   const artifact = yield* encodeTemplateIdentity(identity)

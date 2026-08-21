@@ -158,7 +158,9 @@ describe("E2B image source contract", () => {
 
     expect(create).toContain(".fromImage(image, { username, password: Redacted.value(password) })")
     expect(create).toContain('.setStartCmd("/opt/rika/start.sh", "curl --fail --silent http://127.0.0.1:7070/health")')
-    expect(create).toContain("Template.build(template, alias, { apiKey: Redacted.value(apiKey) })")
+    expect(create).toContain("Template.build(template, alias, {")
+    expect(create).toContain("apiKey: Redacted.value(apiKey)")
+    expect(create).toContain('onBuildLogs: defaultBuildLogger({ minLevel: "debug" })')
     expect(create).toContain('Config.string("GHCR_USERNAME")')
     expect(create).toContain('Config.redacted("GHCR_PASSWORD")')
     expect(create).not.toContain("console.log")
