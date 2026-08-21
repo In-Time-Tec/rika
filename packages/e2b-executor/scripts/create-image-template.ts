@@ -19,10 +19,19 @@ export const createImageTemplate = Effect.fn("ExecutorImageTemplate.create")(fun
   const username = yield* Config.string("GHCR_USERNAME")
   const password = yield* Config.redacted("GHCR_PASSWORD")
   const apiKey = yield* Config.redacted("E2B_API_KEY")
+  const createRuntimeDirectory =
+    "/usr/bin/install -d -m 2750 -o rika-executor -g rika-workspace /run/rika"
   const template = Template()
     .fromImage(image, { username, password: Redacted.value(password) })
+    .runCmd(
+      `printf 'rika-executor ALL=(root) NOPASSWD: ${createRuntimeDirectory}\n' > /etc/sudoers.d/rika-runtime && chmod 0440 /etc/sudoers.d/rika-runtime`,
+      { user: "root" },
+    )
     .setUser("rika-executor")
-    .setStartCmd("/opt/rika/start.sh", "curl --fail --silent http://127.0.0.1:7070/health")
+    .setStartCmd(
+      `sudo -n ${createRuntimeDirectory} && exec /opt/rika/start.sh`,
+      "curl --fail --silent http://127.0.0.1:7070/health",
+    )
   const built = yield* Effect.tryPromise({
     try: () =>
       Template.build(template, alias, {

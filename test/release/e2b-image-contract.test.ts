@@ -163,8 +163,11 @@ describe("E2B image source contract", () => {
     const create = await text("packages/e2b-executor/scripts/create-image-template.ts", root)
 
     expect(create).toContain(".fromImage(image, { username, password: Redacted.value(password) })")
+    expect(create).toContain("rika-executor ALL=(root) NOPASSWD: ${createRuntimeDirectory}")
+    expect(create).toContain('> /etc/sudoers.d/rika-runtime && chmod 0440 /etc/sudoers.d/rika-runtime')
     expect(create).toContain('.setUser("rika-executor")')
-    expect(create).toContain('.setStartCmd("/opt/rika/start.sh", "curl --fail --silent http://127.0.0.1:7070/health")')
+    expect(create).toContain("`sudo -n ${createRuntimeDirectory} && exec /opt/rika/start.sh`")
+    expect(create).toContain('"curl --fail --silent http://127.0.0.1:7070/health"')
     expect(create).toContain("Template.build(template, alias, {")
     expect(create).toContain("apiKey: Redacted.value(apiKey)")
     expect(create).toContain('onBuildLogs: defaultBuildLogger({ minLevel: "debug" })')
