@@ -2,6 +2,15 @@ import { expect, test } from "vitest"
 
 const root = process.cwd()
 const image = `rika-proxy-topology-${process.pid}-${Date.now()}`
+const containerCommand = Bun.which("docker")
+  ? ["docker"]
+  : Bun.which("podman")
+    ? (await Bun.spawn(["sudo", "-n", "podman", "version"], { stdout: "ignore", stderr: "ignore" }).exited) === 0
+      ? ["sudo", "podman", "--cgroup-manager=cgroupfs"]
+      : ["podman"]
+    : undefined
+const usesDocker = containerCommand?.length === 1 && containerCommand[0] === "docker"
+const containerHost = usesDocker ? "host.docker.internal" : "host.containers.internal"
 
 type CommandResult = {
   readonly exitCode: number
@@ -75,7 +84,7 @@ const websocketMessage = (url: string, message: string) =>
     socket.addEventListener("close", () => finish(() => reject(new Error("proxied WebSocket closed before a message"))))
   })
 
-test("routes the digest-pinned Caddy topology to live API, web, and WebSocket listeners", async () => {
+test.skipIf(containerCommand === undefined)("routes the digest-pinned Caddy topology to live API, web, and WebSocket listeners", async () => {
   const apiRequests: Array<{ method: string; path: string; search: string; body: string }> = []
   const apiUpgradePaths: string[] = []
   const webRequests: Array<{ method: string; path: string; search: string; body: string }> = []
@@ -116,24 +125,23 @@ test("routes the digest-pinned Caddy topology to live API, web, and WebSocket li
   let container: string | undefined
   try {
     const proxyPort = await freePort()
-    await checkedCommand(["docker", "build", "--file", "apps/proxy/Dockerfile", "--tag", image, "."], 120_000)
+    await checkedCommand([...containerCommand!, "build", "--file", "apps/proxy/Dockerfile", "--tag", image, "."], 120_000)
     const started = await checkedCommand(
       [
-        "docker",
+        ...containerCommand!,
         "run",
         "--detach",
         "--publish",
         `127.0.0.1:${proxyPort}:3000`,
-        "--add-host",
-        "host.docker.internal:host-gateway",
+        ...(usesDocker ? ["--add-host", "host.docker.internal:host-gateway"] : []),
         "--env",
         "PORT=3000",
         "--env",
-        "API_DOMAIN=host.docker.internal",
+        `API_DOMAIN=${containerHost}`,
         "--env",
         `API_PORT=${apiServer.port}`,
         "--env",
-        "WEB_DOMAIN=host.docker.internal",
+        `WEB_DOMAIN=${containerHost}`,
         "--env",
         `WEB_PORT=${webServer.port}`,
         image,
@@ -223,11 +231,12 @@ test("routes the digest-pinned Caddy topology to live API, web, and WebSocket li
       ["POST", "/assets/upload", "?source=proxy"],
     ])
   } catch (error) {
-    const logs = container === undefined ? "" : (await command(["docker", "logs", container], 10_000)).stdout
+    const logs =
+      container === undefined ? "" : (await command([...containerCommand!, "logs", container], 10_000)).stdout
     throw new Error(`${error instanceof Error ? error.message : String(error)}\n${logs}`)
   } finally {
-    if (container !== undefined) await command(["docker", "rm", "--force", container], 10_000)
-    await command(["docker", "image", "rm", "--force", image], 30_000)
+    if (container !== undefined) await command([...containerCommand!, "rm", "--force", container], 10_000)
+    await command([...containerCommand!, "image", "rm", "--force", image], 30_000)
     await apiServer.stop(true)
     await webServer.stop(true)
   }

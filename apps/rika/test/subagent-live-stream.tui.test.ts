@@ -36,8 +36,8 @@ test(
             // Each child answers in ONE turn. A child that called a tool first would need a second
             // turn, and its slot for that turn is the one the waiting root is holding — the same
             // circular wait a deeper chain hits. Both still run long enough to be seen live.
-            { profile: "Oracle", steps: [model.text("READER_CHILD_FINISHED", 400)] },
-            { profile: "Task", steps: [model.text("WORKER_CHILD_FINISHED", 800)] },
+            { profile: "Oracle", steps: [model.text("READER_CHILD_FINISHED", 3_000)] },
+            { profile: "Task", steps: [model.text("WORKER_CHILD_FINISHED", 4_000)] },
           ],
           height: 40,
         })
@@ -46,7 +46,10 @@ test(
         app.pressEnter()
 
         const live = yield* app.waitFrameMatch(
-          (frame) => frame.includes("Oracle exploring") && frame.includes("Subagent working"),
+          (frame) =>
+            frame.includes("Oracle exploring") &&
+            frame.includes("Subagent working") &&
+            frame.includes("Running 2 subagents"),
         )
         expect(live).toContain("Running 2 subagents")
         expect(live).not.toContain("Execution failed")

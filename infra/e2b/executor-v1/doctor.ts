@@ -1,10 +1,13 @@
-import { readFile } from "node:fs/promises"
-import { createHash } from "node:crypto"
-import { join } from "node:path"
+import { createHash, randomUUID } from "node:crypto"
+import { chmod, readFile, rm } from "node:fs/promises"
+import { dirname, join } from "node:path"
 
 const manifestPath = process.env.RIKA_IMAGE_MANIFEST ?? "/opt/rika/tool-manifest.json"
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"))
 const workspace = process.env.RIKA_EXECUTOR_WORKSPACE ?? "/home/rika-workspace/workspace/repo"
+const workspaceParent = dirname(workspace)
+const temp = join(workspaceParent, `.rika-doctor-${randomUUID()}`)
+const executorHome = process.env.HOME ?? "/home/rika-executor"
 const checks: Array<{ name: string; ok: boolean; detail: string }> = []
 const check = async (name: string, run: () => Promise<string>) => {
   try {
@@ -14,7 +17,7 @@ const check = async (name: string, run: () => Promise<string>) => {
   }
 }
 const command = async (parts: string[]) => {
-  const proc = Bun.spawn(parts, { cwd: workspace, stdout: "pipe", stderr: "pipe", env: process.env })
+  const proc = Bun.spawn(parts, { cwd: executorHome, stdout: "pipe", stderr: "pipe", env: process.env })
   const [stdout, stderr, exit] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -38,12 +41,28 @@ for (const installed of manifest.aptPackages)
     return output
   })
 
-const temp = await command(["sudo", "-n", "-u", "rika-workspace", "mktemp", "-d", `${workspace}/.rika-doctor-XXXXXX`])
-await check("workspace:writable", async () => {
-  const output = await command(["sudo", "-n", "-u", "rika-workspace", "touch", join(temp, "write")])
-  return output || workspace
+await check("workspace:ready", async () => {
+  const output = await command([
+    "sudo",
+    "-n",
+    "-u",
+    "rika-workspace",
+    "env",
+    `PATH=${process.env.PATH ?? ""}`,
+    `GH_CONFIG_DIR=${process.env.GH_CONFIG_DIR ?? ""}`,
+    "sh",
+    "-ceu",
+    '[ "$(id -un)" = rika-workspace ]\n[ "$HOME" = /home/rika-workspace ]\ncase "$PATH" in /run/rika/bin:*) ;; *) exit 1 ;; esac\n[ "$GH_CONFIG_DIR" = /run/rika/gh ]\n[ -r "$1" ] && [ -w "$1" ] && [ -x "$1" ]\ninstall -d -m 0770 "$2"\ntouch "$2/write"\nprintf workspace-ready',
+    "sh",
+    workspaceParent,
+    temp,
+  ])
+  if (output !== "workspace-ready") throw new Error(`unexpected workspace probe: ${output}`)
+  return output
 })
-await check("kernel:persistence", async () => command(["bun", "run", "/opt/rika/kernel-doctor.ts"]))
+await check("kernel:persistence", async () =>
+  command(["bun", "run", "/opt/rika/kernel-doctor.ts", temp, join(temp, "kernel")]),
+)
 await check("typescript:execute", async () => command(["bun", "-e", "const value: number = 42; console.log(value)"]))
 await check("python:pillow", async () =>
   command(["python", "-c", "from PIL import Image; print(Image.new('RGB',(1,1)).size)"]),
@@ -82,6 +101,35 @@ await check("credentials:absent", async () => {
   }
   return "no credential environment keys or files"
 })
+await check("credentials:broker-ready", async () => {
+  const socketPath = join("/run/rika", `.rika-doctor-${randomUUID()}.sock`)
+  const listener = Bun.listen({
+    unix: socketPath,
+    socket: {
+      data(socket, data) {
+        socket.end(new TextDecoder().decode(data).trim() === "readiness" ? "broker-ready" : "")
+      },
+    },
+  })
+  try {
+    await chmod(socketPath, 0o660)
+    const output = await command([
+      "sudo",
+      "-n",
+      "-u",
+      "rika-workspace",
+      "bun",
+      "-e",
+      'let response = ""\nawait new Promise((resolve, reject) => {\n  const timeout = setTimeout(() => reject(new Error("credential broker timed out")), 5000)\n  void Bun.connect({\n    unix: process.argv[1],\n    socket: {\n      open(socket) { socket.write("readiness") },\n      data(_socket, data) { response += new TextDecoder().decode(data) },\n      close() { clearTimeout(timeout); resolve() },\n      error() { clearTimeout(timeout); reject(new Error("credential broker connection failed")) },\n    },\n  }).catch(reject)\n})\nif (response !== "broker-ready") process.exit(1)\nconsole.log(response)',
+      socketPath,
+    ])
+    if (output !== "broker-ready") throw new Error(`unexpected credential broker probe: ${output}`)
+    return output
+  } finally {
+    listener.stop(true)
+    await rm(socketPath, { force: true })
+  }
+})
 await check("source:git-roundtrip", async () => {
   await command(["sudo", "-n", "-u", "rika-workspace", "git", "-C", temp, "init", "--quiet"])
   await command(["sudo", "-n", "-u", "rika-workspace", "sh", "-c", `printf rika > '${join(temp, "tracked")}'`])
@@ -103,7 +151,11 @@ await check("coding:search", async () =>
   command(["sudo", "-n", "-u", "rika-workspace", "rg", "rika", join(temp, "tracked")]),
 )
 await check("process:workspace-user", async () => command(["sudo", "-n", "-u", "rika-workspace", "id", "-un"]))
-await command(["sudo", "-n", "-u", "rika-workspace", "rm", "-rf", temp])
+await check("workspace:cleanup", async () => {
+  await rm(join(temp, "kernel"), { recursive: true, force: true })
+  await command(["sudo", "-n", "-u", "rika-workspace", "rm", "-rf", temp])
+  return "workspace probe removed"
+})
 
 const digest = createHash("sha256")
   .update(await readFile(manifestPath))
@@ -113,6 +165,8 @@ const result = {
   image: manifest.image,
   manifestSchemaVersion: manifest.schemaVersion,
   manifestSha256: digest,
+  manifestToolCount: manifest.tools.length,
+  manifestPackageCount: manifest.aptPackages.length,
   buildId: process.env.RIKA_EXECUTOR_TEMPLATE_BUILD_ID ?? null,
   checks,
 }

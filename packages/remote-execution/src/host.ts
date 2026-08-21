@@ -1028,7 +1028,7 @@ const connect = Effect.fn("Host.connect")(function* (
   frames: Ref.Ref<Map<string, ReadonlyArray<CellLifecycleFrame>>>,
   lifecycle: Semaphore.Semaphore,
   cells: HostedKernel.Interface,
-  machine: Machine["Service"],
+  makeMachine: Effect.Effect<Machine["Service"], never, import("effect").Scope.Scope>,
   ptyDelivery: Semaphore.Semaphore,
   activeWriter: Ref.Ref<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>,
   grants: Ref.Ref<Map<string, PhaseGrant>>,
@@ -1077,6 +1077,7 @@ const connect = Effect.fn("Host.connect")(function* (
   )
   yield* heartbeat
   yield* prepare(config, kernelProfileDigest, bindingContractDigest, incoming, credentials, writer, store)
+  const machine = yield* makeMachine
   const connectedSession = Effect.raceFirst(
     Effect.raceFirst(
       Fiber.join(reader).pipe(
@@ -1352,10 +1353,9 @@ const host = Effect.scoped(
               )
             }),
         })
-        const machineContext = yield* Layer.build(
+        const makeMachine = Layer.build(
           machineLayer({ workspace: workspaceRoot, read: readMachine, write: writeMachine }),
-        )
-        const machine = Context.get(machineContext, Machine)
+        ).pipe(Effect.map((context) => Context.get(context, Machine)))
         const operations = yield* Ref.make(new Map<string, Fiber.Fiber<void, unknown>>())
         const frames = yield* Ref.make(yield* receipts.load)
         const lifecycle = yield* Semaphore.make(1)
@@ -1374,7 +1374,7 @@ const host = Effect.scoped(
             frames,
             lifecycle,
             cells,
-            machine,
+            makeMachine,
             ptyDelivery,
             activeWriter,
             grants,

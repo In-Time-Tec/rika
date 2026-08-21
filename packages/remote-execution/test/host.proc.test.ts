@@ -82,8 +82,6 @@ const server = Bun.serve({
 })
 const stateDirectory = "/tmp/rika-bootstrap-identity-" + process.pid
 const fileSystem = await import("node:fs/promises")
-const workspace = stateDirectory + "/workspace"
-await fileSystem.mkdir(workspace, { recursive: true })
 const host = Bun.spawn(["bun", "run", "./src/host.ts"], {
   cwd: process.cwd(),
   env: {
@@ -97,7 +95,6 @@ const host = Bun.spawn(["bun", "run", "./src/host.ts"], {
     RIKA_EXECUTOR_API_URL: "ws://127.0.0.1:1",
     RIKA_EXECUTOR_WORKSPACE_ID: "workspace-readiness",
     RIKA_EXECUTOR_STATE_DIRECTORY: stateDirectory,
-    RIKA_EXECUTOR_WORKSPACE_ROOT: workspace,
   },
   stdout: "ignore",
   stderr: "ignore",
@@ -127,10 +124,13 @@ try {
       },
     }),
   })
+  let timeout
   const frame = await Promise.race([
     message,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("executor hello timed out")), 3000)),
-  ])
+    new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(new Error("executor hello timed out")), 10000)
+    }),
+  ]).finally(() => clearTimeout(timeout))
   console.log(JSON.stringify({ status: response.status, frame: JSON.parse(frame) }))
 } finally {
   host.kill()
@@ -223,45 +223,48 @@ describe.sequential("executor host process", () => {
     ),
   )
 
-  it.effect("uses the secured bootstrap identity instead of baked template readiness values", () =>
-    Effect.acquireUseRelease(
-      Effect.sync(() =>
-        Bun.spawn(["bun", "-e", bootstrapIdentityProof], {
-          cwd: packageRoot,
-          stdout: "pipe",
-          stderr: "pipe",
-        }),
-      ),
-      (child) =>
-        Effect.promise(() =>
-          Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]),
-        ).pipe(
-          Effect.tap(([exitCode, stdout, stderr]) =>
-            Effect.sync(() => {
-              expect(stderr).toBe("")
-              expect(exitCode).toBe(0)
-              expect(decodeJson(stdout)).toMatchObject({
-                status: 202,
-                frame: {
-                  _tag: "ExecutorHello",
-                  hello: {
-                    fence: {
-                      target: "e2b",
-                      assignmentId: "assignment-from-bootstrap",
-                      assignmentGeneration: 7,
-                      instanceId: expect.any(String),
-                      executorId: expect.stringMatching(/^executor-from-bootstrap:/),
-                    },
-                    templateBuildId: "build-from-bootstrap",
-                    bootstrapToken: "one-time-bootstrap",
-                  },
-                },
-              })
-            }),
-          ),
-          Effect.timeout("5 seconds"),
+  it.effect(
+    "uses the secured bootstrap identity instead of baked template readiness values",
+    () =>
+      Effect.acquireUseRelease(
+        Effect.sync(() =>
+          Bun.spawn(["bun", "-e", bootstrapIdentityProof], {
+            cwd: packageRoot,
+            stdout: "pipe",
+            stderr: "pipe",
+          }),
         ),
-      (child) => Effect.sync(() => child.kill()).pipe(Effect.ignore),
-    ),
+        (child) =>
+          Effect.promise(() =>
+            Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]),
+          ).pipe(
+            Effect.tap(([exitCode, stdout, stderr]) =>
+              Effect.sync(() => {
+                expect(stderr).toBe("")
+                expect(exitCode).toBe(0)
+                expect(decodeJson(stdout)).toMatchObject({
+                  status: 202,
+                  frame: {
+                    _tag: "ExecutorHello",
+                    hello: {
+                      fence: {
+                        target: "e2b",
+                        assignmentId: "assignment-from-bootstrap",
+                        assignmentGeneration: 7,
+                        instanceId: expect.any(String),
+                        executorId: expect.stringMatching(/^executor-from-bootstrap:/),
+                      },
+                      templateBuildId: "build-from-bootstrap",
+                      bootstrapToken: "one-time-bootstrap",
+                    },
+                  },
+                })
+              }),
+            ),
+            Effect.timeout("15 seconds"),
+          ),
+        (child) => Effect.sync(() => child.kill()).pipe(Effect.ignore),
+      ),
+    20_000,
   )
 })

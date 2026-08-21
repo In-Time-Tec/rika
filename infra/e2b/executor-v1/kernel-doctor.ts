@@ -3,13 +3,16 @@ import { CellExecutor, layer } from "@rika/kernel/cell-executor"
 import { HostBindingRegistry } from "tenetkit/repl"
 import { Context, Effect, Layer } from "effect"
 
+const workspace = process.argv[2] ?? "/home/rika-workspace/workspace/repo"
+const dataRoot = process.argv[3] ?? "/var/lib/rika-executor"
+
 const program = Effect.scoped(
   Effect.gen(function* () {
     const context = yield* Layer.build(
       layer({
-        workspace: "/home/rika-workspace/workspace/repo",
+        workspace,
         workspaceDigest: "doctor",
-        dataRoot: "/var/lib/rika-executor",
+        dataRoot,
         runtimeVersion: process.versions.bun,
         trustMode: "trusted-local",
         servers: [],
