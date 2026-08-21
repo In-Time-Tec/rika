@@ -203,7 +203,7 @@ it.effect(
         const context = yield* sandbox
         const cli = yield* openCli(operationLayer(context))
         const help = expectSuccess(yield* cli.invoke(["--help"]))
-        expect(help.lines.join("\n")).toContain("Local durable coding agent")
+        expect(help.lines.join("\n")).toContain("Hosted durable coding agent")
         const versionFlag = expectSuccess(yield* cli.invoke(["--version"]))
         expect(versionFlag.lines.join("\n")).toContain("0.0.0")
         const versionCommand = expectSuccess(yield* cli.invoke(["version"]))
