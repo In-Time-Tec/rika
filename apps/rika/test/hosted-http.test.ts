@@ -17,7 +17,7 @@ const bodyText = (request: HttpClientRequest.HttpClientRequest) => {
   return new TextDecoder().decode(request.body.body)
 }
 
-it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and connection placement", () =>
+it.effect("uses Better Auth DPoP and the canonical hosted Thread and local-runner endpoints", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const requests: Array<HttpClientRequest.HttpClientRequest> = []
@@ -57,14 +57,16 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
           return Effect.succeed(response(request, { devices: [{ id: "device-1", current: true }] }))
         if (path.endsWith("/invitations"))
           return Effect.succeed(response(request, { id: "invite-1", email: "new@example.test", status: "pending" }))
-        if (path === "/api/v1/connections")
+        if (path === "/api/v1/thread-sessions")
           return Effect.succeed(
-            response(request, { threadId: "thread-1", url: "https://hosted.example.test/threads/thread-1" }),
+            response(request, {
+              ticket: "ticket-1",
+              expiresAt: "2026-08-21T06:00:00.000Z",
+              websocketUrl: "wss://hosted.example.test/api/v1/threads/socket",
+              protocol: "rika.thread.v1",
+            }),
           )
-        if (path === "/api/v1/threads/thread-1/operations")
-          return Effect.succeed(
-            response(request, { commandId: "operation-1", turnId: "turn-1", status: "queued" }, 202),
-          )
+        if (path.endsWith("/admissions")) return Effect.succeed(response(request, { _tag: "Waiting" }))
         return Effect.succeed(response(request, {}))
       })
       const context = yield* Layer.build(
@@ -77,7 +79,6 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
       const jkt = yield* thumbprint(publicKey)
       const accessToken = Redacted.make("access")
       const session = { accessToken, privateJwk }
-      const threadId = "thread-1"
       expect((yield* http.register(origin, "device-1", publicKey, jkt)).clientId).toBe("install-client")
       expect((yield* http.startDeviceAuthorization(origin, "install-client", privateJwk)).deviceCode).toBe(
         "device-code",
@@ -95,20 +96,20 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
       expect((yield* http.invite(origin, "org-1", "new@example.test", session)).id).toBe("invite-1")
       yield* http.revokeDevice(origin, "device-1", session)
       yield* http.revokeAllDevices(origin, session)
-      expect(
-        (yield* http.createRemoteConnection(
-          origin,
-          { kind: "organization", organizationId: "org-1" },
-          "project-1",
-          session,
-        )).threadId,
-      ).toBe("thread-1")
-      expect((yield* http.createRemoteConnection(origin, { kind: "personal" }, undefined, session)).threadId).toBe(
-        "thread-1",
+      expect((yield* http.issueThreadTicket(origin, session)).ticket).toBe("ticket-1")
+      yield* http.registerLocalRunner(
+        origin,
+        "checkout-1",
+        {
+          workspaceIdentity: "workspace-1" as never,
+          repository: { identity: "repository-1" },
+          kernel: { runtime: "bun", runtimeVersion: "1.3.14", trustMode: "trusted-local" },
+          capabilities: { cells: true, checkpoints: false, pty: false },
+        },
+        session,
       )
-      expect(
-        yield* http.runThread(origin, threadId, { prompt: ["hello"], mode: "low" }, "operation-1", session),
-      ).toEqual({ commandId: "operation-1", turnId: "turn-1", status: "queued" })
+      yield* http.setRemoteThreadCreation(origin, "checkout-1", "allowed", session)
+      expect((yield* http.pollLocalRunner(origin, "checkout-1", session))._tag).toBe("Waiting")
       expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
         "/api/v1/auth/cli/registrations",
         "/api/auth/device/code",
@@ -119,20 +120,18 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
         "/api/v1/organizations/org-1/invitations",
         "/api/v1/auth/cli/devices/device-1/revoke",
         "/api/v1/auth/cli/devices/revoke-all",
-        "/api/v1/connections",
-        "/api/v1/connections",
-        "/api/v1/threads/thread-1/operations",
+        "/api/v1/thread-sessions",
+        "/api/v1/local-runners/checkout-1",
+        "/api/v1/local-runners/checkout-1/remote-thread-creation",
+        "/api/v1/local-runners/checkout-1/admissions",
       ])
       for (const request of requests.slice(1)) expect(request.headers.dpop).toEqual(expect.any(String))
       expect(requests[4]?.headers.authorization).toBe("DPoP access")
       expect(bodyText(requests[0]!)).toContain('"reference_id":"cli-device:device-1"')
       expect(bodyText(requests[8]!)).toBe("")
-      expect(bodyText(requests[9]!)).toBe(
-        '{"placement":"e2b","owner":{"kind":"organization","organization_id":"org-1"},"project_id":"project-1"}',
-      )
-      expect(bodyText(requests[10]!)).toBe('{"placement":"e2b","owner":{"kind":"personal"}}')
-      expect(requests[11]?.headers["idempotency-key"]).toBe("operation-1")
-      expect(bodyText(requests[11]!)).toBe('{"kind":"run","prompt":["hello"],"mode":"low"}')
+      expect(bodyText(requests[10]!)).toContain('"workspaceIdentity":"workspace-1"')
+      expect(bodyText(requests[11]!)).toBe('{"preference":"allowed"}')
+      expect(bodyText(requests[12]!)).toBe("")
     }),
   ),
 )

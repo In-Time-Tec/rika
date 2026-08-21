@@ -1,6 +1,7 @@
 import { Context, Effect, Option, Redacted, Schema } from "effect"
 import type { ClientTicketResponse } from "@rika/product/client-protocol"
 import type {
+  LocalRunnerTarget,
   LocalRunnerPollResult,
   LocalRunnerProfile,
   RemoteThreadCreation,
@@ -130,12 +131,6 @@ export const CliDevice = Schema.Struct({
 })
 export type CliDevice = typeof CliDevice.Type
 
-export const RemoteConnection = Schema.Struct({
-  threadId: Schema.String,
-  url: Schema.optionalKey(Schema.String),
-})
-export type RemoteConnection = typeof RemoteConnection.Type
-
 export const HostedThreadId = Schema.NonEmptyString
 export type HostedThreadId = typeof HostedThreadId.Type
 
@@ -149,10 +144,30 @@ export type RunRequest = typeof RunRequest.Type
 
 export const RunResult = Schema.Struct({
   commandId: Schema.String,
-  turnId: Schema.String,
   status: Schema.Literal("queued"),
 })
 export type RunResult = typeof RunResult.Type
+
+export interface ThreadClientInterface {
+  readonly create: (input: {
+    readonly ticket: ClientTicketResponse
+    readonly commandId: string
+    readonly owner: OwnerSelection
+    readonly project?: string
+    readonly placement: "local" | "e2b"
+    readonly localRunnerTarget?: LocalRunnerTarget
+  }) => Effect.Effect<HostedThreadId, HostedError>
+  readonly submit: (input: {
+    readonly ticket: ClientTicketResponse
+    readonly threadId: HostedThreadId
+    readonly request: RunRequest
+    readonly commandId: string
+  }) => Effect.Effect<RunResult, HostedError>
+}
+
+export class ThreadClient extends Context.Service<ThreadClient, ThreadClientInterface>()(
+  "@rika/cli/hosted/hosted-contract/ThreadClient",
+) {}
 
 export const ModelProvider = Schema.Literals(["openai", "anthropic", "openrouter"])
 export type ModelProvider = typeof ModelProvider.Type
@@ -198,23 +213,7 @@ export interface HttpInterface {
   readonly devices: (origin: string, session: Session) => Effect.Effect<ReadonlyArray<CliDevice>, HostedError>
   readonly revokeDevice: (origin: string, deviceId: string, session: Session) => Effect.Effect<void, HostedError>
   readonly revokeAllDevices: (origin: string, session: Session) => Effect.Effect<void, HostedError>
-  readonly createRemoteConnection: (
-    origin: string,
-    owner: OwnerSelection,
-    project: string | undefined,
-    session: Session,
-  ) => Effect.Effect<RemoteConnection, HostedError>
-  readonly runThread: (
-    origin: string,
-    threadId: HostedThreadId,
-    request: RunRequest,
-    idempotencyKey: string,
-    session: Session,
-  ) => Effect.Effect<RunResult, HostedError>
-  readonly issueThreadTicket: (
-    origin: string,
-    session: Session,
-  ) => Effect.Effect<ClientTicketResponse, HostedError>
+  readonly issueThreadTicket: (origin: string, session: Session) => Effect.Effect<ClientTicketResponse, HostedError>
   readonly registerLocalRunner: (
     origin: string,
     checkoutFingerprint: string,

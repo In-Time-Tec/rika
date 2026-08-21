@@ -20,6 +20,7 @@ import {
   HostedError,
   Http,
   ProfileStore,
+  ThreadClient,
   type Credential,
   type DevicePoll,
   type HttpInterface,
@@ -51,8 +52,6 @@ const unusedHttp: HttpInterface = {
   devices: () => Effect.die("unused"),
   revokeDevice: () => Effect.die("unused"),
   revokeAllDevices: () => Effect.die("unused"),
-  createRemoteConnection: () => Effect.die("unused"),
-  runThread: () => Effect.die("unused"),
   issueThreadTicket: () => Effect.die("unused"),
   registerLocalRunner: () => Effect.die("unused"),
   setRemoteThreadCreation: () => Effect.die("unused"),
@@ -396,12 +395,26 @@ it.effect("creates for Personal with zero organizations and fails closed for a s
             ...unusedHttp,
             refresh: () => Effect.succeed({ accessToken: "access", refreshToken: "refresh", expiresIn: 600 }),
             context: () => Effect.succeed({ account: { id: "user-1", email: "dev@example.test" }, organizations: [] }),
-            createRemoteConnection: (_origin, owner) => {
-              expect(owner).toEqual({ kind: "personal" })
-              return Ref.update(created, (value) => value + 1).pipe(Effect.as({ threadId: "thread-1" }))
-            },
+            issueThreadTicket: () =>
+              Effect.succeed({
+                ticket: "ticket-1",
+                expiresAt: "2026-08-21T06:00:00.000Z" as never,
+                websocketUrl: "wss://hosted.example.test/api/v1/threads/socket",
+                protocol: "rika.thread.v1",
+              }),
           }),
         ),
+        Layer.succeed(
+          ThreadClient,
+          ThreadClient.of({
+            create: ({ owner }) => {
+              expect(owner).toEqual({ kind: "personal" })
+              return Ref.update(created, (value) => value + 1).pipe(Effect.as("thread-1" as never))
+            },
+            submit: () => Effect.die("unused"),
+          }),
+        ),
+        BunCrypto.layer,
         TestConsole.layer,
       ),
     )

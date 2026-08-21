@@ -1,21 +1,27 @@
+import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as ProductOperation from "@rika/product/product-operation"
-import { Effect, Layer } from "effect"
+import { Crypto, Effect, Layer } from "effect"
 import type { Input } from "../command/root/hosted-command-dispatch"
 import * as HostedAccount from "./hosted-account"
 import * as HostedBrowser from "./hosted-browser"
+import { Browser, CredentialStore, HostedError, Http, ProfileStore, ThreadClient } from "./hosted-contract"
 import * as HostedCredentialStore from "./hosted-credential-store"
 import * as HostedHttp from "./hosted-http"
 import * as HostedProfileStore from "./hosted-profile-store"
+import * as HostedThreadClient from "./hosted-thread-client"
 
 export const liveLayer = (home: string) =>
   Layer.mergeAll(
     HostedHttp.layer,
+    HostedThreadClient.layer.pipe(Layer.provide(BunSocket.layerWebSocketConstructor)),
     HostedProfileStore.layer({ home }),
     HostedCredentialStore.layer(),
     HostedBrowser.layer(),
   )
 
-const operation = (input: Input) => {
+const operation = (
+  input: Input,
+): Effect.Effect<void, HostedError, Browser | CredentialStore | Crypto.Crypto | Http | ProfileStore | ThreadClient> => {
   if (input._tag === "Auth") {
     if (input.action === "login") return HostedAccount.login(input)
     if (input.action === "status") return HostedAccount.status(input.json)

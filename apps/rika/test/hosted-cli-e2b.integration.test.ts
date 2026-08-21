@@ -31,8 +31,10 @@ import * as HostedHttp from "../src/hosted/hosted-http"
 import {
   Browser,
   CredentialStore,
+  HostedError,
   Http,
   ProfileStore,
+  ThreadClient,
   type Credential,
   type PrivateJwk,
 } from "../src/hosted/hosted-contract"
@@ -254,12 +256,17 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
             revokeAll: () => Effect.void,
           } satisfies CliDeviceDirectory,
           product,
+          threads: {
+            issueTicket: () =>
+              Effect.succeed({ ticket: "thread-ticket", expiresAt: "2026-08-21T07:00:00.000Z" as never }),
+            connect: () => Effect.die("The test Thread client handles the canonical command boundary"),
+          },
           executor,
           execution: { check: Effect.die("unused") },
           production: false,
         }
         const api = makeRikaApiHandler(dependencies)
-        let operationRetry: Parameters<typeof api.handler>[0] | undefined
+        let ticketRequests = 0
         const client = HttpClient.make((request) =>
           Effect.promise(() => {
             const pathname = new URL(request.url).pathname
@@ -272,9 +279,8 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
                   token_type: "DPoP",
                 }),
               )
-            const web = webRequest(request)
-            if (pathname.endsWith("/operations")) operationRetry = web.clone() as Parameters<typeof api.handler>[0]
-            return api.handler(web)
+            if (pathname === "/api/v1/thread-sessions") ticketRequests += 1
+            return api.handler(webRequest(request))
           }).pipe(Effect.map((value) => HttpClientResponse.fromWeb(request, value))),
         )
         const localServerSpawns = yield* Ref.make(0)
@@ -318,10 +324,28 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
             }),
           ),
           Layer.succeed(Browser, Browser.of({ open: () => Effect.void })),
+          Layer.succeed(
+            ThreadClient,
+            ThreadClient.of({
+              create: () => Effect.die("unused"),
+              submit: ({ threadId, request, commandId }) =>
+                product
+                  .admitRun({
+                    principal: { userId: account.user.id, deviceId, clientId, dpopJkt: "dpop-thumbprint" },
+                    threadId,
+                    operationKey: commandId,
+                    prompt: request.prompt.join("\n"),
+                    ...(request.mode === undefined ? {} : { mode: request.mode }),
+                  })
+                  .pipe(Effect.mapError((error) => HostedError.make({ kind: "protocol", message: error.message }))),
+            }),
+          ),
         )
         const hostedCommand = Layer.effect(
           HostedCommand.Service,
-          Effect.context<Browser | CredentialStore | import("effect").Crypto.Crypto | Http | ProfileStore>().pipe(
+          Effect.context<
+            Browser | CredentialStore | import("effect").Crypto.Crypto | Http | ProfileStore | ThreadClient
+          >().pipe(
             Effect.map((services) =>
               HostedCommand.Service.of({ run: (input) => HostedCli.run(input).pipe(Effect.provide(services)) }),
             ),
@@ -339,14 +363,7 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
           ),
         ).pipe(Effect.provideService(HttpClient.HttpClient, client))
         yield* run(["--execute", "echo hosted-mvp", "--thread", connection.threadId]).pipe(Effect.provide(cli))
-        expect(operationRetry).toBeDefined()
-        const retried = yield* Effect.promise(() => api.handler(operationRetry!))
-        expect(retried.status).toBe(202)
-        expect(yield* Effect.promise(() => retried.json())).toMatchObject({
-          commandId: expect.any(String),
-          turnId: expect.any(String),
-          status: "queued",
-        })
+        expect(ticketRequests).toBe(1)
         const [thread, assignment, commands, events] = yield* Effect.promise(() =>
           Promise.all([
             migrated!.query(`SELECT executor_kind FROM rika_hosted_threads WHERE id = $1`, [connection.threadId]),

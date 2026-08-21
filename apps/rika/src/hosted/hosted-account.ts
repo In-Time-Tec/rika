@@ -6,6 +6,7 @@ import {
   HostedError,
   Http,
   ProfileStore,
+  ThreadClient,
   type Credential,
   type DeviceAuthorization,
   type PrivateJwk,
@@ -104,7 +105,7 @@ const refresh = Effect.fn("HostedAccount.refresh")(function* (profile: Profile, 
   )
 })
 
-export const authenticated = <A>(
+const authenticated = <A>(
   profile: Profile,
   request: (session: Session) => Effect.Effect<A, HostedError>,
 ): Effect.Effect<A, HostedError, Http | CredentialStore> =>
@@ -351,28 +352,43 @@ export const invite = Effect.fn("HostedAccount.invite")(function* (rawEmail: str
 export const createRemoteThread = Effect.fn("HostedAccount.createRemoteThread")(function* () {
   const profile = yield* selectedProfile()
   const http = yield* Http
-  const connection = yield* authenticated(profile, (session) =>
+  const threads = yield* ThreadClient
+  const crypto = yield* Crypto.Crypto
+  const commandId = yield* crypto.randomUUIDv4.pipe(
+    Effect.mapError(() => failure("host", "Could not create a hosted Thread identifier")),
+  )
+  const threadId = yield* authenticated(profile, (session) =>
     http.context(profile.origin, session).pipe(
       Effect.filterOrFail((identity) => validOwner(profile, identity), staleOwner),
-      Effect.flatMap(() => http.createRemoteConnection(profile.origin, profile.owner, profile.project, session)),
+      Effect.andThen(http.issueThreadTicket(profile.origin, session)),
+      Effect.flatMap((ticket) =>
+        threads.create({
+          ticket,
+          commandId,
+          owner: profile.owner,
+          ...(profile.project === undefined ? {} : { project: profile.project }),
+          placement: "e2b",
+        }),
+      ),
     ),
   )
-  yield* Console.log(
-    `Created remote E2B thread ${connection.threadId}${connection.url === undefined ? "" : `\n${connection.url}`}`,
-  )
+  yield* Console.log(`Created remote E2B thread ${threadId}`)
 })
 
 export const runThread = Effect.fn("HostedAccount.runThread")(function* (threadId: string, request: RunRequest) {
   const profile = yield* selectedProfile()
   const crypto = yield* Crypto.Crypto
   const http = yield* Http
+  const threads = yield* ThreadClient
   const key = yield* crypto.randomUUIDv4.pipe(
     Effect.mapError(() => failure("host", "Could not create a hosted operation identifier")),
   )
   const result = yield* authenticated(profile, (session) =>
-    http.runThread(profile.origin, threadId, request, key, session),
+    http
+      .issueThreadTicket(profile.origin, session)
+      .pipe(Effect.flatMap((ticket) => threads.submit({ ticket, threadId, request, commandId: key }))),
   )
-  yield* Console.log(`Queued turn ${result.turnId} for command ${result.commandId}`)
+  yield* Console.log(`Queued command ${result.commandId}`)
 })
 
 export const putProviderCredential = Effect.fn("HostedAccount.putProviderCredential")(function* (

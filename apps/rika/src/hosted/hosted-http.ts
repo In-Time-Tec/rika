@@ -11,8 +11,6 @@ import {
   Invitation,
   ProviderCredentialStatus,
   Registration,
-  RemoteConnection,
-  RunResult,
   scopes,
   type DevicePoll,
   type OwnerSelection,
@@ -313,40 +311,6 @@ export const layer = Layer.effect(
       revokeAllDevices: (origin, session) => {
         const url = `${origin}/api/v1/auth/cli/devices/revoke-all`
         return authenticatedEmpty("POST", url, HttpClientRequest.post(url), session, "All CLI device revocation")
-      },
-      createRemoteConnection: (origin, owner, project, session) => {
-        const url = `${origin}/api/v1/connections`
-        return authenticatedJson(
-          "POST",
-          url,
-          HttpClientRequest.post(url).pipe(
-            HttpClientRequest.bodyJsonUnsafe({
-              placement: "e2b",
-              owner:
-                owner.kind === "personal"
-                  ? { kind: "personal" }
-                  : { kind: "organization", organization_id: owner.organizationId },
-              ...(project === undefined ? {} : { project_id: project }),
-            }),
-          ),
-          session,
-          RemoteConnection,
-          "Remote connection creation",
-        )
-      },
-      runThread: (origin, threadId, request, idempotencyKey, session) => {
-        const url = `${origin}/api/v1/threads/${encodeURIComponent(threadId)}/operations`
-        return authenticatedJson(
-          "POST",
-          url,
-          HttpClientRequest.post(url).pipe(
-            HttpClientRequest.setHeader("idempotency-key", idempotencyKey),
-            HttpClientRequest.bodyJsonUnsafe({ kind: "run", ...request }),
-          ),
-          session,
-          RunResult,
-          "Hosted thread operation",
-        )
       },
       issueThreadTicket: (origin, session) => {
         const url = `${origin}/api/v1/thread-sessions`
