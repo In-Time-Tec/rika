@@ -1,16 +1,44 @@
+import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { describe, expect, it } from "@effect/vitest"
 import { ControllerError, type Interface as Controller } from "@rika/e2b-executor/controller"
-import { ApiMessage, ExecutorMessage } from "@rika/remote-execution/protocol"
-import { Effect, Fiber, Redacted, Schema } from "effect"
-import { makeGateway as makeGatewayService, type LifecycleStore, type Socket } from "../src/executor-gateway"
+import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
+import { ApiMessage, BindingRequest, ExecutorMessage } from "@rika/remote-execution/protocol"
+import { NestedOperation, ToolContext } from "tenetkit"
+import { HostBindingRegistry } from "tenetkit/repl"
+import { Context, Crypto, Effect, Fiber, Layer, Redacted, Schema } from "effect"
+import {
+  makeGateway as makeGatewayService,
+  type BindingAuthority,
+  type LifecycleStore,
+  type Socket,
+} from "../src/executor-gateway"
 
 const encode = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
 const decode = Schema.decodeSync(Schema.fromJsonString(ApiMessage))
+const encodeBindingRequest = Schema.encodeSync(Schema.fromJsonString(BindingRequest))
+const bindingRequestDigest = (request: BindingRequest) =>
+  new Bun.CryptoHasher("sha256").update(encodeBindingRequest(request)).digest("hex")
 const makeGateway = (
   service: Controller,
   append: LifecycleStore["append"] = () => Effect.void,
   load: LifecycleStore["load"] = () => Effect.succeed([]),
-) => makeGatewayService(service, { append, load, prepare: () => Effect.void })
+) =>
+  makeGatewayService(service, { append, load, prepare: () => Effect.void }).pipe(
+    Effect.provideServiceEffect(
+      Crypto.Crypto,
+      Effect.scoped(Layer.build(BunCrypto.layer)).pipe(Effect.map((context) => Context.get(context, Crypto.Crypto))),
+    ),
+  )
+
+const bindings = {
+  registry: HostBindingRegistry.HostBindingRegistry.of({
+    descriptors: [],
+    resolve: (request) => Effect.fail(HostBindingRegistry.HostBindingNotFound.make({ module: request.module })),
+    invoke: (request) => Effect.fail(HostBindingRegistry.HostBindingNotFound.make({ module: request.module })),
+  }),
+  context: Context.empty(),
+  manifest: { digest: "bindings", descriptors: [] },
+} as unknown as BindingAuthority
 
 const fence = {
   target: "e2b" as const,
@@ -31,6 +59,7 @@ const cellIdentity = {
   attempt: 0,
   admittedAt: null,
   deadline: null,
+  bindings,
 } as const
 const attribution = (operationKey: string) => ({
   operationKey,
@@ -244,6 +273,7 @@ describe("executor gateway", () => {
           sessionId: "thread-1",
           ...cellIdentity,
           code: "echo hosted-mvp",
+          bindings: bindings.manifest,
         },
       })
       const response = { _tag: "Success" as const, result: { stdout: "hosted-mvp\n", stderr: "", exitCode: 0 } }
@@ -287,6 +317,135 @@ describe("executor gateway", () => {
         access,
         response,
       })
+    }),
+  )
+
+  it.effect("runs canonical nested bindings under captured API authority and deduplicates replays", () =>
+    Effect.gen(function* () {
+      const nestedRequests: Array<NestedOperation.Request> = []
+      const signal = yield* Effect.abortSignal
+      const context = Context.empty().pipe(
+        Context.add(
+          ToolContext.ToolContext,
+          ToolContext.ToolContext.of({
+            signal,
+            emit: () => Effect.void,
+            sessionId: "thread-1",
+            runId: "run-1",
+            toolCallId: "call-1",
+            operationKey: "operation-bindings",
+          }),
+        ),
+        Context.add(
+          NestedOperation.NestedOperations,
+          NestedOperation.NestedOperations.of({
+            run: (request) => {
+              nestedRequests.push(request as unknown as NestedOperation.Request)
+              return NestedOperation.NestedOperationSuspended.make({
+                token: "approval-token",
+                operationKey: "operation-bindings",
+                ordinal: 0,
+                capability: request.approval?.capability ?? "unknown",
+              })
+            },
+          }),
+        ),
+      )
+      const registry = yield* HostBindingRegistry.make([
+        WorkspaceBinding.module as HostBindingRegistry.Module<never>,
+      ]).pipe(Effect.provideContext(context))
+      const authority = {
+        registry,
+        context,
+        manifest: { digest: "workspace-bindings", descriptors: registry.descriptors },
+      } as unknown as BindingAuthority
+      const target = socket()
+      const gateway = yield* makeGateway(controller())
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      const running = yield* Effect.forkChild(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-bindings",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: 'await rika.workspace.write({ path: "a", content: "b" })',
+          bindings: authority,
+        }),
+      )
+      yield* Effect.yieldNow
+      const request = {
+        module: "workspace",
+        operation: "write",
+        input: { path: "a", content: "b" },
+        sessionId: "thread-1",
+        cellId: "call-1",
+      } as const
+      const invoke = {
+        _tag: "BindingInvoke" as const,
+        access,
+        operationKey: "operation-bindings",
+        attempt: 0,
+        callId: "operation-bindings:binding:0",
+        requestDigest: bindingRequestDigest(request),
+        request,
+      }
+      yield* gateway.receive(target, encode(invoke))
+      yield* gateway.receive(target, encode(invoke))
+      const results = target.sent.map((value) => decode(value)).filter((message) => message._tag === "BindingResult")
+      expect(results).toHaveLength(2)
+      expect(results[0]?.outcome).toEqual({ _tag: "Suspend", token: "approval-token" })
+      expect(nestedRequests).toEqual([
+        {
+          kind: "workspace.write",
+          payload: { path: "a", content: "b" },
+          replayPolicy: "never",
+          approval: { capability: "workspace.write", request: { path: "a" } },
+        },
+      ])
+
+      const missing = { ...request, operation: "missing" }
+      yield* gateway.receive(
+        target,
+        encode({
+          ...invoke,
+          callId: "operation-bindings:binding:1",
+          requestDigest: bindingRequestDigest(missing),
+          request: missing,
+        }),
+      )
+      const rejected = target.sent.map((value) => decode(value)).findLast((message) => message._tag === "BindingResult")
+      expect(rejected?._tag === "BindingResult" && rejected.outcome).toMatchObject({
+        _tag: "Rejected",
+        failure: { _tag: "tenetkit/repl/HostBindingNotFound", module: "workspace", operation: "missing" },
+      })
+
+      const conflicting = { ...request, input: { path: "a", content: "different" } }
+      yield* gateway.receive(
+        target,
+        encode({
+          ...invoke,
+          requestDigest: bindingRequestDigest(conflicting),
+          request: conflicting,
+        }),
+      )
+      expect(target.closed).toContainEqual([1008, "fenced"])
+      yield* Fiber.interrupt(running)
     }),
   )
 
@@ -380,7 +539,11 @@ describe("executor gateway", () => {
         },
         { _tag: "Terminal" as const, attribution: identity, cursor: 4, outcome: "completed" as const, response },
       ]
-      const gateway = yield* makeGateway(controller(), () => Effect.void, () => Effect.succeed(retained))
+      const gateway = yield* makeGateway(
+        controller(),
+        () => Effect.void,
+        () => Effect.succeed(retained),
+      )
       yield* gateway.receive(
         target,
         encode({

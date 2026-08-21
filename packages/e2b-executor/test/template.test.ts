@@ -28,9 +28,8 @@ describe("E2B template", () => {
       expect(host).toContain('hostname: "0.0.0.0"')
       expect(host).toContain("decodeBootstrap(input)")
       expect(host).toContain("capabilities: { cells: true, checkpoints: false, pty: false }")
-      expect(host).toContain('const workspaceRoot = "/workspace"')
-      expect(host).toContain("kernelCellLayer({")
-      expect(host).toContain('trustMode: "trusted-local"')
+      expect(host).toContain('Bun.env.RIKA_EXECUTOR_WORKSPACE_ROOT || "/workspace"')
+      expect(host).toContain("HostedKernel.make({")
     }),
   )
 })

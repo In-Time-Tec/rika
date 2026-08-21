@@ -1,6 +1,7 @@
 import { Crypto, Effect, Encoding, Schema } from "effect"
 
-export type Source = "workspace" | `skill:${string}`
+export const Source = Schema.Union([Schema.Literal("workspace"), Schema.TemplateLiteral(["skill:", Schema.String])])
+export type Source = typeof Source.Type
 
 export interface LocalServer {
   readonly kind: "local"
@@ -23,6 +24,27 @@ export interface RemoteServer {
 }
 
 export type Server = LocalServer | RemoteServer
+
+export const Server = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("local"),
+    name: Schema.String,
+    command: Schema.String,
+    args: Schema.Array(Schema.String),
+    environment: Schema.Record(Schema.String, Schema.String),
+    cwd: Schema.optionalKey(Schema.String),
+    source: Source,
+    sourceDigest: Schema.String,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("remote"),
+    name: Schema.String,
+    url: Schema.String,
+    headers: Schema.Record(Schema.String, Schema.String),
+    source: Source,
+    sourceDigest: Schema.String,
+  }),
+]) satisfies Schema.Schema<Server>
 
 export interface Input {
   readonly workspace?: string

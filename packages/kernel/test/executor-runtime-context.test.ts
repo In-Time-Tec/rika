@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { NestedOperation, ToolContext } from "tenetkit"
+import { Approvals, NestedOperation, Session, ToolContext } from "tenetkit"
 import type { HostBindingRegistry } from "tenetkit/repl"
 import { Context, Effect, Layer, Schema } from "effect"
 import * as ExecutorRuntime from "../src/executor-runtime"
@@ -146,6 +146,28 @@ it.effect("carries the cell's nested-operation journal and Session store to the 
     expect(response._tag).toBe("Success")
     expect(kinds).toEqual(["probe.write"])
   }).pipe(Effect.scoped),
+)
+
+it.effect("captures the exact per-cell authority objects without reconstructing them", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const context = toolContext("session-a", "operation-a")
+      const nested = NestedOperation.NestedOperations.of({ run: (_request, effect) => effect })
+      const session = Context.get(yield* Layer.build(Session.layerMemory), Session.SessionStore)
+      const approvals = Approvals.Approvals.of({ resolve: (pending) => Effect.succeed(pending) })
+      const captured = yield* ExecutorRuntime.capture.pipe(
+        Effect.provideService(ToolContext.ToolContext, context),
+        Effect.provideService(NestedOperation.NestedOperations, nested),
+        Effect.provideService(Session.SessionStore, session),
+        Effect.provideService(Approvals.Approvals, approvals),
+      )
+
+      expect(Context.get(captured, ToolContext.ToolContext)).toBe(context)
+      expect(Context.get(captured, NestedOperation.NestedOperations)).toBe(nested)
+      expect(Context.get(captured, Session.SessionStore)).toBe(session)
+      expect(Context.get(captured, Approvals.Approvals)).toBe(approvals)
+    }),
+  ),
 )
 
 it("declares the Session identity the seam needs", () => {

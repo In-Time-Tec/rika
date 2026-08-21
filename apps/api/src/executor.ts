@@ -7,10 +7,14 @@ import {
 import { Inspector, InspectionError } from "@rika/e2b-executor/checkpoint"
 import { CredentialError, Credentials } from "@rika/e2b-executor/checkout"
 import { layer as providerLayer } from "@rika/e2b-executor/provider"
+import * as BindingModules from "@rika/kernel/binding-modules"
+import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
+import * as MachineBindings from "@rika/kernel/machine-bindings"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
 import { ExecutorAssignmentId } from "@rika/product/hosted-model"
-import { CellLifecycleFrame } from "@rika/remote-execution/protocol"
+import { bindingManifest, CellLifecycleFrame } from "@rika/remote-execution/protocol"
+import { HostBindingRegistry } from "tenetkit/repl"
 import { Context, Crypto, Effect, Encoding, Layer, Redacted, Schema } from "effect"
 import { GatewayError, makeGateway, type Gateway } from "./executor-gateway"
 import type { AuthenticatedPrincipal } from "./hosted-product"
@@ -98,6 +102,7 @@ export interface Runtime {
     readonly attempt: number
     readonly admittedAt: string | null
     readonly deadline: string | null
+    readonly authority: Context.Context<ExecutorRuntime.CellServices>
   }) => Effect.Effect<
     {
       readonly access?: import("@rika/remote-execution/protocol").AccessWire
@@ -118,6 +123,7 @@ export const service = Layer.effect(
     const assignments = yield* ExecutorAssignments
     const sql = yield* PgClient.PgClient
     const crypto = yield* Crypto.Crypto
+    const scope = yield* Effect.scope
     const decodeLifecycle = Schema.decodeUnknownEffect(CellLifecycleFrame)
     const equivalentLifecycle = Schema.toEquivalence(CellLifecycleFrame)
     const gateway = yield* makeGateway(controller, {
@@ -194,11 +200,13 @@ export const service = Layer.effect(
             deadline: input.deadline,
           })
           const requestDigest = Encoding.encodeHex(
-            yield* crypto.digest("SHA-256", new TextEncoder().encode(encoded)).pipe(
-              Effect.mapError(() =>
-                GatewayError.make({ kind: "transport", message: "Could not identify executor operation" }),
+            yield* crypto
+              .digest("SHA-256", new TextEncoder().encode(encoded))
+              .pipe(
+                Effect.mapError(() =>
+                  GatewayError.make({ kind: "transport", message: "Could not identify executor operation" }),
+                ),
               ),
-            ),
           )
           yield* sql`INSERT INTO rika_hosted_executor_operations
             (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
@@ -256,6 +264,31 @@ export const service = Layer.effect(
     })
     const local = yield* LocalExecutor
     const localGateway = yield* makeLocalGateway(local)
+    const bindings = Effect.fn("Executor.bindings")(function* (
+      input: Parameters<Runtime["run"]>[0],
+      machine: typeof gateway.machine,
+    ) {
+      const machineContext = yield* Layer.buildWithScope(
+        MachineBindings.layer({
+          execute: (request) =>
+            machine(input.threadId, input.operationKey, request).pipe(
+              Effect.mapError((error) => new MachineBindings.Unavailable({ message: error.message })),
+            ),
+        }),
+        scope,
+      )
+      const context = Context.merge(input.authority, machineContext)
+      const registry = yield* HostBindingRegistry.make(
+        BindingModules.make({
+          workspace: input.workspaceId,
+          workspaceDigest: input.workspaceId,
+          trustMode: "hosted",
+          servers: [],
+        }),
+      ).pipe(Effect.provideContext(context), Effect.orDie)
+      const manifest = yield* bindingManifest(registry.descriptors).pipe(Effect.provideService(Crypto.Crypto, crypto))
+      return { registry, context, manifest }
+    })
     return {
       controller,
       gateway,
@@ -275,15 +308,20 @@ export const service = Layer.effect(
             kind: "fenced",
             message: "Executor workspace identity does not match the assignment",
           })
-        if (assignment.placement._tag === "LocalDevicePlacement")
+        if (assignment.placement._tag === "LocalDevicePlacement") {
+          const authority = yield* bindings(input, localGateway.machine)
           return yield* localGateway.execute({
             assignmentId: input.threadId,
             ...input,
+            bindings: authority,
           })
+        }
         yield* controller.provision(input.threadId)
+        const authority = yield* bindings(input, gateway.machine)
         const result = yield* gateway.execute({
           assignmentId: input.threadId,
           ...input,
+          bindings: authority,
         })
         return { ...result, eventPersisted: false as const }
       }),

@@ -1,4 +1,5 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
+import type * as MachineBindings from "@rika/kernel/machine-bindings"
 import {
   ApiMessage,
   CellLifecycleFrame as CellLifecycleFrameSchema,
@@ -10,6 +11,10 @@ import {
   type CellLifecycleFrame,
   type CellRequest,
   type CellResponse,
+  BindingRequest,
+  MachineRequest,
+  type BindingOutcome,
+  type MachineOutcome,
 } from "@rika/remote-execution/protocol"
 import {
   AssignmentLeaseEpoch,
@@ -20,8 +25,8 @@ import {
   Sequence,
 } from "@rika/product/hosted-model"
 import { HostedStore } from "@rika/product/hosted-store"
-import { Crypto, Deferred, Effect, Encoding, Option, Redacted, Ref, Schema, Semaphore } from "effect"
-import { GatewayError } from "./executor-gateway"
+import { Cause, Crypto, Deferred, Effect, Encoding, Option, Redacted, Ref, Schema, Semaphore } from "effect"
+import { GatewayError, type BindingAuthority } from "./executor-gateway"
 import type { LocalExecutorAuthority } from "./local-executor"
 import type { Socket } from "./executor-gateway"
 
@@ -42,9 +47,30 @@ interface Pending {
   readonly operationKey: string
   readonly attempt: number
   readonly code: string
+  readonly request: LocalExecuteInput
   readonly socket: Socket
   readonly access: AccessWire
   readonly result: Deferred.Deferred<FinalResult, GatewayError>
+  readonly bindings: BindingAuthority
+  readonly bindingCalls: Ref.Ref<Map<string, BindingCall>>
+  readonly nextMachineOrdinal: Ref.Ref<number>
+}
+
+interface BindingCall {
+  readonly requestDigest: string
+  readonly result: Deferred.Deferred<BindingOutcome>
+}
+
+interface MachineCall {
+  readonly assignmentId: string
+  readonly operationKey: string
+  readonly attempt: number
+  readonly machineId: string
+  readonly requestDigest: string
+  readonly request: MachineBindings.Request
+  readonly socket: Socket
+  readonly access: AccessWire
+  readonly result: Deferred.Deferred<MachineBindings.Outcome>
 }
 
 interface OperationRow {
@@ -69,7 +95,10 @@ interface OperationRow {
   readonly response: unknown
 }
 
-type LocalExecuteInput = Omit<CellRequest, "access"> & { readonly assignmentId: string }
+type LocalExecuteInput = Omit<CellRequest, "access" | "bindings"> & {
+  readonly assignmentId: string
+  readonly bindings: BindingAuthority
+}
 
 const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(LocalExecutorMessage))
 const encode = Schema.encodeSync(Schema.fromJsonString(ApiMessage))
@@ -91,7 +120,11 @@ const OperationIdentity = Schema.Struct({
   deadline: Schema.NullOr(Schema.String),
 })
 const encodeOperationIdentity = Schema.encodeSync(Schema.fromJsonString(OperationIdentity))
+const encodeBindingRequest = Schema.encodeSync(Schema.fromJsonString(BindingRequest))
+const encodeMachineRequest = Schema.encodeSync(Schema.fromJsonString(MachineRequest))
 const key = (assignmentId: string, operationKey: string) => `${assignmentId}\u001f${operationKey}`
+const machineKey = (assignmentId: string, operationKey: string, machineId: string) =>
+  `${assignmentId}\u001f${operationKey}\u001f${machineId}`
 const failure = (kind: GatewayError["kind"], message: string): GatewayError => GatewayError.make({ kind, message })
 const same = (left: AccessWire, right: AccessWire) =>
   left.leaseEpoch === right.leaseEpoch &&
@@ -115,6 +148,11 @@ export interface LocalGateway {
   readonly disconnected: (socket: Socket) => Effect.Effect<void>
   readonly execute: (input: LocalExecuteInput) => Effect.Effect<FinalResult, GatewayError>
   readonly cancel: (assignmentId: string, operationKey: string) => Effect.Effect<void, GatewayError>
+  readonly machine: (
+    assignmentId: string,
+    operationKey: string,
+    request: MachineBindings.Request,
+  ) => Effect.Effect<MachineBindings.Outcome, GatewayError>
 }
 
 export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function* (authority: LocalExecutorAuthority) {
@@ -123,6 +161,7 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
   const crypto = yield* Crypto.Crypto
   const sessions = yield* Ref.make(new Map<string, Session>())
   const assignments = yield* Ref.make(new Map<Socket, string>())
+  const machineCalls = yield* Ref.make(new Map<string, MachineCall>())
   const pending = yield* Ref.make(new Map<string, Pending>())
   const gatewayLock = yield* Semaphore.make(1)
   const lifecycleLock = yield* Semaphore.make(1)
@@ -307,6 +346,12 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
           }
           return next
         })
+        yield* Ref.update(machineCalls, (current) => {
+          const next = new Map(current)
+          for (const [callKey, call] of next)
+            if (call.assignmentId === id) next.set(callKey, { ...call, socket: session.socket, access: session.access })
+          return next
+        })
         if (previous !== undefined && previous.socket !== session.socket) previous.socket.close(1008, "fenced")
       }),
     )
@@ -323,6 +368,122 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
             afterCursor: 0,
           }),
         )
+    for (const call of (yield* Ref.get(machineCalls)).values())
+      if (call.assignmentId === session.access.fence.assignmentId)
+        session.socket.send(
+          encode({
+            _tag: "MachineExecute",
+            access: session.access,
+            operationKey: call.operationKey,
+            attempt: call.attempt,
+            machineId: call.machineId,
+            requestDigest: call.requestDigest,
+            request: call.request,
+          }),
+        )
+  })
+
+  const receiveBinding = Effect.fn("LocalExecutorGateway.receiveBinding")(function* (
+    socket: Socket,
+    access: AccessWire,
+    operationKey: string,
+    attempt: number,
+    callId: string,
+    digest: string,
+    request: BindingRequest,
+  ) {
+    const assignmentId = (yield* Ref.get(assignments)).get(socket)
+    const pendingOperation =
+      assignmentId === undefined ? undefined : (yield* Ref.get(pending)).get(key(assignmentId, operationKey))
+    if (
+      pendingOperation === undefined ||
+      pendingOperation.socket !== socket ||
+      pendingOperation.attempt !== attempt ||
+      !same(pendingOperation.access, access) ||
+      request.sessionId !== pendingOperation.request.sessionId ||
+      request.cellId !== pendingOperation.request.toolCallId
+    )
+      return yield* failure("fenced", "Local binding call has a stale cell identity")
+    const expected = yield* requestDigest(encodeBindingRequest(request))
+    if (expected !== digest) return yield* failure("fenced", "Local binding request digest is invalid")
+    const candidate = yield* Deferred.make<BindingOutcome>()
+    const call = yield* Ref.modify(pendingOperation.bindingCalls, (current) => {
+      const known = current.get(callId)
+      if (known !== undefined) return [known, current] as const
+      const created = { requestDigest: digest, result: candidate }
+      return [created, new Map(current).set(callId, created)] as const
+    })
+    if (call.requestDigest !== digest)
+      return yield* failure("fenced", "Local binding call id conflicts with a different request")
+    if (call.result === candidate) {
+      const outcome = yield* pendingOperation.bindings.registry.invoke({ ...request, input: request.input }).pipe(
+        Effect.provideContext(pendingOperation.bindings.context),
+        Effect.matchCause({
+          onFailure: (cause): BindingOutcome => {
+            const bindingFailure = Option.getOrUndefined(Cause.findErrorOption(cause))
+            return bindingFailure === undefined
+              ? { _tag: "Unknown", message: "Binding authority was lost after its operation crossed" }
+              : {
+                  _tag: "Rejected",
+                  failure: bindingFailure as Extract<BindingOutcome, { readonly _tag: "Rejected" }>["failure"],
+                }
+          },
+          onSuccess: (response): BindingOutcome => {
+            if (
+              response._tag === "Failure" &&
+              typeof response.failure === "object" &&
+              response.failure !== null &&
+              "_tag" in response.failure &&
+              response.failure._tag === "NestedOperationFailed" &&
+              "reason" in response.failure &&
+              response.failure.reason === "suspended" &&
+              "token" in response.failure &&
+              typeof response.failure.token === "string"
+            )
+              return { _tag: "Suspend", token: response.failure.token }
+            return { _tag: "Returned", response: response as import("@rika/remote-execution/protocol").BindingResponse }
+          },
+        }),
+      )
+      yield* Deferred.succeed(candidate, outcome)
+    }
+    const outcome = yield* Deferred.await(call.result)
+    const current = (yield* Ref.get(sessions)).get(pendingOperation.assignmentId)
+    if (current === undefined) return yield* failure("disconnected", "Local binding result has no executor")
+    current.socket.send(
+      encode({
+        _tag: "BindingResult",
+        access: current.access,
+        operationKey,
+        attempt,
+        callId,
+        requestDigest: digest,
+        outcome,
+      }),
+    )
+  })
+
+  const receiveMachine = Effect.fn("LocalExecutorGateway.receiveMachine")(function* (
+    socket: Socket,
+    access: AccessWire,
+    operationKey: string,
+    attempt: number,
+    machineId: string,
+    digest: string,
+    outcome: MachineOutcome,
+  ) {
+    const assignmentId = (yield* Ref.get(assignments)).get(socket)
+    if (assignmentId === undefined) return yield* failure("fenced", "Local machine result has no executor")
+    const call = (yield* Ref.get(machineCalls)).get(machineKey(assignmentId, operationKey, machineId))
+    if (
+      call === undefined ||
+      call.socket !== socket ||
+      call.attempt !== attempt ||
+      call.requestDigest !== digest ||
+      !same(call.access, access)
+    )
+      return yield* failure("fenced", "Local machine result conflicts with its request")
+    yield* Deferred.succeed(call.result, outcome)
   })
 
   const finalize = Effect.fn("LocalExecutorGateway.finalize")(function* (input: {
@@ -849,11 +1010,32 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
             return persistLifecycle(socket, message.access, message.frame).pipe(
               Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
             )
+          if (message._tag === "BindingInvoke")
+            return receiveBinding(
+              socket,
+              message.access,
+              message.operationKey,
+              message.attempt,
+              message.callId,
+              message.requestDigest,
+              message.request,
+            ).pipe(Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))))
+          if (message._tag === "MachineResult")
+            return receiveMachine(
+              socket,
+              message.access,
+              message.operationKey,
+              message.attempt,
+              message.machineId,
+              message.requestDigest,
+              message.outcome,
+            ).pipe(Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))))
           if (message._tag === "LocalExecutorGoodbye")
             return shutdown(socket, message.access).pipe(
               Effect.tap(() => Effect.sync(() => socket.close(1000, "shutdown"))),
               Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
             )
+          if (message._tag !== "LocalCellResult") return Effect.void
           return complete(socket, message.access, message.operationKey, message.attempt, message.response).pipe(
             Effect.tap((result) =>
               Effect.sync(() =>
@@ -972,9 +1154,13 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
           operationKey: input.operationKey,
           attempt: Number(durable.attempt),
           code: input.code,
+          request: input,
           socket: currentSession.socket,
           access: currentSession.access,
           result,
+          bindings: input.bindings,
+          bindingCalls: yield* Ref.make(new Map()),
+          nextMachineOrdinal: yield* Ref.make(0),
         }
         yield* Ref.update(pending, (values) => new Map(values).set(pendingKey, current))
         const sent = yield* Effect.try({
@@ -996,6 +1182,7 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
                   attempt: current.attempt,
                   admittedAt: input.admittedAt,
                   deadline: input.deadline,
+                  bindings: input.bindings.manifest,
                 },
               }),
             )
@@ -1036,11 +1223,20 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
       )
     }).pipe(
       Effect.ensuring(
-        Ref.update(pending, (values) => {
-          const next = new Map(values)
-          if (next.get(pendingKey) === setup.current) next.delete(pendingKey)
-          return next
-        }),
+        Effect.all(
+          [
+            Ref.update(pending, (values) => {
+              const next = new Map(values)
+              if (next.get(pendingKey) === setup.current) next.delete(pendingKey)
+              return next
+            }),
+            Ref.update(machineCalls, (values) => {
+              const prefix = `${input.assignmentId}\u001f${input.operationKey}\u001f`
+              return new Map(Array.from(values).filter(([callKey]) => !callKey.startsWith(prefix)))
+            }),
+          ],
+          { discard: true },
+        ),
       ),
     )
   })
@@ -1059,61 +1255,68 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
     })
   })
 
+  const machine = Effect.fn("LocalExecutorGateway.machine")(function* (
+    assignmentId: string,
+    operationKey: string,
+    request: MachineBindings.Request,
+  ) {
+    const pendingOperation = (yield* Ref.get(pending)).get(key(assignmentId, operationKey))
+    const session = (yield* Ref.get(sessions)).get(assignmentId)
+    if (pendingOperation === undefined || session === undefined)
+      return yield* failure("disconnected", "Local cell authority is no longer available")
+    const ordinal = yield* Ref.getAndUpdate(pendingOperation.nextMachineOrdinal, (current) => current + 1)
+    const machineId = `${pendingOperation.request.toolCallId}:${ordinal}`
+    const digest = yield* requestDigest(encodeMachineRequest(request))
+    const result = yield* Deferred.make<MachineBindings.Outcome>()
+    const mapKey = machineKey(assignmentId, operationKey, machineId)
+    const candidate: MachineCall = {
+      assignmentId,
+      operationKey,
+      attempt: pendingOperation.attempt,
+      machineId,
+      requestDigest: digest,
+      request,
+      socket: session.socket,
+      access: session.access,
+      result,
+    }
+    const call = yield* Ref.modify(machineCalls, (current) => {
+      const known = current.get(mapKey)
+      if (known !== undefined) return [known, current] as const
+      return [candidate, new Map(current).set(mapKey, candidate)] as const
+    })
+    if (call.requestDigest !== digest)
+      return { _tag: "Fenced" as const, message: "Local machine call id conflicts with a different request" }
+    if (call === candidate) {
+      const sent = yield* Effect.try({
+        try: () =>
+          session.socket.send(
+            encode({
+              _tag: "MachineExecute",
+              access: session.access,
+              operationKey,
+              attempt: pendingOperation.attempt,
+              machineId,
+              requestDigest: digest,
+              request,
+            }),
+          ),
+        catch: () => false,
+      }).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      )
+      if (!sent) return { _tag: "Unknown" as const, message: "Local machine delivery is uncertain" }
+    }
+    return yield* Deferred.await(call.result)
+  })
+
   const pollAccepted = Effect.fn("LocalExecutorGateway.pollAccepted")(function* () {
     yield* recoverDue().pipe(Effect.ignore)
-    const rows = yield* sql<{
-      readonly assignmentId: string
-      readonly operationKey: string
-      readonly workspaceId: string
-      readonly sessionId: string
-      readonly threadId: string
-      readonly turnId: string
-      readonly runId: string
-      readonly rootRunId: string
-      readonly toolCallId: string
-      readonly code: string
-      readonly attempt: string
-      readonly admittedAt: string | null
-      readonly deadline: string | null
-    }>`SELECT assignment_id AS "assignmentId", operation_key AS "operationKey",
-        workspace_id AS "workspaceId", session_id AS "sessionId", thread_id AS "threadId",
-        turn_id AS "turnId", run_id AS "runId", root_run_id AS "rootRunId",
-        tool_call_id AS "toolCallId", code, attempt::text AS attempt, admitted_at AS "admittedAt", deadline
-      FROM rika_hosted_executor_operations
-      WHERE state = 'accepted'
-      ORDER BY created_at ASC
-      LIMIT 32`.pipe(Effect.mapError(() => failure("transport", "Could not inspect local executor queue")))
-    const current = yield* Ref.get(sessions)
-    yield* Effect.forEach(
-      rows,
-      (row) => {
-        if (!current.has(row.assignmentId)) return Effect.void
-        return execute({
-          assignmentId: row.assignmentId,
-          operationKey: row.operationKey,
-          workspaceId: row.workspaceId,
-          sessionId: row.sessionId,
-          threadId: row.threadId,
-          turnId: row.turnId,
-          runId: row.runId,
-          rootRunId: row.rootRunId,
-          toolCallId: row.toolCallId,
-          code: row.code,
-          attempt: Number(row.attempt),
-          admittedAt: row.admittedAt,
-          deadline: row.deadline,
-        }).pipe(
-          Effect.catch(() => Effect.void),
-          Effect.forkScoped,
-          Effect.asVoid,
-        )
-      },
-      { discard: true },
-    )
   })
 
   const pollTick = Effect.sleep("100 millis").pipe(Effect.andThen(pollAccepted()), Effect.ignore)
   yield* Effect.forever(pollTick).pipe(Effect.forkScoped)
 
-  return { receive, disconnected, execute, cancel }
+  return { receive, disconnected, execute, cancel, machine }
 })

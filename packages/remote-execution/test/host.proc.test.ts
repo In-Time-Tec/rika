@@ -81,6 +81,9 @@ const server = Bun.serve({
   },
 })
 const stateDirectory = "/tmp/rika-bootstrap-identity-" + process.pid
+const fileSystem = await import("node:fs/promises")
+const workspace = stateDirectory + "/workspace"
+await fileSystem.mkdir(workspace, { recursive: true })
 const host = Bun.spawn(["bun", "run", "./src/host.ts"], {
   cwd: process.cwd(),
   env: {
@@ -94,6 +97,7 @@ const host = Bun.spawn(["bun", "run", "./src/host.ts"], {
     RIKA_EXECUTOR_API_URL: "ws://127.0.0.1:1",
     RIKA_EXECUTOR_WORKSPACE_ID: "workspace-readiness",
     RIKA_EXECUTOR_STATE_DIRECTORY: stateDirectory,
+    RIKA_EXECUTOR_WORKSPACE_ROOT: workspace,
   },
   stdout: "ignore",
   stderr: "ignore",
@@ -131,7 +135,7 @@ try {
 } finally {
   host.kill()
   server.stop(true)
-  await (await import("node:fs/promises")).rm(stateDirectory, { recursive: true, force: true })
+  await fileSystem.rm(stateDirectory, { recursive: true, force: true })
 }
 `
 

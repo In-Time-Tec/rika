@@ -1,7 +1,5 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
-import * as BunServices from "@effect/platform-bun/BunServices"
-import { CellExecutor, layer as kernelCellLayer } from "@rika/kernel/cell-executor"
 import {
   Cause,
   Clock,
@@ -18,7 +16,10 @@ import {
   Semaphore,
 } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
-import { Cells, layer as cellsLayer, type State as CellState } from "./cells"
+import { BindingProxyError, type Transport as BindingTransport } from "./binding-proxy"
+import type { State as CellState } from "./cells"
+import * as HostedKernel from "./hosted-kernel"
+import { Machine, MachineError, State as MachineState, workspaceLayer as machineLayer } from "./machine"
 import {
   AccessWire,
   ApiMessage,
@@ -75,6 +76,7 @@ export const ForegroundLocalExecutorSnapshot = Schema.Struct({
   heartbeatIntervalMillis: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   cursor: Schema.Struct({ sequence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), value: Schema.String }),
   receipts: Schema.Array(ForegroundReceipt),
+  machines: Schema.Array(Schema.Struct({ machineId: Schema.String, state: MachineState })),
 })
 export type ForegroundLocalExecutorSnapshot = typeof ForegroundLocalExecutorSnapshot.Type
 
@@ -244,48 +246,28 @@ const waitForReconnect = (
     return yield* waitForReconnect(incoming, previous, processIncarnation)
   })
 
-const inMemoryCells = (workspaceIdentity: string, workspacePath: string) =>
+const inMemoryCells = (workspaceIdentity: string, workspacePath: string, sendBinding: BindingTransport["send"]) =>
   Effect.gen(function* () {
     const states = yield* Ref.make(new Map<string, CellState>())
-    const kernel = kernelCellLayer({
-      workspace: workspacePath,
-      workspaceDigest: workspaceIdentity,
+    return yield* HostedKernel.make({
+      workspaceIdentity,
+      workspacePath,
       dataRoot: `${Bun.env.TMPDIR ?? "/tmp"}/rika-kernel/${encodeURIComponent(workspaceIdentity)}`,
-      runtimeVersion: process.versions.bun,
-      trustMode: "trusted-local",
-      servers: [],
-    }).pipe(Layer.provide(BunServices.layer))
-    const kernelContext = yield* Layer.build(kernel)
-    const executor = Context.get(kernelContext, CellExecutor)
-    const context = yield* Layer.build(
-      cellsLayer({
-        workspaceId: workspaceIdentity,
-        read: (operationKey) => Effect.map(Ref.get(states), (values) => values.get(operationKey)),
-        write: (operationKey, state) =>
-          Ref.update(states, (values) => {
-            const next = new Map(values)
-            next.set(operationKey, state)
-            return next
-          }),
-        execute: (request, output) =>
-          executor.execute({
-            sessionId: request.sessionId,
-            cellId: request.toolCallId,
-            code: request.code,
-            emit: (event) =>
-              event._tag === "Stdout" || event._tag === "Stderr"
-                ? output({ stream: event._tag === "Stdout" ? "stdout" : "stderr", text: event.text })
-                : Effect.void,
-          }),
-      }),
-    )
-    return Context.get(context, Cells)
+      read: (operationKey) => Effect.map(Ref.get(states), (values) => values.get(operationKey)),
+      write: (operationKey, state) =>
+        Ref.update(states, (values) => {
+          const next = new Map(values)
+          next.set(operationKey, state)
+          return next
+        }),
+      sendBinding,
+    })
   })
 
 const resolveCellResponse = Effect.fn("ForegroundLocalExecutor.resolveCellResponse")(function* (input: {
   readonly current: LocalSession
   readonly request: CellRequest
-  readonly cells: Cells["Service"]
+  readonly cells: HostedKernel.Interface
   readonly output: (chunk: { readonly stream: "stdout" | "stderr"; readonly text: string }) => Effect.Effect<void>
 }) {
   return sameAccess(access(input.current), input.request.access)
@@ -293,7 +275,7 @@ const resolveCellResponse = Effect.fn("ForegroundLocalExecutor.resolveCellRespon
         Effect.catch((error) =>
           Effect.succeed<CellResponse>({
             _tag: "DomainFailure",
-            failure: { kind: error.kind, message: error.message },
+            failure: { kind: error._tag === "CellError" ? error.kind : "execution", message: error.message },
           }),
         ),
         Effect.catchCause((cause) =>
@@ -318,7 +300,8 @@ const consumeApi = (
   receipts: Ref.Ref<Map<string, PendingResult>>,
   liveOperations: Ref.Ref<Map<string, Fiber.Fiber<void, ForegroundLocalExecutorError>>>,
   activeWriter: Ref.Ref<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>,
-  cells: Cells["Service"],
+  cells: HostedKernel.Interface,
+  machine: Machine["Service"],
   persist: () => Effect.Effect<void, ForegroundLocalExecutorError>,
   lifecycle: Semaphore.Semaphore,
   runWorker: (
@@ -445,6 +428,48 @@ const consumeApi = (
         )
       }
     }
+    if (message._tag === "BindingResult") {
+      const current = yield* Ref.get(session)
+      if (current === undefined || !sameAccess(access(current), message.access))
+        return yield* failure("Local binding result has a stale session")
+      yield* cells.completeBinding(message).pipe(Effect.mapError((error) => failure(error.message)))
+    }
+    if (message._tag === "MachineExecute") {
+      const current = yield* Ref.get(session)
+      if (current === undefined || !sameAccess(access(current), message.access))
+        return yield* failure("Local machine request has a stale session")
+      yield* Effect.sync(() =>
+        runWorker(
+          machine
+            .execute({
+              machineId: message.machineId,
+              requestDigest: message.requestDigest,
+              request: message.request,
+            })
+            .pipe(
+              Effect.flatMap((outcome) =>
+                Effect.gen(function* () {
+                  const latest = yield* Ref.get(session)
+                  const currentWriter = yield* Ref.get(activeWriter)
+                  if (latest === undefined || currentWriter === undefined) return
+                  yield* currentWriter(
+                    encodeLocalExecutorMessage({
+                      _tag: "MachineResult",
+                      access: access(latest),
+                      operationKey: message.operationKey,
+                      attempt: message.attempt,
+                      machineId: message.machineId,
+                      requestDigest: message.requestDigest,
+                      outcome,
+                    }),
+                  ).pipe(Effect.mapError(() => failure("Could not write local machine result")))
+                }),
+              ),
+              Effect.mapError((error) => failure(error.message)),
+            ),
+        ),
+      )
+    }
     if (message._tag === "CellExecute") {
       const current = yield* Ref.get(session)
       if (current === undefined) return yield* failure("Local executor session is unavailable")
@@ -543,7 +568,8 @@ const connected = (
   receipts: Ref.Ref<Map<string, PendingResult>>,
   liveOperations: Ref.Ref<Map<string, Fiber.Fiber<void, ForegroundLocalExecutorError>>>,
   activeWriter: Ref.Ref<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>,
-  cells: Cells["Service"],
+  cells: HostedKernel.Interface,
+  machine: Machine["Service"],
   persist: () => Effect.Effect<void, ForegroundLocalExecutorError>,
   lifecycle: Semaphore.Semaphore,
   runWorker: (
@@ -611,6 +637,7 @@ const connected = (
           )
     yield* Ref.set(sessions, session)
     yield* Ref.set(activeWriter, writer)
+    yield* cells.replayBindings(access(session)).pipe(Effect.mapError((error) => failure(error.message)))
     yield* persist()
     if (options.ready !== undefined) yield* Deferred.succeed(options.ready, undefined)
     const heartbeat = Effect.sleep(session.heartbeatIntervalMillis).pipe(
@@ -640,6 +667,7 @@ const connected = (
         liveOperations,
         activeWriter,
         cells,
+        machine,
         persist,
         lifecycle,
         runWorker,
@@ -688,6 +716,9 @@ export const runForegroundLocalExecutor = (
         (options.resume?.receipts ?? []).map((receipt) => [receipt.operationKey, receipt]),
       )
       const receipts = yield* Ref.make(initialReceipts)
+      const machineStates = yield* Ref.make(
+        new Map((options.resume?.machines ?? []).map(({ machineId, state }) => [machineId, state] as const)),
+      )
       const liveOperations = yield* Ref.make(new Map<string, Fiber.Fiber<void, ForegroundLocalExecutorError>>())
       const activeWriter = yield* Ref.make<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>(
         undefined,
@@ -716,10 +747,35 @@ export const runForegroundLocalExecutor = (
                   heartbeatIntervalMillis: session.heartbeatIntervalMillis,
                   cursor: session.cursor,
                   receipts: storedReceipts,
+                  machines: Array.from(yield* Ref.get(machineStates), ([machineId, state]) => ({ machineId, state })),
                 })
               }),
         )
-      const cells = yield* inMemoryCells(workspaceIdentity, options.workspacePath)
+      const cells = yield* inMemoryCells(workspaceIdentity, options.workspacePath, (message) =>
+        Effect.gen(function* () {
+          const session = yield* Ref.get(sessions)
+          const writer = yield* Ref.get(activeWriter)
+          if (session === undefined || writer === undefined)
+            return yield* BindingProxyError.make({
+              message: "Local binding transport is unavailable",
+            })
+          yield* writer(
+            encodeLocalExecutorMessage({ _tag: "BindingInvoke", ...message, access: access(session) }),
+          ).pipe(Effect.mapError(() => BindingProxyError.make({ message: "Could not write local binding request" })))
+        }),
+      )
+      const machineContext = yield* Layer.build(
+        machineLayer({
+          workspace: options.workspacePath,
+          read: (machineId) => Effect.map(Ref.get(machineStates), (states) => states.get(machineId)),
+          write: (machineId, state) =>
+            Ref.update(machineStates, (states) => new Map(states).set(machineId, state)).pipe(
+              Effect.andThen(persist()),
+              Effect.mapError((error) => MachineError.make({ message: error.message })),
+            ),
+        }),
+      )
+      const machine = Context.get(machineContext, Machine)
       const workers = yield* FiberSet.make<void, ForegroundLocalExecutorError>()
       const runWorker = yield* FiberSet.runtime(workers)<never>()
       const connection = connected(
@@ -731,6 +787,7 @@ export const runForegroundLocalExecutor = (
         liveOperations,
         activeWriter,
         cells,
+        machine,
         persist,
         lifecycle,
         runWorker,

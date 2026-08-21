@@ -397,6 +397,7 @@ const remoteCellExecutor = (
           if (!CellTool.route.matches(request)) return unsupportedCellTool(request.call.name)
           return Effect.gen(function* () {
             const context = yield* ToolContext.ToolContext
+            const authority = yield* ExecutorRuntime.capture
             const operationKey = context.operationKey
             if (operationKey === undefined || operationKey.length === 0)
               return yield* ToolExecutor.FrameworkFailure.make({
@@ -446,6 +447,7 @@ const remoteCellExecutor = (
                       admittedAt: context.admittedAt ?? null,
                       deadline: context.deadline ?? null,
                     }),
+                    authority,
                   )
                   return yield* Schema.decodeUnknownEffect(RemoteCells.Response, {
                     onExcessProperty: "error",

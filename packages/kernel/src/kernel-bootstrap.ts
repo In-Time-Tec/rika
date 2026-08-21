@@ -21,7 +21,9 @@ import { moduleNames } from "./binding/binding-module-catalog"
 export const source = (names: ReadonlyArray<string> = moduleNames): string => `
 ${names.map((name) => `globalThis[${JSON.stringify(name)}] = globalThis.kernel[${JSON.stringify(name)}]`).join("\n")}
 globalThis.rika = { ${names.map((name) => `${name}: globalThis[${JSON.stringify(name)}]`).join(", ")} }
-globalThis.rika.mcp = (() => {
+${
+  names.includes("mcp")
+    ? `globalThis.rika.mcp = (() => {
   const flat = globalThis.rika.mcp
   const discovered = new Map()
   const notFound = (module, operation) => {
@@ -56,7 +58,10 @@ globalThis.rika.mcp = (() => {
     },
   })
 })()
-globalThis.context = await globalThis.rika.context.current({}).catch(() => undefined)
+`
+    : ""
+}
+globalThis.context = ${names.includes("context") ? "await globalThis.rika.context.current({}).catch(() => undefined)" : "undefined"}
 `
 
 /** Every global the bootstrap defines. Nothing else may leak into the kernel namespace. */

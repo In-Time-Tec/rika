@@ -5,12 +5,13 @@ import { ActorAttribution } from "@rika/product/hosted-model"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as HostedPostgres from "@rika/product-store/postgres-layer"
 import { ApiMessage, LocalExecutorMessage, type AccessWire } from "@rika/remote-execution/protocol"
-import { Effect, Layer, Random, Redacted, Schema } from "effect"
+import { HostBindingRegistry } from "tenetkit/repl"
+import { Context, Effect, Layer, Random, Redacted, Schema } from "effect"
 import { createHash } from "node:crypto"
 import { Pool } from "pg"
 import { makeLocalGateway, type LocalGateway } from "../src/local-executor-gateway"
 import type { LocalExecutorAuthority } from "../src/local-executor"
-import type { Socket } from "../src/executor-gateway"
+import type { BindingAuthority, Socket } from "../src/executor-gateway"
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined
@@ -18,6 +19,15 @@ const encode = Schema.encodeSync(Schema.fromJsonString(LocalExecutorMessage))
 const decode = Schema.decodeSync(Schema.fromJsonString(ApiMessage))
 const encodeActor = Schema.encodeUnknownSync(Schema.fromJsonString(ActorAttribution))
 const code = 'printf "restart"'
+const bindings = {
+  registry: HostBindingRegistry.HostBindingRegistry.of({
+    descriptors: [],
+    resolve: (input) => Effect.fail(HostBindingRegistry.HostBindingNotFound.make({ module: input.module })),
+    invoke: (input) => Effect.fail(HostBindingRegistry.HostBindingNotFound.make({ module: input.module })),
+  }),
+  context: Context.empty(),
+  manifest: { digest: "bindings", descriptors: [] },
+} as unknown as BindingAuthority
 const sessionToken = "session-local-gateway"
 const sessionDigest = createHash("sha256").update(sessionToken).digest("hex")
 const deviceId = "11111111-1111-4111-8111-111111111111"
@@ -36,6 +46,7 @@ const cellRequest = (operationKey: string) => ({
   attempt: 0,
   admittedAt: null,
   deadline: null,
+  bindings,
 })
 const request = cellRequest("operation")
 const digest = createHash("sha256")

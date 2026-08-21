@@ -1,4 +1,7 @@
 import type { ControllerError, Interface as Controller } from "@rika/e2b-executor/controller"
+import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
+import type * as MachineBindings from "@rika/kernel/machine-bindings"
+import { HostBindingRegistry } from "tenetkit/repl"
 import {
   ApiMessage,
   CellLifecycleFrame as CellLifecycleFrameSchema,
@@ -12,8 +15,26 @@ import {
   type CellResponse,
   type Fence,
   type ExecutorMessage as ExecutorMessageValue,
+  MachineRequest,
+  type BindingManifest,
+  type BindingOutcome,
+  BindingRequest,
+  type MachineOutcome,
 } from "@rika/remote-execution/protocol"
-import { Clock, Deferred, Effect, Option, Redacted, Ref, Schema, Semaphore } from "effect"
+import {
+  Cause,
+  Clock,
+  Context,
+  Crypto,
+  Deferred,
+  Effect,
+  Encoding,
+  Option,
+  Redacted,
+  Ref,
+  Schema,
+  Semaphore,
+} from "effect"
 
 export interface Socket {
   readonly send: (message: string) => unknown
@@ -40,6 +61,32 @@ interface Pending {
   readonly access: AccessWire
   readonly result: Deferred.Deferred<ExecutionResult, GatewayError>
   readonly waiters: number
+  readonly bindings: BindingAuthority
+  readonly bindingCalls: Ref.Ref<Map<string, BindingCall>>
+  readonly nextMachineOrdinal: Ref.Ref<number>
+}
+
+interface BindingCall {
+  readonly requestDigest: string
+  readonly result: Deferred.Deferred<BindingOutcome>
+}
+
+interface MachineCall {
+  readonly assignmentId: string
+  readonly operationKey: string
+  readonly attempt: number
+  readonly machineId: string
+  readonly requestDigest: string
+  readonly request: MachineRequest
+  readonly socket: Socket
+  readonly access: AccessWire
+  readonly result: Deferred.Deferred<MachineOutcome>
+}
+
+export interface BindingAuthority {
+  readonly registry: HostBindingRegistry.Interface
+  readonly context: Context.Context<ExecutorRuntime.CellServices>
+  readonly manifest: BindingManifest
 }
 
 export class GatewayError extends Schema.TaggedError<GatewayError>()("ExecutorGatewayError", {
@@ -61,6 +108,7 @@ export interface ExecuteInput {
   readonly attempt: number
   readonly admittedAt: string | null
   readonly deadline: string | null
+  readonly bindings: BindingAuthority
 }
 
 export interface Gateway {
@@ -68,6 +116,11 @@ export interface Gateway {
   readonly disconnected: (socket: Socket) => Effect.Effect<void>
   readonly execute: (input: ExecuteInput) => Effect.Effect<ExecutionResult, GatewayError>
   readonly cancel: (assignmentId: string, operationKey: string) => Effect.Effect<void, GatewayError>
+  readonly machine: (
+    assignmentId: string,
+    operationKey: string,
+    request: MachineBindings.Request,
+  ) => Effect.Effect<MachineBindings.Outcome, GatewayError>
 }
 
 export interface LifecycleStore {
@@ -84,6 +137,10 @@ const encode = Schema.encodeSync(Schema.fromJsonString(ApiMessage))
 const equivalentLifecycle = Schema.toEquivalence(CellLifecycleFrameSchema)
 const equivalentResponse = Schema.toEquivalence(CellResponseSchema)
 const key = (assignmentId: string, operationKey: string) => `${assignmentId}\u0000${operationKey}`
+const machineKey = (assignmentId: string, operationKey: string, machineId: string) =>
+  `${assignmentId}\u0000${operationKey}\u0000${machineId}`
+const encodeBindingRequest = Schema.encodeSync(Schema.fromJsonString(BindingRequest))
+const encodeMachineRequest = Schema.encodeSync(Schema.fromJsonString(MachineRequest))
 
 const sameAccess = (left: AccessWire, right: AccessWire) =>
   left.leaseEpoch === right.leaseEpoch &&
@@ -126,6 +183,8 @@ const fenceOf = (message: ExecutorMessageValue): Fence | undefined => {
     case "PtyOutput":
     case "PtyDisconnected":
     case "CellLifecycle":
+    case "BindingInvoke":
+    case "MachineResult":
       return message.access.fence
     case "CellResult":
       return message.access.fence
@@ -149,9 +208,20 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   const sessions = yield* Ref.make(new Map<string, Session>())
   const assignments = yield* Ref.make(new Map<Socket, string>())
   const pending = yield* Ref.make(new Map<string, Pending>())
+  const machineCalls = yield* Ref.make(new Map<string, MachineCall>())
   const frames = yield* Ref.make(new Map<string, ReadonlyArray<CellLifecycleFrame>>())
   const terminals = yield* Ref.make(new Map<string, Extract<CellLifecycleFrame, { readonly _tag: "Terminal" }>>())
   const admission = yield* Semaphore.make(1)
+  const crypto = yield* Crypto.Crypto
+  const digest = Effect.fn("ExecutorGateway.digest")(function* (value: string) {
+    return Encoding.encodeHex(
+      yield* crypto
+        .digest("SHA-256", new TextEncoder().encode(value))
+        .pipe(
+          Effect.mapError(() => GatewayError.make({ kind: "transport", message: "Could not identify RPC request" })),
+        ),
+    )
+  })
 
   const hydrate = Effect.fn("ExecutorGateway.hydrate")(function* (input: ExecuteInput) {
     const retained = yield* lifecycle.load(input.assignmentId, input.operationKey)
@@ -270,6 +340,13 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
               next.set(pendingKey, { ...operation, socket: session.socket, access: session.access })
           return next
         })
+        yield* Ref.update(machineCalls, (current) => {
+          const next = new Map(current)
+          for (const [pendingKey, operation] of next)
+            if (operation.assignmentId === assignmentId)
+              next.set(pendingKey, { ...operation, socket: session.socket, access: session.access })
+          return next
+        })
         return true
       }),
     )
@@ -299,6 +376,20 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           access: session.access,
           operationKey: operation.operationKey,
           afterCursor: retained.at(-1)?.cursor ?? 0,
+        }),
+      )
+    }
+    for (const operation of (yield* Ref.get(machineCalls)).values()) {
+      if (operation.assignmentId !== session.access.fence.assignmentId) continue
+      session.socket.send(
+        encode({
+          _tag: "MachineExecute",
+          access: session.access,
+          operationKey: operation.operationKey,
+          attempt: operation.attempt,
+          machineId: operation.machineId,
+          requestDigest: operation.requestDigest,
+          request: operation.request,
         }),
       )
     }
@@ -433,6 +524,121 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     )
   })
 
+  const receiveBinding = Effect.fn("ExecutorGateway.receiveBinding")(function* (
+    socket: Socket,
+    access: AccessWire,
+    operationKey: string,
+    attempt: number,
+    callId: string,
+    requestDigest: string,
+    request: BindingRequest,
+  ) {
+    const operation = yield* admission.withPermits(1)(
+      Effect.gen(function* () {
+        const assignmentId = yield* Ref.get(assignments).pipe(Effect.map((current) => current.get(socket)))
+        const current =
+          assignmentId === undefined
+            ? undefined
+            : yield* Ref.get(pending).pipe(Effect.map((values) => values.get(key(assignmentId, operationKey))))
+        if (
+          assignmentId === undefined ||
+          current === undefined ||
+          current.socket !== socket ||
+          current.attempt !== attempt ||
+          !sameAccess(current.access, access) ||
+          request.sessionId !== current.request.sessionId ||
+          request.cellId !== current.request.toolCallId
+        )
+          return yield* GatewayError.make({ kind: "fenced", message: "Binding call has a stale cell identity" })
+        const expectedDigest = yield* digest(encodeBindingRequest(request))
+        if (expectedDigest !== requestDigest)
+          return yield* GatewayError.make({ kind: "fenced", message: "Binding call request digest is invalid" })
+        return current
+      }),
+    )
+    const calls = operation.bindingCalls
+    const candidate = yield* Deferred.make<BindingOutcome>()
+    const call = yield* Ref.modify(calls, (current) => {
+      const known = current.get(callId)
+      if (known !== undefined) return [known, current] as const
+      const created = { requestDigest, result: candidate }
+      return [created, new Map(current).set(callId, created)] as const
+    })
+    if (call.requestDigest !== requestDigest)
+      return yield* GatewayError.make({ kind: "fenced", message: "Binding call id conflicts with a different request" })
+    if (call.result === candidate) {
+      const outcome = yield* operation.bindings.registry.invoke({ ...request, input: request.input }).pipe(
+        Effect.provideContext(operation.bindings.context),
+        Effect.matchCause({
+          onFailure: (cause): BindingOutcome => {
+            const bindingFailure = Option.getOrUndefined(Cause.findErrorOption(cause))
+            return bindingFailure === undefined
+              ? { _tag: "Unknown", message: "Binding authority was lost after its operation crossed" }
+              : {
+                  _tag: "Rejected",
+                  failure: bindingFailure as Extract<BindingOutcome, { readonly _tag: "Rejected" }>["failure"],
+                }
+          },
+          onSuccess: (response): BindingOutcome => {
+            if (
+              response._tag === "Failure" &&
+              typeof response.failure === "object" &&
+              response.failure !== null &&
+              "_tag" in response.failure &&
+              response.failure._tag === "NestedOperationFailed" &&
+              "reason" in response.failure &&
+              response.failure.reason === "suspended" &&
+              "token" in response.failure &&
+              typeof response.failure.token === "string"
+            )
+              return { _tag: "Suspend", token: response.failure.token }
+            return { _tag: "Returned", response: response as import("@rika/remote-execution/protocol").BindingResponse }
+          },
+        }),
+      )
+      yield* Deferred.succeed(candidate, outcome)
+    }
+    const outcome = yield* Deferred.await(call.result)
+    const currentSession = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(operation.assignmentId)))
+    if (currentSession === undefined || !sameExecutor(currentSession.access, operation.access))
+      return yield* GatewayError.make({ kind: "disconnected", message: "Binding result has no current executor" })
+    currentSession.socket.send(
+      encode({
+        _tag: "BindingResult",
+        access: currentSession.access,
+        operationKey,
+        attempt,
+        callId,
+        requestDigest,
+        outcome,
+      }),
+    )
+  })
+
+  const receiveMachine = Effect.fn("ExecutorGateway.receiveMachine")(function* (
+    socket: Socket,
+    access: AccessWire,
+    operationKey: string,
+    attempt: number,
+    machineId: string,
+    requestDigest: string,
+    outcome: MachineOutcome,
+  ) {
+    const assignmentId = yield* Ref.get(assignments).pipe(Effect.map((current) => current.get(socket)))
+    if (assignmentId === undefined)
+      return yield* GatewayError.make({ kind: "fenced", message: "Machine result came from an unknown executor" })
+    const call = (yield* Ref.get(machineCalls)).get(machineKey(assignmentId, operationKey, machineId))
+    if (
+      call === undefined ||
+      call.socket !== socket ||
+      call.attempt !== attempt ||
+      call.requestDigest !== requestDigest ||
+      !sameAccess(call.access, access)
+    )
+      return yield* GatewayError.make({ kind: "fenced", message: "Machine result conflicts with its request" })
+    yield* Deferred.succeed(call.result, outcome)
+  })
+
   const recover = Effect.fn("ExecutorGateway.recover")(function* (
     message: ExecutorMessageValue,
     error: ControllerError | GatewayError,
@@ -518,6 +724,26 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
       }
       case "CellResult":
         return yield* complete(socket, message.access, message.operationKey, message.attempt, message.response)
+      case "BindingInvoke":
+        return yield* receiveBinding(
+          socket,
+          message.access,
+          message.operationKey,
+          message.attempt,
+          message.callId,
+          message.requestDigest,
+          message.request,
+        )
+      case "MachineResult":
+        return yield* receiveMachine(
+          socket,
+          message.access,
+          message.operationKey,
+          message.attempt,
+          message.machineId,
+          message.requestDigest,
+          message.outcome,
+        )
       case "CellLifecycle":
         return yield* persistLifecycle(socket, message.access, message.frame)
       case "PtyOpened":
@@ -555,6 +781,67 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         }),
       ),
     )
+
+  const invokeMachine = Effect.fn("ExecutorGateway.invokeMachine")(function* (
+    assignmentId: string,
+    operationKey: string,
+    attempt: number,
+    machineId: string,
+    request: MachineRequest,
+  ) {
+    const encodedRequest = encodeMachineRequest(request)
+    const requestDigest = yield* digest(encodedRequest)
+    const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(assignmentId)))
+    const operation = yield* Ref.get(pending).pipe(
+      Effect.map((current) => current.get(key(assignmentId, operationKey))),
+    )
+    if (
+      session === undefined ||
+      operation === undefined ||
+      operation.attempt !== attempt ||
+      operation.socket !== session.socket ||
+      !sameExecutor(operation.access, session.access)
+    )
+      return { _tag: "Unknown" as const, message: "The selected executor is no longer available" }
+    const result = yield* Deferred.make<MachineOutcome>()
+    const mapKey = machineKey(assignmentId, operationKey, machineId)
+    const candidate: MachineCall = {
+      assignmentId,
+      operationKey,
+      attempt,
+      machineId,
+      requestDigest,
+      request,
+      socket: session.socket,
+      access: session.access,
+      result,
+    }
+    const call = yield* Ref.modify(machineCalls, (current) => {
+      const known = current.get(mapKey)
+      if (known !== undefined) return [known, current] as const
+      return [candidate, new Map(current).set(mapKey, candidate)] as const
+    })
+    if (call.requestDigest !== requestDigest)
+      return { _tag: "Unknown" as const, message: "A machine call id was reused with a different request" }
+    if (call === candidate) {
+      yield* Effect.try({
+        try: () =>
+          session.socket.send(
+            encode({
+              _tag: "MachineExecute",
+              access: session.access,
+              operationKey,
+              attempt,
+              machineId,
+              requestDigest,
+              request,
+            }),
+          ),
+        catch: () => undefined,
+      }).pipe(Effect.ignore)
+    }
+    return yield* Deferred.await(call.result)
+  })
 
   const execute = Effect.fn("ExecutorGateway.execute")(function* (input: ExecuteInput) {
     const connected = yield* awaitSession(input.assignmentId).pipe(Effect.timeoutOption("30 seconds"))
@@ -609,6 +896,9 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           access: session.access,
           result,
           waiters: 1,
+          bindings: input.bindings,
+          bindingCalls: yield* Ref.make(new Map()),
+          nextMachineOrdinal: yield* Ref.make(0),
         }
         yield* Ref.update(pending, (current) => new Map(current).set(pendingKey, created))
         yield* Effect.try({
@@ -630,6 +920,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
                   attempt: input.attempt,
                   admittedAt: input.admittedAt,
                   deadline: input.deadline,
+                  bindings: created.bindings.manifest,
                 },
               }),
             ),
@@ -668,6 +959,10 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
             const next = new Map(current)
             next.delete(pendingKey)
             return next
+          }),
+          Ref.update(machineCalls, (current) => {
+            const prefix = `${input.assignmentId}\u0000${input.operationKey}\u0000`
+            return new Map(Array.from(current).filter(([callKey]) => !callKey.startsWith(prefix)))
           }),
         ],
         { discard: true },
@@ -712,5 +1007,23 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     })
   })
 
-  return { receive, disconnected, execute, cancel } satisfies Gateway
+  const machine = Effect.fn("ExecutorGateway.machine")(function* (
+    assignmentId: string,
+    operationKey: string,
+    request: MachineBindings.Request,
+  ) {
+    const operation = (yield* Ref.get(pending)).get(key(assignmentId, operationKey))
+    if (operation === undefined)
+      return yield* GatewayError.make({ kind: "disconnected", message: "Cell authority is no longer available" })
+    const ordinal = yield* Ref.getAndUpdate(operation.nextMachineOrdinal, (current) => current + 1)
+    return yield* invokeMachine(
+      assignmentId,
+      operationKey,
+      operation.attempt,
+      `${operation.request.toolCallId}:${ordinal}`,
+      request,
+    )
+  })
+
+  return { receive, disconnected, execute, cancel, machine } satisfies Gateway
 })

@@ -1,4 +1,5 @@
 import { Context, Effect, Layer, Schema } from "effect"
+import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 
 const NonEmptyString = Schema.String.check(Schema.isNonEmpty())
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
@@ -33,7 +34,10 @@ export class Unavailable extends Schema.TaggedError<Unavailable>()("@rika/execut
 }) {}
 
 export interface Interface {
-  readonly execute: (request: Request) => Effect.Effect<unknown, Unavailable>
+  readonly execute: (
+    request: Request,
+    authority: Context.Context<ExecutorRuntime.CellServices>,
+  ) => Effect.Effect<unknown, Unavailable>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/execution/remote-cells/Service") {}

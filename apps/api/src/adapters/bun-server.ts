@@ -34,14 +34,30 @@ interface Session {
 
 const session = (gateway: SessionGateway): Session => {
   let pending: Promise<unknown> = Promise.resolve()
+  const concurrent = new Set<Promise<unknown>>()
   let activeSocket: Bun.ServerWebSocket<Session> | undefined
   let draining = false
+  const reverse = (message: unknown) => {
+    try {
+      const text = typeof message === "string" ? message : new TextDecoder().decode(message as ArrayBuffer)
+      const tag = (JSON.parse(text) as { readonly _tag?: unknown })._tag
+      return tag === "BindingInvoke" || tag === "MachineResult"
+    } catch {
+      return false
+    }
+  }
   return {
     attach: (socket) => {
       activeSocket = socket
     },
     receive: (socket, message) => {
       if (draining) return
+      if (reverse(message)) {
+        const task = Effect.runPromise(gateway.receive(socket, message)).catch(() => undefined)
+        concurrent.add(task)
+        void task.finally(() => concurrent.delete(task))
+        return
+      }
       pending = pending.then(() => Effect.runPromise(gateway.receive(socket, message))).catch(() => undefined)
     },
     disconnected: (socket) => {
@@ -49,7 +65,7 @@ const session = (gateway: SessionGateway): Session => {
     },
     drain: () => {
       draining = true
-      return pending.then(() => undefined)
+      return pending.then(() => Promise.all(concurrent)).then(() => undefined)
     },
     close: () => activeSocket?.close(1001, "server draining"),
   }

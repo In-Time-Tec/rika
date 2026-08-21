@@ -9,6 +9,7 @@ export const NestedOperationFailed = Schema.Struct({
   reason: Schema.Literals(["divergence", "unknown", "denied", "suspended"]),
   kind: Schema.String,
   message: Schema.String,
+  token: Schema.optionalKey(Schema.String),
 })
 export type NestedOperationFailed = typeof NestedOperationFailed.Type
 
@@ -39,6 +40,7 @@ const failed = (kind: string, failure: NestedOperation.Failure): NestedOperation
     reason: "suspended",
     kind,
     message: `${failure.capability} awaits approval under token ${failure.token}`,
+    token: failure.token,
   })
 }
 

@@ -402,4 +402,15 @@ export const layer = (workspace: string) =>
     Layer.provide(ProcessRegistry.layer),
   )
 
+export const layerWithRegistry = (workspace: string) => {
+  const processes = ProcessRegistry.layer
+  return Layer.merge(
+    runtimeLayer(workspace, runtimeDependencies).pipe(
+      Layer.provide(WorkspaceIndex.layer(workspace)),
+      Layer.provide(processes),
+    ),
+    processes,
+  )
+}
+
 export const testLayer = (run: Interface["run"]) => Layer.succeed(Service, Service.of({ run }))

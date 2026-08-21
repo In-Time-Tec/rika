@@ -2,8 +2,6 @@ import { BunFileSystem } from "@effect/platform-bun"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
-import * as BunServices from "@effect/platform-bun/BunServices"
-import { CellExecutor, layer as kernelCellLayer } from "@rika/kernel/cell-executor"
 import {
   Cause,
   Context,
@@ -22,7 +20,16 @@ import {
   Semaphore,
 } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
-import { CellError, Cells, State as CellState, layer as cellsLayer, type State as CellStateValue } from "./cells"
+import { BindingProxyError } from "./binding-proxy"
+import { CellError, State as CellState, type State as CellStateValue } from "./cells"
+import * as HostedKernel from "./hosted-kernel"
+import {
+  Machine,
+  MachineError,
+  State as MachineState,
+  workspaceLayer as machineLayer,
+  type State as MachineStateValue,
+} from "./machine"
 import { Runtime, layer as runtimeLayer } from "./runtime"
 import {
   ApiMessage,
@@ -72,6 +79,8 @@ const decodeBootstrap = Schema.decodeUnknownEffect(ExecutorBootstrapWire)
 const encodeExecutorMessage = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
 const decodeCellState = Schema.decodeUnknownEffect(Schema.fromJsonString(CellState))
 const encodeCellState = Schema.encodeEffect(Schema.fromJsonString(CellState))
+const decodeMachineState = Schema.decodeUnknownEffect(Schema.fromJsonString(MachineState))
+const encodeMachineState = Schema.encodeEffect(Schema.fromJsonString(MachineState))
 const decodeSession = Schema.decodeUnknownEffect(Schema.fromJsonString(SessionWire))
 const encodeSession = Schema.encodeEffect(Schema.fromJsonString(SessionWire))
 const OperationReceiptSnapshot = Schema.Struct({
@@ -86,11 +95,10 @@ const OperationReceiptSnapshot = Schema.Struct({
 const decodeOperationReceipts = Schema.decodeUnknownEffect(Schema.fromJsonString(OperationReceiptSnapshot))
 const encodeOperationReceipts = Schema.encodeEffect(Schema.fromJsonString(OperationReceiptSnapshot))
 const executorStateDirectory = "/var/lib/rika-executor"
-const cellStateDirectory = `${executorStateDirectory}/cells`
 const directoryMode = 0o700
 const fileMode = 0o600
 const sandboxIdPath = "/run/e2b/.E2B_SANDBOX_ID"
-const workspaceRoot = "/workspace"
+const workspaceRoot = Bun.env.RIKA_EXECUTOR_WORKSPACE_ROOT || "/workspace"
 
 const sandboxInstanceId = () =>
   Bun.file(sandboxIdPath)
@@ -228,9 +236,7 @@ const operationReceiptStore = (
     const fileSystem = yield* FileSystem.FileSystem
     const crypto = yield* Crypto.Crypto
     const directory = `${stateDirectory}/operation-receipts`
-    const assignmentDigest = yield* crypto
-      .digest("SHA-256", new TextEncoder().encode(assignmentId))
-      .pipe(Effect.orDie)
+    const assignmentDigest = yield* crypto.digest("SHA-256", new TextEncoder().encode(assignmentId)).pipe(Effect.orDie)
     const filename = `${directory}/assignment-${Encoding.encodeHex(assignmentDigest)}-g${assignmentGeneration}.json`
     const restrictDirectory = fileSystem.makeDirectory(directory, { recursive: true, mode: directoryMode }).pipe(
       Effect.andThen(fileSystem.chmod(directory, directoryMode)),
@@ -365,10 +371,11 @@ const consumeApi = (
   operations: Ref.Ref<Map<string, Fiber.Fiber<void, unknown>>>,
   frames: Ref.Ref<Map<string, ReadonlyArray<CellLifecycleFrame>>>,
   lifecycle: Semaphore.Semaphore,
+  cells: HostedKernel.Interface,
+  machine: Machine["Service"],
 ) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime
-    const cells = yield* Cells
     const emit = (access: CellRequest["access"], frame: CellLifecycleFrame) =>
       lifecycle.withPermits(1)(
         Effect.gen(function* () {
@@ -393,6 +400,46 @@ const consumeApi = (
           .receipt(message.receipt)
           .pipe(Effect.mapError((cause) => HostError.make({ message: cause.message })))
         yield* persistSession(store)
+      }
+      if (message._tag === "BindingResult") {
+        const access = yield* runtime.access.pipe(
+          Effect.mapError((cause) => HostError.make({ message: cause.message })),
+        )
+        if (!sameAccess(access, message.access))
+          return yield* HostError.make({ message: "Binding result has a stale executor fence" })
+        yield* cells
+          .completeBinding(message)
+          .pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
+      }
+      if (message._tag === "MachineExecute") {
+        const access = yield* runtime.access.pipe(
+          Effect.mapError((cause) => HostError.make({ message: cause.message })),
+        )
+        if (!sameAccess(access, message.access))
+          return yield* HostError.make({ message: "Machine request has a stale executor fence" })
+        yield* machine
+          .execute({
+            machineId: message.machineId,
+            requestDigest: message.requestDigest,
+            request: message.request,
+          })
+          .pipe(
+            Effect.flatMap((outcome) =>
+              writer(
+                encodeExecutorMessage({
+                  _tag: "MachineResult",
+                  access: message.access,
+                  operationKey: message.operationKey,
+                  attempt: message.attempt,
+                  machineId: message.machineId,
+                  requestDigest: message.requestDigest,
+                  outcome,
+                }),
+              ),
+            ),
+            Effect.mapError((error) => HostError.make({ message: error.message })),
+            Effect.forkScoped,
+          )
       }
       if (message._tag === "CellExecute") {
         const access = yield* runtime.access.pipe(
@@ -558,11 +605,15 @@ const connect = Effect.fn("Host.connect")(function* (
   operations: Ref.Ref<Map<string, Fiber.Fiber<void, unknown>>>,
   frames: Ref.Ref<Map<string, ReadonlyArray<CellLifecycleFrame>>>,
   lifecycle: Semaphore.Semaphore,
+  cells: HostedKernel.Interface,
+  machine: Machine["Service"],
+  activeWriter: Ref.Ref<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>,
   connected: Effect.Effect<void> = Effect.void,
 ) {
   const runtime = yield* Runtime
   const socket = yield* Socket.makeWebSocket(config.apiUrl)
   const writer = yield* socket.writer
+  yield* Ref.set(activeWriter, writer)
   const incoming = yield* Queue.make<IncomingMessage>()
   const reader = yield* socket
     .runString((frame) =>
@@ -577,6 +628,10 @@ const connect = Effect.fn("Host.connect")(function* (
     : { _tag: "ExecutorReconnect" as const, access: yield* runtime.reconnect }
   yield* writer(encodeExecutorMessage(opening))
   yield* waitForWelcome(incoming, store)
+  yield* runtime.access.pipe(
+    Effect.flatMap(cells.replayBindings),
+    Effect.mapError((error) => HostError.make({ message: error.message })),
+  )
   yield* connected
   const session = yield* runtime.persistedSession
   const heartbeat = Effect.sleep(session.heartbeatIntervalMillis).pipe(
@@ -595,7 +650,15 @@ const connect = Effect.fn("Host.connect")(function* (
     Fiber.join(reader).pipe(
       Effect.mapError(() => HostError.make({ message: "Executor controller connection closed" })),
     ),
-    consumeApi(incoming, writer, store, receipts, operations, frames, lifecycle),
+    consumeApi(incoming, writer, store, receipts, operations, frames, lifecycle, cells, machine),
+  ).pipe(
+    Effect.ensuring(
+      Effect.gen(function* () {
+        const running = yield* Ref.getAndSet(operations, new Map())
+        yield* Effect.forEach(running.values(), Fiber.interrupt, { discard: true })
+        yield* Ref.set(activeWriter, undefined)
+      }),
+    ),
   )
 })
 
@@ -661,6 +724,8 @@ export const testing = { operationReceiptStore, receiveBootstrap } as const
 const host = Effect.scoped(
   Effect.gen(function* () {
     const environmentIdentity = yield* executorIdentity
+    const cellStateDirectory = `${environmentIdentity.stateDirectory}/cells`
+    const machineStateDirectory = `${environmentIdentity.stateDirectory}/machines`
     const store = yield* sessionStore(environmentIdentity.stateDirectory)
     const persisted = yield* store.load
     const matchingSession =
@@ -701,6 +766,40 @@ const host = Effect.scoped(
         Effect.mapError(() => CellError.make({ kind: "execution", message: "Could not persist cell state" })),
       )
     })
+    const machinePath = Effect.fn("Host.machineStatePath")(function* (machineId: string) {
+      const digest = yield* crypto
+        .digest("SHA-256", new TextEncoder().encode(machineId))
+        .pipe(Effect.mapError(() => MachineError.make({ message: "Could not identify machine state" })))
+      return `${machineStateDirectory}/${Encoding.encodeHex(digest)}.json`
+    })
+    const readMachine = Effect.fn("Host.readMachineState")(function* (machineId: string) {
+      const filename = yield* machinePath(machineId)
+      const exists = yield* fileSystem
+        .exists(filename)
+        .pipe(Effect.mapError(() => MachineError.make({ message: "Could not inspect machine state" })))
+      if (!exists) return undefined
+      const text = yield* fileSystem
+        .readFileString(filename)
+        .pipe(Effect.mapError(() => MachineError.make({ message: "Could not read machine state" })))
+      return yield* decodeMachineState(text).pipe(
+        Effect.mapError(() => MachineError.make({ message: "Machine state is invalid" })),
+      )
+    })
+    const writeMachine = Effect.fn("Host.writeMachineState")(function* (machineId: string, state: MachineStateValue) {
+      const filename = yield* machinePath(machineId)
+      const temporary = `${filename}.tmp-${process.pid}`
+      const text = yield* encodeMachineState(state).pipe(
+        Effect.mapError(() => MachineError.make({ message: "Could not encode machine state" })),
+      )
+      yield* fileSystem
+        .makeDirectory(machineStateDirectory, { recursive: true, mode: 0o700 })
+        .pipe(Effect.mapError(() => MachineError.make({ message: "Could not create machine state" })))
+      yield* fileSystem.writeFileString(temporary, text, { mode: 0o600 }).pipe(
+        Effect.flatMap(() => fileSystem.rename(temporary, filename)),
+        Effect.ensuring(fileSystem.remove(temporary, { force: true }).pipe(Effect.ignore)),
+        Effect.mapError(() => MachineError.make({ message: "Could not persist machine state" })),
+      )
+    })
     const run = (
       identity: Identity,
       bootstrapToken: Redacted.Redacted<string>,
@@ -723,48 +822,45 @@ const host = Effect.scoped(
           latestCheckpointId: null,
           ...(config.restoredSession === undefined ? {} : { restoredSession: config.restoredSession }),
         })
-        const kernelContext = yield* Layer.build(
-          kernelCellLayer({
-            workspace: workspaceRoot,
-            workspaceDigest: config.workspaceId,
-            dataRoot: config.stateDirectory,
-            runtimeVersion: process.versions.bun,
-            trustMode: "trusted-local",
-            servers: [],
-          }).pipe(Layer.provide(BunServices.layer)),
+        const runtimeContext = yield* Layer.build(runtime).pipe(
+          Effect.mapError((error) => HostError.make({ message: error.message })),
         )
-        const executor = Context.get(kernelContext, CellExecutor)
-        const cells = cellsLayer({
-          workspaceId: config.workspaceId,
+        const executorRuntime = Context.get(runtimeContext, Runtime)
+        const activeWriter = yield* Ref.make<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>(
+          undefined,
+        )
+        const cells = yield* HostedKernel.make({
+          workspaceIdentity: config.workspaceId,
+          workspacePath: workspaceRoot,
+          dataRoot: config.stateDirectory,
           read: readState,
           write: writeState,
-          execute: (request, output) =>
-            executor.execute({
-              sessionId: request.sessionId,
-              cellId: request.toolCallId,
-              code: request.code,
-              emit: (event) =>
-                event._tag === "Stdout" || event._tag === "Stderr"
-                  ? output({ stream: event._tag === "Stdout" ? "stdout" : "stderr", text: event.text })
-                  : Effect.void,
+          sendBinding: (message) =>
+            Effect.gen(function* () {
+              const writer = yield* Ref.get(activeWriter)
+              if (writer === undefined)
+                return yield* BindingProxyError.make({ message: "Executor binding transport is unavailable" })
+              const currentAccess = yield* executorRuntime.access.pipe(
+                Effect.mapError(() => BindingProxyError.make({ message: "Executor binding access is unavailable" })),
+              )
+              yield* writer(encodeExecutorMessage({ _tag: "BindingInvoke", ...message, access: currentAccess })).pipe(
+                Effect.mapError(() => BindingProxyError.make({ message: "Could not write executor binding request" })),
+              )
             }),
         })
-        return yield* Effect.flatMap(
-          Layer.build(Layer.merge(runtime, cells)).pipe(
-            Effect.mapError((cause) => HostError.make({ message: cause.message })),
-          ),
-          (context) =>
-            Effect.gen(function* () {
-              const operations = yield* Ref.make(new Map<string, Fiber.Fiber<void, unknown>>())
-              const frames = yield* Ref.make(yield* receipts.load)
-              const lifecycle = yield* Semaphore.make(1)
-              return yield* Effect.scoped(
-                connect(config, store, receipts, operations, frames, lifecycle, connected),
-              ).pipe(
-                Effect.catchCause(() => Effect.sleep("1 second")),
-                Effect.forever,
-              )
-            }).pipe(Effect.provide(context)),
+        const machineContext = yield* Layer.build(
+          machineLayer({ workspace: workspaceRoot, read: readMachine, write: writeMachine }),
+        )
+        const machine = Context.get(machineContext, Machine)
+        const operations = yield* Ref.make(new Map<string, Fiber.Fiber<void, unknown>>())
+        const frames = yield* Ref.make(yield* receipts.load)
+        const lifecycle = yield* Semaphore.make(1)
+        return yield* Effect.scoped(
+          connect(config, store, receipts, operations, frames, lifecycle, cells, machine, activeWriter, connected),
+        ).pipe(
+          Effect.provide(runtimeContext),
+          Effect.catchCause(() => Effect.sleep("1 second")),
+          Effect.forever,
         )
       })
     const monitor = (

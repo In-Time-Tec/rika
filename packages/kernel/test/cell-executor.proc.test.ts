@@ -1,5 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
+import { HostBindingRegistry } from "tenetkit/repl"
 import { Cause, Context, Effect, Exit, Fiber, FileSystem, Layer } from "effect"
 import { CellExecutor, layer } from "../src/cell-executor"
 
@@ -17,6 +18,13 @@ const withExecutor = <A, E, R>(use: (executor: CellExecutor["Service"]) => Effec
             runtimeVersion: process.versions.bun,
             trustMode: "trusted-local",
             servers: [],
+            registry: HostBindingRegistry.layerTest({
+              descriptors: [],
+              resolve: (request) =>
+                Effect.fail(HostBindingRegistry.HostBindingNotFound.make({ module: request.module })),
+              invoke: (request) =>
+                Effect.fail(HostBindingRegistry.HostBindingNotFound.make({ module: request.module })),
+            }),
           }).pipe(Layer.provide(BunServices.layer)),
         )
         return yield* use(Context.get(context, CellExecutor))

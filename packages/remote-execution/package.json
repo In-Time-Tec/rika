@@ -9,13 +9,18 @@
     "./runtime": "./src/runtime.ts",
     "./operations": "./src/operations.ts",
     "./cells": "./src/cells.ts",
+    "./binding-proxy": "./src/binding-proxy.ts",
+    "./machine": "./src/machine.ts",
     "./protocol": "./src/protocol.ts",
     "./pty": "./src/pty.ts",
     "./foreground": "./src/foreground.ts"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
+    "@rika/coding-tools": "workspace:*",
+    "@rika/extensions": "workspace:*",
     "@rika/kernel": "workspace:*",
+    "tenetkit": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {

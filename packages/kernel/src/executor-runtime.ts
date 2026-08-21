@@ -1,4 +1,4 @@
-import { NestedOperation, Session, ToolContext } from "tenetkit"
+import { Approvals, NestedOperation, Session, ToolContext } from "tenetkit"
 import { HostBindingRegistry, KernelPool, KernelStateStore } from "tenetkit/repl"
 import { Context, Effect, Function, Layer, Option, Ref, Scope } from "effect"
 import type { FileSystem, Path } from "effect"
@@ -6,16 +6,29 @@ import { ChildProcessSpawner } from "effect/unstable/process"
 import type { BindingRequirements } from "./binding/binding-modules"
 import * as KernelComposition from "./kernel-composition"
 
-export type CellServices = ToolContext.ToolContext | NestedOperation.NestedOperations | Session.SessionStore
+type PerCallServices =
+  | ToolContext.ToolContext
+  | NestedOperation.NestedOperations
+  | Session.SessionStore
+  | Approvals.Approvals
+
+export type CellServices = BindingRequirements | Approvals.Approvals
+
+export const capture: Effect.Effect<Context.Context<CellServices>> = Effect.map(
+  Effect.context<never>(),
+  (context) => context as Context.Context<CellServices>,
+)
 
 const ambient: Effect.Effect<Context.Context<never>> = Effect.gen(function* () {
   const toolContext = yield* Effect.serviceOption(ToolContext.ToolContext)
   const nested = yield* Effect.serviceOption(NestedOperation.NestedOperations)
   const session = yield* Effect.serviceOption(Session.SessionStore)
+  const approvals = yield* Effect.serviceOption(Approvals.Approvals)
   let captured = Context.empty()
   if (toolContext._tag === "Some") captured = Context.add(captured, ToolContext.ToolContext, toolContext.value)
   if (nested._tag === "Some") captured = Context.add(captured, NestedOperation.NestedOperations, nested.value)
   if (session._tag === "Some") captured = Context.add(captured, Session.SessionStore, session.value)
+  if (approvals._tag === "Some") captured = Context.add(captured, Approvals.Approvals, approvals.value)
   return captured
 })
 
@@ -88,13 +101,14 @@ export interface Executor<Request, Response, Error> {
 
 export interface Options extends KernelComposition.Options {
   readonly trustMode: NonNullable<KernelComposition.Options["trustMode"]>
-  readonly bindingServices: Layer.Layer<Exclude<BindingRequirements, CellServices>>
+  readonly bindingServices: Layer.Layer<Exclude<BindingRequirements, PerCallServices>>
 }
 
-const mountingPlaceholders: Layer.Layer<CellServices> = Layer.mergeAll(
+const mountingPlaceholders: Layer.Layer<PerCallServices> = Layer.mergeAll(
   ToolContext.layerDefault,
   NestedOperation.layerDirect,
   Session.layerMemory,
+  Approvals.layerAutoApprove,
 )
 
 export const layer = (

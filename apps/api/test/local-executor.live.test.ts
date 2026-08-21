@@ -56,6 +56,34 @@ const seedPrincipal = (pool: Pool, input: AuthenticatedPrincipal) =>
     )
   })
 
+const localConnection = (
+  authenticated: AuthenticatedPrincipal,
+  owner: ReturnType<typeof personal> | ReturnType<typeof organization>,
+  checkoutFingerprint: string,
+) =>
+  Effect.gen(function* () {
+    const product = yield* HostedProduct
+    yield* product.registerLocalRunner({
+      principal: authenticated,
+      checkoutFingerprint,
+      registration: {
+        workspaceIdentity: `${checkoutFingerprint}-identity` as never,
+        repository: { identity: `repository-${checkoutFingerprint}` },
+        kernel: { runtime: "bun", runtimeVersion: Bun.version, trustMode: "trusted-local" },
+        capabilities: { cells: true, checkpoints: false, pty: false },
+      },
+    })
+    return yield* product.createConnection({
+      principal: authenticated,
+      owner,
+      placement: "local",
+      localRunnerTarget: {
+        deviceId: authenticated.deviceId as never,
+        checkoutFingerprint: checkoutFingerprint as never,
+      },
+    })
+  })
+
 const accessFrom = (welcome: Access): Access => ({
   version: welcome.version,
   fence: welcome.fence,
@@ -114,13 +142,8 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
     Effect.gen(function* () {
       const owner = principal("personal-user", "personal-client", "10000000-0000-4000-8000-000000000001")
       yield* seedPrincipal(pool, owner)
-      const product = yield* HostedProduct
       const authority = yield* LocalExecutor
-      const connection = yield* product.createConnection({
-        principal: owner,
-        owner: personal(owner.userId),
-        placement: "local",
-      })
+      const connection = yield* localConnection(owner, personal(owner.userId), "personal-workspace")
       expect((yield* query(pool, `SELECT count(*)::int AS count FROM member`)).rows).toEqual([{ count: 0 }])
       const admission = yield* authority.admit({
         threadId: connection.threadId,
@@ -164,18 +187,9 @@ it.effect.skipIf(!live)("fences organization access immediately while preserving
          VALUES ('local-member', 'local-org', $1, 'member', now())`,
         [owner.userId],
       )
-      const product = yield* HostedProduct
       const authority = yield* LocalExecutor
-      const personalConnection = yield* product.createConnection({
-        principal: owner,
-        owner: personal(owner.userId),
-        placement: "local",
-      })
-      const organizationConnection = yield* product.createConnection({
-        principal: owner,
-        owner: organization("local-org"),
-        placement: "local",
-      })
+      const personalConnection = yield* localConnection(owner, personal(owner.userId), "personal-workspace")
+      const organizationConnection = yield* localConnection(owner, organization("local-org"), "organization-workspace")
       const open = (threadId: string, label: string) =>
         Effect.gen(function* () {
           const admission = yield* authority.admit({
@@ -223,13 +237,8 @@ it.effect.skipIf(!live)("rejects cross-owner and cross-device admissions before 
       yield* seedPrincipal(pool, owner)
       yield* seedPrincipal(pool, stranger)
       yield* seedPrincipal(pool, otherDevice)
-      const product = yield* HostedProduct
       const authority = yield* LocalExecutor
-      const connection = yield* product.createConnection({
-        principal: owner,
-        owner: personal(owner.userId),
-        placement: "local",
-      })
+      const connection = yield* localConnection(owner, personal(owner.userId), "cross-owner")
       expect(
         yield* failureKind(
           authority.admit({

@@ -44,6 +44,7 @@
       "dependencies": {
         "@effect/platform-bun": "4.0.0-rc.109",
         "@effect/sql-pg": "4.0.0-rc.109",
+        "@rika/configuration": "workspace:*",
         "@rika/e2b-executor": "workspace:*",
         "@rika/execution": "workspace:*",
         "@rika/identity": "workspace:*",
@@ -63,20 +64,29 @@
     },
     "apps/rika": {
       "name": "@rika/cli",
-      "version": "0.6.5",
+      "version": "0.6.7",
       "bin": {
         "rika": "./dist/client-main.js",
       },
       "dependencies": {
         "@effect/platform-bun": "catalog:",
         "@opentui/core": "catalog:",
+        "@rika/coding-tools": "workspace:*",
+        "@rika/configuration": "workspace:*",
+        "@rika/execution": "workspace:*",
+        "@rika/extensions": "workspace:*",
+        "@rika/kernel": "workspace:*",
+        "@rika/product": "workspace:*",
+        "@rika/product-store": "workspace:*",
         "@rika/remote-execution": "workspace:*",
+        "@rika/terminal": "workspace:*",
+        "@rika/transcript": "workspace:*",
         "effect": "catalog:",
+        "tenetkit": "catalog:",
       },
       "devDependencies": {
         "@effect/vitest": "catalog:",
         "@rika/identity": "workspace:*",
-        "@rika/remote-execution": "workspace:*",
         "@types/bun": "catalog:",
         "@types/pg": "8.15.5",
         "pg": "8.21.0",
@@ -300,8 +310,11 @@
       "version": "0.0.0",
       "dependencies": {
         "@effect/platform-bun": "catalog:",
+        "@rika/coding-tools": "workspace:*",
+        "@rika/extensions": "workspace:*",
         "@rika/kernel": "workspace:*",
         "effect": "catalog:",
+        "tenetkit": "catalog:",
       },
       "devDependencies": {
         "@effect/vitest": "catalog:",

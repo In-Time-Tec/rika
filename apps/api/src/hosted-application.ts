@@ -84,8 +84,8 @@ export const layer = (options: {
           ),
           cells: HostedExecution.remoteCells({
             cells: RemoteCells.layer({
-              execute: (request) =>
-                executor.run(request).pipe(
+              execute: (request, authority) =>
+                executor.run({ ...request, authority }).pipe(
                   Effect.map((result) => result.response),
                   Effect.mapError((error) => RemoteCells.Unavailable.make({ message: error.message })),
                 ),

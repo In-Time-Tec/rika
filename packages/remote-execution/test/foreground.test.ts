@@ -84,6 +84,11 @@ const acknowledgeTerminal = (socket: FakeWebSocket, access: AccessWire, operatio
     return message
   })
 
+const bindings = {
+  digest: "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  descriptors: [],
+} as const
+
 describe.sequential("foreground local executor", () => {
   it.effect("uses only a local admission and replays cell results in memory", () =>
     Effect.acquireUseRelease(
@@ -168,6 +173,7 @@ describe.sequential("foreground local executor", () => {
                 attempt: 0,
                 admittedAt: null,
                 deadline: null,
+                bindings,
               },
             })
             yield* acknowledgeTerminal(socket, access, "operation-mismatch")
@@ -196,6 +202,7 @@ describe.sequential("foreground local executor", () => {
               attempt: 0,
               admittedAt: null,
               deadline: null,
+              bindings,
             }
             socket.message({ _tag: "CellExecute", request })
             yield* acknowledgeTerminal(socket, access, "operation-1")
@@ -374,6 +381,7 @@ describe.sequential("foreground local executor", () => {
                 attempt: 0,
                 admittedAt: null,
                 deadline: null,
+                bindings,
               },
             })
             yield* terminal(socket, "operation-reconnect")
@@ -468,6 +476,7 @@ describe.sequential("foreground local executor", () => {
                   leaseExpiresAt: 10_000,
                   heartbeatIntervalMillis: 60_000,
                   cursor: { sequence: 0, value: "" },
+                  machines: [],
                   receipts: [
                     {
                       operationKey: "operation-resume",
@@ -533,6 +542,7 @@ describe.sequential("foreground local executor", () => {
                 attempt: 0,
                 admittedAt: null,
                 deadline: null,
+                bindings,
               },
             })
             yield* acknowledgeTerminal(socket, renewed, "operation-resume")
@@ -645,6 +655,7 @@ describe.sequential("foreground local executor", () => {
                 attempt: 0,
                 admittedAt: null,
                 deadline: null,
+                bindings,
               },
             })
             const firstTerminal = yield* acknowledgeTerminal(firstSocket, access, "operation-goodbye")

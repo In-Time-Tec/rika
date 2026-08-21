@@ -92,7 +92,7 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
       const connection = yield* product.createConnection({
         principal: principal("personal-user"),
         owner: personal("personal-user"),
-        placement: "local",
+        placement: "e2b",
       })
       const admissionInput = {
         principal: principal("personal-user"),
@@ -143,12 +143,12 @@ it.effect.skipIf(!live)("revokes organization admission immediately without affe
       const personalConnection = yield* product.createConnection({
         principal: principal("member-user"),
         owner: personal("member-user"),
-        placement: "local",
+        placement: "e2b",
       })
       const organizationConnection = yield* product.createConnection({
         principal: principal("member-user"),
         owner: organization("revoked-org"),
-        placement: "local",
+        placement: "e2b",
       })
       yield* product.admitRun({
         principal: principal("member-user"),
@@ -189,7 +189,7 @@ it.effect.skipIf(!live)("requires a direct grant for a non-creator organization 
       const connection = yield* product.createConnection({
         principal: principal("creator-user"),
         owner: organization("grant-org"),
-        placement: "local",
+        placement: "e2b",
       })
       const operate = product.admitRun({
         principal: principal("operator-user"),
@@ -233,7 +233,7 @@ it.effect.skipIf(!live)("fails closed for forged and cross-owner selections", ()
           product.createConnection({
             principal: principal("first-user"),
             owner: personal("second-user"),
-            placement: "local",
+            placement: "e2b",
           }),
         ),
       ).toBe("forbidden")
@@ -242,14 +242,14 @@ it.effect.skipIf(!live)("fails closed for forged and cross-owner selections", ()
           product.createConnection({
             principal: principal("first-user"),
             owner: organization("foreign-org"),
-            placement: "local",
+            placement: "e2b",
           }),
         ),
       ).toBe("forbidden")
       const secondConnection = yield* product.createConnection({
         principal: principal("second-user"),
         owner: personal("second-user"),
-        placement: "local",
+        placement: "e2b",
       })
       expect(
         yield* failureKind(
@@ -275,7 +275,7 @@ it.effect.skipIf(!live)("fails closed for forged and cross-owner selections", ()
             principal: principal("first-user"),
             owner: personal("first-user"),
             projectId: "foreign-project",
-            placement: "local",
+            placement: "e2b",
           }),
         ),
       ).toBe("not-found")

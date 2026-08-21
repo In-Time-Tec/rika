@@ -93,6 +93,7 @@ describe("executor protocol v1", () => {
         attempt: 0,
         admittedAt: null,
         deadline: null,
+        bindings: { digest: "bindings", descriptors: [] },
       })
       expect(yield* Schema.decodeUnknownEffect(ApiMessage)({ _tag: "CellExecute", request })).toEqual({
         _tag: "CellExecute",

@@ -1,6 +1,7 @@
-import { Cell, KernelPool } from "tenetkit/repl"
+import { Cell, HostBindingRegistry, KernelPool } from "tenetkit/repl"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
 import * as Composition from "./kernel-composition"
+import * as KernelBootstrap from "./kernel-bootstrap"
 
 export interface Request {
   readonly sessionId: string
@@ -21,7 +22,7 @@ export class CellExecutor extends Context.Service<CellExecutor, Interface>()(
   "@rika/kernel/cell-executor/CellExecutor",
 ) {}
 
-export const make = (pool: KernelPool.Interface): Interface => ({
+const make = (pool: KernelPool.Interface, modules: ReadonlyArray<string>): Interface => ({
   execute: (request) => {
     const emit = request.emit ?? (() => Effect.void)
     return Effect.acquireUseRelease(
@@ -31,7 +32,7 @@ export const make = (pool: KernelPool.Interface): Interface => ({
           .execute({
             sessionId: request.sessionId,
             cellId: request.cellId,
-            code: request.code,
+            code: `${KernelBootstrap.source(modules)}\n${request.code}`,
             signal: controller.signal,
           })
           .pipe(
@@ -53,7 +54,24 @@ export const make = (pool: KernelPool.Interface): Interface => ({
   },
 })
 
-export const layer = (options: Composition.Options) =>
-  Layer.effect(CellExecutor, Effect.map(KernelPool.KernelPool, make)).pipe(
-    Layer.provide(Composition.pool({ ...options, bootstrap: false })),
+export interface Options extends Composition.Options {
+  readonly registry: Layer.Layer<HostBindingRegistry.HostBindingRegistry>
+}
+
+export const layer = (options: Options) =>
+  Layer.effect(
+    CellExecutor,
+    Effect.map(Effect.all([KernelPool.KernelPool, HostBindingRegistry.HostBindingRegistry]), ([pool, registry]) =>
+      make(
+        pool,
+        registry.descriptors.map((descriptor) => descriptor.module),
+      ),
+    ),
+  ).pipe(
+    Layer.provide(
+      Layer.merge(
+        Composition.pool({ ...options, bootstrap: false }).pipe(Layer.provide(options.registry)),
+        options.registry,
+      ),
+    ),
   )

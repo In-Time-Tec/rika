@@ -27,6 +27,7 @@
     "./kernel-bootstrap": "./src/kernel-bootstrap.ts",
     "./executor-runtime": "./src/executor-runtime.ts",
     "./cell-executor": "./src/cell-executor.ts",
+    "./machine-bindings": "./src/machine-bindings.ts",
     "./kernel-composition": "./src/kernel-composition.ts",
     "./kernel-profile-registration": "./src/kernel-profile-registration.ts",
     "./kernel-state-store-file-system": "./src/kernel-state-store-file-system.ts"

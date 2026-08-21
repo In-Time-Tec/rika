@@ -1,4 +1,8 @@
-import { Redacted, Schema } from "effect"
+import * as CodingToolResult from "@rika/coding-tools/coding-tool-result"
+import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
+import * as McpConfiguration from "@rika/extensions/mcp-configuration"
+import * as McpRuntime from "@rika/extensions/mcp-runtime"
+import { Crypto, Effect, Encoding, Redacted, Schema } from "effect"
 
 const Identifier = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
 const Generation = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
@@ -9,6 +13,7 @@ const Dimension = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLe
 const Sha256 = Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/))
 const LeaseEpoch = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 const OutputText = Schema.String.check(Schema.isMaxLength(16_384))
+const RequestDigest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
 
 export const ProtocolVersion = Schema.Literal(1)
 export type ProtocolVersion = typeof ProtocolVersion.Type
@@ -149,6 +154,103 @@ export const redactAccess = (access: AccessWire): Access => ({
   sessionToken: Redacted.make(access.sessionToken, { label: "executor-session" }),
 })
 
+export const BindingDescriptor = Schema.Struct({
+  module: Identifier,
+  operations: Schema.Array(Identifier),
+})
+export type BindingDescriptor = typeof BindingDescriptor.Type
+
+export const BindingManifest = Schema.Struct({
+  digest: Identifier,
+  descriptors: Schema.Array(BindingDescriptor),
+})
+export type BindingManifest = typeof BindingManifest.Type
+
+const encodeBindingDescriptors = Schema.encodeSync(Schema.fromJsonString(Schema.Array(BindingDescriptor)))
+
+export const bindingManifest = Effect.fn("RemoteExecution.bindingManifest")(function* (
+  descriptors: ReadonlyArray<BindingDescriptor>,
+) {
+  const crypto = yield* Crypto.Crypto
+  const digest = Encoding.encodeHex(
+    yield* crypto.digest("SHA-256", new TextEncoder().encode(encodeBindingDescriptors(descriptors))).pipe(Effect.orDie),
+  )
+  return BindingManifest.make({ digest, descriptors })
+})
+
+export const BindingRequest = Schema.Struct({
+  module: Identifier,
+  operation: Identifier,
+  input: Schema.optionalKey(Schema.Json),
+  sessionId: Schema.optionalKey(Identifier),
+  cellId: Schema.optionalKey(Identifier),
+})
+export type BindingRequest = typeof BindingRequest.Type
+
+export const BindingResponse = Schema.Union([
+  Schema.TaggedStruct("Success", { output: Schema.optionalKey(Schema.Json) }),
+  Schema.TaggedStruct("Failure", { failure: Schema.Json }),
+])
+export type BindingResponse = typeof BindingResponse.Type
+
+export const BindingBoundaryFailure = Schema.Union([
+  Schema.TaggedStruct("tenetkit/repl/HostBindingNotFound", {
+    module: Identifier,
+    operation: Schema.optionalKey(Identifier),
+  }),
+  Schema.TaggedStruct("tenetkit/repl/HostBindingSchemaFailure", {
+    module: Identifier,
+    operation: Identifier,
+    stage: Schema.Literals(["decode-input", "encode-output", "encode-failure"]),
+    message: Schema.String,
+  }),
+])
+
+export const BindingOutcome = Schema.Union([
+  Schema.TaggedStruct("Returned", { response: BindingResponse }),
+  Schema.TaggedStruct("Rejected", { failure: BindingBoundaryFailure }),
+  Schema.TaggedStruct("Suspend", { token: Identifier }),
+  Schema.TaggedStruct("Unknown", { message: Schema.String }),
+])
+export type BindingOutcome = typeof BindingOutcome.Type
+
+export const MachineRequest = Schema.Union([
+  Schema.TaggedStruct("CodingTool", { request: CodingToolRuntime.Request }),
+  Schema.TaggedStruct("ProcessStop", { processId: Identifier }),
+  Schema.TaggedStruct("McpDiscover", { server: McpConfiguration.Server }),
+  Schema.TaggedStruct("McpCall", { server: McpConfiguration.Server, tool: Identifier, input: Schema.Json }),
+])
+export type MachineRequest = typeof MachineRequest.Type
+
+const DiscoveredMcpTool = Schema.Struct({
+  name: Schema.String,
+  rawName: Schema.String,
+  description: Schema.String,
+  inputSchema: Schema.Json,
+  outputSchema: Schema.Json,
+})
+
+export const MachineSuccess = Schema.Union([
+  Schema.TaggedStruct("CodingTool", { result: CodingToolResult.Result }),
+  Schema.TaggedStruct("ProcessStopped", {}),
+  Schema.TaggedStruct("McpDiscovered", { tools: Schema.Array(DiscoveredMcpTool) }),
+  Schema.TaggedStruct("McpCalled", { content: Schema.Json }),
+])
+
+export const MachineFailure = Schema.Union([
+  CodingToolRuntime.ToolError,
+  McpRuntime.Diagnostic,
+  Schema.TaggedStruct("ProcessStopFailed", { message: Schema.String }),
+])
+
+export const MachineOutcome = Schema.Union([
+  Schema.TaggedStruct("Success", { value: MachineSuccess }),
+  Schema.TaggedStruct("Failure", { failure: MachineFailure }),
+  Schema.TaggedStruct("Unknown", { message: Schema.String }),
+  Schema.TaggedStruct("Fenced", { message: Schema.String }),
+])
+export type MachineOutcome = typeof MachineOutcome.Type
+
 export const CellRequest = Schema.Struct({
   access: AccessWire,
   operationKey: Identifier,
@@ -163,6 +265,7 @@ export const CellRequest = Schema.Struct({
   attempt: Sequence,
   admittedAt: Schema.NullOr(Identifier),
   deadline: Schema.NullOr(Identifier),
+  bindings: BindingManifest,
 })
 export type CellRequest = typeof CellRequest.Type
 
@@ -330,6 +433,22 @@ export const LocalExecutorMessage = Schema.Union([
     response: CellResponse,
   }),
   Schema.TaggedStruct("CellLifecycle", { access: AccessWire, frame: CellLifecycleFrame }),
+  Schema.TaggedStruct("BindingInvoke", {
+    access: AccessWire,
+    operationKey: Identifier,
+    attempt: Sequence,
+    callId: Identifier,
+    requestDigest: RequestDigest,
+    request: BindingRequest,
+  }),
+  Schema.TaggedStruct("MachineResult", {
+    access: AccessWire,
+    operationKey: Identifier,
+    attempt: Sequence,
+    machineId: Identifier,
+    requestDigest: RequestDigest,
+    outcome: MachineOutcome,
+  }),
 ])
 export type LocalExecutorMessage = typeof LocalExecutorMessage.Type
 
@@ -349,6 +468,22 @@ export const ExecutorMessage = Schema.Union([
     response: CellResponse,
   }),
   Schema.TaggedStruct("CellLifecycle", { access: AccessWire, frame: CellLifecycleFrame }),
+  Schema.TaggedStruct("BindingInvoke", {
+    access: AccessWire,
+    operationKey: Identifier,
+    attempt: Sequence,
+    callId: Identifier,
+    requestDigest: RequestDigest,
+    request: BindingRequest,
+  }),
+  Schema.TaggedStruct("MachineResult", {
+    access: AccessWire,
+    operationKey: Identifier,
+    attempt: Sequence,
+    machineId: Identifier,
+    requestDigest: RequestDigest,
+    outcome: MachineOutcome,
+  }),
 ])
 export type ExecutorMessage = typeof ExecutorMessage.Type
 
@@ -372,6 +507,22 @@ export const ApiMessage = Schema.Union([
     operationKey: Identifier,
     attempt: Sequence,
     cursor: Sequence,
+  }),
+  Schema.TaggedStruct("BindingResult", {
+    access: AccessWire,
+    operationKey: Identifier,
+    attempt: Sequence,
+    callId: Identifier,
+    requestDigest: RequestDigest,
+    outcome: BindingOutcome,
+  }),
+  Schema.TaggedStruct("MachineExecute", {
+    access: AccessWire,
+    operationKey: Identifier,
+    attempt: Sequence,
+    machineId: Identifier,
+    requestDigest: RequestDigest,
+    request: MachineRequest,
   }),
   Schema.TaggedStruct("Fenced", { fence: Fence, message: Schema.String }),
 ])

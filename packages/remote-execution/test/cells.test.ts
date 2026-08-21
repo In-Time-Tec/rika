@@ -27,6 +27,7 @@ const request = (operationKey: string, attempt?: number) =>
     attempt: attempt ?? 0,
     admittedAt: null,
     deadline: null,
+    bindings: { digest: "bindings", descriptors: [] },
   })
 
 const run = <A, E>(effect: Effect.Effect<A, E, Cells>, cells: Layer.Layer<Cells>) =>
