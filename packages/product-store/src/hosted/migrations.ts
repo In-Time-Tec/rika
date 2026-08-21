@@ -40,4 +40,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "7acbef20b49d79185a1da7bcb00138c509966f2a0fe0dff5e8f614932f490442",
     url: new URL("../../migrations/postgres/0007-hosted-prompt-admission.sql", import.meta.url),
   },
+  {
+    id: "product/0008_hosted_turn_worker",
+    checksum: "c9616cd9fecf1cb3b8115acdc3d0b03ada1cd0cbe189111aac2c0ad84ce79dd3",
+    url: new URL("../../migrations/postgres/0008-hosted-turn-worker.sql", import.meta.url),
+  },
 ]

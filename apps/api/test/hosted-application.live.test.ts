@@ -47,6 +47,13 @@ it.effect.skipIf(databaseUrl === undefined)(
           resourceScope,
         )
         const application = Context.get(context, HostedApplication)
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if ((yield* Effect.result(application.turnWorker.ready))._tag === "Success") break
+          yield* Effect.callback<void>((resume) => {
+            setImmediate(() => resume(Effect.void))
+          })
+        }
+        yield* application.turnWorker.ready
         expect(application.execution.gateway).toBeDefined()
         expect(application.execution.lifecycle).toBeDefined()
         yield* application.execution.readiness.check.pipe(Effect.retry(Schedule.recurs(20)))

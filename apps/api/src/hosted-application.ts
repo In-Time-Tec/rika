@@ -5,18 +5,21 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
+import * as HostedTurnWorkerStore from "@rika/product-store/postgres-turn-worker-store"
 import * as HostedExecution from "@rika/execution"
 import * as ExecutionPostgres from "@rika/execution/postgres"
 import * as RemoteCells from "@rika/execution/remote-cells"
 import { type ExecutorConfig, Executor, layer as executorLayer, service as executorService } from "./executor"
 import { HostedOperations, layer as hostedOperationsLayer } from "./hosted-operations"
 import { HostedProduct, layer as hostedProductLayer } from "./hosted-product"
+import { HostedTurnWorker, layer as hostedTurnWorkerLayer } from "./hosted-turn-worker"
 import { layer as localExecutorLayer } from "./local-executor"
 
 export interface HostedApplicationService {
   readonly product: HostedProduct["Service"]
   readonly operations: HostedOperations["Service"]
   readonly executor: Executor["Service"]
+  readonly turnWorker: HostedTurnWorker["Service"]
   readonly execution: {
     readonly gateway: ExecutionGateway.Interface
     readonly lifecycle: ExecutionSessionLifecycle.Interface
@@ -79,6 +82,17 @@ export const layer = (options: {
         }),
       )
       const hostedContext = Context.merge(data, executionContext)
+      const turnWorkerContext = yield* Layer.build(
+        hostedTurnWorkerLayer({
+          workerId: options.workerId,
+          leaseMillis: 30_000,
+          pollIntervalMillis: 250,
+        }).pipe(
+          Layer.provide(HostedTurnWorkerStore.layer),
+          Layer.provide(Layer.succeedContext(hostedContext)),
+        ),
+      )
+      const turnWorker = Context.get(turnWorkerContext, HostedTurnWorker)
       const productContext = yield* Layer.build(
         hostedProductLayer({
           templateBuildId: options.executor.templateBuildId,
@@ -92,10 +106,20 @@ export const layer = (options: {
         product: Context.get(productContext, HostedProduct),
         operations: Context.get(operationsContext, HostedOperations),
         executor,
+        turnWorker,
         execution: {
           gateway: Context.get(executionContext, ExecutionGateway.Service),
           lifecycle: Context.get(executionContext, ExecutionSessionLifecycle.Service),
-          readiness: Context.get(executionContext, ExecutionPostgres.Readiness),
+          readiness: ExecutionPostgres.Readiness.of({
+            check: Effect.all([
+              Context.get(executionContext, ExecutionPostgres.Readiness).check,
+              turnWorker.ready.pipe(
+                Effect.mapError((error) =>
+                  ExecutionPostgres.WorkerUnavailable.make({ message: error.message }),
+                ),
+              ),
+            ]).pipe(Effect.map(([readiness]) => readiness)),
+          }),
         },
       })
     }),
