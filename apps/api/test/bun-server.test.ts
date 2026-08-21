@@ -72,6 +72,7 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
         machine: () => Effect.die("unused"),
         sendPty: () => Effect.die("unused"),
         ptyEvents: () => Stream.empty,
+        retryPreparation: () => Effect.void,
       },
       localGateway: {
         receive: () => Effect.void,
@@ -192,6 +193,7 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
           machine: () => Effect.die("unused"),
           sendPty: () => Effect.die("unused"),
           ptyEvents: () => Stream.empty,
+          retryPreparation: () => Effect.void,
         },
         localGateway: {
           receive: () => Effect.void,
@@ -314,6 +316,7 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
           machine: () => Effect.die("unused"),
           sendPty: () => Effect.die("unused"),
           ptyEvents: () => Stream.empty,
+          retryPreparation: () => Effect.void,
         },
         localGateway: {
           receive: () => Effect.void,

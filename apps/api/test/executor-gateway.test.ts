@@ -11,6 +11,7 @@ import {
   makeGateway as makeGatewayService,
   type BindingAuthority,
   type LifecycleStore,
+  type PreparationStore,
   type Socket,
 } from "../src/executor-gateway"
 
@@ -104,19 +105,34 @@ const lifecycleStore = (
       Effect.sync(() => void operations.set(operation(input), { state: "unknown", started: true })),
   }
 }
+const readyPreparation: PreparationStore = {
+  start: () => Effect.void,
+  output: () => Effect.void,
+  complete: () => Effect.void,
+  fail: () => Effect.void,
+  retry: () => Effect.succeed(2),
+  ready: () => Effect.void,
+}
 const makeGateway = (
   service: Controller,
   append: LifecycleStore["append"] = () => Effect.void,
   load: LifecycleStore["load"] = () => Effect.succeed([]),
+  preparation: PreparationStore = readyPreparation,
 ) =>
-  makeGatewayService(service, lifecycleStore(append, load), {
-    activate: (_access, _phase, use) => use({ digest: `sha256:${"0".repeat(64)}`, values: {}, redactedNames: [] }),
-    replace: (key) =>
-      service.replace(key, { phase: "runtime", allow: ["api.example.test"] }).pipe(
-        Effect.asVoid,
-        Effect.mapError((error) => GatewayError.make({ kind: "fenced", message: error.message })),
-      ),
-  }).pipe(
+  makeGatewayService(
+    service,
+    lifecycleStore(append, load),
+    {
+      activate: (_access, _phase, use) => use({ digest: `sha256:${"0".repeat(64)}`, values: {}, redactedNames: [] }),
+      replace: (key) =>
+        service.replace(key, { phase: "runtime", allow: ["api.example.test"] }).pipe(
+          Effect.asVoid,
+          Effect.mapError((error) => GatewayError.make({ kind: "fenced", message: error.message })),
+        ),
+    },
+    preparation,
+    () => Effect.succeed("a".repeat(64)),
+  ).pipe(
     Effect.provideServiceEffect(
       Crypto.Crypto,
       Effect.scoped(Layer.build(BunCrypto.layer)).pipe(Effect.map((context) => Context.get(context, Crypto.Crypto))),
@@ -130,7 +146,7 @@ const bindings = {
     invoke: (request) => Effect.fail(HostBindingRegistry.HostBindingNotFound.make({ module: request.module })),
   }),
   context: Context.empty(),
-  manifest: { digest: "bindings", descriptors: [] },
+  manifest: { digest: "a".repeat(64), descriptors: [] },
 } as unknown as BindingAuthority
 
 const fence = {
@@ -209,7 +225,9 @@ const controller = (overrides: Partial<Controller> = {}): Controller =>
         cursor: { sequence: 1, value: "cursor-1" },
       }),
     checkpoint: () => Effect.die("unused"),
-    checkout: () => Effect.die("unused"),
+    credential: () => Effect.die("unused"),
+    revokeCredential: () => Effect.die("unused"),
+    workspace: () => Effect.die("unused"),
     activatePhase: () => Effect.die("unused"),
     cleanupOrphans: Effect.die("unused"),
     ...overrides,
@@ -568,7 +586,7 @@ describe("executor gateway", () => {
       const authority = {
         registry,
         context,
-        manifest: { digest: "workspace-bindings", descriptors: registry.descriptors },
+        manifest: { digest: "b".repeat(64), descriptors: registry.descriptors },
       } as unknown as BindingAuthority
       const target = socket()
       const gateway = yield* makeGateway(controller())
@@ -658,6 +676,50 @@ describe("executor gateway", () => {
       )
       expect(target.closed).toContainEqual([1008, "fenced"])
       yield* Fiber.interrupt(running)
+    }),
+  )
+
+  it.effect("never dispatches a cell for stale durable workspace readiness", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      const checked: Array<Parameters<PreparationStore["ready"]>[0]> = []
+      const preparation: PreparationStore = {
+        ...readyPreparation,
+        ready: (candidate) => {
+          checked.push(candidate)
+          return Effect.fail(GatewayError.make({ kind: "fenced", message: "Workspace readiness fence is stale" }))
+        },
+      }
+      const gateway = yield* makeGateway(controller(), undefined, undefined, preparation)
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      yield* Effect.flip(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "not-ready",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "echo should-not-run",
+        }),
+      )
+      expect(checked).toEqual([access])
+      expect(target.sent.map((message) => decode(message)._tag)).toEqual(["ExecutorWelcome", "PhaseEnvironmentGranted"])
     }),
   )
 

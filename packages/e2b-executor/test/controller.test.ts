@@ -315,13 +315,54 @@ describe("Controller", () => {
           service.checkpoint(access, { ...staged, checkpointId: "checkpoint-2", objectKey: `${staged.objectKey}.2` }),
         )).kind,
       ).toBe("checkpoint")
-      const credential = yield* service.checkout(access)
+      const credential = yield* service.credential(access, {
+        ownerId: "owner-1",
+        assignmentId: "assignment-1",
+        repositoryId: "repository-1",
+        workspaceId: "workspace-1",
+        purpose: "git-read",
+        assignmentGeneration: 1,
+        leaseEpoch: access.leaseEpoch,
+      })
       expect(credential).toMatchObject({
         repositoryUrl: "https://github.com/In-Time-Tec/rika.git",
         username: "x-access-token",
       })
       expect(String(credential.token)).toBe("<redacted:github-installation-token>")
       expect(json(credential)).not.toContain("ghs_actual_secret")
+      expect(harness.checkoutRequests).toEqual([
+        {
+          installationId: "installation-1",
+          owner: "In-Time-Tec",
+          repository: "rika",
+          ownerId: "owner-1",
+          workspaceId: "workspace-1",
+          repositoryId: "repository-1",
+          purpose: "git-read",
+        },
+      ])
+      const valid = {
+        ownerId: "owner-1",
+        assignmentId: "assignment-1",
+        repositoryId: "repository-1",
+        workspaceId: "workspace-1",
+        purpose: "github-read" as const,
+        assignmentGeneration: 1,
+        leaseEpoch: access.leaseEpoch,
+      }
+      for (const mismatch of [
+        { ...valid, ownerId: "owner-2" },
+        { ...valid, assignmentId: "assignment-2" },
+        { ...valid, repositoryId: "repository-2" },
+        { ...valid, workspaceId: "workspace-2" },
+        { ...valid, assignmentGeneration: 2 },
+        { ...valid, leaseEpoch: access.leaseEpoch + 1 },
+      ])
+        expect((yield* Effect.flip(service.credential(access, mismatch))).kind).toBe("checkout")
+      expect(harness.checkoutRequests).toHaveLength(1)
+      expect(
+        (yield* Effect.flip(service.revokeCredential(access, { ...valid, repositoryId: "repository-2" }))).kind,
+      ).toBe("checkout")
     }).pipe(provideLayer(harness.layer))
   })
 
@@ -334,9 +375,21 @@ describe("Controller", () => {
       yield* service.provision(assignmentInput.id, setupEgress)
       const { access } = yield* authenticate(harness, 1)
 
-      expect(yield* Effect.flip(service.checkout(access))).toMatchObject({
+      expect(
+        yield* Effect.flip(
+          service.credential(access, {
+            ownerId: "owner-1",
+            assignmentId: "assignment-1",
+            repositoryId: "repository-1",
+            workspaceId: "workspace-1",
+            purpose: "git-read",
+            assignmentGeneration: 1,
+            leaseEpoch: access.leaseEpoch,
+          }),
+        ),
+      ).toMatchObject({
         kind: "checkout",
-        message: "Repository checkout is unavailable for this assignment",
+        message: "Credential request does not match the assigned repository fence",
       })
       expect(harness.checkoutRequests).toEqual([])
     }).pipe(provideLayer(harness.layer))

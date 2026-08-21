@@ -41,6 +41,7 @@ export interface RepositoryToken {
 
 export interface InstallationTokenService {
   readonly mint: (request: RepositoryTokenRequest) => Effect.Effect<RepositoryToken, InstallationTokenError>
+  readonly revoke: (token: Redacted.Redacted<string>) => Effect.Effect<void, InstallationTokenError>
 }
 
 export class InstallationToken extends Context.Service<InstallationToken, InstallationTokenService>()(
@@ -166,6 +167,13 @@ export const installationTokenLayer = (options: InstallationTokenOptions = {}) =
             if (expiry <= now) {
               return yield* failure("response", "mint repository token", "GitHub returned an expired token")
             }
+            if (expiry - now > 60 * 60 * 1_000) {
+              return yield* failure(
+                "scope",
+                "mint repository token",
+                "GitHub returned a token lasting longer than one hour",
+              )
+            }
             const value: RepositoryToken = {
               token: Redacted.make(response.token),
               expiresAtMillis: expiry,
@@ -179,9 +187,27 @@ export const installationTokenLayer = (options: InstallationTokenOptions = {}) =
           }),
         )
       })
-      return InstallationToken.of({ mint })
+      const revoke = Effect.fn("GitHubInstallationToken.revoke")(function* (token: Redacted.Redacted<string>) {
+        const request = HttpClientRequest.delete(`${options.baseUrl ?? "https://api.github.com"}/installation/token`, {
+          headers: {
+            accept: "application/vnd.github+json",
+            authorization: `Bearer ${Redacted.value(token)}`,
+            "x-github-api-version": options.apiVersion ?? "2026-03-10",
+          },
+        })
+        const response = yield* client
+          .execute(request)
+          .pipe(Effect.mapError(() => failure("transport", "revoke repository token", "GitHub request failed")))
+        if (response.status !== 204 && response.status !== 404) {
+          return yield* failure(
+            response.status === 401 || response.status === 403 ? "authentication" : "response",
+            "revoke repository token",
+            "GitHub rejected repository token revocation",
+            response.status,
+          )
+        }
+        for (const [key, entry] of cache) if (entry.value.token === token) cache.delete(key)
+      })
+      return InstallationToken.of({ mint, revoke })
     }),
   )
-
-export const installationTokenTestLayer = (mint: InstallationTokenService["mint"]) =>
-  Layer.succeed(InstallationToken, InstallationToken.of({ mint }))

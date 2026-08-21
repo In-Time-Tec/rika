@@ -109,12 +109,14 @@ describe("hosted TypeScript kernel", () => {
           Effect.provideContext(authority("operation-1", "call-1")),
         )
         const manifest = yield* bindingManifest(registry.descriptors)
+        const bindingContractDigest = yield* Ref.make<string | undefined>("f".repeat(64))
         const states = yield* Ref.make(new Map<string, import("../src/cells").State>())
         let kernel: HostedKernel.Interface
         kernel = yield* HostedKernel.make({
           workspaceIdentity: "workspace-1",
           workspacePath: root,
           dataRoot: root,
+          bindingContractDigest,
           read: (operationKey) => Effect.map(Ref.get(states), (current) => current.get(operationKey)),
           write: (operationKey, state) => Ref.update(states, (current) => new Map(current).set(operationKey, state)),
           sendBinding: (message) =>
@@ -138,6 +140,11 @@ describe("hosted TypeScript kernel", () => {
             ),
         })
 
+        const mismatch = yield* Effect.flip(
+          kernel.execute(request(manifest, "operation-mismatch", "call-mismatch", "1"), () => Effect.void),
+        )
+        expect(mismatch.message).toContain("prepared binding contract")
+        yield* Ref.set(bindingContractDigest, manifest.digest)
         const first = yield* kernel.execute(
           request(manifest, "operation-1", "call-1", "let count: number = 1; ({ count, epoch: context.epoch })"),
           () => Effect.void,

@@ -7,7 +7,7 @@ const program = Effect.scoped(
   Effect.gen(function* () {
     const context = yield* Layer.build(
       layer({
-        workspace: "/workspace",
+        workspace: "/home/rika-workspace/workspace/repo",
         workspaceDigest: "doctor",
         dataRoot: "/var/lib/rika-executor",
         runtimeVersion: process.versions.bun,

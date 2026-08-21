@@ -2,7 +2,17 @@ import * as PgClient from "@effect/sql-pg/PgClient"
 import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
+import type { Access } from "@rika/product/executor-assignments"
+import {
+  AssignmentLeaseEpoch,
+  ExecutorAssignmentId,
+  ExecutorInstanceId,
+  FencingGeneration,
+  WorkspaceId,
+} from "@rika/product/hosted-model"
+import { WorkspacePreparations } from "@rika/product/workspace-preparation"
 import { HostedTurnWorkerStore, layer as workerStoreLayer } from "../../src/hosted/postgres-turn-worker-store"
+import { layer as workspacePreparationLayer } from "../../src/hosted/postgres-workspace-preparations"
 import { Context, Effect, Layer, Random, Redacted, Schema } from "effect"
 import { Pool } from "pg"
 import { identityMigrations } from "../../../identity/src/migrations"
@@ -67,10 +77,82 @@ it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers pre
           pool.query(`INSERT INTO rika_thread_queue_state (thread_id,revision,queued_count)
             VALUES ('thread-1',2,2)`),
         )
+        yield* Effect.promise(() =>
+          pool.query(`INSERT INTO rika_hosted_executor_assignments
+            (id, owner_id, thread_id, workspace_id, executor_kind, placement, checkout, generation, revision,
+              last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
+              session_digest, lease_epoch, lease_expires_at)
+            VALUES ('thread-1', 'worker-owner', 'thread-1', 'workspace-1', 'e2b',
+              '{"_tag":"E2BPlacement","templateBuildId":"build-1","providerScope":"test"}', NULL,
+              1, 0, 1, 'active', 'sandbox-1', 'executor-1', 'process-1', 'session-1', 1,
+              clock_timestamp() + interval '4 minutes')`),
+        )
+        const postgres = PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })
         const context = yield* Layer.build(
-          workerStoreLayer.pipe(Layer.provide(PgClient.layer({ url: Redacted.make(url), maxConnections: 8 }))),
+          Layer.merge(workerStoreLayer, workspacePreparationLayer).pipe(Layer.provide(postgres)),
         )
         const store = Context.get(context, HostedTurnWorkerStore)
+        const preparations = Context.get(context, WorkspacePreparations)
+        expect(yield* store.claimNext(request("waiting", "waiting-claim", 99))).toBeUndefined()
+        const access: Access = {
+          assignmentId: ExecutorAssignmentId.make("thread-1"),
+          assignmentGeneration: FencingGeneration.make("1"),
+          providerInstanceId: "sandbox-1",
+          executorInstanceId: ExecutorInstanceId.make("executor-1"),
+          processIncarnation: "process-1",
+          leaseEpoch: AssignmentLeaseEpoch.make("1"),
+          presentedSessionCredentialDigest: Redacted.make("session-1"),
+        }
+        const firstStart = {
+          access,
+          workspaceId: "workspace-1",
+          phase: "checkout" as const,
+          attempt: 1,
+          now: 1_000,
+        }
+        expect((yield* preparations.start(firstStart)).state).toBe("preparing")
+        expect((yield* preparations.start(firstStart)).attempt).toBe(1)
+        yield* preparations.appendOutput({
+          access,
+          phase: "checkout",
+          attempt: 1,
+          stream: "stdout",
+          text: "bounded redacted output",
+          redacted: true,
+          truncated: false,
+          now: 1_001,
+        })
+        yield* preparations.fail({ ...firstStart, message: "retry checkout", retryable: true, now: 1_002 })
+        expect(yield* preparations.retryAttempt(access)).toBe(2)
+        const retry = { ...firstStart, phase: "setup" as const, attempt: 2, now: 2_000 }
+        yield* preparations.start(retry)
+        const digest = `sha256:${"a".repeat(64)}`
+        const evidence = {
+          workspaceId: WorkspaceId.make("workspace-1"),
+          repositoryId: null,
+          commitSha: null,
+          kernelProfileDigest: "a".repeat(64),
+          bindingContractDigest: "b".repeat(64),
+          setup: {
+            digest: null,
+            commitSha: null,
+            buildDigest: digest,
+            environmentDigest: digest,
+            startedAt: 2_000,
+            finishedAt: 2_001,
+            outcome: "missing" as const,
+          },
+          resume: null,
+          capabilities: ["bun"],
+        }
+        const completion = { ...retry, phase: "capabilities" as const, evidence, now: 2_002 }
+        expect((yield* preparations.complete(completion)).state).toBe("ready")
+        expect((yield* preparations.complete(completion)).state).toBe("ready")
+        expect((yield* preparations.requireReady(access)).attempt).toBe(2)
+        expect(
+          (yield* Effect.result(preparations.requireReady({ ...access, leaseEpoch: AssignmentLeaseEpoch.make("2") })))
+            ._tag,
+        ).toBe("Failure")
         const claims = yield* Effect.forEach(
           Array.from({ length: 8 }, (_, index) => request(`worker-${index}`, `claim-${index}`, 100)),
           store.claimNext,

@@ -33,7 +33,7 @@ const resolvedLayer = (clientLayer: Layer.Layer<HttpClient.HttpClient>) =>
 describe("GitHub installation repository tokens", () => {
   it.effect("mints exact repository and permission scopes and caches only until expiry minus five minutes", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
-    const expiries = ["2023-11-14T23:13:20.000Z", "2023-11-15T00:13:20.000Z", "2023-11-15T00:13:20.000Z"]
+    const expiries = ["2023-11-14T23:13:20.000Z", "2023-11-14T23:13:20.000Z", "2023-11-15T00:08:20.000Z"]
     const clientLayer = Layer.succeed(
       HttpClient.HttpClient,
       HttpClient.make((request) => {
@@ -133,6 +133,41 @@ describe("GitHub installation repository tokens", () => {
         tokens.mint({ installationId: 42, repositoryIds: [1], permissions: { contents: "write" } }),
       )
       expect(permissions.reason).toBe("scope")
+    }).pipe(provide(resolvedLayer(clientLayer)))
+  })
+
+  it.effect("rejects credentials lasting over one hour and removes revoked credentials from the cache", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    let expiry = "2023-11-14T23:13:20.001Z"
+    const clientLayer = Layer.succeed(
+      HttpClient.HttpClient,
+      HttpClient.make((request) => {
+        requests.push(request)
+        if (request.method === "DELETE")
+          return Effect.succeed(HttpClientResponse.fromWeb(request, new Response(null, { status: 204 })))
+        const body = requestBody(request)!
+        return Effect.succeed(
+          response(request, {
+            token: `installation-token-${requests.length}`,
+            expires_at: expiry,
+            permissions: { ...body.permissions, metadata: "read" },
+            repositories: body.repository_ids.map(repository),
+          }),
+        )
+      }),
+    )
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(1_700_000_000_000)
+      const tokens = yield* InstallationToken.InstallationToken
+      const request = { installationId: 42, repositoryIds: [1], permissions: { contents: "read" as const } }
+      expect((yield* Effect.flip(tokens.mint(request))).reason).toBe("scope")
+      expiry = "2023-11-14T23:13:20.000Z"
+      const first = yield* tokens.mint(request)
+      expect(yield* tokens.mint(request)).toBe(first)
+      yield* tokens.revoke(first.token)
+      const next = yield* tokens.mint(request)
+      expect(next.token).not.toBe(first.token)
+      expect(requests.map((entry) => entry.method)).toEqual(["POST", "POST", "DELETE", "POST"])
     }).pipe(provide(resolvedLayer(clientLayer)))
   })
 

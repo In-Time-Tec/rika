@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { Schema } from "effect"
-import { ExecutorAssignment } from "../../src/hosted/executor-assignment"
+import { ExecutorAssignment, RepositoryCheckout } from "../../src/hosted/executor-assignment"
 
 const base = {
   id: "assignment-1",
@@ -34,4 +34,46 @@ it("rejects executor kinds that contradict their placement", () => {
   expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "local_device", placement: localPlacement })).toBe(true)
   expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "local_device", placement: e2bPlacement })).toBe(false)
   expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "e2b", placement: localPlacement })).toBe(false)
+})
+
+it("requires a complete immutable checkout identity owned by its remote assignment", () => {
+  const checkout = {
+    ownerId: "owner-1",
+    projectId: "project-1",
+    repositoryId: "repository-1",
+    installationId: "installation-1",
+    owner: "In-Time-Tec",
+    name: "rika",
+    ref: "main",
+    commitSha: "a".repeat(40),
+    private: true,
+    gitIdentity: { name: "Rika User", email: "rika@example.test" },
+  }
+  expect(Schema.is(RepositoryCheckout)(checkout)).toBe(true)
+  for (const invalid of [
+    { ...checkout, commitSha: "main" },
+    { ...checkout, commitSha: "A".repeat(40) },
+    { ...checkout, repositoryId: "" },
+    { ...checkout, ref: "" },
+    { ...checkout, gitIdentity: { ...checkout.gitIdentity, email: "invalid" } },
+  ])
+    expect(Schema.is(RepositoryCheckout)(invalid)).toBe(false)
+  const placement = { _tag: "E2BPlacement", templateBuildId: "build-1", providerScope: "scope-1" }
+  expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "e2b", placement, checkout })).toBe(true)
+  expect(
+    Schema.is(ExecutorAssignment)({
+      ...base,
+      executorKind: "e2b",
+      placement,
+      checkout: { ...checkout, ownerId: "owner-2" },
+    }),
+  ).toBe(false)
+  expect(
+    Schema.is(ExecutorAssignment)({
+      ...base,
+      executorKind: "local_device",
+      placement: { _tag: "LocalDevicePlacement", deviceId: "device-1" },
+      checkout,
+    }),
+  ).toBe(false)
 })

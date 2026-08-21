@@ -489,6 +489,16 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
                 }),
               ))._tag,
             ).toBe("Failure")
+            yield* Effect.promise(() =>
+              migrated!.query(`INSERT INTO rika_hosted_git_identities (owner_id, name, email)
+                VALUES ('organization-owner-live', 'Rika Live', 'rika-live@example.test');
+                INSERT INTO rika_hosted_project_repositories
+                  (project_id, owner_id, repository_id, installation_id, installation_account_id,
+                    installation_account_login, installation_account_type, repository_owner, repository_name,
+                    default_ref, private)
+                VALUES ('project-live', 'organization-owner-live', 'repository-live', 'installation-live',
+                  'account-live', 'In-Time-Tec', 'Organization', 'In-Time-Tec', 'rika', 'main', true)`),
+            )
             const assignments = yield* ExecutorAssignments
             const created = yield* assignments.create({
               id: ExecutorAssignmentId.make(ids.thread),
@@ -496,7 +506,18 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               threadId: ids.thread,
               workspaceId: ids.workspace,
               placement: { _tag: "E2BPlacement", templateBuildId: "template", providerScope: "scope" },
-              checkout: null,
+              checkout: {
+                ownerId: ids.organizationOwner,
+                projectId: ids.project,
+                repositoryId: "repository-live",
+                installationId: "installation-live",
+                owner: "In-Time-Tec",
+                name: "rika",
+                ref: "main",
+                commitSha: "a".repeat(40),
+                private: true,
+                gitIdentity: { name: "Rika Live", email: "rika-live@example.test" },
+              },
             })
             const provisioning = yield* assignments.beginProvisioning({
               ...version(created),

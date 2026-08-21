@@ -12,6 +12,8 @@ const environment = {
   DATABASE_SSL: "verify-full",
   GITHUB_CLIENT_ID: "github-client",
   GITHUB_CLIENT_SECRET: "github-secret",
+  GITHUB_APP_ID: "12345",
+  GITHUB_APP_PRIVATE_KEY: "private-key",
   RESEND_API_KEY: "resend-secret",
   EMAIL_FROM: "Rika <no-reply@example.com>",
   E2B_API_KEY: "e2b-api-key",
@@ -36,6 +38,7 @@ it.effect("reports missing database and executor provider configuration as typed
   Effect.gen(function* () {
     expect((yield* failure({ ...environment, DATABASE_URL: "" })).dependency).toBe("database")
     expect((yield* failure({ ...environment, E2B_API_KEY: "" })).dependency).toBe("executor-provider")
+    expect((yield* failure({ ...environment, GITHUB_APP_PRIVATE_KEY: "" })).dependency).toBe("github-app")
     expect((yield* failure({ ...environment, RIKA_PROVIDER_CREDENTIAL_KEY: "invalid" })).dependency).toBe(
       "model-provider",
     )

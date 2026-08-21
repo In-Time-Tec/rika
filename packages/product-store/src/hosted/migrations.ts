@@ -90,4 +90,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "7dda258e69b81e87662ebe8aeed01769bf456c829f50589e5b77d953e0d3b549",
     url: new URL("../../migrations/postgres/0017-executor-recovery-capabilities.sql", import.meta.url),
   },
+  {
+    id: "product/0018_workspace_preparation",
+    checksum: "fd7d1d0c8353e78599de0745f450dc19a55df575ecfb70083acd909571a006bf",
+    url: new URL("../../migrations/postgres/0018-workspace-preparation.sql", import.meta.url),
+  },
 ]

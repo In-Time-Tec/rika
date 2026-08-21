@@ -12,7 +12,14 @@ import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import * as MachineBindings from "@rika/kernel/machine-bindings"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
-import { ExecutorAssignmentId } from "@rika/product/hosted-model"
+import {
+  AssignmentLeaseEpoch,
+  ExecutorAssignmentId,
+  ExecutorInstanceId,
+  FencingGeneration,
+  WorkspaceId,
+} from "@rika/product/hosted-model"
+import { WorkspacePreparations } from "@rika/product/workspace-preparation"
 import {
   bindingManifest,
   CellLifecycleFrame,
@@ -20,11 +27,12 @@ import {
   type CellResponse as CellResponseValue,
 } from "@rika/remote-execution/protocol"
 import { HostBindingRegistry } from "tenetkit/repl"
-import { Context, Crypto, Effect, Encoding, Layer, Redacted, Schedule, Schema } from "effect"
+import { Clock, Context, Crypto, Effect, Encoding, Layer, Redacted, Schedule, Schema } from "effect"
 import { GatewayError, makeGateway, type Gateway, type LifecycleStore } from "./executor-gateway"
 import { HostedEnvironment } from "./hosted-environment"
 import type { AuthenticatedPrincipal } from "./hosted-product"
 import { LocalExecutor } from "./local-executor"
+import { HostedRepositories } from "./hosted-repositories"
 import { makeLocalGateway, type LocalGateway } from "./local-executor-gateway"
 
 export class ExecutorConfigError extends Schema.TaggedError<ExecutorConfigError>()("ExecutorConfigError", {
@@ -79,9 +87,27 @@ export const layer = (options: ExecutorConfig) =>
       ),
     ),
     Layer.provide(
-      Layer.succeed(
+      Layer.effect(
         Credentials,
-        Credentials.of({ issue: () => Effect.fail(CredentialError.make({ message: "Checkout is unavailable" })) }),
+        Effect.gen(function* () {
+          const repositories = yield* HostedRepositories
+          return Credentials.of({
+            issue: (request) =>
+              repositories
+                .credential({
+                  access: request.access,
+                  ownerId: request.ownerId,
+                  workspaceId: request.workspaceId,
+                  repositoryId: request.repositoryId,
+                  purpose: request.purpose,
+                })
+                .pipe(Effect.mapError((error) => CredentialError.make({ message: error.message }))),
+            revoke: (access, purpose) =>
+              repositories
+                .revoke(access, purpose)
+                .pipe(Effect.mapError((error) => CredentialError.make({ message: error.message }))),
+          })
+        }),
       ),
     ),
   )
@@ -136,6 +162,7 @@ export const service = Layer.effect(
     const controller = yield* Controller
     const assignments = yield* ExecutorAssignments
     const environment = yield* HostedEnvironment
+    const preparations = yield* WorkspacePreparations
     const sql = yield* PgClient.PgClient
     const crypto = yield* Crypto.Crypto
     const scope = yield* Effect.scope
@@ -146,6 +173,52 @@ export const service = Layer.effect(
       _tag: "DomainFailure",
       failure: { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" },
     }
+    const preparationAccess = Effect.fn("Executor.preparationAccess")(function* (
+      input: import("@rika/remote-execution/protocol").AccessWire,
+    ) {
+      const digest = Encoding.encodeHex(
+        yield* crypto
+          .digest("SHA-256", new TextEncoder().encode(input.sessionToken))
+          .pipe(
+            Effect.mapError(() =>
+              GatewayError.make({ kind: "transport", message: "Could not verify executor access" }),
+            ),
+          ),
+      )
+      return {
+        assignmentId: ExecutorAssignmentId.make(input.fence.assignmentId),
+        assignmentGeneration: FencingGeneration.make(String(input.fence.assignmentGeneration)),
+        providerInstanceId: input.fence.instanceId,
+        executorInstanceId: ExecutorInstanceId.make(input.fence.executorId),
+        processIncarnation: input.fence.processIncarnation,
+        leaseEpoch: AssignmentLeaseEpoch.make(String(input.leaseEpoch)),
+        presentedSessionCredentialDigest: Redacted.make(digest),
+      }
+    })
+    const preparationFailure = (error: GatewayError | { readonly reason: string; readonly message: string }) =>
+      Schema.is(GatewayError)(error)
+        ? error
+        : GatewayError.make({
+            kind: error.reason === "database" ? "transport" : "fenced",
+            message: error.message,
+          })
+    const hostedBindingModules = (workspace: string) =>
+      BindingModules.make({
+        workspace,
+        workspaceDigest: workspace,
+        trustMode: "hosted",
+        servers: [],
+      })
+    const bindingContract = (workspace: string) =>
+      bindingManifest(
+        hostedBindingModules(workspace).map((module) => ({
+          module: module.name,
+          operations: module.operations.map((operation) => operation.name),
+        })),
+      ).pipe(
+        Effect.provideService(Crypto.Crypto, crypto),
+        Effect.map((manifest) => manifest.digest),
+      )
     const lifecycle: LifecycleStore = {
       append: (assignmentId, frame) =>
         sql
@@ -497,46 +570,108 @@ export const service = Layer.effect(
             ),
           ),
     }
-    const gateway = yield* makeGateway(controller, lifecycle, {
-      activate: (access, phase, use) =>
-        environment
-          .usePhase({ assignmentId: access.fence.assignmentId, phase }, (resolved) =>
-            controller
-              .activatePhase(
-                {
-                  ...access,
-                  sessionToken: Redacted.make(access.sessionToken, { label: "executor-session" }),
-                },
-                resolved.egress,
-              )
-              .pipe(
-                Effect.andThen(
-                  use({
-                    digest: resolved.manifest.digest,
-                    values: resolved.values,
-                    redactedNames: resolved.manifest.references.map((reference) => reference.name),
-                  }),
+    const gateway = yield* makeGateway(
+      controller,
+      lifecycle,
+      {
+        activate: (executorAccess, phase, use) =>
+          environment
+            .usePhase({ assignmentId: executorAccess.fence.assignmentId, phase }, (resolved) =>
+              controller
+                .activatePhase(
+                  {
+                    ...executorAccess,
+                    sessionToken: Redacted.make(executorAccess.sessionToken, { label: "executor-session" }),
+                  },
+                  resolved.egress,
+                )
+                .pipe(
+                  Effect.andThen(
+                    use({
+                      digest: resolved.manifest.digest,
+                      values: resolved.values,
+                      redactedNames: resolved.manifest.references.map((reference) => reference.name),
+                    }),
+                  ),
                 ),
+            )
+            .pipe(
+              Effect.mapError((error) =>
+                Schema.is(GatewayError)(error)
+                  ? error
+                  : GatewayError.make({ kind: "fenced", message: "Executor phase authorization was rejected" }),
               ),
-          )
-          .pipe(
-            Effect.mapError((error) =>
-              Schema.is(GatewayError)(error)
-                ? error
-                : GatewayError.make({ kind: "fenced", message: "Executor phase authorization was rejected" }),
             ),
-          ),
-      replace: (key) =>
-        environment
-          .usePhase({ assignmentId: key.assignmentId, phase: "runtime" }, (resolved) =>
-            controller.replace(key, resolved.egress).pipe(Effect.asVoid),
-          )
-          .pipe(
-            Effect.mapError(() =>
-              GatewayError.make({ kind: "fenced", message: "Executor replacement authorization was rejected" }),
+        replace: (key) =>
+          environment
+            .usePhase({ assignmentId: key.assignmentId, phase: "runtime" }, (resolved) =>
+              controller.replace(key, resolved.egress).pipe(Effect.asVoid),
+            )
+            .pipe(
+              Effect.mapError(() =>
+                GatewayError.make({ kind: "fenced", message: "Executor replacement authorization was rejected" }),
+              ),
             ),
+      },
+      {
+        start: (input) =>
+          Effect.gen(function* () {
+            yield* preparations.start({
+              access: yield* preparationAccess(input.access),
+              workspaceId: input.workspaceId,
+              phase: input.phase,
+              attempt: input.attempt,
+              now: yield* Clock.currentTimeMillis,
+            })
+          }).pipe(Effect.mapError(preparationFailure)),
+        output: (input) =>
+          Effect.gen(function* () {
+            yield* preparations.appendOutput({
+              access: yield* preparationAccess(input.access),
+              phase: input.phase,
+              attempt: input.attempt,
+              stream: input.stream,
+              text: input.text,
+              redacted: true,
+              truncated: input.truncated,
+              now: yield* Clock.currentTimeMillis,
+            })
+          }).pipe(Effect.mapError(preparationFailure)),
+        complete: (input) =>
+          Effect.gen(function* () {
+            yield* preparations.complete({
+              access: yield* preparationAccess(input.access),
+              workspaceId: input.workspaceId,
+              phase: input.phase,
+              attempt: input.attempt,
+              evidence: { ...input.evidence, workspaceId: WorkspaceId.make(input.evidence.workspaceId) },
+              now: yield* Clock.currentTimeMillis,
+            })
+          }).pipe(Effect.mapError(preparationFailure)),
+        fail: (input) =>
+          Effect.gen(function* () {
+            yield* preparations.fail({
+              access: yield* preparationAccess(input.access),
+              workspaceId: input.workspaceId,
+              phase: input.phase,
+              attempt: input.attempt,
+              message: input.message,
+              retryable: input.retryable,
+              now: yield* Clock.currentTimeMillis,
+            })
+          }).pipe(Effect.mapError(preparationFailure)),
+        retry: (input) =>
+          Effect.flatMap(preparationAccess(input), (resolved) => preparations.retryAttempt(resolved)).pipe(
+            Effect.mapError(preparationFailure),
           ),
-    })
+        ready: (input) =>
+          Effect.flatMap(preparationAccess(input), (resolved) => preparations.requireReady(resolved)).pipe(
+            Effect.asVoid,
+            Effect.mapError(preparationFailure),
+          ),
+      },
+      bindingContract,
+    )
     const local = yield* LocalExecutor
     const localGateway = yield* makeLocalGateway(local)
     const bindings = Effect.fn("Executor.bindings")(function* (
@@ -553,14 +688,10 @@ export const service = Layer.effect(
         scope,
       )
       const context = Context.merge(input.authority, machineContext)
-      const registry = yield* HostBindingRegistry.make(
-        BindingModules.make({
-          workspace: input.workspaceId,
-          workspaceDigest: input.workspaceId,
-          trustMode: "hosted",
-          servers: [],
-        }),
-      ).pipe(Effect.provideContext(context), Effect.orDie)
+      const registry = yield* HostBindingRegistry.make(hostedBindingModules(input.workspaceId)).pipe(
+        Effect.provideContext(context),
+        Effect.orDie,
+      )
       const manifest = yield* bindingManifest(registry.descriptors).pipe(Effect.provideService(Crypto.Crypto, crypto))
       return { registry, context, manifest }
     })

@@ -1,6 +1,10 @@
 import { BunCrypto } from "@effect/platform-bun"
 import type * as PgClient from "@effect/sql-pg/PgClient"
+import { appJwtJoseLayer } from "@rika/github-app/app-jwt"
+import { installationLayer } from "@rika/github-app/installation-service"
+import { installationTokenLayer } from "@rika/github-app/installation-token"
 import { Context, Effect, Layer, Redacted } from "effect"
+import { HttpClient } from "effect/unstable/http"
 import { Runtime as TenetRuntime } from "tenetkit/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
@@ -17,7 +21,7 @@ import { HostedEnvironment, layer as hostedEnvironmentLayer } from "./hosted-env
 import { HostedOperations, layer as hostedOperationsLayer } from "./hosted-operations"
 import { HostedThreadProtocol, layer as hostedThreadProtocolLayer } from "./hosted-thread-protocol"
 import { HostedModelRegistry, layer as hostedModelRegistryLayer } from "./hosted-model-registry"
-import { HostedProduct, layer as hostedProductLayer } from "./hosted-product"
+import { HostedProduct, HostedProductError, layer as hostedProductLayer } from "./hosted-product"
 import {
   HostedProviderCredentials,
   layer as hostedProviderCredentialsLayer,
@@ -25,6 +29,7 @@ import {
 } from "./hosted-provider-credentials"
 import { HostedProjectionWorker, layer as hostedProjectionWorkerLayer } from "./hosted-projection-worker"
 import { HostedRecovery, type HostedRecoveryService, layer as hostedRecoveryLayer } from "./hosted-recovery"
+import { HostedRepositories, layer as hostedRepositoriesLayer } from "./hosted-repositories"
 import { HostedTurnWorker, layer as hostedTurnWorkerLayer } from "./hosted-turn-worker"
 import { layer as localExecutorLayer } from "./local-executor"
 
@@ -37,6 +42,7 @@ export interface HostedApplicationService {
   readonly models: HostedModelRegistry["Service"]
   readonly executor: Executor["Service"]
   readonly recovery: HostedRecoveryService
+  readonly repositories: HostedRepositories["Service"]
   readonly projectionWorker: HostedProjectionWorker["Service"]
   readonly turnWorker: HostedTurnWorker["Service"]
   readonly execution: {
@@ -55,11 +61,14 @@ export const layer = (options: {
   readonly databaseUrl: Redacted.Redacted<string>
   readonly providerCredentialKey: Redacted.Redacted<string>
   readonly executor: ExecutorConfig
+  readonly github: { readonly appId: number; readonly privateKey: Redacted.Redacted<string> }
   readonly workerId: string
 }) =>
   Layer.effect(
     HostedApplication,
     Effect.gen(function* () {
+      const httpClient = yield* HttpClient.HttpClient
+      const httpLayer = Layer.succeed(HttpClient.HttpClient, httpClient)
       const data = yield* Layer.build(
         Layer.mergeAll(postgresLayer(options.database), AuthorizationPolicy.layer, BunCrypto.layer),
       )
@@ -79,10 +88,26 @@ export const layer = (options: {
       const modelContext = yield* Layer.build(
         hostedModelRegistryLayer.pipe(Layer.provide(Layer.succeedContext(Context.merge(data, credentialContext)))),
       )
+      const githubLayer = Layer.merge(
+        installationLayer({ appId: options.github.appId }),
+        installationTokenLayer(),
+      ).pipe(
+        Layer.provide(appJwtJoseLayer({ issuer: String(options.github.appId), privateKey: options.github.privateKey })),
+        Layer.provide(httpLayer),
+      )
+      const repositoryContext = yield* Layer.build(
+        hostedRepositoriesLayer().pipe(
+          Layer.provide(githubLayer),
+          Layer.provide(httpLayer),
+          Layer.provide(retainedData),
+        ),
+      )
       const executorContext = yield* Layer.build(
         executorService.pipe(
           Layer.provide(Layer.merge(executorLayer(options.executor), localExecutorLayer)),
-          Layer.provide(Layer.succeedContext(Context.merge(data, environmentContext))),
+          Layer.provide(
+            Layer.succeedContext(Context.merge(Context.merge(data, environmentContext), repositoryContext)),
+          ),
         ),
       )
       const executor = Context.get(executorContext, Executor)
@@ -126,7 +151,7 @@ export const layer = (options: {
       )
       const hostedContext = Context.merge(
         Context.merge(Context.merge(data, executionContext), environmentContext),
-        Context.merge(credentialContext, modelContext),
+        Context.merge(Context.merge(credentialContext, modelContext), repositoryContext),
       )
       const recoveryContext = yield* Layer.build(
         hostedRecoveryLayer.pipe(
@@ -149,10 +174,22 @@ export const layer = (options: {
         }).pipe(Layer.provide(HostedTurnWorkerStore.layer), Layer.provide(Layer.succeedContext(hostedContext))),
       )
       const turnWorker = Context.get(turnWorkerContext, HostedTurnWorker)
+      const environment = Context.get(environmentContext, HostedEnvironment)
       const productContext = yield* Layer.build(
         hostedProductLayer({
           templateBuildId: options.executor.templateBuildId,
           providerScope: options.executor.deploymentId,
+          provision: (assignmentId) =>
+            environment
+              .usePhase({ assignmentId, phase: "setup" }, (resolved) =>
+                executor.controller.provision(assignmentId, resolved.egress),
+              )
+              .pipe(
+                Effect.asVoid,
+                Effect.mapError(() =>
+                  HostedProductError.make({ kind: "unavailable", message: "Remote workspace provisioning failed" }),
+                ),
+              ),
         }).pipe(Layer.provide(Layer.succeedContext(hostedContext))),
       )
       const operationsContext = yield* Layer.build(
@@ -174,6 +211,7 @@ export const layer = (options: {
         models: Context.get(modelContext, HostedModelRegistry),
         executor,
         recovery: Context.get(recoveryContext, HostedRecovery),
+        repositories: Context.get(repositoryContext, HostedRepositories),
         projectionWorker,
         turnWorker,
         execution: {

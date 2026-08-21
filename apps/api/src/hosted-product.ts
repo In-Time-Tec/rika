@@ -32,6 +32,7 @@ import {
   HostedModelRegistryError,
   testLayer as hostedModelRegistryTestLayer,
 } from "./hosted-model-registry"
+import { HostedRepositories, testLayer as hostedRepositoriesTestLayer } from "./hosted-repositories"
 
 export interface AuthenticatedPrincipal {
   readonly userId: string
@@ -143,7 +144,11 @@ export class HostedProduct extends Context.Service<HostedProduct, HostedProductS
   "@rika/api/hosted-product/HostedProduct",
 ) {}
 
-export const layer = (options: { readonly templateBuildId: string; readonly providerScope: string }) =>
+export const layer = (options: {
+  readonly templateBuildId: string
+  readonly providerScope: string
+  readonly provision: (assignmentId: string) => Effect.Effect<void, HostedProductError>
+}) =>
   Layer.effect(
     HostedProduct,
     Effect.gen(function* () {
@@ -153,6 +158,7 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
       const policy = yield* AuthorizationPolicy
       const crypto = yield* Crypto.Crypto
       const modelRegistry = yield* HostedModelRegistry
+      const repositories = yield* HostedRepositories
 
       const activateClient = Effect.fn("HostedProduct.activateClient")(function* (
         principal: AuthenticatedPrincipal,
@@ -259,7 +265,7 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
 
       const createConnection: HostedProductService["createConnection"] = Effect.fn("HostedProduct.createConnection")(
         function* (input) {
-          return yield* sql
+          const created = yield* sql
             .withTransaction(
               Effect.gen(function* () {
                 const authority = yield* resolveOwner(input.principal, input.owner)
@@ -289,6 +295,10 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
                     })
                     .pipe(Effect.mapError(() => forbidden()))
                 }
+                const checkout =
+                  input.placement === "e2b" && input.projectId !== undefined
+                    ? yield* repositories.resolve({ ownerId: authority.owner.id, projectId: input.projectId })
+                    : null
                 const deviceId = yield* activateClient(input.principal, authority.userId)
                 const actor =
                   authority.owner.identity._tag === "PersonalOwner"
@@ -436,12 +446,14 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
                           checkoutFingerprint: input.localRunnerTarget!.checkoutFingerprint,
                           requestingDeviceId: deviceId,
                         },
-                  checkout: null,
+                  checkout,
                 })
-                return { threadId: String(thread.id) }
+                return { threadId: String(thread.id), remote: executorKind === "e2b" }
               }),
             )
             .pipe(Effect.mapError(storeFailure))
+          if (created.remote === true) yield* options.provision(created.threadId)
+          return { threadId: created.threadId }
         },
       )
 
@@ -688,8 +700,13 @@ export const postgresTest = (options: {
   readonly templateBuildId: string
   readonly providerScope: string
 }) =>
-  layer(options).pipe(
+  layer({ ...options, provision: () => Effect.void }).pipe(
     Layer.provide(
-      Layer.mergeAll(postgresLayer(options.database), AuthorizationPolicy.layer, hostedModelRegistryTestLayer),
+      Layer.mergeAll(
+        postgresLayer(options.database),
+        AuthorizationPolicy.layer,
+        hostedModelRegistryTestLayer,
+        hostedRepositoriesTestLayer,
+      ),
     ),
   )

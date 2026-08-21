@@ -29,7 +29,7 @@ const bindings = {
     invoke: (input) => Effect.fail(HostBindingRegistry.HostBindingNotFound.make({ module: input.module })),
   }),
   context: Context.empty(),
-  manifest: { digest: "bindings", descriptors: [] },
+  manifest: { digest: "a".repeat(64), descriptors: [] },
 } as unknown as BindingAuthority
 const sessionToken = "session-local-gateway"
 const sessionDigest = createHash("sha256").update(sessionToken).digest("hex")

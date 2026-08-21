@@ -16,6 +16,7 @@ export interface Options {
   readonly workspaceIdentity: string
   readonly workspacePath: string
   readonly dataRoot: string
+  readonly bindingContractDigest?: Ref.Ref<string | undefined>
   readonly read: (operationKey: string) => Effect.Effect<CellState | undefined, CellError>
   readonly write: (operationKey: string, state: CellState) => Effect.Effect<void, CellError>
   readonly sendBinding: BindingProxy.Transport["send"]
@@ -47,6 +48,13 @@ export const make: (options: Options) => Effect.Effect<Interface, never, Crypto.
   const runtime = (request: CellRequest) =>
     initialization.withPermits(1)(
       Effect.gen(function* () {
+        if (options.bindingContractDigest !== undefined) {
+          const bindingContractDigest = yield* Ref.get(options.bindingContractDigest)
+          if (bindingContractDigest === undefined || bindingContractDigest !== request.bindings.digest)
+            return yield* BindingProxy.BindingProxyError.make({
+              message: "cell binding manifest does not match the prepared binding contract",
+            })
+        }
         const known = yield* Ref.get(current)
         if (known !== undefined) {
           if (known.digest !== request.bindings.digest)

@@ -7,6 +7,7 @@
   "exports": {
     "./host": "./src/host.ts",
     "./runtime": "./src/runtime.ts",
+    "./workspace": "./src/workspace.ts",
     "./operations": "./src/operations.ts",
     "./cells": "./src/cells.ts",
     "./binding-proxy": "./src/binding-proxy.ts",

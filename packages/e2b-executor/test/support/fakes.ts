@@ -4,12 +4,7 @@ import { ExecutorAssignments } from "@rika/product/executor-assignments"
 import { CheckpointId, ExecutorAssignmentId, OwnerId, ThreadId, WorkspaceId } from "@rika/product/hosted-model"
 import { layer as assignmentLayer } from "@rika/product-store/memory-assignments"
 import { Inspector } from "../../src/checkpoint"
-import {
-  Credentials,
-  InstallationTokens,
-  layer as checkoutLayer,
-  type InstallationTokensInterface,
-} from "../../src/checkout"
+import { Credentials } from "../../src/checkout"
 import { Controller, type ControllerError, type Options, layer as controllerLayer } from "../../src/controller"
 import {
   Provider,
@@ -43,6 +38,10 @@ export interface Harness {
     readonly installationId: string
     readonly owner: string
     readonly repository: string
+    readonly ownerId: string
+    readonly workspaceId: string
+    readonly repositoryId: string
+    readonly purpose: "git-read" | "github-read"
   }>
   layer: Layer.Layer<Controller | ExecutorAssignments, ControllerError>
 }
@@ -119,20 +118,31 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     checkoutRequests: [],
     layer: undefined as never,
   }
-  const source: InstallationTokensInterface = {
-    issue: (request) => {
-      harness.checkoutRequests.push(request)
-      return Effect.map(
-        Effect.clockWith((clock) => clock.currentTimeMillis),
-        (now) => ({
-          token: Redacted.make("ghs_actual_secret", { label: "github-installation-token" }),
-          expiresAt: now + 30 * 60 * 1_000,
-        }),
-      )
-    },
-  }
-  const broker: Layer.Layer<Credentials> = checkoutLayer.pipe(
-    Layer.provide(Layer.succeed(InstallationTokens, InstallationTokens.of(source))),
+  const broker = Layer.succeed(
+    Credentials,
+    Credentials.of({
+      issue: (request) => {
+        harness.checkoutRequests.push({
+          installationId: request.checkout.installationId,
+          owner: request.checkout.owner,
+          repository: request.checkout.name,
+          ownerId: request.ownerId,
+          workspaceId: request.workspaceId,
+          repositoryId: request.repositoryId,
+          purpose: request.purpose,
+        })
+        return Effect.map(
+          Effect.clockWith((clock) => clock.currentTimeMillis),
+          (now) => ({
+            repositoryUrl: `https://github.com/${request.checkout.owner}/${request.checkout.name}.git`,
+            username: "x-access-token" as const,
+            token: Redacted.make("ghs_actual_secret", { label: "github-installation-token" }),
+            expiresAt: now + 30 * 60 * 1_000,
+          }),
+        )
+      },
+      revoke: () => Effect.void,
+    }),
   )
   const inspector = Layer.succeed(
     Inspector,
@@ -168,11 +178,16 @@ export const assignmentInput = {
     providerScope: "test",
   },
   checkout: {
+    ownerId: OwnerId.make("owner-1"),
+    projectId: "project-1",
     repositoryId: "repository-1",
     owner: "In-Time-Tec",
     name: "rika",
     installationId: "installation-1",
+    ref: "main",
     commitSha: "a".repeat(40),
+    private: true,
+    gitIdentity: { name: "Rika Test", email: "rika@example.test" },
   },
 }
 

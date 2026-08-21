@@ -28,7 +28,7 @@ const request = (operationKey: string, attempt?: number) =>
     replayPolicy: "pure",
     admittedAt: null,
     deadline: null,
-    bindings: { digest: "bindings", descriptors: [] },
+    bindings: { digest: "a".repeat(64), descriptors: [] },
   })
 
 const run = <A, E>(effect: Effect.Effect<A, E, Cells>, cells: Layer.Layer<Cells>) =>

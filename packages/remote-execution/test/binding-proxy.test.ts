@@ -107,7 +107,7 @@ describe("binding proxy", () => {
       Effect.gen(function* () {
         const invalid = yield* Effect.result(
           BindingProxy.make({
-            manifest: { digest: "forged", descriptors: [{ module: "workspace", operations: ["read"] }] },
+            manifest: { digest: "f".repeat(64), descriptors: [{ module: "workspace", operations: ["read"] }] },
             transport: { send: () => Effect.void },
           }),
         )

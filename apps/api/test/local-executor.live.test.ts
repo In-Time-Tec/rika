@@ -11,6 +11,7 @@ import { Effect, Layer, Random, Redacted } from "effect"
 import { Pool } from "pg"
 import { testLayer as hostedModelRegistryTestLayer } from "../src/hosted-model-registry"
 import { HostedProduct, layer as hostedProductLayer, type AuthenticatedPrincipal } from "../src/hosted-product"
+import { testLayer as hostedRepositoriesTestLayer } from "../src/hosted-repositories"
 import { LocalExecutor, layer as localExecutorLayer } from "../src/local-executor"
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
@@ -139,10 +140,15 @@ const isolated = <A, E, R>(
           AuthorizationPolicy.layer,
           BunCrypto.layer,
           hostedModelRegistryTestLayer,
+          hostedRepositoriesTestLayer,
         )
         const context = yield* Layer.build(
           Layer.merge(
-            hostedProductLayer({ templateBuildId: "local-authority-live", providerScope: "local-authority-live" }),
+            hostedProductLayer({
+              templateBuildId: "local-authority-live",
+              providerScope: "local-authority-live",
+              provision: () => Effect.void,
+            }),
             localExecutorLayer,
           ).pipe(Layer.provide(base)),
         )

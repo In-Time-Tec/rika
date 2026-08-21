@@ -17,6 +17,7 @@
     "@effect/sql-pg": "4.0.0-rc.109",
     "@rika/configuration": "workspace:*",
     "@rika/e2b-executor": "workspace:*",
+    "@rika/github-app": "workspace:*",
     "@rika/identity": "workspace:*",
     "@rika/product": "workspace:*",
     "@rika/execution": "workspace:*",

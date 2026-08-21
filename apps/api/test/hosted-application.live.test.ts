@@ -3,6 +3,7 @@ import { identityMigrations, runMigration } from "@rika/identity"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as ExecutionPostgres from "@rika/execution/postgres"
 import { Context, Effect, Exit, Layer, Random, Redacted, Scope } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
 import { Pool } from "pg"
 import { HostedApplication, layer as hostedApplicationLayer } from "../src/hosted-application"
 
@@ -44,8 +45,9 @@ it.effect.skipIf(databaseUrl === undefined)(
               controlEgress: ["api.example.test"],
               apiKey: Redacted.make("e2b-test-key"),
             },
+            github: { appId: 123, privateKey: Redacted.make("test-private-key") },
             workerId: "worker-test",
-          }),
+          }).pipe(Layer.provide(FetchHttpClient.layer)),
           resourceScope,
         )
         const application = Context.get(context, HostedApplication)

@@ -22,6 +22,7 @@ import { Executor, service as executorService } from "../../api/src/executor"
 import { HostedEnvironment, layer as hostedEnvironmentLayer } from "../../api/src/hosted-environment"
 import { HostedProduct, layer as hostedProductLayer } from "../../api/src/hosted-product"
 import { testLayer as hostedModelRegistryTestLayer } from "../../api/src/hosted-model-registry"
+import { testLayer as hostedRepositoriesTestLayer } from "../../api/src/hosted-repositories"
 import { layer as localExecutorLayer } from "../../api/src/local-executor"
 import { makeRikaApiHandler } from "../../api/src/api"
 import type { HttpDependencies } from "../../api/src/http"
@@ -229,7 +230,10 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
               ),
               Layer.succeed(
                 Credentials,
-                Credentials.of({ issue: () => Effect.fail(CredentialError.make({ message: "unused" })) }),
+                Credentials.of({
+                  issue: () => Effect.fail(CredentialError.make({ message: "unused" })),
+                  revoke: () => Effect.void,
+                }),
               ),
             ),
           ),
@@ -240,10 +244,12 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
           AuthorizationPolicy.layer,
           BunCrypto.layer,
           hostedModelRegistryTestLayer,
+          hostedRepositoriesTestLayer,
         )
         const productLayer = hostedProductLayer({
           templateBuildId: "template-build-v1-immutable",
           providerScope: "integration-test",
+          provision: () => Effect.void,
         }).pipe(Layer.provide(shared))
         const environmentLayer = hostedEnvironmentLayer({
           encryptionKey: Redacted.make(Buffer.alloc(32, 1).toString("base64")),

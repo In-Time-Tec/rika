@@ -97,7 +97,7 @@ describe("executor protocol v1", () => {
         replayPolicy: "pure",
         admittedAt: null,
         deadline: null,
-        bindings: { digest: "bindings", descriptors: [] },
+        bindings: { digest: "a".repeat(64), descriptors: [] },
       })
       expect(yield* Schema.decodeUnknownEffect(ApiMessage)({ _tag: "CellExecute", request })).toEqual({
         _tag: "CellExecute",

@@ -146,6 +146,7 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "turn-repository",
     "turn-repository-steering",
     "thread-query-service",
+    "workspace-preparation",
   ],
   "@rika/product-store": [
     "memory-assignments",
@@ -170,7 +171,9 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "migrations/postgres/0014-local-runner-registration.sql",
     "migrations/postgres/0015-environment-and-egress.sql",
     "migrations/postgres/0016-authority-revocation.sql",
+    "migrations/postgres/0018-workspace-preparation.sql",
     "postgres-product-repositories",
+    "postgres-workspace-preparations",
     "product-database-layer",
     "sqlite-goal-repository",
     "sqlite-thread-search-repository",

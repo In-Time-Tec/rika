@@ -128,6 +128,16 @@ export const layer = Layer.effect(
         JOIN rika_hosted_threads hosted_thread ON hosted_thread.id = turn_record.thread_id
           AND hosted_thread.owner_id = thread_record.owner_id
         WHERE turn_record.turn_kind = 'AgentExecution' AND turn_record.status = 'queued'
+          AND (hosted_thread.executor_kind = 'local_device' OR EXISTS (
+            SELECT 1 FROM rika_hosted_executor_assignments assignment
+            JOIN rika_hosted_workspace_preparations preparation
+              ON preparation.assignment_id = assignment.id
+              AND preparation.generation = assignment.generation
+              AND preparation.lease_epoch = assignment.lease_epoch
+              AND preparation.state = 'ready'
+            WHERE assignment.id = hosted_thread.id AND assignment.lifecycle = 'active'
+              AND assignment.lease_expires_at > clock_timestamp()
+          ))
           AND NOT EXISTS (
             SELECT 1 FROM rika_hosted_turn_claims active_claim
             JOIN rika_turns active_turn ON active_turn.id = active_claim.turn_id
@@ -156,6 +166,16 @@ export const layer = Layer.effect(
           AND hosted_thread.owner_id = thread_record.owner_id
         WHERE turn_record.turn_kind = 'AgentExecution' AND turn_record.status = 'running'
           AND turn_record.execution_link_json IS NULL
+          AND (hosted_thread.executor_kind = 'local_device' OR EXISTS (
+            SELECT 1 FROM rika_hosted_executor_assignments assignment
+            JOIN rika_hosted_workspace_preparations preparation
+              ON preparation.assignment_id = assignment.id
+              AND preparation.generation = assignment.generation
+              AND preparation.lease_epoch = assignment.lease_epoch
+              AND preparation.state = 'ready'
+            WHERE assignment.id = hosted_thread.id AND assignment.lifecycle = 'active'
+              AND assignment.lease_expires_at > clock_timestamp()
+          ))
           AND NOT EXISTS (
             SELECT 1 FROM rika_hosted_turn_claims active_claim
             WHERE active_claim.turn_id = turn_record.id AND active_claim.expires_at > ${request.now}

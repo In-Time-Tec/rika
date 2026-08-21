@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 const manifestPath = process.env.RIKA_IMAGE_MANIFEST ?? "/opt/rika/tool-manifest.json"
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"))
-const workspace = process.env.RIKA_EXECUTOR_WORKSPACE ?? "/workspace"
+const workspace = process.env.RIKA_EXECUTOR_WORKSPACE ?? "/home/rika-workspace/workspace/repo"
 const checks: Array<{ name: string; ok: boolean; detail: string }> = []
 const check = async (name: string, run: () => Promise<string>) => {
   try {

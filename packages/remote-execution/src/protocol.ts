@@ -168,8 +168,11 @@ export const BindingDescriptor = Schema.Struct({
 })
 export type BindingDescriptor = typeof BindingDescriptor.Type
 
+export const BindingContractDigest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
+export type BindingContractDigest = typeof BindingContractDigest.Type
+
 export const BindingManifest = Schema.Struct({
-  digest: Identifier,
+  digest: BindingContractDigest,
   descriptors: Schema.Array(BindingDescriptor),
 })
 export type BindingManifest = typeof BindingManifest.Type
@@ -414,11 +417,57 @@ export type SessionWire = typeof SessionWire.Type
 
 export const CredentialWire = Schema.Struct({
   requestId: Identifier,
+  ownerId: Identifier,
+  assignmentId: Identifier,
+  repositoryId: Identifier,
+  workspaceId: Identifier,
+  purpose: Schema.Literals(["git-read", "github-read"]),
+  assignmentGeneration: Generation,
+  leaseEpoch: LeaseEpoch,
   repositoryUrl: Identifier,
   username: Schema.Literal("x-access-token"),
   token: Identifier,
   expiresAt: Timestamp,
 })
+
+export const RepositoryCheckoutWire = Schema.Struct({
+  ownerId: Identifier,
+  projectId: Identifier,
+  repositoryId: Identifier,
+  installationId: Identifier,
+  owner: Identifier,
+  name: Identifier,
+  ref: Identifier,
+  commitSha: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/)),
+  private: Schema.Boolean,
+  gitIdentity: Schema.Struct({ name: Identifier, email: Identifier }),
+})
+export type RepositoryCheckoutWire = typeof RepositoryCheckoutWire.Type
+
+export const WorkspacePreparationPhase = Schema.Literals(["checkout", "setup", "resume", "capabilities"])
+export type WorkspacePreparationPhase = typeof WorkspacePreparationPhase.Type
+
+export const HookEvidenceWire = Schema.Struct({
+  digest: Schema.NullOr(Sha256),
+  commitSha: Schema.NullOr(Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/))),
+  buildDigest: Sha256,
+  environmentDigest: Sha256,
+  startedAt: Timestamp,
+  finishedAt: Timestamp,
+  outcome: Schema.Literals(["missing", "completed", "continued"]),
+})
+
+export const WorkspacePreparationEvidenceWire = Schema.Struct({
+  workspaceId: Identifier,
+  repositoryId: Schema.NullOr(Identifier),
+  commitSha: Schema.NullOr(Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/))),
+  kernelProfileDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+  bindingContractDigest: BindingContractDigest,
+  setup: HookEvidenceWire,
+  resume: Schema.NullOr(HookEvidenceWire),
+  capabilities: Schema.Array(Identifier).check(Schema.isMaxLength(32)),
+})
+export type WorkspacePreparationEvidenceWire = typeof WorkspacePreparationEvidenceWire.Type
 
 export const LocalExecutorHelloWire = Schema.Struct({
   admissionId: Identifier,
@@ -467,7 +516,66 @@ export const ExecutorMessage = Schema.Union([
   Schema.TaggedStruct("ExecutorReconnect", { access: AccessWire }),
   Schema.TaggedStruct("ExecutorHeartbeat", { heartbeat: HeartbeatWire }),
   Schema.TaggedStruct("CheckpointStaged", { access: AccessWire, checkpoint: FilesystemCheckpoint }),
-  Schema.TaggedStruct("CheckoutRequested", { requestId: Identifier, access: AccessWire }),
+  Schema.TaggedStruct("CredentialRequested", {
+    requestId: Identifier,
+    access: AccessWire,
+    ownerId: Identifier,
+    assignmentId: Identifier,
+    repositoryId: Identifier,
+    workspaceId: Identifier,
+    purpose: Schema.Literals(["git-read", "github-read"]),
+    assignmentGeneration: Generation,
+    leaseEpoch: LeaseEpoch,
+  }),
+  Schema.TaggedStruct("CredentialRevocationRequested", {
+    access: AccessWire,
+    ownerId: Identifier,
+    assignmentId: Identifier,
+    repositoryId: Identifier,
+    workspaceId: Identifier,
+    purpose: Schema.Literals(["git-read", "github-read"]),
+    assignmentGeneration: Generation,
+    leaseEpoch: LeaseEpoch,
+  }),
+  Schema.TaggedStruct("WorkspacePreparationRequested", {
+    access: AccessWire,
+    workspaceId: Identifier,
+    wakeId: Identifier,
+    cold: Schema.Boolean,
+    attempt: Generation,
+    retry: Schema.Boolean,
+  }),
+  Schema.TaggedStruct("WorkspacePreparationStarted", {
+    access: AccessWire,
+    workspaceId: Identifier,
+    phase: WorkspacePreparationPhase,
+    attempt: Generation,
+  }),
+  Schema.TaggedStruct("WorkspacePreparationOutput", {
+    access: AccessWire,
+    workspaceId: Identifier,
+    phase: WorkspacePreparationPhase,
+    attempt: Generation,
+    stream: Schema.Literals(["stdout", "stderr"]),
+    text: OutputText,
+    redacted: Schema.Literal(true),
+    truncated: Schema.Boolean,
+  }),
+  Schema.TaggedStruct("WorkspacePreparationReady", {
+    access: AccessWire,
+    workspaceId: Identifier,
+    phase: WorkspacePreparationPhase,
+    attempt: Generation,
+    evidence: WorkspacePreparationEvidenceWire,
+  }),
+  Schema.TaggedStruct("WorkspacePreparationFailed", {
+    access: AccessWire,
+    workspaceId: Identifier,
+    phase: WorkspacePreparationPhase,
+    attempt: Generation,
+    message: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048)),
+    retryable: Schema.Boolean,
+  }),
   Schema.TaggedStruct("PtyOpened", { access: AccessWire, pty: PtyCreate }),
   Schema.TaggedStruct("PtyOutput", { access: AccessWire, ptyId: Identifier, chunk: PtyTranscriptChunk }),
   Schema.TaggedStruct("PtyReplayGap", { access: AccessWire, ptyId: Identifier, gap: PtyGap }),
@@ -512,7 +620,19 @@ export const ApiMessage = Schema.Union([
   Schema.TaggedStruct("LeaseReceipt", { receipt: ReceiptWire }),
   Schema.TaggedStruct("LocalCellReceipt", { access: AccessWire, operationKey: Identifier, attempt: Sequence }),
   Schema.TaggedStruct("CheckpointAccepted", { checkpointId: Identifier, contentDigest: Sha256 }),
-  Schema.TaggedStruct("CheckoutCredential", { credential: CredentialWire }),
+  Schema.TaggedStruct("RepositoryCredential", { credential: CredentialWire }),
+  Schema.TaggedStruct("WorkspacePreparationAssigned", {
+    access: AccessWire,
+    workspaceId: Identifier,
+    wakeId: Identifier,
+    cold: Schema.Boolean,
+    attempt: Generation,
+    retry: Schema.Boolean,
+    templateBuildId: Identifier,
+    bindingContractDigest: BindingContractDigest,
+    checkout: Schema.NullOr(RepositoryCheckoutWire),
+  }),
+  Schema.TaggedStruct("WorkspacePreparationRetry", { fence: Fence, attempt: Generation }),
   Schema.TaggedStruct("PtyCreate", { fence: Fence, request: PtyCreate }),
   Schema.TaggedStruct("PtyInput", { fence: Fence, request: PtyInput }),
   Schema.TaggedStruct("PtyResize", { fence: Fence, request: PtyResize }),

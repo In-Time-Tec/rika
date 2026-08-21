@@ -48,11 +48,19 @@ export const WorkspaceCapabilitySnapshot = Schema.Struct({
 export type WorkspaceCapabilitySnapshot = typeof WorkspaceCapabilitySnapshot.Type
 
 export const RepositoryCheckout = Schema.Struct({
+  ownerId: OwnerId,
+  projectId: OpaqueId,
   repositoryId: OpaqueId,
   installationId: OpaqueId,
   owner: OpaqueId,
   name: OpaqueId,
-  commitSha: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/i)),
+  ref: OpaqueId,
+  commitSha: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/)),
+  private: Schema.Boolean,
+  gitIdentity: Schema.Struct({
+    name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+    email: Schema.String.check(Schema.isPattern(/^[^\s@]+@[^\s@]+$/), Schema.isMaxLength(320)),
+  }),
 })
 export type RepositoryCheckout = typeof RepositoryCheckout.Type
 
@@ -135,18 +143,29 @@ const ExecutorAssignmentStruct = Schema.Struct({
   updatedAt: Timestamp,
 })
 export const ExecutorAssignment = ExecutorAssignmentStruct.check(
-  Schema.makeFilter((assignment) =>
-    (assignment.executorKind === "e2b" && assignment.placement._tag === "E2BPlacement") ||
-    (assignment.executorKind === "local_device" && assignment.placement._tag === "LocalDevicePlacement")
-      ? []
-      : [{ path: ["placement"], issue: "placement must match executor kind" }],
-  ),
-  Schema.makeFilter((assignment) =>
-    (assignment.capabilityGeneration === null && assignment.capabilities === null) ||
-    (assignment.capabilityGeneration === assignment.generation && assignment.capabilities !== null)
-      ? []
-      : [{ path: ["capabilities"], issue: "capability snapshot must match the assignment generation" }],
-  ),
+  Schema.makeFilter((assignment) => {
+    const issues: Array<{ readonly path: ReadonlyArray<PropertyKey>; readonly issue: string }> = []
+    if (
+      !(
+        (assignment.executorKind === "e2b" && assignment.placement._tag === "E2BPlacement") ||
+        (assignment.executorKind === "local_device" && assignment.placement._tag === "LocalDevicePlacement")
+      )
+    )
+      issues.push({ path: ["placement"], issue: "placement must match executor kind" })
+    if (
+      assignment.checkout !== null &&
+      (assignment.executorKind !== "e2b" || assignment.checkout.ownerId !== assignment.ownerId)
+    )
+      issues.push({ path: ["checkout"], issue: "repository checkout must match its remote assignment owner" })
+    if (
+      !(
+        (assignment.capabilityGeneration === null && assignment.capabilities === null) ||
+        (assignment.capabilityGeneration === assignment.generation && assignment.capabilities !== null)
+      )
+    )
+      issues.push({ path: ["capabilities"], issue: "capability snapshot must match the assignment generation" })
+    return issues
+  }),
 )
 export type ExecutorAssignment = typeof ExecutorAssignment.Type
 

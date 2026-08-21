@@ -19,7 +19,7 @@ import {
 } from "@rika/remote-execution/protocol"
 import { Context, Crypto, DateTime, Effect, Encoding, Layer, Redacted, Schema } from "effect"
 import { Inspector } from "./checkpoint"
-import { Credentials, type Credential } from "./checkout"
+import { Credentials, type Credential, type CredentialPurpose } from "./checkout"
 import { Provider, type CreateRequest, type ProviderError } from "./provider"
 
 const Identifier = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
@@ -121,7 +121,31 @@ export interface Interface {
     access: ProtocolAccess,
     checkpoint: FilesystemCheckpoint,
   ) => Effect.Effect<VerifiedCheckpoint, ControllerError>
-  readonly checkout: (access: ProtocolAccess) => Effect.Effect<Credential, ControllerError>
+  readonly credential: (
+    access: ProtocolAccess,
+    request: {
+      readonly ownerId: string
+      readonly assignmentId: string
+      readonly repositoryId: string
+      readonly workspaceId: string
+      readonly purpose: CredentialPurpose
+      readonly assignmentGeneration: number
+      readonly leaseEpoch: number
+    },
+  ) => Effect.Effect<Credential, ControllerError>
+  readonly revokeCredential: (
+    access: ProtocolAccess,
+    request: {
+      readonly ownerId: string
+      readonly assignmentId: string
+      readonly repositoryId: string
+      readonly workspaceId: string
+      readonly purpose: CredentialPurpose
+      readonly assignmentGeneration: number
+      readonly leaseEpoch: number
+    },
+  ) => Effect.Effect<void, ControllerError>
+  readonly workspace: (access: ProtocolAccess) => Effect.Effect<ExecutorAssignment, ControllerError>
   readonly activatePhase: (access: ProtocolAccess, egress: PhaseEgressPolicy) => Effect.Effect<void, ControllerError>
   readonly cleanupOrphans: Effect.Effect<ReadonlyArray<string>, ControllerError>
 }
@@ -636,14 +660,72 @@ export const layer = (
         }
       })
 
-      const checkout = Effect.fn("Controller.checkout")(function* (input: ProtocolAccess) {
-        const assignment = yield* assignments
-          .authenticate(yield* assignmentAccess(input))
-          .pipe(Effect.mapError(assignmentFailure))
-        if (assignment.checkout === null)
-          return yield* failure("checkout", "Repository checkout is unavailable for this assignment")
+      const workspace = Effect.fn("Controller.workspace")(function* (input: ProtocolAccess) {
+        return yield* assignments.authenticate(yield* assignmentAccess(input)).pipe(Effect.mapError(assignmentFailure))
+      })
+
+      const credential = Effect.fn("Controller.credential")(function* (
+        input: ProtocolAccess,
+        request: {
+          readonly ownerId: string
+          readonly assignmentId: string
+          readonly repositoryId: string
+          readonly workspaceId: string
+          readonly purpose: CredentialPurpose
+          readonly assignmentGeneration: number
+          readonly leaseEpoch: number
+        },
+      ) {
+        const access = yield* assignmentAccess(input)
+        const assignment = yield* assignments.authenticate(access).pipe(Effect.mapError(assignmentFailure))
+        if (
+          assignment.checkout === null ||
+          request.ownerId !== assignment.ownerId ||
+          request.assignmentId !== assignment.id ||
+          request.repositoryId !== assignment.checkout.repositoryId ||
+          request.workspaceId !== assignment.workspaceId ||
+          request.assignmentGeneration !== Number(assignment.generation) ||
+          request.leaseEpoch !== Number(access.leaseEpoch)
+        )
+          return yield* failure("checkout", "Credential request does not match the assigned repository fence")
         return yield* checkoutBroker
-          .issue(assignment.checkout)
+          .issue({
+            access,
+            checkout: assignment.checkout,
+            ownerId: request.ownerId,
+            workspaceId: request.workspaceId,
+            repositoryId: request.repositoryId,
+            purpose: request.purpose,
+          })
+          .pipe(Effect.mapError((cause) => failure("checkout", cause.message)))
+      })
+
+      const revokeCredential = Effect.fn("Controller.revokeCredential")(function* (
+        input: ProtocolAccess,
+        request: {
+          readonly ownerId: string
+          readonly assignmentId: string
+          readonly repositoryId: string
+          readonly workspaceId: string
+          readonly purpose: CredentialPurpose
+          readonly assignmentGeneration: number
+          readonly leaseEpoch: number
+        },
+      ) {
+        const access = yield* assignmentAccess(input)
+        const assignment = yield* assignments.authenticate(access).pipe(Effect.mapError(assignmentFailure))
+        if (
+          assignment.checkout === null ||
+          request.ownerId !== assignment.ownerId ||
+          request.assignmentId !== assignment.id ||
+          request.repositoryId !== assignment.checkout.repositoryId ||
+          request.workspaceId !== assignment.workspaceId ||
+          request.assignmentGeneration !== Number(assignment.generation) ||
+          request.leaseEpoch !== Number(access.leaseEpoch)
+        )
+          return yield* failure("checkout", "Credential revocation does not match the assigned repository fence")
+        yield* checkoutBroker
+          .revoke(access, request.purpose)
           .pipe(Effect.mapError((cause) => failure("checkout", cause.message)))
       })
 
@@ -694,7 +776,9 @@ export const layer = (
         validateAccess,
         heartbeat,
         checkpoint,
-        checkout,
+        credential,
+        revokeCredential,
+        workspace,
         activatePhase,
         cleanupOrphans,
       })

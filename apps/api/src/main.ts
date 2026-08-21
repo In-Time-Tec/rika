@@ -30,7 +30,7 @@ const provideLayerScoped =
 const program = Effect.scoped(
   Effect.gen(function* () {
     const loaded = yield* loadApiConfig(Bun.env)
-    const { environment, identity: config, executor: executorOptions, providerCredentialKey } = loaded
+    const { environment, identity: config, executor: executorOptions, github, providerCredentialKey } = loaded
     const httpClient = yield* HttpClient.HttpClient
     const pool = makePostgresPool(config)
     yield* Effect.addFinalizer(() => closePostgresPool(pool).pipe(Effect.ignore))
@@ -51,6 +51,7 @@ const program = Effect.scoped(
           databaseUrl: config.databaseUrl,
           providerCredentialKey,
           executor: executorOptions,
+          github,
           workerId: environment.RAILWAY_DEPLOYMENT_ID ?? executorOptions.deploymentId,
         }),
       ),

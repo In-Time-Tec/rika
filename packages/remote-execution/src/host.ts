@@ -1,6 +1,7 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
+import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import {
   Cause,
   Context,
@@ -41,6 +42,7 @@ import {
   type Connection as PtyConnection,
 } from "./pty"
 import { Runtime, layer as runtimeLayer } from "./runtime"
+import { prepare as prepareWorkspace, RemoteRepositoryRoot, WorkspaceError, type KernelIdentity } from "./workspace"
 import {
   ApiMessage,
   type ApiMessage as IncomingMessage,
@@ -63,6 +65,7 @@ interface Config {
   readonly bootstrapToken: Redacted.Redacted<string>
   readonly workspaceId: string
   readonly stateDirectory: string
+  readonly wakeId: string
   readonly restoredSession?: SessionWire
 }
 
@@ -111,7 +114,7 @@ const executorStateDirectory = "/var/lib/rika-executor"
 const directoryMode = 0o700
 const fileMode = 0o600
 const sandboxIdPath = "/run/e2b/.E2B_SANDBOX_ID"
-const workspaceRoot = Bun.env.RIKA_EXECUTOR_WORKSPACE_ROOT || "/workspace"
+const workspaceRoot = RemoteRepositoryRoot
 const workspaceUser = "rika-workspace"
 
 const sandboxInstanceId = () =>
@@ -167,6 +170,9 @@ const configuration = (identity: Identity, bootstrapToken: Redacted.Redacted<str
             Effect.mapError(() => HostError.make({ message: "Could not create the process incarnation" })),
           )
         : restoredSession.fence.processIncarnation
+    const wakeId = yield* crypto.randomUUIDv4.pipe(
+      Effect.mapError(() => HostError.make({ message: "Could not create the workspace wake identity" })),
+    )
     return {
       fence: {
         target: identity.target,
@@ -181,6 +187,7 @@ const configuration = (identity: Identity, bootstrapToken: Redacted.Redacted<str
       bootstrapToken,
       workspaceId: identity.workspaceId,
       stateDirectory: identity.stateDirectory,
+      wakeId,
       ...(restoredSession === undefined ? {} : { restoredSession }),
     } satisfies Config
   })
@@ -352,6 +359,216 @@ const sameFence = (left: Fence, right: Fence) =>
   left.instanceId === right.instanceId &&
   left.executorId === right.executorId &&
   left.processIncarnation === right.processIncarnation
+
+const prepare = (
+  config: Config,
+  kernelProfileDigest: string,
+  bindingContractDigest: Ref.Ref<string | undefined>,
+  incoming: Queue.Queue<IncomingMessage>,
+  credentials: Queue.Queue<Extract<IncomingMessage, { readonly _tag: "RepositoryCredential" }>>,
+  writer: (chunk: string) => Effect.Effect<void, Socket.SocketError>,
+  store: SessionStore,
+) =>
+  Effect.gen(function* () {
+    const runtime = yield* Runtime
+    const crypto = yield* Crypto.Crypto
+    const access = yield* runtime.access.pipe(Effect.mapError((cause) => HostError.make({ message: cause.message })))
+    function receive<A>(accept: (message: IncomingMessage) => A | undefined): Effect.Effect<A, HostError> {
+      return Effect.gen(function* () {
+        const message = yield* Queue.take(incoming)
+        if (message._tag === "Fenced") return yield* HostError.make({ message: message.message })
+        if (message._tag === "LeaseReceipt") {
+          yield* runtime
+            .receipt(message.receipt)
+            .pipe(Effect.mapError((cause) => HostError.make({ message: cause.message })))
+          yield* store.save(
+            yield* runtime.persistedSession.pipe(
+              Effect.mapError((cause) => HostError.make({ message: cause.message })),
+            ),
+          )
+        }
+        const accepted = accept(message)
+        return accepted === undefined ? yield* receive(accept) : accepted
+      })
+    }
+    function runAttempt(
+      attempt: number,
+      retry: boolean,
+    ): Effect.Effect<
+      void,
+      HostError | WorkspaceError,
+      Crypto.Crypto | FileSystem.FileSystem | import("effect").Scope.Scope
+    > {
+      return Effect.gen(function* () {
+        yield* writer(
+          encodeExecutorMessage({
+            _tag: "WorkspacePreparationRequested",
+            access,
+            workspaceId: config.workspaceId,
+            wakeId: config.wakeId,
+            cold: config.restoredSession !== undefined,
+            attempt,
+            retry,
+          }),
+        ).pipe(Effect.mapError(() => HostError.make({ message: "Could not request workspace preparation" })))
+        const assigned = yield* receive((message) =>
+          message._tag === "WorkspacePreparationAssigned" &&
+          sameAccess(access, message.access) &&
+          message.workspaceId === config.workspaceId &&
+          message.wakeId === config.wakeId &&
+          message.attempt === attempt &&
+          message.retry === retry
+            ? message
+            : undefined,
+        )
+        yield* Ref.set(bindingContractDigest, assigned.bindingContractDigest)
+        const kernel = {
+          profileDigest: kernelProfileDigest,
+          bindingContractDigest: assigned.bindingContractDigest,
+        } satisfies KernelIdentity
+        const send = (message: Parameters<typeof encodeExecutorMessage>[0]) =>
+          writer(encodeExecutorMessage(message)).pipe(
+            Effect.mapError(() =>
+              WorkspaceError.make({ phase: "capabilities", message: "Controller connection failed", retryable: true }),
+            ),
+          )
+        const credential = Effect.fn("Host.repositoryCredential")(function* (purpose: "git-read" | "github-read") {
+          const requestId = yield* crypto.randomUUIDv4.pipe(
+            Effect.mapError(() =>
+              WorkspaceError.make({ phase: "checkout", message: "Credential request failed", retryable: true }),
+            ),
+          )
+          const checkout = assigned.checkout
+          if (checkout === null)
+            return yield* WorkspaceError.make({
+              phase: "checkout",
+              message: "Assignment has no repository",
+              retryable: false,
+            })
+          yield* send({
+            _tag: "CredentialRequested",
+            requestId,
+            access,
+            ownerId: checkout.ownerId,
+            assignmentId: access.fence.assignmentId,
+            repositoryId: checkout.repositoryId,
+            workspaceId: assigned.workspaceId,
+            purpose,
+            assignmentGeneration: access.fence.assignmentGeneration,
+            leaseEpoch: access.leaseEpoch,
+          })
+          const response = yield* Queue.take(credentials).pipe(
+            Effect.filterOrFail(
+              (message) =>
+                message.credential.requestId === requestId &&
+                message.credential.ownerId === checkout.ownerId &&
+                message.credential.assignmentId === access.fence.assignmentId &&
+                message.credential.repositoryId === checkout.repositoryId &&
+                message.credential.workspaceId === assigned.workspaceId &&
+                message.credential.purpose === purpose &&
+                message.credential.assignmentGeneration === access.fence.assignmentGeneration &&
+                message.credential.leaseEpoch === access.leaseEpoch,
+              () => HostError.make({ message: "Repository credential response has a stale scope" }),
+            ),
+            Effect.map((message) => message.credential),
+            Effect.mapError((error) =>
+              WorkspaceError.make({ phase: "checkout", message: error.message, retryable: true }),
+            ),
+          )
+          return {
+            token: Redacted.make(response.token, { label: `repository-${purpose}` }),
+            username: response.username,
+            repositoryUrl: response.repositoryUrl,
+            expiresAt: response.expiresAt,
+          }
+        })
+        const revoke = (purpose: "git-read" | "github-read") => {
+          const checkout = assigned.checkout
+          if (checkout === null) return Effect.void
+          return send({
+            _tag: "CredentialRevocationRequested",
+            access,
+            ownerId: checkout.ownerId,
+            assignmentId: access.fence.assignmentId,
+            repositoryId: checkout.repositoryId,
+            workspaceId: assigned.workspaceId,
+            purpose,
+            assignmentGeneration: access.fence.assignmentGeneration,
+            leaseEpoch: access.leaseEpoch,
+          })
+        }
+        const reporter = {
+          started: (phase: import("./protocol").WorkspacePreparationPhase) =>
+            send({
+              _tag: "WorkspacePreparationStarted",
+              access,
+              workspaceId: assigned.workspaceId,
+              phase,
+              attempt,
+            }),
+          output: (
+            phase: import("./protocol").WorkspacePreparationPhase,
+            stream: "stdout" | "stderr",
+            text: string,
+            truncated: boolean,
+          ) =>
+            send({
+              _tag: "WorkspacePreparationOutput",
+              access,
+              workspaceId: assigned.workspaceId,
+              phase,
+              attempt,
+              stream,
+              text,
+              redacted: true,
+              truncated,
+            }),
+        }
+        yield* reporter.started("checkout")
+        const outcome = yield* Effect.result(
+          prepareWorkspace({
+            stateDirectory: config.stateDirectory,
+            kernel,
+            assignment: assigned,
+            reporter,
+            credential,
+            revoke,
+          }),
+        )
+        if (outcome._tag === "Success") {
+          yield* send({
+            _tag: "WorkspacePreparationReady",
+            access,
+            workspaceId: assigned.workspaceId,
+            phase: "capabilities",
+            attempt,
+            evidence: outcome.success,
+          })
+          return
+        }
+        const error = outcome.failure
+        yield* send({
+          _tag: "WorkspacePreparationFailed",
+          access,
+          workspaceId: assigned.workspaceId,
+          phase: error.phase,
+          attempt,
+          message: error.message,
+          retryable: error.retryable,
+        })
+        const next = yield* receive((message) =>
+          message._tag === "WorkspacePreparationRetry" &&
+          message.fence.assignmentId === access.fence.assignmentId &&
+          message.fence.assignmentGeneration === access.fence.assignmentGeneration &&
+          message.attempt > attempt
+            ? message.attempt
+            : undefined,
+        )
+        return yield* runAttempt(next, true)
+      })
+    }
+    yield* runAttempt(1, false).pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
+  })
 
 const sameAccess = (
   left: { readonly fence: Fence; readonly leaseEpoch: number; readonly sessionToken: string },
@@ -803,6 +1020,8 @@ const consumeApi = (
 
 const connect = Effect.fn("Host.connect")(function* (
   config: Config,
+  kernelProfileDigest: string,
+  bindingContractDigest: Ref.Ref<string | undefined>,
   store: SessionStore,
   receipts: OperationReceiptStore,
   operations: Ref.Ref<Map<string, Fiber.Fiber<void, unknown>>>,
@@ -823,11 +1042,14 @@ const connect = Effect.fn("Host.connect")(function* (
   const writer = yield* socket.writer
   yield* Ref.set(activeWriter, writer)
   const incoming = yield* Queue.make<IncomingMessage>()
+  const credentials = yield* Queue.make<Extract<IncomingMessage, { readonly _tag: "RepositoryCredential" }>>()
   const reader = yield* socket
     .runString((frame) =>
       decodeApiMessage(frame).pipe(
         Effect.mapError(() => HostError.make({ message: "Controller sent an invalid executor frame" })),
-        Effect.flatMap((message) => Queue.offer(incoming, message)),
+        Effect.flatMap((message) =>
+          message._tag === "RepositoryCredential" ? Queue.offer(credentials, message) : Queue.offer(incoming, message),
+        ),
       ),
     )
     .pipe(Effect.forkScoped)
@@ -854,6 +1076,7 @@ const connect = Effect.fn("Host.connect")(function* (
     Effect.forkScoped,
   )
   yield* heartbeat
+  yield* prepare(config, kernelProfileDigest, bindingContractDigest, incoming, credentials, writer, store)
   const connectedSession = Effect.raceFirst(
     Effect.raceFirst(
       Fiber.join(reader).pipe(
@@ -1045,6 +1268,18 @@ const host = Effect.scoped(
     ) =>
       Effect.gen(function* () {
         const config = yield* configuration(identity, bootstrapToken, restoredSession)
+        const kernelOptions = {
+          workspace: workspaceRoot,
+          workspaceDigest: config.workspaceId,
+          dataRoot: config.stateDirectory,
+          runtimeVersion: process.versions.bun,
+          trustMode: "trusted-local" as const,
+          servers: [],
+        }
+        const kernelProfileDigest = KernelProfileRegistration.digest(
+          KernelProfileRegistration.make({ ...kernelOptions, environment: { servers: kernelOptions.servers } }),
+        )
+        const bindingContractDigest = yield* Ref.make<string | undefined>(undefined)
         const receipts = yield* operationReceiptStore(
           config.stateDirectory,
           config.fence.assignmentId,
@@ -1100,6 +1335,7 @@ const host = Effect.scoped(
           workspaceIdentity: config.workspaceId,
           workspacePath: workspaceRoot,
           dataRoot: config.stateDirectory,
+          bindingContractDigest,
           read: readState,
           write: writeState,
           environment: executionEnvironment,
@@ -1130,6 +1366,8 @@ const host = Effect.scoped(
         return yield* Effect.scoped(
           connect(
             config,
+            kernelProfileDigest,
+            bindingContractDigest,
             store,
             receipts,
             operations,

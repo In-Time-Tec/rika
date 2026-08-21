@@ -24,6 +24,8 @@ import {
   type PtyInput,
   type PtyReconnect,
   type PtyResize,
+  type WorkspacePreparationEvidenceWire,
+  type WorkspacePreparationPhase,
 } from "@rika/remote-execution/protocol"
 import {
   Cause,
@@ -150,6 +152,7 @@ export interface Gateway {
   ) => Effect.Effect<MachineBindings.Outcome, GatewayError>
   readonly sendPty: (assignmentId: string, request: PtyRequest) => Effect.Effect<void, GatewayError>
   readonly ptyEvents: (assignmentId: string) => Stream.Stream<PtyEvent>
+  readonly retryPreparation: (assignmentId: string) => Effect.Effect<void, GatewayError>
 }
 
 export interface LifecycleStore {
@@ -192,6 +195,42 @@ export interface PhaseAuthority {
     readonly assignmentId: string
     readonly generation: number
   }) => Effect.Effect<void, GatewayError>
+}
+
+export interface PreparationStore {
+  readonly start: (input: {
+    readonly access: AccessWire
+    readonly workspaceId: string
+    readonly phase: WorkspacePreparationPhase
+    readonly attempt: number
+  }) => Effect.Effect<void, GatewayError>
+  readonly output: (input: {
+    readonly access: AccessWire
+    readonly workspaceId: string
+    readonly phase: WorkspacePreparationPhase
+    readonly attempt: number
+    readonly stream: "stdout" | "stderr"
+    readonly text: string
+    readonly redacted: true
+    readonly truncated: boolean
+  }) => Effect.Effect<void, GatewayError>
+  readonly complete: (input: {
+    readonly access: AccessWire
+    readonly workspaceId: string
+    readonly phase: WorkspacePreparationPhase
+    readonly attempt: number
+    readonly evidence: WorkspacePreparationEvidenceWire
+  }) => Effect.Effect<void, GatewayError>
+  readonly fail: (input: {
+    readonly access: AccessWire
+    readonly workspaceId: string
+    readonly phase: WorkspacePreparationPhase
+    readonly attempt: number
+    readonly message: string
+    readonly retryable: boolean
+  }) => Effect.Effect<void, GatewayError>
+  readonly retry: (access: AccessWire) => Effect.Effect<number, GatewayError>
+  readonly ready: (access: AccessWire) => Effect.Effect<void, GatewayError>
 }
 
 const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(ExecutorMessage))
@@ -241,7 +280,13 @@ const fenceOf = (message: ExecutorMessageValue): Fence | undefined => {
     case "ExecutorHeartbeat":
       return message.heartbeat.access.fence
     case "CheckpointStaged":
-    case "CheckoutRequested":
+    case "CredentialRequested":
+    case "CredentialRevocationRequested":
+    case "WorkspacePreparationRequested":
+    case "WorkspacePreparationStarted":
+    case "WorkspacePreparationOutput":
+    case "WorkspacePreparationReady":
+    case "WorkspacePreparationFailed":
     case "PtyOpened":
     case "PtyOutput":
     case "PtyReplayGap":
@@ -270,6 +315,8 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   controller: Controller,
   lifecycle: LifecycleStore,
   phases: PhaseAuthority,
+  preparation: PreparationStore,
+  bindingContract: (workspaceId: string) => Effect.Effect<string, GatewayError>,
 ) {
   const sessions = yield* Ref.make(new Map<string, Session>())
   const assignments = yield* Ref.make(new Map<Socket, string>())
@@ -840,16 +887,71 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         )
         return
       }
-      case "CheckoutRequested": {
-        const credential = yield* controller.checkout(redactAccess(message.access))
+      case "CredentialRequested": {
+        const credential = yield* controller.credential(redactAccess(message.access), message)
         socket.send(
           encode({
-            _tag: "CheckoutCredential",
-            credential: { ...credential, requestId: message.requestId, token: Redacted.value(credential.token) },
+            _tag: "RepositoryCredential",
+            credential: {
+              requestId: message.requestId,
+              ownerId: message.ownerId,
+              assignmentId: message.assignmentId,
+              repositoryId: message.repositoryId,
+              workspaceId: message.workspaceId,
+              purpose: message.purpose,
+              assignmentGeneration: message.assignmentGeneration,
+              leaseEpoch: message.leaseEpoch,
+              ...credential,
+              token: Redacted.value(credential.token),
+            },
           }),
         )
         return
       }
+      case "CredentialRevocationRequested": {
+        if (
+          message.ownerId.length === 0 ||
+          message.assignmentId !== message.access.fence.assignmentId ||
+          message.assignmentGeneration !== message.access.fence.assignmentGeneration ||
+          message.leaseEpoch !== message.access.leaseEpoch
+        )
+          return yield* GatewayError.make({ kind: "fenced", message: "Credential revocation scope is stale" })
+        yield* controller.revokeCredential(redactAccess(message.access), message)
+        return
+      }
+      case "WorkspacePreparationRequested": {
+        const assignment = yield* controller.workspace(redactAccess(message.access))
+        if (assignment.workspaceId !== message.workspaceId)
+          return yield* GatewayError.make({ kind: "fenced", message: "Workspace preparation identity is stale" })
+        const templateBuildId =
+          assignment.placement._tag === "E2BPlacement" ? assignment.placement.templateBuildId : undefined
+        if (templateBuildId === undefined)
+          return yield* GatewayError.make({ kind: "fenced", message: "Workspace preparation is not remote" })
+        const bindingContractDigest = yield* bindingContract(message.workspaceId)
+        socket.send(
+          encode({
+            _tag: "WorkspacePreparationAssigned",
+            access: message.access,
+            workspaceId: message.workspaceId,
+            wakeId: message.wakeId,
+            cold: message.cold,
+            attempt: message.attempt,
+            retry: message.retry,
+            templateBuildId,
+            bindingContractDigest,
+            checkout: assignment.checkout,
+          }),
+        )
+        return
+      }
+      case "WorkspacePreparationStarted":
+        return yield* preparation.start(message)
+      case "WorkspacePreparationOutput":
+        return yield* preparation.output(message)
+      case "WorkspacePreparationReady":
+        return yield* preparation.complete(message)
+      case "WorkspacePreparationFailed":
+        return yield* preparation.fail(message)
       case "CellResult":
         return yield* complete(socket, message.access, message.operationKey, message.attempt, message.response)
       case "BindingInvoke": {
@@ -1018,6 +1120,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           })
         if ((yield* Clock.currentTimeMillis) >= session.leaseExpiresAt) return yield* expired()
         yield* controller.validateAccess(redactAccess(session.access)).pipe(Effect.mapError(accessFailure))
+        yield* preparation.ready(session.access)
         yield* grant(session, "runtime", input.operationKey)
         yield* lifecycle.prepare(input)
         yield* hydrate(input)
@@ -1269,6 +1372,19 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
       request,
     )
   })
+  const retryPreparation = Effect.fn("ExecutorGateway.retryPreparation")(function* (assignmentId: string) {
+    const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(assignmentId)))
+    if (session === undefined)
+      return yield* GatewayError.make({ kind: "disconnected", message: "Executor is not connected" })
+    const attempt = yield* preparation.retry(session.access)
+    session.socket.send(
+      encode({
+        _tag: "WorkspacePreparationRetry",
+        fence: session.access.fence,
+        attempt,
+      }),
+    )
+  })
 
   const active: Gateway["active"] = (socket) =>
     Effect.gen(function* () {
@@ -1282,5 +1398,15 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
       )
     })
 
-  return { receive, disconnected, active, execute, cancel, machine, sendPty, ptyEvents } satisfies Gateway
+  return {
+    receive,
+    disconnected,
+    active,
+    execute,
+    cancel,
+    machine,
+    sendPty,
+    ptyEvents,
+    retryPreparation,
+  } satisfies Gateway
 })

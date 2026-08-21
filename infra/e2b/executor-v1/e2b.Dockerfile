@@ -69,7 +69,8 @@ RUN export DEBIAN_FRONTEND=noninteractive \
   && printf 'Defaults:rika-executor env_reset\nrika-executor ALL=(rika-workspace) NOPASSWD: ALL\n' > /etc/sudoers.d/rika-workspace \
   && chmod 0440 /etc/sudoers.d/rika-workspace \
   && install -d -m 0700 -o rika-executor -g rika-executor /var/lib/rika-executor \
-  && install -d -m 0750 -o rika-workspace -g rika-workspace /workspace
+  && install -d -m 2750 -o rika-executor -g rika-workspace /run/rika \
+  && install -d -m 0750 -o rika-workspace -g rika-workspace /home/rika-workspace/workspace
 RUN npm install --global --force "pnpm@${PNPM_VERSION}" "yarn@${YARN_VERSION}" \
   && pnpm --version \
   && yarn --version
@@ -91,11 +92,12 @@ RUN chmod 0555 /opt/rika/start.sh /opt/rika/rika \
   && ln -s /opt/rika/rika /usr/local/bin/rika \
   && chown -R root:rika-executor /opt/rika \
   && chmod -R u=rwX,g=rX,o= /opt/rika \
-  && sudo -n -u rika-workspace -- test -w /workspace
+  && sudo -n -u rika-workspace -- test -w /home/rika-workspace/workspace
 
 ENV HOME=/home/rika-executor \
   LANG=en_US.UTF-8 \
-  PATH=/opt/rika-python/bin:/usr/local/bin:/usr/bin:/bin \
+  PATH=/run/rika/bin:/opt/rika-python/bin:/usr/local/bin:/usr/bin:/bin \
+  GH_CONFIG_DIR=/run/rika/gh \
   RIKA_IMAGE_MANIFEST=/opt/rika/tool-manifest.json \
   RIKA_EXECUTOR_TARGET=e2b \
   RIKA_EXECUTOR_ASSIGNMENT_ID=template-readiness \
@@ -104,7 +106,7 @@ ENV HOME=/home/rika-executor \
   RIKA_EXECUTOR_TEMPLATE_BUILD_ID=template-readiness \
   RIKA_EXECUTOR_API_URL=ws://127.0.0.1:1 \
   RIKA_EXECUTOR_WORKSPACE_ID=template-readiness \
-  RIKA_EXECUTOR_WORKSPACE=/workspace \
+  RIKA_EXECUTOR_WORKSPACE=/home/rika-workspace/workspace/repo \
   RIKA_CHECKPOINT_OBJECT_PREFIX=assignments/template-readiness/g1/
 
 USER rika-executor

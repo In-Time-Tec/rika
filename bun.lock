@@ -47,6 +47,7 @@
         "@rika/configuration": "workspace:*",
         "@rika/e2b-executor": "workspace:*",
         "@rika/execution": "workspace:*",
+        "@rika/github-app": "workspace:*",
         "@rika/identity": "workspace:*",
         "@rika/product": "workspace:*",
         "@rika/product-store": "workspace:*",
