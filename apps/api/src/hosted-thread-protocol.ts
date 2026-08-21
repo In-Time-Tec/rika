@@ -17,6 +17,7 @@ import {
 import { HostedStore, StoreError } from "@rika/product/hosted-store"
 import { InteractiveCommand } from "@rika/product/interactive-command"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
+import type { AuthorizationAction } from "@rika/product/hosted-authorization"
 import {
   type ClientMessage,
   type MutatingThreadCommand,
@@ -28,11 +29,20 @@ import { ThreadProtocolStore, type ThreadProtocolCommand } from "@rika/product/t
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { HostedOperations, HostedOperationsError } from "./hosted-operations"
 import { type AuthenticatedPrincipal, HostedProduct, HostedProductError, type ThreadAuthority } from "./hosted-product"
+import { HostedWorkspace } from "./hosted-workspace"
 
 export const threadWebSocketAudience = "/api/v1/threads/socket"
 const ticketLifetimeMillis = 60_000
 const zeroCursor = ThreadEventCursor.make("0")
 const checkpointEquivalent = Schema.toEquivalence(ExecutionProjection.Checkpoint)
+
+const repositoryServiceFailureKind = (
+  reason: "conflict" | "invalid" | "missing" | "unavailable",
+): "conflict" | "invalid" | "unavailable" => {
+  if (reason === "conflict") return "conflict"
+  if (reason === "invalid") return "invalid"
+  return "unavailable"
+}
 
 export class HostedThreadProtocolError extends Schema.TaggedError<HostedThreadProtocolError>()(
   "HostedThreadProtocolError",
@@ -99,7 +109,12 @@ const commandResult = (command: ThreadProtocolCommand, requestId: RequestId): Se
   }
 }
 
-const productCommand = (command: MutatingThreadCommand) => {
+type InteractiveMutatingCommand = Exclude<
+  MutatingThreadCommand,
+  { readonly _tag: "EnsureRepositoryService" | "StopRepositoryService" }
+>
+
+const productCommand = (command: InteractiveMutatingCommand) => {
   let value: unknown
   switch (command._tag) {
     case "SubmitPrompt":
@@ -187,6 +202,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const product = yield* HostedProduct
     const operations = yield* HostedOperations
+    const workspace = yield* HostedWorkspace
     const store = yield* ThreadProtocolStore
     const hosted = yield* HostedStore
     const crypto = yield* Crypto.Crypto
@@ -401,11 +417,46 @@ export const layer = Layer.effect(
           }
           if (attached === undefined)
             return yield* HostedThreadProtocolError.make({ kind: "invalid", message: "Attach a Thread first" })
-          const requiredAction = command._tag === "AcknowledgeCursor" ? "thread:view" : "thread:control"
+          let requiredAction: AuthorizationAction = "thread:control"
+          if (command._tag === "InspectWorkspaceFile") requiredAction = "workspace:file:view"
+          if (command._tag === "EnsureRepositoryService" || command._tag === "StopRepositoryService")
+            requiredAction = "workspace:service:control"
+          if (command._tag === "AcknowledgeCursor") requiredAction = "thread:view"
           const authority = yield* product
             .authorizeThread(principal, attached.threadId, requiredAction)
             .pipe(Effect.mapError(productFailure))
           attached = { threadId: attached.threadId, authority }
+
+          if (command._tag === "InspectWorkspaceFile") {
+            const inspection = yield* workspace
+              .execute(attached.threadId, {
+                _tag: "WorkspaceFileInspect",
+                requestId: String(message.requestId),
+                path: command.path,
+                maximumBytes: command.maximumBytes,
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  HostedThreadProtocolError.make({
+                    kind: error.kind === "unsupported" ? "invalid" : "unavailable",
+                    message: error.message,
+                  }),
+                ),
+              )
+            if (inspection._tag !== "WorkspaceFileContent" && inspection._tag !== "WorkspaceFileRejected")
+              return yield* HostedThreadProtocolError.make({
+                kind: "unavailable",
+                message: "Executor returned an invalid file inspection result",
+              })
+            return [
+              frame({
+                _tag: "WorkspaceFileInspected",
+                requestId: message.requestId,
+                threadId: attached.threadId,
+                inspection,
+              }),
+            ]
+          }
 
           if (command._tag === "AcknowledgeCursor") {
             const cursor = yield* store
@@ -476,6 +527,29 @@ export const layer = Layer.effect(
                   readonly decision: "approve" | "deny"
                 }
               | undefined
+            if (command._tag === "EnsureRepositoryService" || command._tag === "StopRepositoryService") {
+              const result = yield* workspace
+                .execute(
+                  attached!.threadId,
+                  command._tag === "EnsureRepositoryService"
+                    ? { _tag: "RepositoryServiceEnsure", requestId: command.commandId, service: command.service }
+                    : { _tag: "RepositoryServiceStop", requestId: command.commandId, serviceId: command.serviceId },
+                )
+                .pipe(
+                  Effect.mapError((error) =>
+                    HostedThreadProtocolError.make({
+                      kind: error.kind === "unsupported" ? "invalid" : "unavailable",
+                      message: error.message,
+                    }),
+                  ),
+                )
+              if (result._tag === "RepositoryServiceRejected")
+                return yield* HostedThreadProtocolError.make({
+                  kind: repositoryServiceFailureKind(result.reason),
+                  message: result.message,
+                })
+              return { result: { _tag: "Applied" } as const, events: [] as ReadonlyArray<InteractiveEvent> }
+            }
             if (command._tag === "Approve" || command._tag === "Deny") {
               const snapshot = yield* operations
                 .snapshot(authority.ownerId, ProductThreadId.make(attached!.threadId))

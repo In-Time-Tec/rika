@@ -17,6 +17,7 @@ import {
   WorkspaceId,
 } from "@rika/product/hosted-model"
 import { StoreError } from "@rika/product/hosted-store"
+import type { AuthorizationAction } from "@rika/product/hosted-authorization"
 import type { HostedThreadSnapshot } from "@rika/product/client-protocol"
 import type { InteractiveCommand } from "@rika/product/interactive-command"
 import {
@@ -31,6 +32,7 @@ import { HostedOperations, type HostedOperationsService } from "../src/hosted-op
 import { HostedProduct, type HostedProductService, type OwnerSelection } from "../src/hosted-product"
 import { HostedThreadProtocol, layer as hostedThreadProtocolLayer } from "../src/hosted-thread-protocol"
 import { layer as hostedStoreLayer } from "@rika/product-store/memory-store"
+import { HostedWorkspace } from "../src/hosted-workspace"
 
 const timestamp = Timestamp.make("2026-08-21T00:00:00.000Z")
 const userId = BetterAuthUserId.make("user-1")
@@ -172,11 +174,17 @@ it.effect("derives personal authority, admits a retried submission once, and res
   const store = memoryStore()
   let selectedOwner: OwnerSelection | undefined
   const applied: Array<string> = []
+  const authorizedActions: Array<AuthorizationAction> = []
+  const workspaceRequests: Array<string> = []
   const product: HostedProductService = {
     ready: Effect.void,
     projects: () => Effect.succeed([]),
     activatePrincipal: () => Effect.void,
-    authorizeThread: () => Effect.succeed({ ownerId, actor }),
+    authorizeThread: (_principal, _threadId, action) =>
+      Effect.sync(() => {
+        authorizedActions.push(action)
+        return { ownerId, actor }
+      }),
     threadExecutionContext: () =>
       Effect.succeed({
         repository: { identity: "repository-1", branch: "main" },
@@ -204,6 +212,31 @@ it.effect("derives personal authority, admits a retried submission once, and res
   const dependencies = Layer.mergeAll(
     Layer.succeed(HostedProduct, product),
     Layer.succeed(HostedOperations, operations),
+    Layer.succeed(
+      HostedWorkspace,
+      HostedWorkspace.of({
+        execute: (_threadId, request) =>
+          Effect.sync(() => {
+            workspaceRequests.push(request._tag)
+            if (request._tag === "WorkspaceFileInspect")
+              return {
+                _tag: "WorkspaceFileContent" as const,
+                requestId: request.requestId,
+                path: request.path,
+                sizeBytes: 2,
+                contentBase64: "e30=",
+              }
+            return {
+              _tag:
+                request._tag === "RepositoryServiceEnsure"
+                  ? ("RepositoryServiceRunning" as const)
+                  : ("RepositoryServiceStopped" as const),
+              requestId: request.requestId,
+              serviceId: request._tag === "RepositoryServiceEnsure" ? request.service.serviceId : request.serviceId,
+            }
+          }),
+      }),
+    ),
     Layer.succeed(ThreadProtocolStore, store),
     hostedStoreLayer,
     BunCrypto.layer,
@@ -230,6 +263,18 @@ it.effect("derives personal authority, admits a retried submission once, and res
       })
       expect(created[0]?.payload).toMatchObject({ _tag: "CommandAccepted", threadVersion: "1" })
       expect(selectedOwner).toEqual({ _tag: "PersonalOwner", userId: "user-1" })
+
+      expect(
+        (yield* first.receive({
+          protocolVersion: 1,
+          requestId: "request-inspect" as never,
+          command: { _tag: "InspectWorkspaceFile", path: "src/main.ts", maximumBytes: 1024 },
+        }))[0]?.payload,
+      ).toMatchObject({
+        _tag: "WorkspaceFileInspected",
+        inspection: { _tag: "WorkspaceFileContent", path: "src/main.ts", contentBase64: "e30=" },
+      })
+      expect(authorizedActions).toContain("workspace:file:view")
 
       const submit = {
         protocolVersion: 1 as const,
@@ -317,6 +362,27 @@ it.effect("derives personal authority, admits a retried submission once, and res
         reason: "conflict",
       })
       expect(applied).toEqual(["submit-1", "cancel-1"])
+
+      const ensureService = {
+        protocolVersion: 1 as const,
+        requestId: "request-service" as never,
+        command: {
+          _tag: "EnsureRepositoryService" as const,
+          commandId: CommandId.make("service-1"),
+          idempotencyKey: "service-key" as never,
+          expectedThreadVersion: ThreadVersion.make("4"),
+          service: { serviceId: "docs", command: "bun", args: ["run", "dev"], cwd: "." },
+        },
+      }
+      expect((yield* first.receive(ensureService))[0]?.payload).toMatchObject({
+        _tag: "CommandAccepted",
+        threadVersion: "5",
+      })
+      expect(
+        (yield* first.receive({ ...ensureService, requestId: "request-service-retry" as never }))[0]?.payload,
+      ).toMatchObject({ _tag: "CommandAccepted", threadVersion: "5" })
+      expect(authorizedActions).toContain("workspace:service:control")
+      expect(workspaceRequests).toEqual(["WorkspaceFileInspect", "RepositoryServiceEnsure"])
     }),
   )
 })
@@ -376,6 +442,10 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
   const dependencies = Layer.mergeAll(
     Layer.succeed(HostedProduct, product),
     Layer.succeed(HostedOperations, operations),
+    Layer.succeed(
+      HostedWorkspace,
+      HostedWorkspace.of({ execute: () => Effect.die("unused") }),
+    ),
     Layer.succeed(ThreadProtocolStore, store),
     hostedStoreLayer,
     BunCrypto.layer,

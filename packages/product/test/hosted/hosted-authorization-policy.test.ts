@@ -1,9 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import {
-  type AuthorizationAction,
-  type AuthorizationSubject,
-  isAuthorized,
-} from "../../src/hosted/authorization"
+import { type AuthorizationAction, type AuthorizationSubject, isAuthorized } from "../../src/hosted/authorization"
 import { BetterAuthMemberId, type GrantRole } from "../../src/hosted/model"
 
 const memberId = BetterAuthMemberId.make("member")
@@ -18,6 +14,9 @@ const threadActions: ReadonlyArray<AuthorizationAction> = [
   "thread:grant",
   "terminal:view",
   "terminal:input",
+  "workspace:file:view",
+  "workspace:browser:control",
+  "workspace:service:control",
 ]
 
 const projectExpected: Readonly<Record<GrantRole, ReadonlyArray<boolean>>> = {
@@ -28,10 +27,10 @@ const projectExpected: Readonly<Record<GrantRole, ReadonlyArray<boolean>>> = {
 }
 
 const threadExpected: Readonly<Record<GrantRole, ReadonlyArray<boolean>>> = {
-  viewer: [true, false, false, false, true, false],
-  controller: [true, true, false, false, true, true],
-  operator: [true, true, true, false, true, true],
-  owner: [true, true, true, true, true, true],
+  viewer: [true, false, false, false, true, false, true, false, false],
+  controller: [true, true, false, false, true, true, true, true, true],
+  operator: [true, true, true, false, true, true, true, true, true],
+  owner: [true, true, true, true, true, true, true, true, true],
 }
 
 describe("hosted authorization policy", () => {

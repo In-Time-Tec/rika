@@ -81,6 +81,7 @@ const capabilities = (digestCharacter: string): WorkspaceCapabilitySnapshot => (
   process: { _tag: "Ready", detail: "process execution" },
   pty: { _tag: "Ready", detail: "PTY" },
   browser: { _tag: "Unavailable", reason: "browser not installed" },
+  services: { _tag: "Ready", detail: "repository services" },
   workspaceLifecycle: { _tag: "Ready", detail: "workspace lifecycle" },
 })
 

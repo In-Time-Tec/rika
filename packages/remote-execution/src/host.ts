@@ -41,8 +41,15 @@ import {
   repositoryLayer as ptyRepositoryLayer,
   type Connection as PtyConnection,
 } from "./pty"
+import {
+  RepositoryServices,
+  driverLayer as repositoryServiceDriverLayer,
+  layer as repositoryServicesLayer,
+  repositoryLayer as repositoryServiceRepositoryLayer,
+} from "./repository-services"
 import { Runtime, layer as runtimeLayer } from "./runtime"
 import { prepare as prepareWorkspace, RemoteRepositoryRoot, WorkspaceError, type KernelIdentity } from "./workspace"
+import { WorkspaceFiles, layer as workspaceFilesLayer } from "./workspace-files"
 import {
   ApiMessage,
   type ApiMessage as IncomingMessage,
@@ -114,7 +121,7 @@ const executorStateDirectory = "/var/lib/rika-executor"
 const directoryMode = 0o700
 const fileMode = 0o600
 const sandboxIdPath = "/run/e2b/.E2B_SANDBOX_ID"
-const workspaceRoot = RemoteRepositoryRoot
+const workspaceRoot = Bun.env.RIKA_EXECUTOR_WORKSPACE_ROOT || RemoteRepositoryRoot
 const workspaceUser = "rika-workspace"
 
 const sandboxInstanceId = () =>
@@ -750,6 +757,66 @@ const applyPhaseGrant = Effect.fn("Host.applyPhaseGrant")(function* (
   )
 })
 
+const dispatchWorkspace = Effect.fn("Host.dispatchWorkspace")(function* (
+  message: IncomingMessage,
+  writer: (chunk: string) => Effect.Effect<void, Socket.SocketError>,
+) {
+  if (message._tag !== "WorkspaceRequest") return false
+  const runtime = yield* Runtime
+  const access = yield* runtime.access.pipe(Effect.mapError((cause) => HostError.make({ message: cause.message })))
+  if (!sameFence(access.fence, message.fence))
+    return yield* HostError.make({ message: "Workspace request has a stale executor fence" })
+  const files = yield* WorkspaceFiles
+  const services = yield* RepositoryServices
+  const request = message.request
+  const response = yield* (() => {
+    if (request._tag === "WorkspaceFileInspect") return files.inspect(request)
+    if (request._tag === "RepositoryServiceEnsure")
+      return services.ensure(request.service).pipe(
+        Effect.match({
+          onFailure: (error) => ({
+            _tag: "RepositoryServiceRejected" as const,
+            requestId: request.requestId,
+            serviceId: request.service.serviceId,
+            reason:
+              error.kind === "conflict" || error.kind === "invalid" || error.kind === "missing"
+                ? error.kind
+                : ("unavailable" as const),
+            message: error.message,
+          }),
+          onSuccess: () => ({
+            _tag: "RepositoryServiceRunning" as const,
+            requestId: request.requestId,
+            serviceId: request.service.serviceId,
+          }),
+        }),
+      )
+    return services.stop(request.serviceId).pipe(
+      Effect.match({
+        onFailure: (error) => ({
+          _tag: "RepositoryServiceRejected" as const,
+          requestId: request.requestId,
+          serviceId: request.serviceId,
+          reason:
+            error.kind === "conflict" || error.kind === "invalid" || error.kind === "missing"
+              ? error.kind
+              : ("unavailable" as const),
+          message: error.message,
+        }),
+        onSuccess: () => ({
+          _tag: "RepositoryServiceStopped" as const,
+          requestId: request.requestId,
+          serviceId: request.serviceId,
+        }),
+      }),
+    )
+  })()
+  yield* writer(encodeExecutorMessage({ _tag: "WorkspaceResponse", access, response })).pipe(
+    Effect.mapError(() => HostError.make({ message: "Could not write Workspace response" })),
+  )
+  return true
+})
+
 const consumeApi = (
   incoming: Queue.Queue<IncomingMessage>,
   writer: (chunk: string) => Effect.Effect<void, Socket.SocketError>,
@@ -835,6 +902,7 @@ const consumeApi = (
           )
       }
       if (yield* dispatchPty(message, writer, ptyDelivery)) return
+      if (yield* dispatchWorkspace(message, writer)) return
       if (message._tag === "PhaseEnvironmentGranted") {
         yield* applyPhaseGrant(message, grants, executionEnvironment, appliedEnvironment, cells, environmentAccess)
       }
@@ -1077,6 +1145,10 @@ const connect = Effect.fn("Host.connect")(function* (
   )
   yield* heartbeat
   yield* prepare(config, kernelProfileDigest, bindingContractDigest, incoming, credentials, writer, store)
+  yield* RepositoryServices.pipe(
+    Effect.flatMap((services) => services.resume),
+    Effect.mapError((error) => HostError.make({ message: error.message })),
+  )
   const machine = yield* makeMachine
   const connectedSession = Effect.raceFirst(
     Effect.raceFirst(
@@ -1175,6 +1247,7 @@ const receiveBootstrap = Effect.callback<Bootstrap, HostError>((resume) => {
 export const testing = {
   applyPhaseGrant,
   dispatchPty,
+  dispatchWorkspace,
   operationReceiptStore,
   receiveBootstrap,
   redactOutput,
@@ -1303,6 +1376,19 @@ const host = Effect.scoped(
             ),
           ),
         ).pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
+        const workspaceContext = yield* Layer.build(
+          Layer.merge(
+            workspaceFilesLayer(workspaceRoot),
+            repositoryServicesLayer.pipe(
+              Layer.provide(
+                Layer.merge(
+                  repositoryServiceDriverLayer({ workspaceRoot, workspaceUser }),
+                  repositoryServiceRepositoryLayer({ stateDirectory: config.stateDirectory, fence: config.fence }),
+                ),
+              ),
+            ),
+          ),
+        ).pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
         const capabilities = yield* liveCapabilities(workspaceUser)
         const pty = Context.get(ptyContext, PtyManager)
         yield* pty.disconnectAll.pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
@@ -1313,12 +1399,18 @@ const host = Effect.scoped(
           workspacePath: workspaceRoot,
           typescriptKernel: true,
           pty: ptyReady,
+          browser: capabilities.browser,
+          services: capabilities.services,
         })
         const runtime = runtimeLayer({
           fence: config.fence,
           bootstrapToken: config.bootstrapToken,
           templateBuildId: config.templateBuildId,
-          capabilities: { ...capabilities, pty: ptyReady },
+          capabilities: {
+            cells: capabilities.cells,
+            checkpoints: capabilities.checkpoints,
+            pty: ptyReady,
+          },
           workspaceCapabilities,
           cursors: { command: 0, event: 0, pty: ptyCursor },
           latestCheckpointId: null,
@@ -1384,7 +1476,7 @@ const host = Effect.scoped(
             connected,
           ),
         ).pipe(
-          Effect.provide(Context.merge(runtimeContext, ptyContext)),
+          Effect.provide(Context.merge(Context.merge(runtimeContext, ptyContext), workspaceContext)),
           Effect.catchCause(() => Effect.sleep("1 second")),
           Effect.forever,
         )

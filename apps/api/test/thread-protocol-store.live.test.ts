@@ -34,6 +34,7 @@ import {
   layer as hostedThreadProtocolLayer,
   threadWebSocketAudience,
 } from "../src/hosted-thread-protocol"
+import { HostedWorkspace } from "../src/hosted-workspace"
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined
@@ -372,6 +373,10 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       const dependencies = Layer.mergeAll(
         Layer.succeed(HostedProduct, product),
         Layer.succeed(HostedOperations, operations),
+        Layer.succeed(
+          HostedWorkspace,
+          HostedWorkspace.of({ execute: () => Effect.die("unused") }),
+        ),
         Layer.succeed(ThreadProtocolStore, protocolStore),
         BunCrypto.layer,
       )

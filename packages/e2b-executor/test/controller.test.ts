@@ -20,6 +20,7 @@ const workspaceCapabilities = {
   process: { _tag: "Ready" as const, detail: "Bun process operations available" },
   pty: { _tag: "Unavailable" as const, reason: "durable PTY is unavailable" },
   browser: { _tag: "Unavailable" as const, reason: "browser executable is unavailable" },
+  services: { _tag: "Ready" as const, detail: "supervised repository services available" },
   workspaceLifecycle: { _tag: "Ready" as const, detail: "workspace lifecycle ready" },
 }
 

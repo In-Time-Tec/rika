@@ -14,6 +14,8 @@
     "./machine": "./src/machine.ts",
     "./protocol": "./src/protocol.ts",
     "./pty": "./src/pty.ts",
+    "./repository-services": "./src/repository-services.ts",
+    "./workspace-files": "./src/workspace-files.ts",
     "./foreground": "./src/foreground.ts"
   },
   "dependencies": {
@@ -21,6 +23,7 @@
     "@rika/coding-tools": "workspace:*",
     "@rika/extensions": "workspace:*",
     "@rika/kernel": "workspace:*",
+    "@rika/product": "workspace:*",
     "tenetkit": "catalog:",
     "effect": "catalog:"
   },

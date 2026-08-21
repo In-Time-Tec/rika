@@ -138,6 +138,7 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "thread-tool-action",
     "transcript-page",
     "turn-record",
+    "workspace-capability",
     "workspace-record",
     "thread-repository",
     "thread-search-repository",

@@ -56,6 +56,7 @@ const workspaceCapabilities = {
   process: { _tag: "Ready", detail: "available" },
   pty: { _tag: "Unavailable", reason: "not required" },
   browser: { _tag: "Unavailable", reason: "not required" },
+  services: { _tag: "Ready", detail: "available" },
   workspaceLifecycle: { _tag: "Ready", detail: "available" },
 } as const
 const deviceId = "device-cli-e2b"

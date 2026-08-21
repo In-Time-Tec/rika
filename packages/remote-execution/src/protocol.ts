@@ -3,6 +3,15 @@ import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as McpConfiguration from "@rika/extensions/mcp-configuration"
 import * as McpRuntime from "@rika/extensions/mcp-runtime"
 import { WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
+import {
+  RepositoryServiceEnsure,
+  RepositoryServiceResult,
+  RepositoryServiceStop,
+  WorkspaceFileInspect,
+  WorkspaceFileInspection,
+  WorkspaceRequest,
+  WorkspaceResponse,
+} from "@rika/product/workspace-capability"
 import { Crypto, Effect, Encoding, Redacted, Schema } from "effect"
 
 const Identifier = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
@@ -115,6 +124,16 @@ export const Capabilities = Schema.Struct({
   pty: Schema.Boolean,
 })
 export type Capabilities = typeof Capabilities.Type
+
+export {
+  RepositoryServiceEnsure,
+  RepositoryServiceResult,
+  RepositoryServiceStop,
+  WorkspaceFileInspect,
+  WorkspaceFileInspection,
+  WorkspaceRequest,
+  WorkspaceResponse,
+}
 
 export const ResumeCursors = Schema.Struct({
   command: Sequence,
@@ -581,6 +600,7 @@ export const ExecutorMessage = Schema.Union([
   Schema.TaggedStruct("PtyReplayGap", { access: AccessWire, ptyId: Identifier, gap: PtyGap }),
   Schema.TaggedStruct("PtyDisconnected", { access: AccessWire, ptyId: Identifier, cursor: Sequence }),
   Schema.TaggedStruct("PtyTerminated", { access: AccessWire, ptyId: Identifier, cursor: Sequence }),
+  Schema.TaggedStruct("WorkspaceResponse", { access: AccessWire, response: WorkspaceResponse }),
   Schema.TaggedStruct("CellResult", {
     access: AccessWire,
     operationKey: Identifier,
@@ -639,6 +659,7 @@ export const ApiMessage = Schema.Union([
   Schema.TaggedStruct("PtyDisconnect", { fence: Fence, ptyId: Identifier }),
   Schema.TaggedStruct("PtyReconnect", { fence: Fence, request: PtyReconnect }),
   Schema.TaggedStruct("PtyTerminate", { fence: Fence, ptyId: Identifier }),
+  Schema.TaggedStruct("WorkspaceRequest", { fence: Fence, request: WorkspaceRequest }),
   Schema.TaggedStruct("CellExecute", { request: CellRequest }),
   Schema.TaggedStruct("CellCancel", { access: AccessWire, operationKey: Identifier, attempt: Sequence }),
   Schema.TaggedStruct("CellReplay", {

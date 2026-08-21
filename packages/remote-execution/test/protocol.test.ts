@@ -139,6 +139,28 @@ describe("executor protocol v1", () => {
     }),
   )
 
+  it.effect("round trips assignment-fenced Workspace file and service frames", () =>
+    Effect.gen(function* () {
+      const request = {
+        _tag: "WorkspaceRequest" as const,
+        fence,
+        request: {
+          _tag: "WorkspaceFileInspect" as const,
+          requestId: "inspect-1",
+          path: "src/main.ts",
+          maximumBytes: 1024,
+        },
+      }
+      expect(yield* Schema.decodeUnknownEffect(ApiMessage)(request)).toEqual(request)
+      const response = {
+        _tag: "WorkspaceResponse" as const,
+        access: { version: 1 as const, fence, leaseEpoch: 1, sessionToken: "session" },
+        response: { _tag: "RepositoryServiceRunning" as const, requestId: "service-1", serviceId: "docs" },
+      }
+      expect(yield* Schema.decodeUnknownEffect(ExecutorMessage)(response)).toEqual(response)
+    }),
+  )
+
   it.effect("decodes attributed lifecycle frames and bounds redacted output", () =>
     Effect.gen(function* () {
       const attribution = {

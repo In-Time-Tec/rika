@@ -27,6 +27,7 @@ const helloReadiness = {
     process: { _tag: "Ready", detail: "process ready" },
     pty: { _tag: "Ready", detail: "PTY ready" },
     browser: { _tag: "Ready", detail: "browser ready" },
+    services: { _tag: "Unavailable", reason: "repository services unavailable" },
     workspaceLifecycle: { _tag: "Ready", detail: "workspace lifecycle ready" },
   },
   cursors: { command: 0, event: 0, pty: 0 },

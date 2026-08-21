@@ -43,6 +43,7 @@ export const WorkspaceCapabilitySnapshot = Schema.Struct({
   process: WorkspaceCapability,
   pty: WorkspaceCapability,
   browser: WorkspaceCapability,
+  services: WorkspaceCapability,
   workspaceLifecycle: WorkspaceCapability,
 })
 export type WorkspaceCapabilitySnapshot = typeof WorkspaceCapabilitySnapshot.Type

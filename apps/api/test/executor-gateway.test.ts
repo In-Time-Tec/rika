@@ -30,6 +30,7 @@ const workspaceCapabilities = {
   process: ready("process ready"),
   pty: ready("PTY ready"),
   browser: ready("browser ready"),
+  services: ready("repository services ready"),
   workspaceLifecycle: ready("workspace lifecycle ready"),
 }
 
@@ -369,6 +370,66 @@ describe("executor gateway", () => {
       expect(yield* gateway.active(target)).toBe(true)
       active = false
       expect(yield* gateway.active(target)).toBe(false)
+    }),
+  )
+
+  it.effect("correlates Workspace requests and replays them on a resumed executor session", () =>
+    Effect.gen(function* () {
+      const first = socket()
+      const resumed = socket()
+      const gateway = yield* makeGateway(
+        controller({
+          reconnect: () =>
+            Effect.succeed({
+              version: 1,
+              fence,
+              leaseEpoch: 2,
+              leaseExpiresAt: 4_102_444_800_000,
+              heartbeatIntervalMillis: 20,
+              cursor: { sequence: 1, value: "cursor-1" },
+            }),
+        }),
+      )
+      yield* gateway.receive(
+        first,
+        encode({
+          _tag: "ExecutorHello",
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: true },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      const request = {
+        _tag: "WorkspaceFileInspect" as const,
+        requestId: "inspect-1",
+        path: "src/main.ts",
+        maximumBytes: 1024,
+      }
+      const pending = yield* Effect.forkChild(gateway.workspace("assignment-1", request))
+      yield* Effect.yieldNow
+      expect(decode(first.sent.at(-1)!)).toEqual({ _tag: "WorkspaceRequest", fence, request })
+
+      yield* gateway.disconnected(first)
+      yield* gateway.receive(resumed, encode({ _tag: "ExecutorReconnect", access }))
+      const resumedAccess = { ...access, leaseEpoch: 2 }
+      expect(decode(resumed.sent.at(-1)!)).toEqual({ _tag: "WorkspaceRequest", fence, request })
+      const response = {
+        _tag: "WorkspaceFileContent" as const,
+        requestId: "inspect-1",
+        path: "src/main.ts",
+        sizeBytes: 2,
+        contentBase64: "e30=",
+      }
+      yield* gateway.receive(resumed, encode({ _tag: "WorkspaceResponse", access: resumedAccess, response }))
+      expect(yield* Fiber.join(pending)).toEqual(response)
     }),
   )
 

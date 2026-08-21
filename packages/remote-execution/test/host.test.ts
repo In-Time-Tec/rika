@@ -3,8 +3,10 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Option, Redacted, Semaphore, Stream } from "effect"
 import { sessionStore, testing } from "../src/host"
 import { Manager as PtyManager } from "../src/pty"
+import { RepositoryServices } from "../src/repository-services"
 import { Runtime, layer as runtimeLayer } from "../src/runtime"
 import type { Fence, SessionWire } from "../src/protocol"
+import { WorkspaceFiles } from "../src/workspace-files"
 import { provideLayer } from "./support/layer"
 import { workspaceCapabilities } from "./support/workspace-capabilities"
 
@@ -114,5 +116,54 @@ describe("executor host session state", () => {
       expect(error.message).toBe("PTY request has a stale executor fence")
       expect(creates).toBe(0)
     }).pipe(provideLayer(Layer.merge(runtime, pty)))
+  })
+
+  it.effect("rejects stale Workspace requests before file or service access", () => {
+    let calls = 0
+    const runtime = runtimeLayer({
+      fence,
+      bootstrapToken: Redacted.make("consumed"),
+      templateBuildId: "build-1",
+      capabilities: { cells: true, checkpoints: false, pty: true },
+      workspaceCapabilities,
+      cursors: { command: 0, event: 0, pty: 0 },
+      latestCheckpointId: null,
+      restoredSession: session,
+    })
+    const workspace = Layer.merge(
+      Layer.succeed(
+        WorkspaceFiles,
+        WorkspaceFiles.of({
+          inspect: () => Effect.sync(() => calls++).pipe(Effect.andThen(Effect.die("unexpected inspection"))),
+        }),
+      ),
+      Layer.succeed(
+        RepositoryServices,
+        RepositoryServices.of({
+          ensure: () => Effect.sync(() => calls++).pipe(Effect.andThen(Effect.die("unexpected ensure"))),
+          stop: () => Effect.sync(() => calls++).pipe(Effect.andThen(Effect.die("unexpected stop"))),
+          resume: Effect.void,
+        }),
+      ),
+    )
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        testing.dispatchWorkspace(
+          {
+            _tag: "WorkspaceRequest",
+            fence: { ...fence, assignmentGeneration: 2 },
+            request: {
+              _tag: "WorkspaceFileInspect",
+              requestId: "request-1",
+              path: "src/main.ts",
+              maximumBytes: 1024,
+            },
+          },
+          () => Effect.void,
+        ),
+      )
+      expect(error.message).toBe("Workspace request has a stale executor fence")
+      expect(calls).toBe(0)
+    }).pipe(provideLayer(Layer.merge(runtime, workspace)))
   })
 })

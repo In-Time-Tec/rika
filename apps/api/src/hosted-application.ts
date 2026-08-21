@@ -31,6 +31,7 @@ import { HostedProjectionWorker, layer as hostedProjectionWorkerLayer } from "./
 import { HostedRecovery, type HostedRecoveryService, layer as hostedRecoveryLayer } from "./hosted-recovery"
 import { HostedRepositories, layer as hostedRepositoriesLayer } from "./hosted-repositories"
 import { HostedTurnWorker, layer as hostedTurnWorkerLayer } from "./hosted-turn-worker"
+import { layer as hostedWorkspaceLayer } from "./hosted-workspace"
 import { layer as localExecutorLayer } from "./local-executor"
 
 export interface HostedApplicationService {
@@ -111,6 +112,13 @@ export const layer = (options: {
         ),
       )
       const executor = Context.get(executorContext, Executor)
+      const workspaceContext = yield* Layer.build(
+        hostedWorkspaceLayer.pipe(
+          Layer.provide(
+            Layer.succeedContext(Context.merge(Context.merge(data, executorContext), environmentContext)),
+          ),
+        ),
+      )
       const executionContext = yield* Layer.build(
         HostedExecution.layerHosted({
           kernel: { runtimeVersion: Bun.version, dataRoot: `${Bun.env.TMPDIR ?? "/tmp"}/rika-hosted` },
@@ -198,7 +206,12 @@ export const layer = (options: {
       const threadProtocolContext = yield* Layer.build(
         hostedThreadProtocolLayer.pipe(
           Layer.provide(
-            Layer.succeedContext(Context.merge(hostedContext, Context.merge(productContext, operationsContext))),
+            Layer.succeedContext(
+              Context.merge(
+                Context.merge(hostedContext, Context.merge(productContext, operationsContext)),
+                workspaceContext,
+              ),
+            ),
           ),
         ),
       )

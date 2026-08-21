@@ -11,5 +11,6 @@ export const workspaceCapabilities: WorkspaceCapabilitySnapshot = {
   process: ready("process ready"),
   pty: ready("PTY ready"),
   browser: ready("browser ready"),
+  services: ready("repository services ready"),
   workspaceLifecycle: ready("workspace lifecycle ready"),
 }

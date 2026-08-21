@@ -26,6 +26,9 @@ import {
   type PtyResize,
   type WorkspacePreparationEvidenceWire,
   type WorkspacePreparationPhase,
+  WorkspaceRequest,
+  type WorkspaceRequest as WorkspaceRequestValue,
+  type WorkspaceResponse,
 } from "@rika/remote-execution/protocol"
 import {
   Cause,
@@ -108,6 +111,14 @@ interface MachineCall {
   readonly result: Deferred.Deferred<MachineOutcome>
 }
 
+interface WorkspaceCall {
+  readonly assignmentId: string
+  readonly request: WorkspaceRequestValue
+  readonly socket: Socket
+  readonly access: AccessWire
+  readonly result: Deferred.Deferred<WorkspaceResponse, GatewayError>
+}
+
 export interface BindingAuthority {
   readonly registry: HostBindingRegistry.Interface
   readonly context: Context.Context<ExecutorRuntime.CellServices>
@@ -153,6 +164,10 @@ export interface Gateway {
   readonly sendPty: (assignmentId: string, request: PtyRequest) => Effect.Effect<void, GatewayError>
   readonly ptyEvents: (assignmentId: string) => Stream.Stream<PtyEvent>
   readonly retryPreparation: (assignmentId: string) => Effect.Effect<void, GatewayError>
+  readonly workspace: (
+    assignmentId: string,
+    request: WorkspaceRequestValue,
+  ) => Effect.Effect<WorkspaceResponse, GatewayError>
 }
 
 export interface LifecycleStore {
@@ -241,8 +256,25 @@ const key = (assignmentId: string, operationKey: string, attempt: number) =>
   `${assignmentId}\u0000${operationKey}\u0000${attempt}`
 const machineKey = (assignmentId: string, operationKey: string, attempt: number, machineId: string) =>
   `${assignmentId}\u0000${operationKey}\u0000${attempt}\u0000${machineId}`
+const workspaceKey = (assignmentId: string, requestId: string) => `${assignmentId}\u0000${requestId}`
 const encodeBindingRequest = Schema.encodeSync(Schema.fromJsonString(BindingRequest))
 const encodeMachineRequest = Schema.encodeSync(Schema.fromJsonString(MachineRequest))
+const equivalentWorkspaceRequest = Schema.toEquivalence(WorkspaceRequest)
+
+const matchesWorkspaceRequest = (request: WorkspaceRequestValue, response: WorkspaceResponse) => {
+  if (request.requestId !== response.requestId) return false
+  if (request._tag === "WorkspaceFileInspect")
+    return (
+      (response._tag === "WorkspaceFileContent" || response._tag === "WorkspaceFileRejected") &&
+      request.path === response.path
+    )
+  return (
+    (response._tag === "RepositoryServiceRunning" ||
+      response._tag === "RepositoryServiceStopped" ||
+      response._tag === "RepositoryServiceRejected") &&
+    (request._tag === "RepositoryServiceEnsure" ? request.service.serviceId : request.serviceId) === response.serviceId
+  )
+}
 
 const sameAccess = (left: AccessWire, right: AccessWire) =>
   left.leaseEpoch === right.leaseEpoch &&
@@ -292,6 +324,7 @@ const fenceOf = (message: ExecutorMessageValue): Fence | undefined => {
     case "PtyReplayGap":
     case "PtyDisconnected":
     case "PtyTerminated":
+    case "WorkspaceResponse":
     case "CellLifecycle":
     case "BindingInvoke":
     case "MachineResult":
@@ -322,6 +355,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   const assignments = yield* Ref.make(new Map<Socket, string>())
   const pending = yield* Ref.make(new Map<string, Pending>())
   const machineCalls = yield* Ref.make(new Map<string, MachineCall>())
+  const workspaceCalls = yield* Ref.make(new Map<string, WorkspaceCall>())
   const frames = yield* Ref.make(new Map<string, ReadonlyArray<CellLifecycleFrame>>())
   const terminals = yield* Ref.make(new Map<string, Extract<CellLifecycleFrame, { readonly _tag: "Terminal" }>>())
   const admission = yield* Semaphore.make(1)
@@ -486,6 +520,42 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
               next.set(pendingKey, { ...operation, socket: session.socket, access: session.access })
           return next
         })
+        const failedWorkspace = yield* Ref.modify(
+          workspaceCalls,
+          (
+            current,
+          ): readonly [
+            ReadonlyArray<Deferred.Deferred<WorkspaceResponse, GatewayError>>,
+            Map<string, WorkspaceCall>,
+          ] => {
+            const displacedCalls = [...current.entries()].filter(
+              ([, call]) => call.assignmentId === assignmentId && !sameExecutor(call.access, session.access),
+            )
+            if (displacedCalls.length === 0) return [[], current] as const
+            const next = new Map(current)
+            for (const [callKey] of displacedCalls) next.delete(callKey)
+            return [displacedCalls.map(([, call]) => call.result), next] as const
+          },
+        )
+        yield* Effect.forEach(
+          failedWorkspace,
+          (result) =>
+            Deferred.fail(
+              result,
+              GatewayError.make({
+                kind: "disconnected",
+                message: "Executor connection was replaced before returning a Workspace result",
+              }),
+            ),
+          { discard: true },
+        )
+        yield* Ref.update(workspaceCalls, (current) => {
+          const next = new Map(current)
+          for (const [callKey, call] of next)
+            if (call.assignmentId === assignmentId)
+              next.set(callKey, { ...call, socket: session.socket, access: session.access })
+          return next
+        })
         return true
       }),
     )
@@ -532,6 +602,10 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           request: operation.request,
         }),
       )
+    }
+    for (const call of (yield* Ref.get(workspaceCalls)).values()) {
+      if (call.assignmentId !== session.access.fence.assignmentId) continue
+      session.socket.send(encode({ _tag: "WorkspaceRequest", fence: session.access.fence, request: call.request }))
     }
   })
 
@@ -784,6 +858,28 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     yield* Deferred.succeed(call.result, outcome)
   })
 
+  const receiveWorkspace = Effect.fn("ExecutorGateway.receiveWorkspace")(function* (
+    socket: Socket,
+    access: AccessWire,
+    response: WorkspaceResponse,
+  ) {
+    const assignmentId = yield* Ref.get(assignments).pipe(Effect.map((current) => current.get(socket)))
+    const call =
+      assignmentId === undefined
+        ? undefined
+        : (yield* Ref.get(workspaceCalls)).get(workspaceKey(assignmentId, response.requestId))
+    if (
+      assignmentId === undefined ||
+      call === undefined ||
+      call.socket !== socket ||
+      !sameAccess(call.access, access) ||
+      !matchesWorkspaceRequest(call.request, response)
+    )
+      return yield* GatewayError.make({ kind: "fenced", message: "Workspace result conflicts with its request" })
+    yield* controller.validateAccess(redactAccess(access)).pipe(Effect.mapError(accessFailure))
+    yield* Deferred.succeed(call.result, response)
+  })
+
   const publishPty = Effect.fn("ExecutorGateway.publishPty")(function* (socket: Socket, message: PtyEvent) {
     yield* admission.withPermits(1)(
       Effect.gen(function* () {
@@ -978,6 +1074,8 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           message.outcome,
         )
       }
+      case "WorkspaceResponse":
+        return yield* receiveWorkspace(socket, message.access, message.response)
       case "CellLifecycle":
         return yield* persistLifecycle(socket, message.access, message.frame)
       case "PtyOpened":
@@ -1041,6 +1139,62 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
 
   const ptyEvents = (assignmentId: string) =>
     Stream.fromPubSub(ptyFrames).pipe(Stream.filter((message) => message.access.fence.assignmentId === assignmentId))
+
+  const workspace = Effect.fn("ExecutorGateway.workspace")(function* (
+    assignmentId: string,
+    request: WorkspaceRequestValue,
+  ) {
+    const connected = yield* awaitSession(assignmentId).pipe(Effect.timeoutOption("30 seconds"))
+    if (Option.isNone(connected))
+      return yield* GatewayError.make({ kind: "timeout", message: "Executor did not connect in time" })
+    const candidate = yield* admission.withPermits(1)(
+      Effect.gen(function* () {
+        const session = (yield* Ref.get(sessions)).get(assignmentId)
+        if (session === undefined)
+          return yield* GatewayError.make({
+            kind: "disconnected",
+            message: "Executor disconnected before the Workspace request could be sent",
+          })
+        if ((yield* Clock.currentTimeMillis) >= session.leaseExpiresAt) return yield* expired()
+        yield* controller.validateAccess(redactAccess(session.access)).pipe(Effect.mapError(accessFailure))
+        const mapKey = workspaceKey(assignmentId, request.requestId)
+        const known = (yield* Ref.get(workspaceCalls)).get(mapKey)
+        if (known !== undefined) {
+          if (!equivalentWorkspaceRequest(known.request, request))
+            return yield* GatewayError.make({
+              kind: "fenced",
+              message: "Workspace request id conflicts with a different request",
+            })
+          return known
+        }
+        const result = yield* Deferred.make<WorkspaceResponse, GatewayError>()
+        const created = { assignmentId, request, socket: session.socket, access: session.access, result }
+        yield* Ref.update(workspaceCalls, (current) => new Map(current).set(mapKey, created))
+        yield* Effect.try({
+          try: () => session.socket.send(encode({ _tag: "WorkspaceRequest", fence: session.access.fence, request })),
+          catch: () => GatewayError.make({ kind: "transport", message: "Could not send the Workspace request" }),
+        }).pipe(Effect.tapError((error) => Deferred.fail(result, error)))
+        return created
+      }),
+    )
+    const mapKey = workspaceKey(assignmentId, request.requestId)
+    return yield* Deferred.await(candidate.result).pipe(
+      Effect.timeoutOption("30 seconds"),
+      Effect.flatMap((completed) =>
+        Option.isNone(completed)
+          ? GatewayError.make({ kind: "timeout", message: "Workspace request did not finish in time" })
+          : Effect.succeed(completed.value),
+      ),
+      Effect.ensuring(
+        Ref.update(workspaceCalls, (current) => {
+          if (current.get(mapKey)?.result !== candidate.result) return current
+          const next = new Map(current)
+          next.delete(mapKey)
+          return next
+        }),
+      ),
+    )
+  })
 
   const invokeMachine = Effect.fn("ExecutorGateway.invokeMachine")(function* (
     assignmentId: string,
@@ -1408,5 +1562,6 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     sendPty,
     ptyEvents,
     retryPreparation,
+    workspace,
   } satisfies Gateway
 })

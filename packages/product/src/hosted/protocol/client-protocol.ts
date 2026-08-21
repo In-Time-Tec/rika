@@ -18,6 +18,7 @@ import {
   Timestamp,
 } from "../model"
 import { LocalRunnerTarget } from "../local-runner-registration"
+import { RepositoryService, WorkspaceFileInspection } from "../workspace-capability"
 
 export const protocolVersion = 1 as const
 
@@ -91,6 +92,18 @@ export const MutatingThreadCommand = Schema.Union([
       checkpoint: ExecutionProjection.Checkpoint,
     }),
   ),
+  strict(
+    Schema.TaggedStruct("EnsureRepositoryService", {
+      ...mutating,
+      service: RepositoryService,
+    }),
+  ),
+  strict(
+    Schema.TaggedStruct("StopRepositoryService", {
+      ...mutating,
+      serviceId: Schema.NonEmptyString,
+    }),
+  ),
 ])
 export type MutatingThreadCommand = typeof MutatingThreadCommand.Type
 
@@ -120,6 +133,12 @@ export const ClientCommand = Schema.Union([
     }),
   ),
   MutatingThreadCommand,
+  strict(
+    Schema.TaggedStruct("InspectWorkspaceFile", {
+      path: Schema.NonEmptyString,
+      maximumBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(1_048_576)),
+    }),
+  ),
   strict(
     Schema.TaggedStruct("AcknowledgeCursor", {
       cursor: ThreadEventCursor,
@@ -221,6 +240,13 @@ const ServerPayload = Schema.Union([
   strict(Schema.TaggedStruct("ThreadEvent", { event: ThreadProtocolEvent })),
   strict(Schema.TaggedStruct("ExecutorStatus", { threadId: ThreadId, status: JsonObject })),
   strict(Schema.TaggedStruct("WorkspaceStatus", { threadId: ThreadId, status: JsonObject })),
+  strict(
+    Schema.TaggedStruct("WorkspaceFileInspected", {
+      requestId: RequestId,
+      threadId: ThreadId,
+      inspection: WorkspaceFileInspection,
+    }),
+  ),
   strict(
     Schema.TaggedStruct("PresenceSnapshot", {
       threadId: ThreadId,

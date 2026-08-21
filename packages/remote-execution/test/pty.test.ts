@@ -204,7 +204,7 @@ describe("PTY durable state and image capabilities", () => {
     ),
   )
 
-  it.effect("advertises PTY only when tmux, Chromium, and agent-browser are all available", () =>
+  it.effect("detects PTY, browser, and repository-service capabilities independently", () =>
     Effect.gen(function* () {
       const calls: Array<string> = []
       expect(
@@ -212,10 +212,18 @@ describe("PTY durable state and image capabilities", () => {
           calls.push(`${command} ${args.join(" ")}`)
           return Effect.succeed(true)
         }),
-      ).toEqual({ cells: true, checkpoints: false, pty: true })
-      expect(calls).toEqual(["tmux -V", "chromium --version", "agent-browser --version"])
-      for (const missing of ["tmux", "chromium", "agent-browser"])
-        expect((yield* detectCapabilities((command) => Effect.succeed(command !== missing))).pty, missing).toBe(false)
+      ).toEqual({ cells: true, checkpoints: false, pty: true, browser: true, services: true })
+      expect(calls).toEqual(["tmux -V", "chromium --version", "agent-browser --version", "true "])
+      expect(yield* detectCapabilities((command) => Effect.succeed(command === "tmux" || command === "true"))).toEqual({
+        cells: true,
+        checkpoints: false,
+        pty: true,
+        browser: false,
+        services: true,
+      })
+      expect(
+        yield* detectCapabilities((command) => Effect.succeed(command === "chromium" || command === "agent-browser")),
+      ).toEqual({ cells: true, checkpoints: false, pty: false, browser: true, services: false })
     }),
   )
 

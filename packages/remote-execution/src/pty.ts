@@ -623,20 +623,39 @@ export const driverLayer = (options: {
 
 export const detectCapabilities = (
   check: (command: string, args: ReadonlyArray<string>) => Effect.Effect<boolean>,
-): Effect.Effect<{ readonly cells: true; readonly checkpoints: false; readonly pty: boolean }> =>
+): Effect.Effect<{
+  readonly cells: true
+  readonly checkpoints: false
+  readonly pty: boolean
+  readonly browser: boolean
+  readonly services: boolean
+}> =>
   Effect.gen(function* () {
-    const available = yield* Effect.all([
+    const [tmux, chromium, agentBrowser, services] = yield* Effect.all([
       check("tmux", ["-V"]),
       check("chromium", ["--version"]),
       check("agent-browser", ["--version"]),
+      check("true", []),
     ])
-    return { cells: true, checkpoints: false, pty: available.every(Boolean) }
+    return {
+      cells: true,
+      checkpoints: false,
+      pty: tmux,
+      browser: chromium && agentBrowser,
+      services,
+    }
   })
 
 export const liveCapabilities = (
   workspaceUser: string,
 ): Effect.Effect<
-  { readonly cells: true; readonly checkpoints: false; readonly pty: boolean },
+  {
+    readonly cells: true
+    readonly checkpoints: false
+    readonly pty: boolean
+    readonly browser: boolean
+    readonly services: boolean
+  },
   never,
   ChildProcessSpawner.ChildProcessSpawner
 > =>
