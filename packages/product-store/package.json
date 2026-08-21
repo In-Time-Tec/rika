@@ -25,6 +25,7 @@
     "./migrations/postgres/0013-thread-protocol.sql": "./migrations/postgres/0013-thread-protocol.sql",
     "./migrations/postgres/0014-local-runner-registration.sql": "./migrations/postgres/0014-local-runner-registration.sql",
     "./migrations/postgres/0015-environment-and-egress.sql": "./migrations/postgres/0015-environment-and-egress.sql",
+    "./migrations/postgres/0016-authority-revocation.sql": "./migrations/postgres/0016-authority-revocation.sql",
     "./product-database-layer": "./src/database/product-database-layer.ts",
     "./postgres-product-repositories": "./src/database/postgres-product-repositories.ts",
     "./sqlite-goal-repository": "./src/goal/sqlite-goal-repository.ts",

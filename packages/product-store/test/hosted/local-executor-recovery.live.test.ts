@@ -180,7 +180,7 @@ it.effect.skipIf(!live)("fails closed when a dispatched operation has no reconst
             provider_instance_id, executor_instance_id, process_incarnation, session_digest, lease_epoch, lease_expires_at)
           VALUES ('thread-recovery', 'owner-recovery', 'thread-recovery', 'local_device',
             '{"_tag":"LocalDevicePlacement","deviceId":"device-recovery"}', 2, 1, 2, 'active',
-            'device-recovery', 'executor-recovery', 'process-recovery', 'session-digest', 2, now() + interval '1 hour')`),
+            'device-recovery', 'executor-recovery', 'process-recovery', 'session-digest', 2, now() + interval '5 minutes')`),
       )
       const failed = yield* Effect.promise(() =>
         pool
@@ -240,6 +240,19 @@ it.effect.skipIf(!live)(
                 id: ids.client,
                 userId: ids.user,
                 deviceId: ids.device,
+                now: at(0),
+                expiresAt: at(59),
+              })
+              yield* store.grantClientAuthority({
+                ownerId: ids.owner,
+                actor: {
+                  _tag: "OrganizationActor",
+                  owner: { _tag: "OrganizationOwner", organizationId: ids.organization },
+                  userId: ids.user,
+                  membershipId: ids.member,
+                  clientId: ids.client,
+                  deviceId: ids.device,
+                },
                 now: at(0),
                 expiresAt: at(59),
               })

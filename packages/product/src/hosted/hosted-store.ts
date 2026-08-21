@@ -1,6 +1,7 @@
 import { Context, Effect, Schema } from "effect"
 import type { ExecutionRouteSnapshot } from "../execution/contract/execution-route-snapshot"
 import type { TurnId } from "../thread/model/turn-record"
+import type { AuthorizationAction } from "./authorization"
 import {
   type ActorAttribution,
   type AuditEvent,
@@ -133,6 +134,20 @@ export interface AuthenticateClientInput {
   readonly expiresAt: Timestamp
 }
 
+export interface ValidateClientInput {
+  readonly userId: BetterAuthUserId
+  readonly clientId: ClientId
+  readonly deviceId: DeviceId
+  readonly at: Timestamp
+}
+
+export interface GrantClientAuthorityInput {
+  readonly ownerId: OwnerId
+  readonly actor: ActorAttribution
+  readonly now: Timestamp
+  readonly expiresAt: Timestamp
+}
+
 export interface AdmitCommandInput {
   readonly ownerId: OwnerId
   readonly threadId: ThreadId
@@ -191,6 +206,11 @@ export interface ThreadCursorInput {
   readonly ownerId: OwnerId
   readonly threadId: ThreadId
   readonly actor: ActorAttribution
+}
+
+export interface AuthorizeThreadInput extends ThreadCursorInput {
+  readonly action: AuthorizationAction
+  readonly at?: Timestamp
 }
 
 export interface ReadThreadLogInput extends ThreadCursorInput {
@@ -265,6 +285,9 @@ export interface StoreService {
   readonly putThreadGrant: (input: PutThreadGrantInput) => Effect.Effect<ThreadGrant, StoreError>
   readonly registerDevice: (input: RegisterDeviceInput) => Effect.Effect<AuthenticatedDevice, StoreError>
   readonly authenticateClient: (input: AuthenticateClientInput) => Effect.Effect<AuthenticatedClient, StoreError>
+  readonly validateClient: (input: ValidateClientInput) => Effect.Effect<void, StoreError>
+  readonly grantClientAuthority: (input: GrantClientAuthorityInput) => Effect.Effect<void, StoreError>
+  readonly authorizeThread: (input: AuthorizeThreadInput) => Effect.Effect<void, StoreError>
   readonly admitCommand: (input: AdmitCommandInput) => Effect.Effect<ThreadCommand, StoreError>
   readonly admitPrompt: (input: AdmitPromptInput) => Effect.Effect<AdmittedPrompt, StoreError>
   readonly readCommands: (input: ReadThreadLogInput) => Effect.Effect<ReadonlyArray<ThreadCommand>, StoreError>

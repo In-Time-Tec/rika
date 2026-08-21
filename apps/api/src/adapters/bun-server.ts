@@ -22,15 +22,42 @@ export const canonicalPublicRequest = (input: { readonly request: Request; reado
   })
 }
 
-type SessionGateway = Pick<Gateway, "receive" | "disconnected">
+type SessionGateway = Pick<Gateway, "receive" | "disconnected" | "active">
 
 interface Session {
   readonly attach: (socket: Bun.ServerWebSocket<Session>) => void
   readonly receive: (socket: Socket, message: unknown) => void
   readonly disconnected: (socket: Socket) => void
+  readonly validate: () => Effect.Effect<boolean>
   readonly drain: () => Promise<void>
-  readonly close: () => void
+  readonly close: (code?: number, reason?: string) => void
 }
+
+interface AuthoritySession {
+  readonly validate: () => Effect.Effect<boolean>
+  readonly close: (code?: number, reason?: string) => void
+}
+
+export const pollAuthority = (sessions: ReadonlySet<AuthoritySession>) =>
+  Effect.sleep("100 millis").pipe(
+    Effect.andThen(
+      Effect.suspend(() =>
+        Effect.forEach(
+          sessions,
+          (current) =>
+            current
+              .validate()
+              .pipe(
+                Effect.tap((active) =>
+                  active ? Effect.void : Effect.sync(() => current.close(1008, "authority revoked")),
+                ),
+              ),
+          { concurrency: "unbounded", discard: true },
+        ),
+      ),
+    ),
+    Effect.forever,
+  )
 
 const session = (gateway: SessionGateway): Session => {
   let pending: Promise<unknown> = Promise.resolve()
@@ -63,11 +90,15 @@ const session = (gateway: SessionGateway): Session => {
     disconnected: (socket) => {
       pending = pending.then(() => Effect.runPromise(gateway.disconnected(socket))).catch(() => undefined)
     },
+    validate: () =>
+      activeSocket === undefined
+        ? Effect.succeed(true)
+        : gateway.active(activeSocket).pipe(Effect.orElseSucceed(() => false)),
     drain: () => {
       draining = true
       return pending.then(() => Promise.all(concurrent)).then(() => undefined)
     },
-    close: () => activeSocket?.close(1001, "server draining"),
+    close: (code = 1001, reason = "server draining") => activeSocket?.close(code, reason),
   }
 }
 
@@ -101,11 +132,12 @@ const threadSession = (connection: HostedThreadConnection): Session => {
     disconnected: () => {
       pending = pending.then(() => Effect.runPromise(connection.detach)).catch(() => undefined)
     },
+    validate: () => connection.active.pipe(Effect.orElseSucceed(() => false)),
     drain: () => {
       draining = true
       return pending.then(() => undefined)
     },
-    close: () => activeSocket?.close(1001, "server draining"),
+    close: (code = 1001, reason = "server draining") => activeSocket?.close(code, reason),
   }
 }
 
@@ -208,4 +240,6 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
         yield* Effect.promise(() => stopped)
         yield* Effect.promise(api.dispose)
       }),
+  ).pipe(
+    Effect.tap((resources) => pollAuthority(resources.sessions).pipe(Effect.forkScoped({ startImmediately: true }))),
   )

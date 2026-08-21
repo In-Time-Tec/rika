@@ -2,6 +2,7 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import { identityMigrations, runMigration } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
+import { CheckoutFingerprint } from "@rika/product/local-runner-registration"
 import { BetterAuthUserId, OrganizationId, ThreadId } from "@rika/product/hosted-model"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { layer as productPostgres } from "@rika/product-store/postgres-layer"
@@ -63,9 +64,10 @@ const localConnection = (
 ) =>
   Effect.gen(function* () {
     const product = yield* HostedProduct
+    const fingerprint = CheckoutFingerprint.make(checkoutFingerprint)
     yield* product.registerLocalRunner({
       principal: authenticated,
-      checkoutFingerprint,
+      checkoutFingerprint: fingerprint,
       registration: {
         workspaceIdentity: `${checkoutFingerprint}-identity` as never,
         repository: { identity: `repository-${checkoutFingerprint}`, branch: "main" },
@@ -73,15 +75,16 @@ const localConnection = (
         capabilities: { cells: true, checkpoints: false, pty: false },
       },
     })
-    return yield* product.createConnection({
+    const connection = yield* product.createConnection({
       principal: authenticated,
       owner,
       placement: "local",
       localRunnerTarget: {
         deviceId: authenticated.deviceId as never,
-        checkoutFingerprint: checkoutFingerprint as never,
+        checkoutFingerprint: fingerprint,
       },
     })
+    return { ...connection, checkoutFingerprint: fingerprint }
   })
 
 const accessFrom = (welcome: Access): Access => ({
@@ -145,7 +148,7 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
       const authority = yield* LocalExecutor
       const connection = yield* localConnection(owner, personal(owner.userId), "personal-workspace")
       const product = yield* HostedProduct
-      const threadAuthority = yield* product.authorizeThread(owner, connection.threadId)
+      const threadAuthority = yield* product.authorizeThread(owner, connection.threadId, "thread:view")
       expect(
         yield* product.threadExecutionContext(threadAuthority.ownerId, ThreadId.make(connection.threadId)),
       ).toMatchObject({
@@ -156,7 +159,7 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
       expect((yield* query(pool, `SELECT count(*)::int AS count FROM member`)).rows).toEqual([{ count: 0 }])
       const admission = yield* authority.admit({
         threadId: connection.threadId,
-        workspaceFingerprint: "personal-workspace",
+        workspaceFingerprint: connection.checkoutFingerprint,
         principal: owner,
         executorUrl: "ws://executor.test/local",
       })
@@ -199,11 +202,11 @@ it.effect.skipIf(!live)("fences organization access immediately while preserving
       const authority = yield* LocalExecutor
       const personalConnection = yield* localConnection(owner, personal(owner.userId), "personal-workspace")
       const organizationConnection = yield* localConnection(owner, organization("local-org"), "organization-workspace")
-      const open = (threadId: string, label: string) =>
+      const open = (connection: typeof personalConnection, label: string) =>
         Effect.gen(function* () {
           const admission = yield* authority.admit({
-            threadId,
-            workspaceFingerprint: `${label}-workspace`,
+            threadId: connection.threadId,
+            workspaceFingerprint: connection.checkoutFingerprint,
             principal: owner,
             executorUrl: "ws://executor.test/local",
           })
@@ -213,8 +216,8 @@ it.effect.skipIf(!live)("fences organization access immediately while preserving
             processIncarnation: `${label}-process`,
           })
         })
-      const personalWelcome = yield* open(personalConnection.threadId, "personal")
-      const organizationWelcome = yield* open(organizationConnection.threadId, "organization")
+      const personalWelcome = yield* open(personalConnection, "personal")
+      const organizationWelcome = yield* open(organizationConnection, "organization")
       const personalAccess = accessFrom(personalWelcome)
       const organizationAccess = accessFrom(organizationWelcome)
       yield* authority.validateAccess(organizationAccess)
@@ -252,7 +255,7 @@ it.effect.skipIf(!live)("rejects cross-owner and cross-device admissions before 
         yield* failureKind(
           authority.admit({
             threadId: connection.threadId,
-            workspaceFingerprint: "cross-owner",
+            workspaceFingerprint: connection.checkoutFingerprint,
             principal: stranger,
             executorUrl: "ws://executor.test/local",
           }),
@@ -262,7 +265,7 @@ it.effect.skipIf(!live)("rejects cross-owner and cross-device admissions before 
         yield* failureKind(
           authority.admit({
             threadId: connection.threadId,
-            workspaceFingerprint: "cross-device",
+            workspaceFingerprint: connection.checkoutFingerprint,
             principal: otherDevice,
             executorUrl: "ws://executor.test/local",
           }),

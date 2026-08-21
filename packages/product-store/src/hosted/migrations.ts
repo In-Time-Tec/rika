@@ -80,4 +80,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "1d4c818cce92dcd01b5b020cb05bb4cad95a95eb624e0bca1563577bb655d0a2",
     url: new URL("../../migrations/postgres/0015-environment-and-egress.sql", import.meta.url),
   },
+  {
+    id: "product/0016_authority_revocation",
+    checksum: "057e350b553c3deaab26ae860cff5841de39544a698fbcc426b6a8e1328dc085",
+    url: new URL("../../migrations/postgres/0016-authority-revocation.sql", import.meta.url),
+  },
 ]

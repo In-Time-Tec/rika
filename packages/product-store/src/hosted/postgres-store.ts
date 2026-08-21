@@ -51,6 +51,7 @@ import {
   type RenewTerminalWriterInput,
   type UpsertPresenceInput,
 } from "@rika/product/hosted-store"
+import { requireActiveClient, requireThreadAccess } from "./postgres-authority"
 
 const databaseError = (cause: unknown) =>
   StoreError.make({ reason: "database", message: `Hosted PostgreSQL operation failed: ${String(cause)}` })
@@ -100,8 +101,6 @@ const allocateCommitCursor = Effect.fn("PostgresStore.allocateCommitCursor")(fun
   return CommitCursor.make(rows[0].cursor)
 })
 
-const roleRank = { viewer: 1, controller: 2, operator: 3, owner: 4 } as const
-
 const requireOwnerCreator = Effect.fn("PostgresStore.requireOwnerCreator")(function* (
   sql: SqlClient,
   input: { readonly ownerId: string; readonly userId: string },
@@ -129,84 +128,6 @@ const requireOrganizationGrantAuthority = Effect.fn("PostgresStore.requireOrgani
     FOR KEY SHARE OF owner_record`)
   if (rows[0] === undefined)
     return yield* failure("invalid-authority", "Grants require active organization memberships")
-})
-
-const requireThreadAccess = Effect.fn("PostgresStore.requireThreadAccess")(function* (
-  sql: SqlClient,
-  input: { readonly ownerId: string; readonly threadId: string; readonly actor: ActorAttribution },
-  minimum: number,
-  at?: string,
-) {
-  yield* requireActiveClient(sql, input, at)
-  const threads = yield* query(sql<{
-    readonly createdByUserId: string
-    readonly projectId: string | null
-    readonly executorKind: "local_device" | "e2b"
-    readonly inheritProjectGrants: boolean
-  }>`SELECT created_by_user_id AS "createdByUserId", project_id AS "projectId",
-      executor_kind AS "executorKind", inherit_project_grants AS "inheritProjectGrants"
-    FROM rika_hosted_threads
-    WHERE owner_id = ${input.ownerId} AND id = ${input.threadId}
-    FOR KEY SHARE`)
-  const thread = threads[0]
-  if (thread === undefined) return yield* failure("invalid-authority", "Resource is unavailable")
-  if (input.actor._tag === "PersonalActor" || thread.createdByUserId === input.actor.userId) return
-  const direct = yield* query(sql<{ readonly role: keyof typeof roleRank }>`SELECT role
-    FROM rika_hosted_thread_grants
-    WHERE owner_id = ${input.ownerId}
-      AND thread_id = ${input.threadId}
-      AND membership_id = ${input.actor.membershipId}
-    FOR KEY SHARE`)
-  const inherited =
-    thread.executorKind === "e2b" && thread.inheritProjectGrants && thread.projectId !== null
-      ? yield* query(sql<{ readonly role: keyof typeof roleRank }>`SELECT role
-          FROM rika_hosted_project_grants
-          WHERE owner_id = ${input.ownerId}
-            AND project_id = ${thread.projectId}
-            AND membership_id = ${input.actor.membershipId}
-          FOR KEY SHARE`)
-      : []
-  const available = Math.max(
-    direct[0] === undefined ? 0 : roleRank[direct[0].role],
-    inherited[0] === undefined ? 0 : roleRank[inherited[0].role],
-  )
-  if (available < minimum) return yield* failure("invalid-authority", "Resource is unavailable")
-})
-
-const requireActiveClient = Effect.fn("PostgresStore.requireActiveClient")(function* (
-  sql: SqlClient,
-  input: { readonly ownerId: string; readonly actor: ActorAttribution },
-  at?: string,
-) {
-  const rows = yield* query(sql<{ readonly deviceId: string; readonly userId: string; readonly clientId: string }>`
-    SELECT device.id AS "deviceId", client_record.user_id AS "userId", client_record.id AS "clientId"
-    FROM rika_hosted_owners owner_record
-    JOIN rika_hosted_clients client_record ON client_record.user_id = ${input.actor.userId}
-    JOIN rika_hosted_devices device
-      ON device.id = client_record.device_id AND device.user_id = client_record.user_id
-    LEFT JOIN "member" membership ON owner_record.kind = 'organization'
-      AND membership.organization_id = owner_record.organization_id
-      AND membership.id = ${input.actor._tag === "OrganizationActor" ? input.actor.membershipId : null}
-      AND membership.user_id = client_record.user_id
-    WHERE owner_record.id = ${input.ownerId}
-      AND client_record.id = ${input.actor.clientId}
-      AND client_record.user_id = ${input.actor.userId}
-      AND device.id = ${input.actor.deviceId}
-      AND client_record.revoked_at IS NULL
-      AND device.revoked_at IS NULL
-      AND client_record.expires_at > ${at === undefined ? sql`transaction_timestamp()` : sql`${at}::timestamptz`}
-      AND ((owner_record.kind = 'personal'
-          AND ${input.actor._tag} = 'PersonalActor'
-          AND owner_record.user_id = client_record.user_id
-          AND owner_record.user_id = ${input.actor.owner._tag === "PersonalOwner" ? input.actor.owner.userId : null})
-        OR (owner_record.kind = 'organization'
-          AND ${input.actor._tag} = 'OrganizationActor'
-          AND owner_record.organization_id = ${input.actor.owner._tag === "OrganizationOwner" ? input.actor.owner.organizationId : null}
-          AND membership.id IS NOT NULL))
-    FOR KEY SHARE OF owner_record, client_record, device`)
-  if (rows[0] === undefined)
-    return yield* failure("invalid-authority", "The authenticated client is inactive or foreign")
-  return rows[0]
 })
 
 const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgClient.PgClient> {
@@ -384,19 +305,80 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
 
   const authenticateClient = Effect.fn("PostgresStore.authenticateClient")(function* (input: AuthenticateClientInput) {
     const rows = yield* query(sql`INSERT INTO rika_hosted_clients
-      (id, user_id, device_id, authenticated_at, last_seen_at, expires_at)
-      SELECT ${input.id}, ${input.userId}, device.id, ${input.now}, ${input.now}, ${input.expiresAt}
-      FROM rika_hosted_devices device WHERE device.id = ${input.deviceId} AND device.user_id = ${input.userId} AND device.revoked_at IS NULL
-      ON CONFLICT (id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at, expires_at = EXCLUDED.expires_at
-      WHERE rika_hosted_clients.user_id = EXCLUDED.user_id AND rika_hosted_clients.device_id = EXCLUDED.device_id
-        AND rika_hosted_clients.revoked_at IS NULL
-      RETURNING id, user_id AS "userId", device_id AS "deviceId",
-        to_char(authenticated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "authenticatedAt",
-        to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastSeenAt",
-        to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt", NULL AS "revokedAt"`)
-    if (rows[0] === undefined) return yield* failure("invalid-authority", "Client device is inactive or foreign")
+          (id, user_id, device_id, authenticated_at, last_seen_at, expires_at)
+          SELECT ${input.id}, ${input.userId}, device.id, ${input.now}, ${input.now}, ${input.expiresAt}
+          FROM rika_hosted_devices device
+          WHERE device.id = ${input.deviceId} AND device.user_id = ${input.userId}
+            AND device.revoked_at IS NULL
+            AND ${input.expiresAt}::timestamptz > ${input.now}::timestamptz
+            AND ${input.expiresAt}::timestamptz <= ${input.now}::timestamptz + interval '5 minutes'
+          ON CONFLICT (id) DO UPDATE SET authenticated_at = EXCLUDED.authenticated_at,
+            last_seen_at = EXCLUDED.last_seen_at, expires_at = EXCLUDED.expires_at
+          WHERE rika_hosted_clients.user_id = EXCLUDED.user_id
+            AND rika_hosted_clients.device_id = EXCLUDED.device_id
+            AND rika_hosted_clients.revoked_at IS NULL
+          RETURNING id, user_id AS "userId", device_id AS "deviceId",
+            to_char(authenticated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "authenticatedAt",
+            to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastSeenAt",
+            to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt", NULL AS "revokedAt"`)
+    if (rows[0] === undefined)
+      return yield* failure("invalid-authority", "Client device is inactive, foreign, or exceeds five minutes")
     return yield* decode(AuthenticatedClient, rows[0])
   })
+
+  const validateClient: StoreService["validateClient"] = Effect.fn("PostgresStore.validateClient")(function* (input) {
+    const rows = yield* query(sql`SELECT 1
+      FROM rika_hosted_clients client_record
+      JOIN rika_hosted_devices device
+        ON device.id = client_record.device_id AND device.user_id = client_record.user_id
+      WHERE client_record.id = ${input.clientId} AND client_record.user_id = ${input.userId}
+        AND client_record.device_id = ${input.deviceId}
+        AND client_record.revoked_at IS NULL AND device.revoked_at IS NULL
+        AND client_record.expires_at > ${input.at}::timestamptz
+      FOR KEY SHARE OF client_record, device`)
+    if (rows[0] === undefined) return yield* failure("invalid-authority", "Client authority is inactive or foreign")
+  })
+
+  const grantClientAuthority: StoreService["grantClientAuthority"] = Effect.fn("PostgresStore.grantClientAuthority")(
+    function* (input) {
+      const authority = yield* query(sql`INSERT INTO rika_hosted_client_authorities
+          (client_id, owner_id, issued_at, expires_at)
+          SELECT client_record.id, owner_record.id, ${input.now},
+            LEAST(${input.expiresAt}::timestamptz, client_record.expires_at)
+          FROM rika_hosted_owners owner_record
+          JOIN rika_hosted_clients client_record ON client_record.id = ${input.actor.clientId}
+            AND client_record.user_id = ${input.actor.userId}
+            AND client_record.device_id = ${input.actor.deviceId}
+            AND client_record.revoked_at IS NULL
+            AND client_record.expires_at > ${input.now}::timestamptz
+          JOIN rika_hosted_devices device ON device.id = client_record.device_id
+            AND device.user_id = client_record.user_id AND device.revoked_at IS NULL
+          LEFT JOIN "member" membership ON owner_record.kind = 'organization'
+            AND membership.organization_id = owner_record.organization_id
+            AND membership.id = ${input.actor._tag === "OrganizationActor" ? input.actor.membershipId : null}
+            AND membership.user_id = client_record.user_id
+          WHERE owner_record.id = ${input.ownerId}
+            AND ${input.expiresAt}::timestamptz > ${input.now}::timestamptz
+            AND ${input.expiresAt}::timestamptz <= ${input.now}::timestamptz + interval '5 minutes'
+            AND ((owner_record.kind = 'personal'
+                AND ${input.actor._tag} = 'PersonalActor'
+                AND owner_record.user_id = client_record.user_id)
+              OR (owner_record.kind = 'organization'
+                AND ${input.actor._tag} = 'OrganizationActor'
+                AND membership.id IS NOT NULL))
+          ON CONFLICT (client_id, owner_id) DO UPDATE SET
+            issued_at = EXCLUDED.issued_at,
+            expires_at = EXCLUDED.expires_at,
+            revoked_at = NULL
+          RETURNING client_id`)
+      if (authority[0] === undefined)
+        return yield* failure("invalid-authority", "Client owner authority is inactive or foreign")
+    },
+  )
+
+  const authorizeThread: StoreService["authorizeThread"] = Effect.fn("PostgresStore.authorizeThread")((input) =>
+    transaction(sql, requireThreadAccess(sql, input, input.action, input.at)),
+  )
 
   const admitCommand = Effect.fn("PostgresStore.admitCommand")(function* (input: AdmitCommandInput) {
     return yield* transaction(
@@ -405,7 +387,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
         const locked = yield* query(sql`SELECT id FROM rika_hosted_threads
           WHERE id = ${input.threadId} AND owner_id = ${input.ownerId} FOR UPDATE`)
         if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist for the owner")
-        yield* requireThreadAccess(sql, input, roleRank.controller, input.admittedAt)
+        yield* requireThreadAccess(sql, input, "thread:control", input.admittedAt)
         const existingRows =
           yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId", command_id AS "commandId",
           idempotency_key AS "idempotencyKey", actor, sequence::text AS sequence,
@@ -476,7 +458,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
         const locked = yield* query(sql`SELECT id FROM rika_hosted_threads
           WHERE id = ${input.threadId} AND owner_id = ${input.ownerId} FOR UPDATE`)
         if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist for the owner")
-        yield* requireThreadAccess(sql, input, roleRank.controller, input.admittedAt)
+        yield* requireThreadAccess(sql, input, "thread:control", input.admittedAt)
         const existingRows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId",
           command_id AS "commandId", idempotency_key AS "idempotencyKey", turn_id AS "turnId",
           actor, sequence::text AS sequence, commit_cursor::text AS "commitCursor", command,
@@ -533,16 +515,21 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
   })
 
   const readCommands: StoreService["readCommands"] = Effect.fn("PostgresStore.readCommands")(function* (input) {
-    yield* requireThreadAccess(sql, input, roleRank.viewer)
-    const rows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId", command_id AS "commandId",
-      idempotency_key AS "idempotencyKey", actor, sequence::text AS sequence,
-      commit_cursor::text AS "commitCursor", command,
-      to_char(admitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "admittedAt"
-      FROM rika_hosted_thread_commands
-      WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
-        AND commit_cursor > ${input.afterCommitCursor}::bigint
-      ORDER BY commit_cursor ASC LIMIT ${limit(input.limit)}`)
-    return yield* Effect.forEach(rows, (row) => decode(ThreadCommand, row))
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        yield* requireThreadAccess(sql, input, "thread:view")
+        const rows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId",
+          command_id AS "commandId", idempotency_key AS "idempotencyKey", actor, sequence::text AS sequence,
+          commit_cursor::text AS "commitCursor", command,
+          to_char(admitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "admittedAt"
+          FROM rika_hosted_thread_commands
+          WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
+            AND commit_cursor > ${input.afterCommitCursor}::bigint
+          ORDER BY commit_cursor ASC LIMIT ${limit(input.limit)}`)
+        return yield* Effect.forEach(rows, (row) => decode(ThreadCommand, row))
+      }),
+    )
   })
 
   const appendEvent = Effect.fn("PostgresStore.appendEvent")(function* (input: AppendEventInput) {
@@ -699,118 +686,147 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
   })
 
   const readEvents: StoreService["readEvents"] = Effect.fn("PostgresStore.readEvents")(function* (input) {
-    yield* requireThreadAccess(sql, input, roleRank.viewer)
-    const rows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId",
-        event_id AS "eventId", idempotency_key AS "idempotencyKey",
-        assignment_id AS "assignmentId", executor_instance_id AS "executorInstanceId",
-        assignment_generation::text AS "assignmentGeneration", lease_epoch::text AS "leaseEpoch",
-        sequence::text AS sequence, commit_cursor::text AS "commitCursor",
-        command_sequence::text AS "commandSequence", event,
-        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"
-        FROM rika_hosted_thread_events
-        WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
-          AND commit_cursor > ${input.afterCommitCursor}::bigint
-        ORDER BY commit_cursor ASC LIMIT ${limit(input.limit)}`)
-    return yield* Effect.forEach(rows, (row) => decode(ThreadEvent, row))
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        yield* requireThreadAccess(sql, input, "thread:view")
+        const rows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId",
+            event_id AS "eventId", idempotency_key AS "idempotencyKey",
+            assignment_id AS "assignmentId", executor_instance_id AS "executorInstanceId",
+            assignment_generation::text AS "assignmentGeneration", lease_epoch::text AS "leaseEpoch",
+            sequence::text AS sequence, commit_cursor::text AS "commitCursor",
+            command_sequence::text AS "commandSequence", event,
+            to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"
+            FROM rika_hosted_thread_events
+            WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
+              AND commit_cursor > ${input.afterCommitCursor}::bigint
+            ORDER BY commit_cursor ASC LIMIT ${limit(input.limit)}`)
+        return yield* Effect.forEach(rows, (row) => decode(ThreadEvent, row))
+      }),
+    )
   })
 
   const acknowledgeCursor: StoreService["acknowledgeCursor"] = Effect.fn("PostgresStore.acknowledgeCursor")(
     function* (input) {
-      yield* requireActiveClient(sql, input)
-      yield* requireThreadAccess(sql, input, roleRank.viewer)
-      const events = yield* query(sql`SELECT 1 FROM rika_hosted_thread_events
-      WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
-        AND commit_cursor = ${input.commitCursor}::bigint`)
-      if (events[0] === undefined) {
-        return yield* failure("conflict", "Cursor must reference a persisted thread event")
-      }
-      const rows = yield* query(sql`INSERT INTO rika_hosted_client_cursors
-      (owner_id, thread_id, actor, commit_cursor, updated_at)
-      VALUES (${input.ownerId}, ${input.threadId}, ${sql.json(input.actor)}, ${input.commitCursor}::bigint, ${input.now})
-      ON CONFLICT (thread_id, actor) DO UPDATE SET
-        commit_cursor = GREATEST(rika_hosted_client_cursors.commit_cursor, EXCLUDED.commit_cursor),
-        updated_at = EXCLUDED.updated_at
-      RETURNING owner_id AS "ownerId", thread_id AS "threadId", actor, commit_cursor::text AS "commitCursor",
-        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"`)
-      return yield* decode(ResumableCursor, rows[0])
+      return yield* transaction(
+        sql,
+        Effect.gen(function* () {
+          yield* requireThreadAccess(sql, input, "thread:view", input.now)
+          const events = yield* query(sql`SELECT 1 FROM rika_hosted_thread_events
+            WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
+              AND commit_cursor = ${input.commitCursor}::bigint`)
+          if (events[0] === undefined)
+            return yield* failure("conflict", "Cursor must reference a persisted thread event")
+          const rows = yield* query(sql`INSERT INTO rika_hosted_client_cursors
+            (owner_id, thread_id, actor, commit_cursor, updated_at)
+            VALUES (${input.ownerId}, ${input.threadId}, ${sql.json(input.actor)},
+              ${input.commitCursor}::bigint, ${input.now})
+            ON CONFLICT (thread_id, actor) DO UPDATE SET
+              commit_cursor = GREATEST(rika_hosted_client_cursors.commit_cursor, EXCLUDED.commit_cursor),
+              updated_at = EXCLUDED.updated_at
+            RETURNING owner_id AS "ownerId", thread_id AS "threadId", actor,
+              commit_cursor::text AS "commitCursor",
+              to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"`)
+          return yield* decode(ResumableCursor, rows[0])
+        }),
+      )
     },
   )
 
   const acquireTerminalWriter = Effect.fn("PostgresStore.acquireTerminalWriter")(function* (
     input: AcquireTerminalWriterInput,
   ) {
-    yield* requireActiveClient(sql, input)
-    yield* requireThreadAccess(sql, input, roleRank.controller)
-    const rows = yield* query(sql`INSERT INTO rika_hosted_terminal_writer_leases
-      (owner_id, thread_id, actor, lease_id, generation, acquired_at, renewed_at, expires_at)
-      VALUES (${input.ownerId}, ${input.threadId}, ${sql.json(input.actor)}, ${input.leaseId}, 1,
-        ${input.now}, ${input.now}, ${input.expiresAt})
-      ON CONFLICT (thread_id) DO UPDATE SET
-        owner_id = EXCLUDED.owner_id,
-        actor = EXCLUDED.actor,
-        lease_id = EXCLUDED.lease_id,
-        generation = rika_hosted_terminal_writer_leases.generation + 1,
-        acquired_at = EXCLUDED.acquired_at,
-        renewed_at = EXCLUDED.renewed_at,
-        expires_at = EXCLUDED.expires_at
-      WHERE rika_hosted_terminal_writer_leases.owner_id = EXCLUDED.owner_id
-        AND rika_hosted_terminal_writer_leases.expires_at <= ${input.now}::timestamptz
-      RETURNING owner_id AS "ownerId", thread_id AS "threadId", actor, lease_id AS "leaseId", generation::text AS generation,
-        to_char(acquired_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "acquiredAt",
-        to_char(renewed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "renewedAt",
-        to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt"`)
-    if (rows[0] === undefined)
-      return yield* failure("lease-unavailable", "Thread already has an active terminal writer")
-    return yield* decode(TerminalWriterLease, rows[0])
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        yield* requireThreadAccess(sql, input, "terminal:input", input.now)
+        const rows = yield* query(sql`INSERT INTO rika_hosted_terminal_writer_leases
+          (owner_id, thread_id, actor, lease_id, generation, acquired_at, renewed_at, expires_at)
+          VALUES (${input.ownerId}, ${input.threadId}, ${sql.json(input.actor)}, ${input.leaseId}, 1,
+            ${input.now}, ${input.now}, ${input.expiresAt})
+          ON CONFLICT (thread_id) DO UPDATE SET
+            owner_id = EXCLUDED.owner_id,
+            actor = EXCLUDED.actor,
+            lease_id = EXCLUDED.lease_id,
+            generation = rika_hosted_terminal_writer_leases.generation + 1,
+            acquired_at = EXCLUDED.acquired_at,
+            renewed_at = EXCLUDED.renewed_at,
+            expires_at = EXCLUDED.expires_at
+          WHERE rika_hosted_terminal_writer_leases.owner_id = EXCLUDED.owner_id
+            AND rika_hosted_terminal_writer_leases.expires_at <= ${input.now}::timestamptz
+          RETURNING owner_id AS "ownerId", thread_id AS "threadId", actor,
+            lease_id AS "leaseId", generation::text AS generation,
+            to_char(acquired_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "acquiredAt",
+            to_char(renewed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "renewedAt",
+            to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt"`)
+        if (rows[0] === undefined)
+          return yield* failure("lease-unavailable", "Thread already has an active terminal writer")
+        return yield* decode(TerminalWriterLease, rows[0])
+      }),
+    )
   })
 
   const renewTerminalWriter = Effect.fn("PostgresStore.renewTerminalWriter")(function* (
     input: RenewTerminalWriterInput,
   ) {
-    yield* requireActiveClient(sql, input)
-    yield* requireThreadAccess(sql, input, roleRank.controller)
-    const rows = yield* query(sql`UPDATE rika_hosted_terminal_writer_leases SET
-      renewed_at = ${input.now}, expires_at = ${input.expiresAt}
-      WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
-        AND actor = ${sql.json(input.actor)}
-        AND lease_id = ${input.leaseId}
-        AND generation = ${input.generation}::bigint
-        AND expires_at > ${input.now}::timestamptz
-      RETURNING owner_id AS "ownerId", thread_id AS "threadId", actor, lease_id AS "leaseId", generation::text AS generation,
-        to_char(acquired_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "acquiredAt",
-        to_char(renewed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "renewedAt",
-        to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt"`)
-    if (rows[0] === undefined) return yield* failure("stale-fence", "Terminal writer lease is expired or fenced")
-    return yield* decode(TerminalWriterLease, rows[0])
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        yield* requireThreadAccess(sql, input, "terminal:input", input.now)
+        const rows = yield* query(sql`UPDATE rika_hosted_terminal_writer_leases SET
+          renewed_at = ${input.now}, expires_at = ${input.expiresAt}
+          WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
+            AND actor = ${sql.json(input.actor)}
+            AND lease_id = ${input.leaseId}
+            AND generation = ${input.generation}::bigint
+            AND expires_at > ${input.now}::timestamptz
+          RETURNING owner_id AS "ownerId", thread_id AS "threadId", actor,
+            lease_id AS "leaseId", generation::text AS generation,
+            to_char(acquired_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "acquiredAt",
+            to_char(renewed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "renewedAt",
+            to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt"`)
+        if (rows[0] === undefined) return yield* failure("stale-fence", "Terminal writer lease is expired or fenced")
+        return yield* decode(TerminalWriterLease, rows[0])
+      }),
+    )
   })
 
   const upsertPresence = Effect.fn("PostgresStore.upsertPresence")(function* (input: UpsertPresenceInput) {
-    yield* requireActiveClient(sql, input)
-    yield* requireThreadAccess(sql, input, roleRank.viewer)
-    const rows = yield* query(sql`INSERT INTO rika_hosted_presence
-      (owner_id, thread_id, actor, status, last_seen_at, expires_at)
-      VALUES (${input.ownerId}, ${input.threadId}, ${sql.json(input.actor)}, ${input.status}, ${input.now}, ${input.expiresAt})
-      ON CONFLICT (thread_id, actor) DO UPDATE SET
-        status = EXCLUDED.status,
-        last_seen_at = EXCLUDED.last_seen_at,
-        expires_at = EXCLUDED.expires_at
-      RETURNING owner_id AS "ownerId", thread_id AS "threadId", actor, status,
-        to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastSeenAt",
-        to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt"`)
-    return yield* decode(Presence, rows[0])
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        yield* requireThreadAccess(sql, input, "presence:update", input.now)
+        const rows = yield* query(sql`INSERT INTO rika_hosted_presence
+          (owner_id, thread_id, actor, status, last_seen_at, expires_at)
+          VALUES (${input.ownerId}, ${input.threadId}, ${sql.json(input.actor)},
+            ${input.status}, ${input.now}, ${input.expiresAt})
+          ON CONFLICT (thread_id, actor) DO UPDATE SET
+            status = EXCLUDED.status,
+            last_seen_at = EXCLUDED.last_seen_at,
+            expires_at = EXCLUDED.expires_at
+          RETURNING owner_id AS "ownerId", thread_id AS "threadId", actor, status,
+            to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastSeenAt",
+            to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt"`)
+        return yield* decode(Presence, rows[0])
+      }),
+    )
   })
 
   const listPresence: StoreService["listPresence"] = Effect.fn("PostgresStore.listPresence")(function* (input) {
-    yield* requireActiveClient(sql, input)
-    yield* requireThreadAccess(sql, input, roleRank.viewer)
-    const rows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId", actor, status,
-      to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastSeenAt",
-      to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt"
-      FROM rika_hosted_presence
-      WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
-        AND expires_at > ${input.now}::timestamptz
-      ORDER BY actor`)
-    return yield* Effect.forEach(rows, (row) => decode(Presence, row))
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        yield* requireThreadAccess(sql, input, "presence:view", input.now)
+        const rows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId", actor, status,
+          to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastSeenAt",
+          to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt"
+          FROM rika_hosted_presence
+          WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
+            AND expires_at > ${input.now}::timestamptz
+          ORDER BY actor`)
+        return yield* Effect.forEach(rows, (row) => decode(Presence, row))
+      }),
+    )
   })
 
   const bindLocalWorkspace = Effect.fn("PostgresStore.bindLocalWorkspace")(function* (input: BindLocalWorkspaceInput) {
@@ -859,8 +875,8 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
           VALUES (${input.id}, ${input.ownerId}, ${sql.json(input.actor)}, ${input.action}, ${input.resourceKind},
             ${input.resourceId}, ${commitCursor}::bigint,
             ${sql.json(input.attributes)}, ${input.occurredAt})
-          RETURNING id, owner_id AS "ownerId", actor, action, resource_kind AS "resourceKind", resource_id AS "resourceId",
-            commit_cursor::text AS "commitCursor", attributes,
+          RETURNING id, owner_id AS "ownerId", actor, action, resource_kind AS "resourceKind",
+            resource_id AS "resourceId", commit_cursor::text AS "commitCursor", attributes,
             to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "occurredAt"`)
         return yield* decode(AuditEvent, rows[0])
       }),
@@ -912,6 +928,9 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
     putThreadGrant,
     registerDevice,
     authenticateClient,
+    validateClient,
+    grantClientAuthority,
+    authorizeThread,
     admitCommand,
     admitPrompt,
     readCommands,

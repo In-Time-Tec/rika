@@ -340,6 +340,31 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               now: at(0),
               expiresAt: at(59),
             })
+            yield* store.grantClientAuthority({
+              ownerId: ids.organizationOwner,
+              actor: {
+                _tag: "OrganizationActor",
+                owner: { _tag: "OrganizationOwner", organizationId: ids.organization },
+                userId: ids.user,
+                membershipId: ids.member,
+                clientId: ids.client,
+                deviceId: ids.device,
+              },
+              now: at(0),
+              expiresAt: at(59),
+            })
+            yield* store.grantClientAuthority({
+              ownerId: ids.personalOwner,
+              actor: {
+                _tag: "PersonalActor",
+                owner: { _tag: "PersonalOwner", userId: ids.user },
+                userId: ids.user,
+                clientId: ids.client,
+                deviceId: ids.device,
+              },
+              now: at(0),
+              expiresAt: at(59),
+            })
             const workspace = yield* store.createWorkspace({
               id: ids.workspace,
               ownerId: ids.organizationOwner,

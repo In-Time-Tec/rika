@@ -25,6 +25,7 @@ import {
   Timestamp,
 } from "@rika/product/hosted-model"
 import { HostedStore, StoreError, type StoreFailureReason, type StoreService } from "@rika/product/hosted-store"
+import { isAuthorized, type AuthorizationAction } from "@rika/product/hosted-authorization"
 import type { TurnId } from "@rika/product/turn-record"
 import { layer as assignmentLayer } from "./memory-assignments"
 
@@ -43,6 +44,7 @@ interface State {
   readonly threadGrants: Map<string, ThreadGrant>
   readonly devices: Map<string, AuthenticatedDevice>
   readonly clients: Map<string, AuthenticatedClient>
+  readonly clientAuthorities: Map<string, Timestamp>
   readonly commands: Map<string, ReadonlyArray<ThreadCommand>>
   readonly promptTurns: Map<string, TurnId>
   readonly events: Map<string, ReadonlyArray<ThreadEvent>>
@@ -68,6 +70,7 @@ const emptyState = (): State => ({
   threadGrants: new Map(),
   devices: new Map(),
   clients: new Map(),
+  clientAuthorities: new Map(),
   commands: new Map(),
   promptTurns: new Map(),
   events: new Map(),
@@ -97,6 +100,7 @@ const projectGrantKey = (projectId: string, memberId: string) => `${projectId}\u
 const threadGrantKey = (threadId: string, memberId: string) => `${threadId}\u0000${memberId}`
 const cursorKey = (threadId: string, clientId: string) => `${threadId}\u0000${clientId}`
 const bindingKey = (threadId: string, deviceId: string) => `${threadId}\u0000${deviceId}`
+const clientAuthorityKey = (clientId: string, ownerId: string) => `${clientId}\u0000${ownerId}`
 const ownerEquivalent = Schema.toEquivalence(HostedOwner)
 const allocateCommitCursor = (current: State, ownerId: string) => {
   const next = current.ownerCounters.get(ownerId) ?? 1n
@@ -136,22 +140,50 @@ const make = Effect.gen(function* () {
   const state = yield* Ref.make(emptyState())
   const assignments = yield* ExecutorAssignments
 
-  const requireClient = (
-    current: State,
-    input: { ownerId: string; actor: ActorAttribution },
-    at?: string,
-  ) => {
+  const requireClient = (current: State, input: { ownerId: string; actor: ActorAttribution }, at?: string) => {
     const owner = current.owners.get(input.ownerId)
     const client = current.clients.get(input.actor.clientId)
+    const device = current.devices.get(input.actor.deviceId)
+    const authorityExpiry = current.clientAuthorities.get(clientAuthorityKey(input.actor.clientId, input.ownerId))
     return client !== undefined &&
+      device !== undefined &&
       owner !== undefined &&
       ownerEquivalent(input.actor.owner, owner.identity) &&
       client.userId === input.actor.userId &&
       client.deviceId === input.actor.deviceId &&
       client.revokedAt === null &&
-      (at === undefined || client.expiresAt > at)
+      device.revokedAt === null &&
+      authorityExpiry !== undefined &&
+      (at === undefined || (client.expiresAt > at && authorityExpiry > at))
       ? client
       : undefined
+  }
+
+  const requireAccess = (
+    current: State,
+    input: { ownerId: string; threadId: string; actor: ActorAttribution },
+    action: AuthorizationAction,
+    at?: string,
+  ) => {
+    if (requireClient(current, input, at) === undefined) return false
+    const thread = current.threads.get(input.threadId)?.thread
+    if (thread === undefined || thread.ownerId !== input.ownerId) return false
+    if (input.actor._tag === "PersonalActor" || thread.createdByUserId === input.actor.userId) return true
+    const direct = current.threadGrants.get(threadGrantKey(input.threadId, input.actor.membershipId))
+    const inherited =
+      thread.executorKind === "e2b" && thread.inheritProjectGrants && thread.projectId !== undefined
+        ? current.projectGrants.get(projectGrantKey(thread.projectId, input.actor.membershipId))
+        : undefined
+    return isAuthorized(
+      {
+        memberId: input.actor.membershipId,
+        executorKind: thread.executorKind,
+        inheritProjectGrants: thread.inheritProjectGrants,
+        ...(direct === undefined ? {} : { threadRole: direct.role }),
+        ...(inherited === undefined ? {} : { projectRole: inherited.role }),
+      },
+      action,
+    )
   }
 
   return HostedStore.of({
@@ -304,6 +336,8 @@ const make = Effect.gen(function* () {
         if (device === undefined || device.userId !== input.userId || device.revokedAt !== null) {
           return fail("invalid-authority", "Client device is inactive or foreign")
         }
+        if (input.expiresAt <= input.now || Date.parse(input.expiresAt) - Date.parse(input.now) > 5 * 60 * 1_000)
+          return fail("invalid-authority", "Client authority exceeds five minutes")
         const previous = current.clients.get(input.id)
         if (
           previous !== undefined &&
@@ -315,13 +349,70 @@ const make = Effect.gen(function* () {
           id: input.id,
           userId: input.userId,
           deviceId: input.deviceId,
-          authenticatedAt: previous?.authenticatedAt ?? input.now,
+          authenticatedAt: input.now,
           lastSeenAt: input.now,
           expiresAt: input.expiresAt,
           revokedAt: null,
         }
         return succeed(client, { ...current, clients: replace(current.clients, input.id, client) })
       }),
+    validateClient: (input) =>
+      Ref.get(state).pipe(
+        Effect.filterOrFail(
+          (current) => {
+            const client = current.clients.get(input.clientId)
+            const device = current.devices.get(input.deviceId)
+            return (
+              client !== undefined &&
+              device !== undefined &&
+              client.userId === input.userId &&
+              client.deviceId === input.deviceId &&
+              client.revokedAt === null &&
+              device.revokedAt === null &&
+              client.expiresAt > input.at
+            )
+          },
+          () => StoreError.make({ reason: "invalid-authority", message: "Client authority is inactive or foreign" }),
+        ),
+        Effect.asVoid,
+      ),
+    grantClientAuthority: (input) =>
+      mutation(state, (current) => {
+        const owner = current.owners.get(input.ownerId)
+        const client = current.clients.get(input.actor.clientId)
+        const device = current.devices.get(input.actor.deviceId)
+        if (
+          owner === undefined ||
+          client === undefined ||
+          device === undefined ||
+          !ownerEquivalent(input.actor.owner, owner.identity) ||
+          client.userId !== input.actor.userId ||
+          client.deviceId !== input.actor.deviceId ||
+          client.revokedAt !== null ||
+          device.revokedAt !== null ||
+          client.expiresAt <= input.now ||
+          input.expiresAt <= input.now ||
+          Date.parse(input.expiresAt) - Date.parse(input.now) > 5 * 60 * 1_000
+        )
+          return fail("invalid-authority", "Client owner authority is inactive or foreign")
+        const expiresAt = client.expiresAt < input.expiresAt ? client.expiresAt : input.expiresAt
+        return succeed(undefined, {
+          ...current,
+          clientAuthorities: replace(
+            current.clientAuthorities,
+            clientAuthorityKey(input.actor.clientId, input.ownerId),
+            expiresAt,
+          ),
+        })
+      }),
+    authorizeThread: (input) =>
+      Ref.get(state).pipe(
+        Effect.filterOrFail(
+          (current) => requireAccess(current, input, input.action, input.at),
+          () => StoreError.make({ reason: "invalid-authority", message: "Resource is unavailable" }),
+        ),
+        Effect.asVoid,
+      ),
     admitCommand: (input) =>
       mutation(state, (current) => {
         const threadState = current.threads.get(input.threadId)
@@ -329,7 +420,7 @@ const make = Effect.gen(function* () {
           return fail("not-found", "Thread does not exist in the organization")
         }
         const client = requireClient(current, input, input.admittedAt)
-        if (client === undefined || input.actor.deviceId !== client.deviceId) {
+        if (!requireAccess(current, input, "thread:control", input.admittedAt) || client === undefined) {
           return fail("invalid-authority", "Command actor attribution does not match the authenticated client")
         }
         const commands = current.commands.get(input.threadId) ?? []
@@ -376,7 +467,7 @@ const make = Effect.gen(function* () {
         if (threadState === undefined || threadState.thread.ownerId !== input.ownerId)
           return fail("not-found", "Thread does not exist in the organization")
         const client = requireClient(current, input, input.admittedAt)
-        if (client === undefined || input.actor.deviceId !== client.deviceId)
+        if (!requireAccess(current, input, "thread:control", input.admittedAt) || client === undefined)
           return fail("invalid-authority", "Command actor attribution does not match the authenticated client")
         const commands = current.commands.get(input.threadId) ?? []
         const previous = commands.find(
@@ -388,8 +479,7 @@ const make = Effect.gen(function* () {
         }
         if (previous !== undefined) {
           const turnId = current.promptTurns.get(previous.commandId)
-          if (turnId === undefined)
-            return fail("conflict", "Command identity was admitted without a queued Turn")
+          if (turnId === undefined) return fail("conflict", "Command identity was admitted without a queued Turn")
           return commandEquivalent(previous, comparable)
             ? succeed({ command: previous, turnId }, current)
             : fail("conflict", "Command identity or idempotency key was reused with different content")
@@ -426,7 +516,11 @@ const make = Effect.gen(function* () {
       Ref.get(state).pipe(
         Effect.flatMap((current) => {
           const thread = current.threads.get(input.threadId)?.thread
-          if (requireClient(current, input) === undefined || thread === undefined || thread.ownerId !== input.ownerId) {
+          if (
+            !requireAccess(current, input, "thread:view") ||
+            thread === undefined ||
+            thread.ownerId !== input.ownerId
+          ) {
             return Effect.fail(StoreError.make({ reason: "invalid-authority", message: "Client is foreign" }))
           }
           return Effect.succeed(
@@ -498,7 +592,11 @@ const make = Effect.gen(function* () {
       Ref.get(state).pipe(
         Effect.flatMap((current) => {
           const thread = current.threads.get(input.threadId)?.thread
-          if (requireClient(current, input) === undefined || thread === undefined || thread.ownerId !== input.ownerId) {
+          if (
+            !requireAccess(current, input, "thread:view") ||
+            thread === undefined ||
+            thread.ownerId !== input.ownerId
+          ) {
             return Effect.fail(StoreError.make({ reason: "invalid-authority", message: "Client is foreign" }))
           }
           return Effect.succeed(
@@ -514,7 +612,7 @@ const make = Effect.gen(function* () {
         if (threadState === undefined || threadState.thread.ownerId !== input.ownerId) {
           return fail("not-found", "Thread does not exist in the organization")
         }
-        if (requireClient(current, input, input.now) === undefined) {
+        if (!requireAccess(current, input, "thread:view", input.now)) {
           return fail("invalid-authority", "Client is inactive or foreign")
         }
         const eventExists = (current.events.get(input.threadId) ?? []).some(
@@ -534,7 +632,7 @@ const make = Effect.gen(function* () {
       }),
     acquireTerminalWriter: (input) =>
       mutation(state, (current) => {
-        if (requireClient(current, input, input.now) === undefined) {
+        if (!requireAccess(current, input, "terminal:input", input.now)) {
           return fail("invalid-authority", "Client is inactive or foreign")
         }
         const thread = current.threads.get(input.threadId)?.thread
@@ -558,7 +656,7 @@ const make = Effect.gen(function* () {
       }),
     renewTerminalWriter: (input) =>
       mutation(state, (current) => {
-        if (requireClient(current, input, input.now) === undefined) {
+        if (!requireAccess(current, input, "terminal:input", input.now)) {
           return fail("invalid-authority", "Client is inactive or foreign")
         }
         const previous = current.writers.get(input.threadId)
@@ -577,7 +675,7 @@ const make = Effect.gen(function* () {
       }),
     upsertPresence: (input) =>
       mutation(state, (current) => {
-        if (requireClient(current, input, input.now) === undefined) {
+        if (!requireAccess(current, input, "presence:update", input.now)) {
           return fail("invalid-authority", "Client is inactive or foreign")
         }
         const presence: Presence = { ...input, lastSeenAt: input.now }
@@ -589,7 +687,7 @@ const make = Effect.gen(function* () {
     listPresence: (input) =>
       Ref.get(state).pipe(
         Effect.flatMap((current) =>
-          requireClient(current, input, input.now) === undefined
+          !requireAccess(current, input, "presence:view", input.now)
             ? Effect.fail(StoreError.make({ reason: "invalid-authority", message: "Client is foreign" }))
             : Effect.succeed(
                 [...current.presence.values()].filter(

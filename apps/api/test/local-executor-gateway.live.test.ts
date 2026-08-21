@@ -1,5 +1,6 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
+import { ControllerError } from "@rika/e2b-executor/controller"
 import { identityMigrations, runMigration } from "@rika/identity"
 import { ActorAttribution } from "@rika/product/hosted-model"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
@@ -142,6 +143,7 @@ const socket = () => {
 const authority = (input?: {
   readonly renewedLeaseEpoch?: number
   readonly release?: LocalExecutorAuthority["release"]
+  readonly validateAccess?: LocalExecutorAuthority["validateAccess"]
 }): LocalExecutorAuthority => ({
   admit: () => Effect.die("unused"),
   hello: () => Effect.die("unused"),
@@ -154,7 +156,7 @@ const authority = (input?: {
       heartbeatIntervalMillis: 20_000,
       cursor: { sequence: 0, value: "" },
     }),
-  validateAccess: () => Effect.void,
+  validateAccess: input?.validateAccess ?? (() => Effect.void),
   workspaceIdentity: () => Effect.succeed("workspace-local-gateway"),
   heartbeat: () => Effect.die("unused"),
   release: input?.release ?? (() => Effect.void),
@@ -261,7 +263,7 @@ const seed = (
       pool,
       `INSERT INTO rika_hosted_clients
       (id, user_id, device_id, authenticated_at, last_seen_at, expires_at)
-      VALUES ('client-local-gateway', 'user-local-gateway', $1, now(), now(), now() + interval '1 hour')`,
+      VALUES ('client-local-gateway', 'user-local-gateway', $1, now(), now(), now() + interval '5 minutes')`,
       [deviceId],
     )
     yield* query(
@@ -273,7 +275,7 @@ const seed = (
       VALUES ('thread-local-gateway', $4, 'thread-local-gateway', 'local_device',
         '{"_tag":"LocalDevicePlacement","deviceId":"11111111-1111-4111-8111-111111111111"}'::jsonb, NULL, 1, 1, 1, 'active',
         $1, 'executor-local-gateway', 'process-local-gateway', $2, 1,
-        CASE WHEN $3 = 'past' THEN now() - interval '1 second' ELSE now() + interval '1 hour' END,
+        CASE WHEN $3 = 'past' THEN now() - interval '1 second' ELSE now() + interval '5 minutes' END,
         now(), now(), now(), 'workspace-local-gateway')`,
       [deviceId, sessionDigest, options?.leaseExpires ?? "future", ownerId],
     )
@@ -284,7 +286,7 @@ const seed = (
         generation, workspace_fingerprint, ticket_digest, expires_at, consumed_at)
       VALUES ('admission-local-gateway', 'thread-local-gateway', $2, $1,
         'client-local-gateway', 'user-local-gateway', 'process-local-gateway',
-        1, 'workspace-binding', 'ticket-digest', now() + interval '1 hour', now())`,
+        1, 'workspace-binding', 'ticket-digest', now() + interval '5 minutes', now())`,
       [deviceId, ownerId],
     )
     yield* query(
@@ -450,6 +452,84 @@ it.effect.skipIf(!live)("fences organization dispatch immediately after membersh
         })
         expect((yield* operationState(pool, "operation-revoked-membership")).rows).toEqual([
           { state: "accepted", events: 0 },
+        ])
+      }),
+    ),
+  ),
+)
+
+it.effect.skipIf(!live)("durably revokes a local executor immediately after device revocation", () =>
+  isolated(({ url, pool }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* seed(pool, "operation-revoked-device", { state: "accepted" })
+        yield* query(
+          pool,
+          `INSERT INTO rika_hosted_local_runner_registrations
+            (device_id, user_id, checkout_fingerprint, workspace_id, repository, kernel_profile, capabilities)
+            VALUES ($1, 'user-local-gateway', 'checkout-local-gateway', 'workspace-local-gateway',
+              '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)`,
+          [deviceId],
+        )
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        let active = true
+        const gateway = yield* makeLocalGateway(
+          authority({
+            validateAccess: () =>
+              active ? Effect.void : Effect.fail(ControllerError.make({ kind: "fenced", message: "revoked" })),
+          }),
+        ).pipe(Effect.provide(context))
+        const target = socket()
+        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* Effect.yieldNow
+        expect(yield* gateway.active(target)).toBe(true)
+
+        yield* query(
+          pool,
+          `UPDATE rika_cli_registration SET revoked_at = transaction_timestamp()
+            WHERE client_id = 'client-local-gateway'`,
+        )
+
+        active = false
+        expect(yield* gateway.active(target)).toBe(false)
+        yield* gateway.receive(
+          target,
+          encode({
+            _tag: "LocalCellResult",
+            access,
+            operationKey: "operation-revoked-device",
+            attempt: 0,
+            response,
+          }),
+        )
+        yield* Effect.yieldNow
+        expect(target.closed).toContainEqual([1008, "fenced"])
+        expect(
+          (yield* query(
+            pool,
+            `SELECT device.revoked_at IS NOT NULL AS "deviceRevoked",
+                  client_record.revoked_at IS NOT NULL AS "clientRevoked",
+                  admission.revoked_at IS NOT NULL AS "admissionRevoked",
+                  assignment.lifecycle, assignment.generation::int AS generation,
+                  EXISTS (SELECT 1 FROM rika_hosted_local_runner_registrations) AS "runnerRegistered"
+                FROM rika_hosted_devices device
+                JOIN rika_hosted_clients client_record ON client_record.device_id = device.id
+                JOIN rika_hosted_local_executor_admissions admission ON admission.client_id = client_record.id
+                JOIN rika_hosted_executor_assignments assignment ON assignment.id = admission.assignment_id
+                WHERE device.id = $1`,
+            [deviceId],
+          )).rows,
+        ).toEqual([
+          {
+            deviceRevoked: true,
+            clientRevoked: true,
+            admissionRevoked: true,
+            lifecycle: "terminated",
+            generation: 2,
+            runnerRegistered: false,
+          },
         ])
       }),
     ),

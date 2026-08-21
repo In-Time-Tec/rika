@@ -136,6 +136,7 @@ export interface ExecuteInput {
 export interface Gateway {
   readonly receive: (socket: Socket, frame: unknown) => Effect.Effect<void>
   readonly disconnected: (socket: Socket) => Effect.Effect<void>
+  readonly active: (socket: Socket) => Effect.Effect<boolean>
   readonly execute: (input: ExecuteInput) => Effect.Effect<ExecutionResult, GatewayError>
   readonly cancel: (assignmentId: string, operationKey: string) => Effect.Effect<void, GatewayError>
   readonly machine: (
@@ -718,6 +719,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         if (session?.socket !== socket || !sameAccess(session.access, message.access))
           return yield* GatewayError.make({ kind: "fenced", message: "PTY frame has a stale executor session" })
         if ((yield* Clock.currentTimeMillis) >= session.leaseExpiresAt) return yield* expired()
+        yield* controller.validateAccess(redactAccess(message.access))
         yield* PubSub.publish(ptyFrames, message)
       }),
     )
@@ -745,6 +747,8 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   })
 
   const handle = Effect.fn("ExecutorGateway.handle")(function* (socket: Socket, message: ExecutorMessageValue) {
+    if (message._tag === "CellResult" || message._tag === "CellLifecycle")
+      yield* controller.validateAccess(redactAccess(message.access))
     switch (message._tag) {
       case "ExecutorHello": {
         const welcome = yield* controller.hello(redactHello(message.hello))
@@ -817,7 +821,8 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
       }
       case "CellResult":
         return yield* complete(socket, message.access, message.operationKey, message.attempt, message.response)
-      case "BindingInvoke":
+      case "BindingInvoke": {
+        yield* controller.validateAccess(redactAccess(message.access))
         return yield* receiveBinding(
           socket,
           message.access,
@@ -827,7 +832,9 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           message.requestDigest,
           message.request,
         )
-      case "MachineResult":
+      }
+      case "MachineResult": {
+        yield* controller.validateAccess(redactAccess(message.access))
         return yield* receiveMachine(
           socket,
           message.access,
@@ -837,6 +844,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           message.requestDigest,
           message.outcome,
         )
+      }
       case "CellLifecycle":
         return yield* persistLifecycle(socket, message.access, message.frame)
       case "PtyOpened":
@@ -1145,5 +1153,17 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     )
   })
 
-  return { receive, disconnected, execute, cancel, machine, sendPty, ptyEvents } satisfies Gateway
+  const active: Gateway["active"] = (socket) =>
+    Effect.gen(function* () {
+      const assignmentId = (yield* Ref.get(assignments)).get(socket)
+      if (assignmentId === undefined) return true
+      const current = (yield* Ref.get(sessions)).get(assignmentId)
+      if (current === undefined || current.socket !== socket) return false
+      return yield* controller.validateAccess(redactAccess(current.access)).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      )
+    })
+
+  return { receive, disconnected, active, execute, cancel, machine, sendPty, ptyEvents } satisfies Gateway
 })

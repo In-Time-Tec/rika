@@ -237,6 +237,38 @@ describe("executor gateway", () => {
     }),
   )
 
+  it.effect("reports a registered executor inactive when its durable authority is revoked", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      let active = true
+      const gateway = yield* makeGateway(
+        controller({
+          validateAccess: () =>
+            active ? Effect.void : Effect.fail(ControllerError.make({ kind: "fenced", message: "revoked" })),
+        }),
+      )
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: true },
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      expect(yield* gateway.active(target)).toBe(true)
+      active = false
+      expect(yield* gateway.active(target)).toBe(false)
+    }),
+  )
+
   it.effect("rejects an acknowledged Hello replay without displacing the live socket", () =>
     Effect.gen(function* () {
       const first = socket()

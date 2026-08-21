@@ -146,6 +146,7 @@ const unknownResponse: CellResponse = {
 export interface LocalGateway {
   readonly receive: (socket: Socket, frame: unknown) => Effect.Effect<void>
   readonly disconnected: (socket: Socket) => Effect.Effect<void>
+  readonly active: (socket: Socket) => Effect.Effect<boolean>
   readonly execute: (input: LocalExecuteInput) => Effect.Effect<FinalResult, GatewayError>
   readonly cancel: (assignmentId: string, operationKey: string) => Effect.Effect<void, GatewayError>
   readonly machine: (
@@ -267,6 +268,7 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
               AND admission.device_id = assignment.provider_instance_id
               AND admission.process_incarnation = assignment.process_incarnation
               AND admission.consumed_at IS NOT NULL
+              AND admission.revoked_at IS NULL
             JOIN rika_cli_registration registration
               ON registration.client_id = admission.client_id
               AND registration.device_id::text = admission.device_id
@@ -1007,36 +1009,48 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
               Effect.catch((error) => Effect.sync(() => socket.close(1008, error.kind))),
             )
           if (message._tag === "CellLifecycle")
-            return persistLifecycle(socket, message.access, message.frame).pipe(
+            return authority.validateAccess(redactAccess(message.access)).pipe(
+              Effect.andThen(persistLifecycle(socket, message.access, message.frame)),
               Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
             )
           if (message._tag === "BindingInvoke")
-            return receiveBinding(
-              socket,
-              message.access,
-              message.operationKey,
-              message.attempt,
-              message.callId,
-              message.requestDigest,
-              message.request,
-            ).pipe(Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))))
+            return authority.validateAccess(redactAccess(message.access)).pipe(
+              Effect.andThen(
+                receiveBinding(
+                  socket,
+                  message.access,
+                  message.operationKey,
+                  message.attempt,
+                  message.callId,
+                  message.requestDigest,
+                  message.request,
+                ),
+              ),
+              Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
+            )
           if (message._tag === "MachineResult")
-            return receiveMachine(
-              socket,
-              message.access,
-              message.operationKey,
-              message.attempt,
-              message.machineId,
-              message.requestDigest,
-              message.outcome,
-            ).pipe(Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))))
+            return authority.validateAccess(redactAccess(message.access)).pipe(
+              Effect.andThen(
+                receiveMachine(
+                  socket,
+                  message.access,
+                  message.operationKey,
+                  message.attempt,
+                  message.machineId,
+                  message.requestDigest,
+                  message.outcome,
+                ),
+              ),
+              Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
+            )
           if (message._tag === "LocalExecutorGoodbye")
             return shutdown(socket, message.access).pipe(
               Effect.tap(() => Effect.sync(() => socket.close(1000, "shutdown"))),
               Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
             )
           if (message._tag !== "LocalCellResult") return Effect.void
-          return complete(socket, message.access, message.operationKey, message.attempt, message.response).pipe(
+          return authority.validateAccess(redactAccess(message.access)).pipe(
+            Effect.andThen(complete(socket, message.access, message.operationKey, message.attempt, message.response)),
             Effect.tap((result) =>
               Effect.sync(() =>
                 socket.send(
@@ -1318,5 +1332,17 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
   const pollTick = Effect.sleep("100 millis").pipe(Effect.andThen(pollAccepted()), Effect.ignore)
   yield* Effect.forever(pollTick).pipe(Effect.forkScoped)
 
-  return { receive, disconnected, execute, cancel, machine }
+  const active: LocalGateway["active"] = (socket) =>
+    Effect.gen(function* () {
+      const assignmentId = (yield* Ref.get(assignments)).get(socket)
+      if (assignmentId === undefined) return true
+      const current = (yield* Ref.get(sessions)).get(assignmentId)
+      if (current === undefined || current.socket !== socket) return false
+      return yield* authority.validateAccess(redactAccess(current.access)).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      )
+    })
+
+  return { receive, disconnected, active, execute, cancel, machine }
 })

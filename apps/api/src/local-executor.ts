@@ -147,7 +147,7 @@ export const layer = Layer.effect(
         FROM rika_hosted_local_executor_admissions
         WHERE assignment_id = ${input.fence.assignmentId} AND generation = ${input.fence.assignmentGeneration}
           AND device_id = ${input.fence.instanceId} AND process_incarnation = ${input.fence.processIncarnation}
-          AND consumed_at IS NOT NULL
+          AND consumed_at IS NOT NULL AND revoked_at IS NULL
         ORDER BY consumed_at DESC LIMIT 1`.pipe(
         Effect.mapError(() => failure("repository", "Local admission binding is unavailable")),
       )
@@ -174,7 +174,7 @@ export const layer = Layer.effect(
       const admitted = yield* sql<{ readonly id: string }>`SELECT id FROM rika_hosted_local_executor_admissions
         WHERE assignment_id = ${assignment.id} AND owner_id = ${assignment.ownerId}
           AND device_id = ${principal.deviceId} AND client_id = ${principal.clientId}
-          AND generation = ${assignment.generation} AND consumed_at IS NOT NULL
+          AND generation = ${assignment.generation} AND consumed_at IS NOT NULL AND revoked_at IS NULL
         LIMIT 1`.pipe(Effect.mapError(() => failure("repository", "Local admission binding is unavailable")))
       if (admitted.length === 0)
         return yield* failure("authentication", "Authenticated client has no consumed local admission")
@@ -300,7 +300,7 @@ export const layer = Layer.effect(
             to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt"
             FROM rika_hosted_local_executor_admissions
             WHERE id = ${input.admissionId} AND consumed_at IS NULL
-              AND expires_at > clock_timestamp()
+              AND revoked_at IS NULL AND expires_at > clock_timestamp()
             FOR UPDATE`.pipe(
               Effect.mapError(() => failure("authentication", "Local admission is invalid, expired, or consumed")),
             )
@@ -380,7 +380,7 @@ export const layer = Layer.effect(
         FROM rika_hosted_local_executor_admissions
         WHERE assignment_id = ${input.fence.assignmentId} AND generation = ${input.fence.assignmentGeneration}
           AND device_id = ${input.fence.instanceId} AND process_incarnation = ${input.fence.processIncarnation}
-          AND consumed_at IS NOT NULL
+          AND consumed_at IS NOT NULL AND revoked_at IS NULL
         ORDER BY consumed_at DESC LIMIT 1`.pipe(
         Effect.mapError(() => failure("repository", "Local workspace identity is unavailable")),
       )

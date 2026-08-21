@@ -11,6 +11,8 @@ export const AuthorizationAction = Schema.Literals([
   "thread:grant",
   "terminal:view",
   "terminal:input",
+  "presence:view",
+  "presence:update",
 ])
 export type AuthorizationAction = typeof AuthorizationAction.Type
 
@@ -46,6 +48,8 @@ const required: Readonly<Record<AuthorizationAction, number>> = {
   "thread:grant": rank.owner,
   "terminal:view": rank.viewer,
   "terminal:input": rank.controller,
+  "presence:view": rank.viewer,
+  "presence:update": rank.viewer,
 }
 
 const effectiveThreadRank = (subject: AuthorizationSubject) => {

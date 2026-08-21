@@ -24,6 +24,7 @@ import {
   type ThreadProtocolEvent,
   type ThreadProtocolStoreService,
 } from "@rika/product/thread-protocol-store"
+import { requireThreadAccess } from "./postgres-authority"
 
 const databaseError = (cause: unknown) =>
   StoreError.make({ reason: "database", message: `Thread protocol PostgreSQL operation failed: ${String(cause)}` })
@@ -78,12 +79,18 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
   const initializeThread: ThreadProtocolStoreService["initializeThread"] = Effect.fn(
     "PostgresThreadProtocolStore.initializeThread",
   )(function* (input) {
-    const rows = yield* query(sql`INSERT INTO rika_hosted_thread_protocol_state (owner_id, thread_id)
-      SELECT owner_id, id FROM rika_hosted_threads WHERE owner_id = ${input.ownerId} AND id = ${input.threadId}
-      ON CONFLICT (thread_id) DO UPDATE SET owner_id = EXCLUDED.owner_id
-      WHERE rika_hosted_thread_protocol_state.owner_id = EXCLUDED.owner_id
-      RETURNING thread_id`)
-    if (rows[0] === undefined) return yield* failure("not-found", "Thread is unavailable")
+    yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        yield* requireThreadAccess(sql, input, "thread:view")
+        const rows = yield* query(sql`INSERT INTO rika_hosted_thread_protocol_state (owner_id, thread_id)
+          SELECT owner_id, id FROM rika_hosted_threads WHERE owner_id = ${input.ownerId} AND id = ${input.threadId}
+          ON CONFLICT (thread_id) DO UPDATE SET owner_id = EXCLUDED.owner_id
+          WHERE rika_hosted_thread_protocol_state.owner_id = EXCLUDED.owner_id
+          RETURNING thread_id`)
+        if (rows[0] === undefined) return yield* failure("not-found", "Thread is unavailable")
+      }),
+    )
   })
 
   const admitCommand: ThreadProtocolStoreService["admitCommand"] = Effect.fn(
@@ -92,6 +99,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
     return yield* transaction(
       sql,
       Effect.gen(function* () {
+        yield* requireThreadAccess(sql, input, "thread:control", input.admittedAt)
         const stateRows = yield* query(sql<{ readonly version: string }>`SELECT version::text AS version
           FROM rika_hosted_thread_protocol_state
           WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
@@ -200,7 +208,8 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
           FOR UPDATE`)
         const current = rows[0]
         if (current === undefined) return yield* failure("not-found", "Command is unavailable")
-        if (current.state === "completed") return yield* commandRow(current)
+        const currentCommand = yield* commandRow(current)
+        if (current.state === "completed") return currentCommand
         const threadVersion = ThreadVersion.make(current.threadVersion)
         const events = yield* writeEvents({
           ownerId: input.ownerId,
@@ -261,67 +270,73 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
 
   const replay: ThreadProtocolStoreService["replay"] = Effect.fn("PostgresThreadProtocolStore.replay")(
     function* (input) {
-      const stateRows = yield* query(sql<{ readonly version: string; readonly cursor: string }>`
+      return yield* transaction(
+        sql,
+        Effect.gen(function* () {
+          yield* requireThreadAccess(sql, input, "thread:view")
+          const stateRows = yield* query(sql<{ readonly version: string; readonly cursor: string }>`
         SELECT version::text AS version, event_cursor::text AS cursor
         FROM rika_hosted_thread_protocol_state
         WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}`)
-      const state = stateRows[0]
-      if (state === undefined) return yield* failure("not-found", "Thread protocol state is unavailable")
-      const snapshotRows = yield* query(sql<{
-        readonly threadVersion: string
-        readonly cursor: string
-        readonly snapshot: unknown
-        readonly createdAt: string
-      }>`SELECT thread_version::text AS "threadVersion", cursor::text AS cursor, snapshot,
+          const state = stateRows[0]
+          if (state === undefined) return yield* failure("not-found", "Thread protocol state is unavailable")
+          const snapshotRows = yield* query(sql<{
+            readonly threadVersion: string
+            readonly cursor: string
+            readonly snapshot: unknown
+            readonly createdAt: string
+          }>`SELECT thread_version::text AS "threadVersion", cursor::text AS cursor, snapshot,
           ${sql.unsafe(timestampSql.replace("%s", "created_at"))} AS "createdAt"
         FROM rika_hosted_thread_protocol_snapshots
         WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
           AND cursor > ${input.afterCursor} AND cursor <= ${state.cursor}
           AND thread_version <= ${state.version}
         ORDER BY thread_version DESC LIMIT 1`)
-      const snapshotRow = snapshotRows[0]
-      const replayCursor = snapshotRow?.cursor ?? input.afterCursor
-      const eventRows = yield* query(sql<{
-        readonly sequence: string
-        readonly cursor: string
-        readonly threadVersion: string
-        readonly event: unknown
-        readonly createdAt: string
-      }>`SELECT sequence::text AS sequence, cursor::text AS cursor,
+          const snapshotRow = snapshotRows[0]
+          const replayCursor = snapshotRow?.cursor ?? input.afterCursor
+          const eventRows = yield* query(sql<{
+            readonly sequence: string
+            readonly cursor: string
+            readonly threadVersion: string
+            readonly event: unknown
+            readonly createdAt: string
+          }>`SELECT sequence::text AS sequence, cursor::text AS cursor,
           thread_version::text AS "threadVersion", event,
           ${sql.unsafe(timestampSql.replace("%s", "created_at"))} AS "createdAt"
         FROM rika_hosted_thread_protocol_events
         WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
           AND cursor > ${replayCursor} AND cursor <= ${state.cursor}
         ORDER BY sequence LIMIT ${Math.min(Math.max(Math.trunc(input.limit), 1), 1_000)}`)
-      const events: Array<ThreadProtocolEvent> = []
-      for (const row of eventRows)
-        events.push({
-          ownerId: input.ownerId,
-          threadId: input.threadId,
-          sequence: row.sequence,
-          cursor: ThreadEventCursor.make(row.cursor),
-          threadVersion: ThreadVersion.make(row.threadVersion),
-          event: yield* decode(InteractiveEventSchema, row.event),
-          createdAt: Timestamp.make(row.createdAt),
-        })
-      return {
-        threadVersion: ThreadVersion.make(state.version),
-        cursor: ThreadEventCursor.make(state.cursor),
-        ...(snapshotRow === undefined
-          ? {}
-          : {
-              snapshot: {
-                ownerId: input.ownerId,
-                threadId: input.threadId,
-                threadVersion: ThreadVersion.make(snapshotRow.threadVersion),
-                cursor: ThreadEventCursor.make(snapshotRow.cursor),
-                snapshot: yield* decode(HostedThreadSnapshot, snapshotRow.snapshot),
-                createdAt: Timestamp.make(snapshotRow.createdAt),
-              },
-            }),
-        events,
-      }
+          const events: Array<ThreadProtocolEvent> = []
+          for (const row of eventRows)
+            events.push({
+              ownerId: input.ownerId,
+              threadId: input.threadId,
+              sequence: row.sequence,
+              cursor: ThreadEventCursor.make(row.cursor),
+              threadVersion: ThreadVersion.make(row.threadVersion),
+              event: yield* decode(InteractiveEventSchema, row.event),
+              createdAt: Timestamp.make(row.createdAt),
+            })
+          return {
+            threadVersion: ThreadVersion.make(state.version),
+            cursor: ThreadEventCursor.make(state.cursor),
+            ...(snapshotRow === undefined
+              ? {}
+              : {
+                  snapshot: {
+                    ownerId: input.ownerId,
+                    threadId: input.threadId,
+                    threadVersion: ThreadVersion.make(snapshotRow.threadVersion),
+                    cursor: ThreadEventCursor.make(snapshotRow.cursor),
+                    snapshot: yield* decode(HostedThreadSnapshot, snapshotRow.snapshot),
+                    createdAt: Timestamp.make(snapshotRow.createdAt),
+                  },
+                }),
+            events,
+          }
+        }),
+      )
     },
   )
 
@@ -331,9 +346,10 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
     return yield* transaction(
       sql,
       Effect.gen(function* () {
+        yield* requireThreadAccess(sql, input, "thread:view", input.acknowledgedAt)
         const rows = yield* query(sql<{ readonly cursor: string }>`INSERT INTO rika_hosted_thread_protocol_cursors
           (owner_id, thread_id, client_id, cursor, acknowledged_at)
-          SELECT state.owner_id, state.thread_id, ${input.clientId}, ${input.cursor}, ${input.acknowledgedAt}
+          SELECT state.owner_id, state.thread_id, ${input.actor.clientId}, ${input.cursor}, ${input.acknowledgedAt}
           FROM rika_hosted_thread_protocol_state state
           WHERE state.owner_id = ${input.ownerId} AND state.thread_id = ${input.threadId}
             AND state.event_cursor >= ${input.cursor}

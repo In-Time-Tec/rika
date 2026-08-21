@@ -23,6 +23,7 @@ const clientId = ClientId.make("client")
 const personalOwnerId = OwnerId.make("personal-owner")
 const organizationOwnerId = OwnerId.make("organization-owner")
 const personal = { _tag: "PersonalOwner" as const, userId }
+const personalActor = { _tag: "PersonalActor" as const, owner: personal, userId, clientId, deviceId }
 const organization = {
   _tag: "OrganizationOwner" as const,
   organizationId: OrganizationId.make("organization"),
@@ -40,7 +41,30 @@ it.layer(layer)("hosted memory store owner identity", (test) => {
         publicKeyFingerprint: "sha256:laptop",
         now,
       })
-      yield* store.authenticateClient({ id: clientId, userId, deviceId, now, expiresAt: later })
+      expect(
+        yield* store
+          .authenticateClient({
+            id: clientId,
+            userId,
+            deviceId,
+            now,
+            expiresAt: Timestamp.make("2026-01-01T00:05:01.000Z"),
+          })
+          .pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-authority" } })
+      yield* store.authenticateClient({
+        id: clientId,
+        userId,
+        deviceId,
+        now,
+        expiresAt: later,
+      })
+      yield* store.grantClientAuthority({
+        ownerId: personalOwnerId,
+        actor: personalActor,
+        now,
+        expiresAt: later,
+      })
       const workspace = yield* store.createWorkspace({
         id: WorkspaceId.make("personal-workspace"),
         ownerId: personalOwnerId,
@@ -59,6 +83,24 @@ it.layer(layer)("hosted memory store owner identity", (test) => {
       expect(workspace.projectId).toBeUndefined()
       expect(thread.projectId).toBeUndefined()
       expect(thread.ownerId).toBe(personalOwnerId)
+      yield* store.authorizeThread({
+        ownerId: personalOwnerId,
+        threadId: thread.id,
+        actor: personalActor,
+        action: "thread:control",
+        at: now,
+      })
+      expect(
+        yield* store
+          .authorizeThread({
+            ownerId: personalOwnerId,
+            threadId: thread.id,
+            actor: personalActor,
+            action: "thread:view",
+            at: later,
+          })
+          .pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-authority" } })
       expect(
         yield* Effect.result(
           store.putThreadGrant({

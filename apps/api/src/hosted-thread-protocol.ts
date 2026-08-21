@@ -14,7 +14,7 @@ import {
   ThreadVersion,
   Timestamp,
 } from "@rika/product/hosted-model"
-import { StoreError } from "@rika/product/hosted-store"
+import { HostedStore, StoreError } from "@rika/product/hosted-store"
 import { InteractiveCommand } from "@rika/product/interactive-command"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import {
@@ -160,6 +160,7 @@ const productCommand = (command: MutatingThreadCommand) => {
 
 export interface HostedThreadConnection {
   readonly receive: (message: ClientMessage) => Effect.Effect<ReadonlyArray<ServerFrame>, never>
+  readonly active: Effect.Effect<boolean>
   readonly detach: Effect.Effect<void>
 }
 
@@ -187,6 +188,7 @@ export const layer = Layer.effect(
     const product = yield* HostedProduct
     const operations = yield* HostedOperations
     const store = yield* ThreadProtocolStore
+    const hosted = yield* HostedStore
     const crypto = yield* Crypto.Crypto
 
     const digest = Effect.fn("HostedThreadProtocol.digest")(function* (ticket: string) {
@@ -247,6 +249,7 @@ export const layer = Layer.effect(
               .replay({
                 ownerId: attached.authority.ownerId,
                 threadId: attached.threadId,
+                actor: attached.authority.actor,
                 afterCursor: zeroCursor,
                 limit: 1,
               })
@@ -295,8 +298,12 @@ export const layer = Layer.effect(
               })
               .pipe(Effect.mapError(productFailure))
             const threadId = ThreadId.make(created.threadId)
-            const authority = yield* product.authorizeThread(principal, threadId).pipe(Effect.mapError(productFailure))
-            yield* store.initializeThread({ ownerId: authority.ownerId, threadId }).pipe(Effect.mapError(storeFailure))
+            const authority = yield* product
+              .authorizeThread(principal, threadId, "thread:control")
+              .pipe(Effect.mapError(productFailure))
+            yield* store
+              .initializeThread({ ownerId: authority.ownerId, threadId, actor: authority.actor })
+              .pipe(Effect.mapError(storeFailure))
             const encoded = yield* Schema.encodeEffect(JsonObject)(command).pipe(Effect.mapError(() => unavailable()))
             const admission = yield* store
               .admitCommand({
@@ -340,15 +347,16 @@ export const layer = Layer.effect(
 
           if (command._tag === "AttachThread") {
             const authority = yield* product
-              .authorizeThread(principal, command.threadId)
+              .authorizeThread(principal, command.threadId, "thread:view")
               .pipe(Effect.mapError(productFailure))
             yield* store
-              .initializeThread({ ownerId: authority.ownerId, threadId: command.threadId })
+              .initializeThread({ ownerId: authority.ownerId, threadId: command.threadId, actor: authority.actor })
               .pipe(Effect.mapError(storeFailure))
             const replay = yield* store
               .replay({
                 ownerId: authority.ownerId,
                 threadId: command.threadId,
+                actor: authority.actor,
                 afterCursor: command.afterCursor,
                 limit: 1_000,
               })
@@ -393,8 +401,9 @@ export const layer = Layer.effect(
           }
           if (attached === undefined)
             return yield* HostedThreadProtocolError.make({ kind: "invalid", message: "Attach a Thread first" })
+          const requiredAction = command._tag === "AcknowledgeCursor" ? "thread:view" : "thread:control"
           const authority = yield* product
-            .authorizeThread(principal, attached.threadId)
+            .authorizeThread(principal, attached.threadId, requiredAction)
             .pipe(Effect.mapError(productFailure))
           attached = { threadId: attached.threadId, authority }
 
@@ -403,13 +412,19 @@ export const layer = Layer.effect(
               .acknowledgeCursor({
                 ownerId: authority.ownerId,
                 threadId: attached.threadId,
-                clientId: binding.clientId,
+                actor: authority.actor,
                 cursor: command.cursor,
                 acknowledgedAt: receivedAt,
               })
               .pipe(Effect.mapError(storeFailure))
             const replay = yield* store
-              .replay({ ownerId: authority.ownerId, threadId: attached.threadId, afterCursor: cursor, limit: 1 })
+              .replay({
+                ownerId: authority.ownerId,
+                threadId: attached.threadId,
+                actor: authority.actor,
+                afterCursor: cursor,
+                limit: 1,
+              })
               .pipe(Effect.mapError(storeFailure))
             return [
               frame({
@@ -560,6 +575,22 @@ export const layer = Layer.effect(
               Effect.catch((error) => reject(message, error)),
               Effect.orDie,
             ),
+          active: Effect.gen(function* () {
+            const at = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+            if (attached === undefined) {
+              yield* hosted.validateClient({
+                userId: binding.userId,
+                clientId: binding.clientId,
+                deviceId: binding.deviceId,
+                at,
+              })
+              return true
+            }
+            yield* product
+              .authorizeThread(principal, attached.threadId, "thread:view")
+              .pipe(Effect.mapError(productFailure))
+            return true
+          }).pipe(Effect.orElseSucceed(() => false)),
           detach: Effect.sync(() => (attached = undefined)),
         }
       },

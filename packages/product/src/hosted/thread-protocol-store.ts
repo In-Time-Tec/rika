@@ -76,6 +76,7 @@ export interface ThreadProtocolStoreService {
   readonly initializeThread: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
+    readonly actor: ActorAttribution
   }) => Effect.Effect<void, StoreError>
   readonly admitCommand: (input: {
     readonly ownerId: OwnerId
@@ -105,13 +106,14 @@ export interface ThreadProtocolStoreService {
   readonly replay: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
+    readonly actor: ActorAttribution
     readonly afterCursor: ThreadEventCursor
     readonly limit: number
   }) => Effect.Effect<ThreadReplay, StoreError>
   readonly acknowledgeCursor: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
-    readonly clientId: ClientId
+    readonly actor: ActorAttribution
     readonly cursor: ThreadEventCursor
     readonly acknowledgedAt: Timestamp
   }) => Effect.Effect<ThreadEventCursor, StoreError>

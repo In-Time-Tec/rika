@@ -1,6 +1,6 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { Clock, Context, Crypto, DateTime, Effect, Layer, Schema } from "effect"
-import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
+import { AuthorizationPolicy, type AuthorizationAction } from "@rika/product/hosted-authorization"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
 import {
   BetterAuthMemberId,
@@ -130,6 +130,7 @@ export interface HostedProductService {
   readonly authorizeThread: (
     principal: AuthenticatedPrincipal,
     threadId: string,
+    action: AuthorizationAction,
   ) => Effect.Effect<ThreadAuthority, HostedProductError>
   readonly threadExecutionContext: (
     ownerId: OwnerId,
@@ -172,7 +173,7 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
           userId,
           deviceId,
           now,
-          expiresAt: DateTime.formatIso(DateTime.makeUnsafe(currentTime + 60 * 60 * 1000)),
+          expiresAt: DateTime.formatIso(DateTime.makeUnsafe(currentTime + 5 * 60 * 1000)),
         })
         return deviceId
       })
@@ -289,6 +290,29 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
                     .pipe(Effect.mapError(() => forbidden()))
                 }
                 const deviceId = yield* activateClient(input.principal, authority.userId)
+                const actor =
+                  authority.owner.identity._tag === "PersonalOwner"
+                    ? ({
+                        _tag: "PersonalActor",
+                        owner: authority.owner.identity,
+                        userId: authority.userId,
+                        clientId: ClientId.make(input.principal.clientId),
+                        deviceId,
+                      } as const)
+                    : ({
+                        _tag: "OrganizationActor",
+                        owner: authority.owner.identity,
+                        userId: authority.userId,
+                        membershipId: membershipId!,
+                        clientId: ClientId.make(input.principal.clientId),
+                        deviceId,
+                      } as const)
+                yield* store.grantClientAuthority({
+                  ownerId: authority.owner.id,
+                  actor,
+                  now: timestamp,
+                  expiresAt: DateTime.formatIso(DateTime.makeUnsafe(currentTime + 5 * 60 * 1000)),
+                })
                 const executorKind = input.placement === "e2b" ? "e2b" : "local_device"
                 if ((input.placement === "local") !== (input.localRunnerTarget !== undefined))
                   return yield* HostedProductError.make({
@@ -476,7 +500,7 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
       )
 
       const authorizeThread: HostedProductService["authorizeThread"] = Effect.fn("HostedProduct.authorizeThread")(
-        function* (principal, threadId) {
+        function* (principal, threadId, action) {
           const threadRows = yield* sql<{
             readonly ownerId: string
             readonly kind: "personal" | "organization"
@@ -511,7 +535,7 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
           if (resolved.kind === "organization") {
             const membershipId = BetterAuthMemberId.make(resolved.membershipId!)
             yield* policy
-              .authorize("thread:operate", {
+              .authorize(action, {
                 memberId: membershipId,
                 ...(resolved.createdByUserId === principal.userId ? { threadCreatorMemberId: membershipId } : {}),
                 executorKind: resolved.executorKind,
@@ -542,7 +566,20 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
                   clientId: ClientId.make(principal.clientId),
                   deviceId: DeviceId.make(principal.deviceId),
                 } as const)
-          yield* activateClient(principal, userId)
+          const nowMillis = yield* Clock.currentTimeMillis
+          yield* store.grantClientAuthority({
+            ownerId: OwnerId.make(resolved.ownerId),
+            actor,
+            now: DateTime.formatIso(DateTime.makeUnsafe(nowMillis)),
+            expiresAt: DateTime.formatIso(DateTime.makeUnsafe(nowMillis + 5 * 60 * 1000)),
+          })
+          yield* store.authorizeThread({
+            ownerId: OwnerId.make(resolved.ownerId),
+            threadId: ThreadId.make(threadId),
+            actor,
+            action,
+            at: DateTime.formatIso(DateTime.makeUnsafe(nowMillis)),
+          })
           return { ownerId: OwnerId.make(resolved.ownerId), actor }
         },
         Effect.mapError(storeFailure),
@@ -607,7 +644,7 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
       )
 
       const admitRun: HostedProductService["admitRun"] = Effect.fn("HostedProduct.admitRun")(function* (input) {
-        const authority = yield* authorizeThread(input.principal, input.threadId)
+        const authority = yield* authorizeThread(input.principal, input.threadId, "thread:operate")
         const executionRoute = yield* modelRegistry
           .resolve(authority.ownerId, input.mode)
           .pipe(Effect.mapError(modelFailure))

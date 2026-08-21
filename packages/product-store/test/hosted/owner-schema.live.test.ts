@@ -53,8 +53,8 @@ it.effect.skipIf(databaseUrl === undefined)("creates fresh personal and organiza
             ('personal-device','personal-user','Personal Device','personal-fingerprint',now(),now()),
             ('org-device','org-user','Org Device','org-fingerprint',now(),now());
           INSERT INTO rika_hosted_clients (id,user_id,device_id,authenticated_at,last_seen_at,expires_at) VALUES
-            ('personal-client','personal-user','personal-device',now(),now(),now()+interval '1 hour'),
-            ('org-client','org-user','org-device',now(),now(),now()+interval '1 hour');
+            ('personal-client','personal-user','personal-device',now(),now(),now()+interval '5 minutes'),
+            ('org-client','org-user','org-device',now(),now(),now()+interval '5 minutes');
           INSERT INTO rika_hosted_thread_commands (owner_id,thread_id,command_id,idempotency_key,actor,sequence,commit_cursor,command,admitted_at) VALUES
             ('personal-owner','personal-thread','personal-command','personal-key',
              '{"_tag":"PersonalActor","owner":{"_tag":"PersonalOwner","userId":"personal-user"},"userId":"personal-user","clientId":"personal-client","deviceId":"personal-device"}',1,1,'{}',now()),
@@ -88,9 +88,7 @@ it.effect.skipIf(databaseUrl === undefined)("creates fresh personal and organiza
         "23503",
       )
       yield* Effect.promise(() => pool.query(`DELETE FROM rika_hosted_owners WHERE id='personal-owner'`))
-      const result = yield* Effect.promise(() =>
-        pool.query(`SELECT id FROM rika_hosted_threads ORDER BY id`),
-      )
+      const result = yield* Effect.promise(() => pool.query(`SELECT id FROM rika_hosted_threads ORDER BY id`))
       expect(result.rows).toEqual([{ id: "org-thread" }])
     } finally {
       yield* Effect.promise(() => pool.end())

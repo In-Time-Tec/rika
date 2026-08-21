@@ -1,11 +1,12 @@
 import { expect, it } from "@effect/vitest"
 import { Deferred, Effect, Exit, Fiber, Redacted, Schema, Scope, Stream } from "effect"
+import { TestClock } from "effect/testing"
 import type { CliDeviceDirectory, IdentityConfig, IdentityDirectory, IdentityRuntime } from "@rika/identity"
 import { ServerFrame } from "@rika/product/client-protocol"
 import type { HostedProductService } from "../src/hosted-product"
 import type { Runtime as ExecutorRuntime } from "../src/executor"
 import type { HttpDependencies } from "../src/http"
-import { canonicalPublicRequest, serveApi } from "../src/adapters/bun-server"
+import { canonicalPublicRequest, pollAuthority, serveApi } from "../src/adapters/bun-server"
 
 const config: IdentityConfig = {
   production: false,
@@ -60,6 +61,7 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
       gateway: {
         receive: () => Effect.void,
         disconnected: () => Effect.void,
+        active: () => Effect.succeed(true),
         execute: () => Effect.die("unused"),
         cancel: () => Effect.void,
         machine: () => Effect.die("unused"),
@@ -69,6 +71,7 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
       localGateway: {
         receive: () => Effect.void,
         disconnected: () => Effect.void,
+        active: () => Effect.succeed(true),
         execute: () => Effect.die("unused"),
         cancel: () => Effect.void,
         machine: () => Effect.die("unused"),
@@ -176,6 +179,7 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
         gateway: {
           receive: () => Effect.void,
           disconnected: () => Effect.void,
+          active: () => Effect.succeed(true),
           execute: () => Effect.die("unused"),
           cancel: () => Effect.void,
           machine: () => Effect.die("unused"),
@@ -185,6 +189,7 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
         localGateway: {
           receive: () => Effect.void,
           disconnected: () => Effect.void,
+          active: () => Effect.succeed(true),
           execute: () => Effect.die("unused"),
           cancel: () => Effect.void,
           machine: () => Effect.die("unused"),
@@ -215,6 +220,27 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
     yield* Scope.close(resourceScope, Exit.void)
     expect(response.status).toBe(200)
     expect(handledUrl).toBe("https://api.example.test/api/auth/session?proof=1")
+  }),
+)
+
+it.effect("closes inactive sessions with a policy violation on the authority schedule", () =>
+  Effect.gen(function* () {
+    let active = true
+    const closed: Array<readonly [number | undefined, string | undefined]> = []
+    const polling = yield* pollAuthority(
+      new Set([
+        {
+          validate: () => Effect.sync(() => active),
+          close: (code?: number, reason?: string) => closed.push([code, reason]),
+        },
+      ]),
+    ).pipe(Effect.forkChild)
+    yield* TestClock.adjust("99 millis")
+    expect(closed).toEqual([])
+    active = false
+    yield* TestClock.adjust("1 millis")
+    expect(closed).toEqual([[1008, "authority revoked"]])
+    yield* Fiber.interrupt(polling)
   }),
 )
 
@@ -264,6 +290,7 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
               ])
             },
             detach: Effect.void,
+            active: Effect.succeed(true),
           })
         },
       },
@@ -272,6 +299,7 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
         gateway: {
           receive: () => Effect.void,
           disconnected: () => Effect.void,
+          active: () => Effect.succeed(true),
           execute: () => Effect.die("unused"),
           cancel: () => Effect.void,
           machine: () => Effect.die("unused"),
@@ -281,6 +309,7 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
         localGateway: {
           receive: () => Effect.void,
           disconnected: () => Effect.void,
+          active: () => Effect.succeed(true),
           execute: () => Effect.die("unused"),
           cancel: () => Effect.void,
           machine: () => Effect.die("unused"),

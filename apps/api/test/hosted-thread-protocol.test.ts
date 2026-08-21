@@ -30,6 +30,7 @@ import { TurnId } from "@rika/product/turn-record"
 import { HostedOperations, type HostedOperationsService } from "../src/hosted-operations"
 import { HostedProduct, type HostedProductService, type OwnerSelection } from "../src/hosted-product"
 import { HostedThreadProtocol, layer as hostedThreadProtocolLayer } from "../src/hosted-thread-protocol"
+import { layer as hostedStoreLayer } from "@rika/product-store/memory-store"
 
 const timestamp = Timestamp.make("2026-08-21T00:00:00.000Z")
 const userId = BetterAuthUserId.make("user-1")
@@ -204,6 +205,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
     Layer.succeed(HostedProduct, product),
     Layer.succeed(HostedOperations, operations),
     Layer.succeed(ThreadProtocolStore, store),
+    hostedStoreLayer,
     BunCrypto.layer,
   )
   return Effect.scoped(
@@ -375,6 +377,7 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
     Layer.succeed(HostedProduct, product),
     Layer.succeed(HostedOperations, operations),
     Layer.succeed(ThreadProtocolStore, store),
+    hostedStoreLayer,
     BunCrypto.layer,
   )
   return Effect.scoped(

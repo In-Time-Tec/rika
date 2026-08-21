@@ -169,6 +169,7 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "migrations/postgres/0013-thread-protocol.sql",
     "migrations/postgres/0014-local-runner-registration.sql",
     "migrations/postgres/0015-environment-and-egress.sql",
+    "migrations/postgres/0016-authority-revocation.sql",
     "postgres-product-repositories",
     "product-database-layer",
     "sqlite-goal-repository",

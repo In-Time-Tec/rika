@@ -3,11 +3,13 @@ import { expect, it } from "@effect/vitest"
 import { identityMigrations, runMigration } from "@rika/identity"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import {
+  BetterAuthMemberId,
   BetterAuthUserId,
   ClientId,
   CommandId,
   DeviceId,
   IdempotencyKey,
+  OrganizationId,
   OwnerId,
   ThreadEventCursor,
   ThreadId,
@@ -23,7 +25,7 @@ import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId } from "@rika/product/turn-record"
 import { migrations } from "@rika/product-store/migrations"
 import { layer } from "@rika/product-store/postgres-layer"
-import { Context, Effect, Layer, Random, Redacted } from "effect"
+import { Context, DateTime, Effect, Layer, Random, Redacted } from "effect"
 import { Pool } from "pg"
 import { HostedOperations, type HostedOperationsService } from "../src/hosted-operations"
 import { HostedProduct, type HostedProductService } from "../src/hosted-product"
@@ -35,8 +37,13 @@ import {
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined
-const now = Timestamp.make("2026-01-01T00:00:00.000Z")
-const later = Timestamp.make("2026-01-01T00:01:00.000Z")
+const startedAt = DateTime.toEpochMillis(DateTime.nowUnsafe())
+const timestampAfter = (milliseconds: number) =>
+  Timestamp.make(DateTime.formatIso(DateTime.makeUnsafe(startedAt + milliseconds)))
+const now = timestampAfter(0)
+const later = timestampAfter(60_000)
+const authorityExpiresAt = timestampAfter(5 * 60_000)
+const presenceExpiresAt = timestampAfter(4 * 60_000)
 const userId = BetterAuthUserId.make("protocol-user")
 const ownerId = OwnerId.make("protocol-owner")
 const workspaceId = WorkspaceId.make("protocol-workspace")
@@ -122,7 +129,13 @@ const setup = (pool: Pool) =>
       userId,
       deviceId,
       now,
-      expiresAt: Timestamp.make("2027-01-01T00:00:00.000Z"),
+      expiresAt: authorityExpiresAt,
+    })
+    yield* hosted.grantClientAuthority({
+      ownerId,
+      actor,
+      now,
+      expiresAt: authorityExpiresAt,
     })
     yield* hosted.createWorkspace({
       id: workspaceId,
@@ -140,7 +153,7 @@ const setup = (pool: Pool) =>
       now,
     })
     const protocol = yield* ThreadProtocolStore
-    yield* protocol.initializeThread({ ownerId, threadId })
+    yield* protocol.initializeThread({ ownerId, threadId, actor })
     return protocol
   })
 
@@ -202,14 +215,20 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
         events: [{ _tag: "ExecutionControlled", action: "cancelled" }],
         createdAt: later,
       })
-      const replay = yield* protocol.replay({ ownerId, threadId, afterCursor: ThreadEventCursor.make("0"), limit: 100 })
+      const replay = yield* protocol.replay({
+        ownerId,
+        threadId,
+        actor,
+        afterCursor: ThreadEventCursor.make("0"),
+        limit: 100,
+      })
       expect(replay).toMatchObject({ threadVersion: "2", cursor: "2", snapshot: { cursor: "1" } })
       expect(replay.events.map((event) => event.cursor)).toEqual(["2"])
       expect(
         yield* protocol.acknowledgeCursor({
           ownerId,
           threadId,
-          clientId,
+          actor,
           cursor: ThreadEventCursor.make("1"),
           acknowledgedAt: later,
         }),
@@ -217,6 +236,7 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
       const compacted = yield* protocol.replay({
         ownerId,
         threadId,
+        actor,
         afterCursor: ThreadEventCursor.make("0"),
         limit: 100,
       })
@@ -655,6 +675,167 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
         { payload: { _tag: "ThreadSnapshot", threadVersion: "6", cursor: "3" } },
         { payload: { _tag: "ThreadEvent", event: { cursor: "4", threadVersion: "6" } } },
       ])
+    }),
+  ),
+)
+
+it.effect.skipIf(!live)("revokes organization authority without revoking the same client's personal authority", () =>
+  withDatabase((pool) =>
+    Effect.gen(function* () {
+      const protocol = yield* setup(pool)
+      const hosted = yield* HostedStore
+      const organizationId = OrganizationId.make("protocol-organization")
+      const membershipId = BetterAuthMemberId.make("protocol-membership")
+      const organizationOwnerId = OwnerId.make("protocol-organization-owner")
+      const organizationWorkspaceId = WorkspaceId.make("protocol-organization-workspace")
+      const organizationThreadId = ThreadId.make("protocol-organization-thread")
+      const organizationActor = {
+        _tag: "OrganizationActor" as const,
+        owner: { _tag: "OrganizationOwner" as const, organizationId },
+        userId,
+        membershipId,
+        clientId,
+        deviceId,
+      }
+      yield* query(
+        pool,
+        `INSERT INTO "organization" (id, name, slug, created_at)
+          VALUES ($1, 'Protocol', 'protocol', now())`,
+        [organizationId],
+      )
+      yield* query(
+        pool,
+        `INSERT INTO member (id, organization_id, user_id, role, created_at)
+          VALUES ($1, $2, $3, 'owner', now())`,
+        [membershipId, organizationId, userId],
+      )
+      yield* hosted.putOwner({ id: organizationOwnerId, identity: organizationActor.owner, now })
+      yield* hosted.grantClientAuthority({
+        ownerId: organizationOwnerId,
+        actor: organizationActor,
+        now,
+        expiresAt: authorityExpiresAt,
+      })
+      yield* hosted.createWorkspace({
+        id: organizationWorkspaceId,
+        ownerId: organizationOwnerId,
+        createdByUserId: userId,
+        executorKind: "local_device",
+        now,
+      })
+      yield* hosted.createThread({
+        id: organizationThreadId,
+        ownerId: organizationOwnerId,
+        workspaceId: organizationWorkspaceId,
+        createdByUserId: userId,
+        executorKind: "local_device",
+        now,
+      })
+      yield* protocol.initializeThread({
+        ownerId: organizationOwnerId,
+        threadId: organizationThreadId,
+        actor: organizationActor,
+      })
+      const organizationAdmission = yield* protocol.admitCommand({
+        ownerId: organizationOwnerId,
+        threadId: organizationThreadId,
+        commandId: CommandId.make("organization-command"),
+        idempotencyKey: IdempotencyKey.make("organization-command-key"),
+        expectedThreadVersion: ThreadVersion.make("0"),
+        actor: organizationActor,
+        command: { _tag: "Cancel" },
+        admittedAt: now,
+      })
+      yield* protocol.completeCommand({
+        ownerId: organizationOwnerId,
+        threadId: organizationThreadId,
+        commandId: organizationAdmission.command.commandId,
+        result: { _tag: "Applied" },
+        events: [],
+        snapshot: {
+          ...snapshot,
+          thread: {
+            ...snapshot.thread,
+            id: ProductThreadId.make(organizationThreadId),
+            workspace: organizationWorkspaceId,
+          },
+        },
+        completedAt: later,
+      })
+      yield* hosted.upsertPresence({
+        ownerId: organizationOwnerId,
+        threadId: organizationThreadId,
+        actor: organizationActor,
+        status: "controlling",
+        now,
+        expiresAt: presenceExpiresAt,
+      })
+
+      yield* query(pool, `DELETE FROM member WHERE id = $1`, [membershipId])
+
+      const authorities = yield* query(
+        pool,
+        `SELECT owner_id AS "ownerId", revoked_at IS NOT NULL AS revoked
+          FROM rika_hosted_client_authorities WHERE client_id = $1 ORDER BY owner_id`,
+        [clientId],
+      )
+      expect(authorities.rows).toEqual([
+        { ownerId: organizationOwnerId, revoked: true },
+        { ownerId, revoked: false },
+      ])
+      expect(
+        yield* protocol
+          .replay({
+            ownerId: organizationOwnerId,
+            threadId: organizationThreadId,
+            actor: organizationActor,
+            afterCursor: ThreadEventCursor.make("0"),
+            limit: 100,
+          })
+          .pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-authority" } })
+      expect(
+        yield* protocol
+          .admitCommand({
+            ownerId: organizationOwnerId,
+            threadId: organizationThreadId,
+            commandId: CommandId.make("revoked-command"),
+            idempotencyKey: IdempotencyKey.make("revoked-command-key"),
+            expectedThreadVersion: ThreadVersion.make("1"),
+            actor: organizationActor,
+            command: { _tag: "Cancel" },
+            admittedAt: later,
+          })
+          .pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-authority" } })
+      expect(
+        yield* hosted
+          .listPresence({
+            ownerId: organizationOwnerId,
+            threadId: organizationThreadId,
+            actor: organizationActor,
+            now: later,
+          })
+          .pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-authority" } })
+
+      const personalReplay = yield* protocol.replay({
+        ownerId,
+        threadId,
+        actor,
+        afterCursor: ThreadEventCursor.make("0"),
+        limit: 100,
+      })
+      expect(personalReplay).toMatchObject({ threadVersion: "0", cursor: "0" })
+      yield* hosted.upsertPresence({
+        ownerId,
+        threadId,
+        actor,
+        status: "viewing",
+        now: later,
+        expiresAt: presenceExpiresAt,
+      })
+      expect(yield* hosted.listPresence({ ownerId, threadId, actor, now: later })).toHaveLength(1)
     }),
   ),
 )
