@@ -171,6 +171,9 @@ it.effect("derives personal authority and returns committed outcomes for retries
     projects: () => Effect.succeed([]),
     activatePrincipal: () => Effect.void,
     authorizeThread: () => Effect.succeed({ ownerId, actor }),
+    registerLocalRunner: () => Effect.die("unused"),
+    setRemoteThreadCreation: () => Effect.die("unused"),
+    pollLocalRunner: () => Effect.die("unused"),
     createConnection: (input) => {
       selectedOwner = input.owner
       return Effect.succeed({ threadId })
@@ -209,6 +212,7 @@ it.effect("derives personal authority and returns committed outcomes for retries
           expectedThreadVersion: ThreadVersion.make("0"),
           owner: { kind: "personal" },
           placement: "local",
+          localRunnerTarget: { deviceId: "device-1" as never, checkoutFingerprint: "checkout-1" as never },
         },
       })
       expect(created[0]?.payload).toMatchObject({ _tag: "CommandAccepted", threadVersion: "1" })

@@ -72,7 +72,13 @@ describe("hosted owner and actor attribution", () => {
 describe("hosted Thread client protocol", () => {
   it("round trips every interactive command through one versioned envelope", () => {
     const messages = [
-      envelope({ _tag: "CreateThread", ...mutation, owner: { kind: "personal" }, placement: "local" }),
+      envelope({
+        _tag: "CreateThread",
+        ...mutation,
+        owner: { kind: "personal" },
+        placement: "local",
+        localRunnerTarget: { deviceId: "device-1", checkoutFingerprint: "checkout-1" },
+      }),
       envelope({
         _tag: "CreateThread",
         ...mutation,

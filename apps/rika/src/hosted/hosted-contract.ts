@@ -1,4 +1,10 @@
 import { Context, Effect, Option, Redacted, Schema } from "effect"
+import type { ClientTicketResponse } from "@rika/product/client-protocol"
+import type {
+  LocalRunnerPollResult,
+  LocalRunnerProfile,
+  RemoteThreadCreation,
+} from "@rika/product/local-runner-registration"
 
 export const defaultOrigin = "https://rika-app.up.railway.app"
 export const scopes = "openid profile email offline_access account"
@@ -205,6 +211,27 @@ export interface HttpInterface {
     idempotencyKey: string,
     session: Session,
   ) => Effect.Effect<RunResult, HostedError>
+  readonly issueThreadTicket: (
+    origin: string,
+    session: Session,
+  ) => Effect.Effect<ClientTicketResponse, HostedError>
+  readonly registerLocalRunner: (
+    origin: string,
+    checkoutFingerprint: string,
+    registration: LocalRunnerProfile,
+    session: Session,
+  ) => Effect.Effect<void, HostedError>
+  readonly setRemoteThreadCreation: (
+    origin: string,
+    checkoutFingerprint: string,
+    preference: RemoteThreadCreation,
+    session: Session,
+  ) => Effect.Effect<void, HostedError>
+  readonly pollLocalRunner: (
+    origin: string,
+    checkoutFingerprint: string,
+    session: Session,
+  ) => Effect.Effect<LocalRunnerPollResult, HostedError>
   readonly putProviderCredential: (
     origin: string,
     owner: OwnerSelection,

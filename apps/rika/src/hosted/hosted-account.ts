@@ -83,7 +83,7 @@ const sessionFrom = (tokens: TokenSet, privateJwk: PrivateJwk): Session => ({
   privateJwk,
 })
 
-const selectedProfile = Effect.fn("HostedAccount.profile")(function* () {
+export const selectedProfile = Effect.fn("HostedAccount.profile")(function* () {
   const store = yield* ProfileStore
   const loaded = yield* store.load
   if (Option.isNone(loaded)) return yield* failure("login-required", "Run rika auth login first")
@@ -104,7 +104,7 @@ const refresh = Effect.fn("HostedAccount.refresh")(function* (profile: Profile, 
   )
 })
 
-const authenticated = <A>(
+export const authenticated = <A>(
   profile: Profile,
   request: (session: Session) => Effect.Effect<A, HostedError>,
 ): Effect.Effect<A, HostedError, Http | CredentialStore> =>

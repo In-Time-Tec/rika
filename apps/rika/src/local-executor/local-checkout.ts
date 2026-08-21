@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto"
+import { DeviceId, WorkspaceId } from "@rika/product/hosted-model"
+import { CheckoutFingerprint } from "@rika/product/local-runner-registration"
 import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import type { LocalRunnerRegistration, RemoteThreadCreation } from "./local-runner-contract"
@@ -61,15 +63,15 @@ export const inspectLocalCheckout = Effect.fn("LocalCheckout.inspect")(function*
   return {
     workspacePath: checkoutPath,
     registration: {
-      deviceId: input.deviceId,
-      checkoutFingerprint,
+      deviceId: DeviceId.make(input.deviceId),
+      checkoutFingerprint: CheckoutFingerprint.make(checkoutFingerprint),
       repository: {
         identity: repositoryIdentity,
         ...(remoteUrl === undefined ? {} : { remoteUrl }),
         ...(headRevision === undefined ? {} : { headRevision }),
         ...(branch === undefined ? {} : { branch }),
       },
-      workspaceIdentity,
+      workspaceIdentity: WorkspaceId.make(workspaceIdentity),
       kernel: { runtime: "bun", runtimeVersion: process.versions.bun, trustMode: "trusted-local" },
       capabilities: { cells: true, checkpoints: false, pty: false },
       remoteThreadCreation: input.remoteThreadCreation,

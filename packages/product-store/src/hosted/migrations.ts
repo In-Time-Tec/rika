@@ -70,4 +70,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "8030a7e690ce8ff46aba12667c820fa083482922f8785e09c86da86fb03ee948",
     url: new URL("../../migrations/postgres/0013-thread-protocol.sql", import.meta.url),
   },
+  {
+    id: "product/0014_local_runner_registration",
+    checksum: "c3b4774eafa26939c91cd00822e82373964e9d373309ae63c7df4ee5dd95f175",
+    url: new URL("../../migrations/postgres/0014-local-runner-registration.sql", import.meta.url),
+  },
 ]

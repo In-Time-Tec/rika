@@ -17,6 +17,7 @@ import {
   ThreadVersion,
   Timestamp,
 } from "../model"
+import { LocalRunnerTarget } from "../local-runner-registration"
 
 export const protocolVersion = 1 as const
 
@@ -93,16 +94,25 @@ export const MutatingThreadCommand = Schema.Union([
 ])
 export type MutatingThreadCommand = typeof MutatingThreadCommand.Type
 
-export const ClientCommand = Schema.Union([
-  strict(
-    Schema.TaggedStruct("CreateThread", {
-      ...mutating,
-      owner: OwnerSelection,
-      projectId: Schema.optionalKey(ProjectId),
-      placement: Schema.Literals(["local", "e2b"]),
-      repositoryRef: Schema.optionalKey(RepositoryRef),
-    }),
+const CreateThread = strict(
+  Schema.TaggedStruct("CreateThread", {
+    ...mutating,
+    owner: OwnerSelection,
+    projectId: Schema.optionalKey(ProjectId),
+    placement: Schema.Literals(["local", "e2b"]),
+    localRunnerTarget: Schema.optionalKey(LocalRunnerTarget),
+    repositoryRef: Schema.optionalKey(RepositoryRef),
+  }),
+).check(
+  Schema.makeFilter((command) =>
+    (command.placement === "local") === (command.localRunnerTarget !== undefined)
+      ? []
+      : [{ path: ["localRunnerTarget"], issue: "local placement requires exactly one local runner target" }],
   ),
+)
+
+export const ClientCommand = Schema.Union([
+  CreateThread,
   strict(
     Schema.TaggedStruct("AttachThread", {
       threadId: ThreadId,

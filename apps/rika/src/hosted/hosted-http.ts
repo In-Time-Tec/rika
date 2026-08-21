@@ -1,4 +1,6 @@
 import { Crypto, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { ClientTicketResponse } from "@rika/product/client-protocol"
+import { LocalRunnerPollResult } from "@rika/product/local-runner-registration"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import {
   CliDevice,
@@ -150,7 +152,7 @@ export const layer = Layer.effect(
         ),
       )
     const authenticatedEmpty = (
-      method: "POST",
+      method: "POST" | "PUT",
       url: string,
       request: HttpClientRequest.HttpClientRequest,
       session: Session,
@@ -344,6 +346,48 @@ export const layer = Layer.effect(
           session,
           RunResult,
           "Hosted thread operation",
+        )
+      },
+      issueThreadTicket: (origin, session) => {
+        const url = `${origin}/api/v1/thread-sessions`
+        return authenticatedJson(
+          "POST",
+          url,
+          HttpClientRequest.post(url),
+          session,
+          ClientTicketResponse,
+          "Hosted Thread session",
+        )
+      },
+      registerLocalRunner: (origin, checkoutFingerprint, registration, session) => {
+        const url = `${origin}/api/v1/local-runners/${encodeURIComponent(checkoutFingerprint)}`
+        return authenticatedEmpty(
+          "PUT",
+          url,
+          HttpClientRequest.put(url).pipe(HttpClientRequest.bodyJsonUnsafe(registration)),
+          session,
+          "Local runner registration",
+        )
+      },
+      setRemoteThreadCreation: (origin, checkoutFingerprint, preference, session) => {
+        const url = `${origin}/api/v1/local-runners/${encodeURIComponent(checkoutFingerprint)}/remote-thread-creation`
+        return authenticatedEmpty(
+          "PUT",
+          url,
+          HttpClientRequest.put(url).pipe(HttpClientRequest.bodyJsonUnsafe({ preference })),
+          session,
+          "Local runner preference",
+        )
+      },
+      pollLocalRunner: (origin, checkoutFingerprint, session) => {
+        const url = `${origin}/api/v1/local-runners/${encodeURIComponent(checkoutFingerprint)}/admissions`
+        return authenticatedJson(
+          "POST",
+          url,
+          HttpClientRequest.post(url),
+          session,
+          LocalRunnerPollResult,
+          "Local runner admission",
         )
       },
       putProviderCredential: (origin, owner, provider, apiKey, session) => {

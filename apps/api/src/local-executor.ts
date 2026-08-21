@@ -199,8 +199,18 @@ export const layer = Layer.effect(
         .withTransaction(
           Effect.gen(function* () {
             const assignment = yield* load(input.threadId)
-            yield* local(assignment, input.principal)
+            const placement = yield* local(assignment, input.principal)
             yield* verifyPrincipal(input.principal, assignment.ownerId)
+            if (placement.checkoutFingerprint !== input.workspaceFingerprint)
+              return yield* failure("fenced", "Authenticated checkout is not assigned to this executor")
+            if (placement.requestingDeviceId !== placement.deviceId) {
+              const allowed = yield* sql`SELECT device_id FROM rika_hosted_local_runner_registrations
+                WHERE device_id = ${placement.deviceId} AND checkout_fingerprint = ${placement.checkoutFingerprint}
+                  AND remote_thread_creation_allowed = TRUE FOR UPDATE`.pipe(
+                Effect.mapError(() => failure("repository", "Local runner preference is unavailable")),
+              )
+              if (allowed.length === 0) return yield* failure("fenced", "Remote Thread creation is no longer allowed")
+            }
 
             let preparing: ExecutorAssignment
             if (assignment.lifecycle._tag === "Pending") {

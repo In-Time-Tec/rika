@@ -20,6 +20,11 @@ import {
 } from "@rika/product/hosted-model"
 import { HostedStore, StoreError } from "@rika/product/hosted-store"
 import { TurnId } from "@rika/product/turn-record"
+import type {
+  LocalRunnerProfile,
+  LocalRunnerTarget,
+  RemoteThreadCreationPreference,
+} from "@rika/product/local-runner-registration"
 import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
 import {
   HostedModelRegistry,
@@ -91,8 +96,23 @@ export interface HostedProductService {
     readonly owner: OwnerSelection
     readonly projectId?: string
     readonly placement: "local" | "e2b"
+    readonly localRunnerTarget?: LocalRunnerTarget
     readonly threadId?: string
   }) => Effect.Effect<{ readonly threadId: string }, HostedProductError>
+  readonly registerLocalRunner: (input: {
+    readonly principal: AuthenticatedPrincipal
+    readonly checkoutFingerprint: string
+    readonly registration: LocalRunnerProfile
+  }) => Effect.Effect<void, HostedProductError>
+  readonly setRemoteThreadCreation: (input: {
+    readonly principal: AuthenticatedPrincipal
+    readonly checkoutFingerprint: string
+    readonly preference: RemoteThreadCreationPreference
+  }) => Effect.Effect<void, HostedProductError>
+  readonly pollLocalRunner: (input: {
+    readonly principal: AuthenticatedPrincipal
+    readonly checkoutFingerprint: string
+  }) => Effect.Effect<{ readonly threadId: string; readonly workspaceId: string } | undefined, HostedProductError>
   readonly admitRun: (input: {
     readonly principal: AuthenticatedPrincipal
     readonly threadId: string
@@ -259,6 +279,38 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
                 }
                 const deviceId = yield* activateClient(input.principal, authority.userId)
                 const executorKind = input.placement === "e2b" ? "e2b" : "local_device"
+                if ((input.placement === "local") !== (input.localRunnerTarget !== undefined))
+                  return yield* HostedProductError.make({
+                    kind: "invalid",
+                    message: "Local runner target is required only for local placement",
+                  })
+                const runner =
+                  input.localRunnerTarget === undefined
+                    ? undefined
+                    : (yield* sql<{
+                        readonly workspaceId: string
+                        readonly projectId: string | null
+                        readonly userId: string
+                        readonly allowed: boolean
+                      }>`SELECT workspace_id AS "workspaceId", project_id AS "projectId", user_id AS "userId",
+                    remote_thread_creation_allowed AS allowed
+                  FROM rika_hosted_local_runner_registrations
+                  WHERE device_id = ${input.localRunnerTarget.deviceId}
+                    AND checkout_fingerprint = ${input.localRunnerTarget.checkoutFingerprint}
+                  FOR UPDATE`.pipe(Effect.mapError(unavailable)))[0]
+                if (input.localRunnerTarget !== undefined && runner === undefined)
+                  return yield* HostedProductError.make({ kind: "not-found", message: "Local runner is unavailable" })
+                if (
+                  runner !== undefined &&
+                  (runner.userId !== authority.userId || runner.projectId !== (input.projectId ?? null))
+                )
+                  return yield* forbidden("Local runner authority does not match the Thread")
+                if (
+                  runner !== undefined &&
+                  input.principal.deviceId !== input.localRunnerTarget!.deviceId &&
+                  !runner.allowed
+                )
+                  return yield* forbidden("Remote Thread creation is denied by the local runner")
                 const projectId = input.projectId === undefined ? undefined : ProjectId.make(input.projectId)
                 const threadId = ThreadId.make(input.threadId ?? (yield* crypto.randomUUIDv4))
                 const existingRows = yield* sql<{
@@ -285,19 +337,26 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
                   return { threadId: String(threadId) }
                 }
                 const workspaceId = WorkspaceId.make(
-                  input.threadId === undefined ? yield* crypto.randomUUIDv4 : `${input.threadId}-workspace`,
+                  runner?.workspaceId ??
+                    (input.threadId === undefined ? yield* crypto.randomUUIDv4 : `${input.threadId}-workspace`),
                 )
-                yield* store.createWorkspace({
-                  id: workspaceId,
-                  ownerId: authority.owner.id,
-                  ...(projectId === undefined ? {} : { projectId }),
-                  createdByUserId: authority.userId,
-                  executorKind,
-                  inheritProjectGrants: executorKind === "e2b" && projectId !== undefined,
-                  now: timestamp,
-                })
+                const workspaceExists =
+                  (yield* sql`SELECT id FROM rika_hosted_workspaces WHERE id = ${workspaceId}`.pipe(
+                    Effect.mapError(unavailable),
+                  )).length > 0
+                if (!workspaceExists)
+                  yield* store.createWorkspace({
+                    id: workspaceId,
+                    ownerId: authority.owner.id,
+                    ...(projectId === undefined ? {} : { projectId }),
+                    createdByUserId: authority.userId,
+                    executorKind,
+                    inheritProjectGrants: executorKind === "e2b" && projectId !== undefined,
+                    now: timestamp,
+                  })
                 yield* sql`INSERT INTO rika_workspaces (owner_id, path, created_at)
-                  VALUES (${authority.owner.id}, ${workspaceId}, ${currentTime})`.pipe(Effect.mapError(unavailable))
+                  VALUES (${authority.owner.id}, ${workspaceId}, ${currentTime})
+                  ON CONFLICT (owner_id, path) DO NOTHING`.pipe(Effect.mapError(unavailable))
                 const thread = yield* store.createThread({
                   id: threadId,
                   ownerId: authority.owner.id,
@@ -336,7 +395,12 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
                           templateBuildId: options.templateBuildId,
                           providerScope: options.providerScope,
                         }
-                      : { _tag: "LocalDevicePlacement", deviceId },
+                      : {
+                          _tag: "LocalDevicePlacement",
+                          deviceId: input.localRunnerTarget!.deviceId,
+                          checkoutFingerprint: input.localRunnerTarget!.checkoutFingerprint,
+                          requestingDeviceId: deviceId,
+                        },
                   checkout: null,
                 })
                 return { threadId: String(thread.id) }
@@ -345,6 +409,59 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
             .pipe(Effect.mapError(storeFailure))
         },
       )
+
+      const registerLocalRunner: HostedProductService["registerLocalRunner"] = Effect.fn(
+        "HostedProduct.registerLocalRunner",
+      )(function* (input) {
+        const userId = BetterAuthUserId.make(input.principal.userId)
+        const deviceId = yield* activateClient(input.principal, userId)
+        yield* sql`INSERT INTO rika_hosted_local_runner_registrations
+            (device_id, user_id, checkout_fingerprint, workspace_id, project_id, repository, kernel_profile, capabilities)
+            VALUES (${deviceId}, ${userId}, ${input.checkoutFingerprint}, ${input.registration.workspaceIdentity},
+              ${input.registration.projectId ?? null}, ${sql.json(input.registration.repository)},
+              ${sql.json(input.registration.kernel)}, ${sql.json(input.registration.capabilities)})
+            ON CONFLICT (device_id, checkout_fingerprint) DO UPDATE SET
+              workspace_id = EXCLUDED.workspace_id, project_id = EXCLUDED.project_id,
+              repository = EXCLUDED.repository, kernel_profile = EXCLUDED.kernel_profile,
+              capabilities = EXCLUDED.capabilities, updated_at = transaction_timestamp()
+            WHERE rika_hosted_local_runner_registrations.user_id = EXCLUDED.user_id`.pipe(Effect.mapError(unavailable))
+      }, Effect.mapError(storeFailure))
+
+      const setRemoteThreadCreation: HostedProductService["setRemoteThreadCreation"] = Effect.fn(
+        "HostedProduct.setRemoteThreadCreation",
+      )(function* (input) {
+        yield* activateClient(input.principal, BetterAuthUserId.make(input.principal.userId))
+        const rows = yield* sql`UPDATE rika_hosted_local_runner_registrations
+            SET remote_thread_creation_allowed = ${input.preference.preference === "allowed"}, updated_at = transaction_timestamp()
+            WHERE device_id = ${input.principal.deviceId} AND user_id = ${input.principal.userId}
+              AND checkout_fingerprint = ${input.checkoutFingerprint} RETURNING device_id`.pipe(
+          Effect.mapError(unavailable),
+        )
+        if (rows.length === 0)
+          return yield* HostedProductError.make({ kind: "not-found", message: "Local runner is unavailable" })
+      }, Effect.mapError(storeFailure))
+
+      const pollLocalRunner: HostedProductService["pollLocalRunner"] = Effect.fn(
+        "HostedProduct.pollLocalRunner",
+      )(function* (input) {
+        yield* activateClient(input.principal, BetterAuthUserId.make(input.principal.userId))
+        const rows = yield* sql<{ readonly threadId: string; readonly workspaceId: string }>`SELECT
+              assignment.thread_id AS "threadId", assignment.workspace_id AS "workspaceId"
+            FROM rika_hosted_executor_assignments assignment
+            JOIN rika_hosted_local_runner_registrations registration
+              ON registration.device_id = ${input.principal.deviceId}
+              AND registration.checkout_fingerprint = ${input.checkoutFingerprint}
+              AND registration.user_id = ${input.principal.userId}
+            WHERE assignment.executor_kind = 'local_device' AND assignment.lifecycle = 'pending'
+              AND assignment.placement ->> 'deviceId' = registration.device_id
+              AND assignment.placement ->> 'checkoutFingerprint' = registration.checkout_fingerprint
+              AND (assignment.placement ->> 'requestingDeviceId' = registration.device_id
+                OR registration.remote_thread_creation_allowed = TRUE)
+            ORDER BY assignment.created_at, assignment.id LIMIT 1 FOR UPDATE OF assignment SKIP LOCKED`.pipe(
+          Effect.mapError(unavailable),
+        )
+        return rows[0]
+      }, Effect.mapError(storeFailure))
 
       const authorizeThread: HostedProductService["authorizeThread"] = Effect.fn("HostedProduct.authorizeThread")(
         function* (principal, threadId) {
@@ -454,6 +571,9 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
         ready: sql`SELECT 1 FROM rika_hosted_owners LIMIT 1`.pipe(Effect.asVoid, Effect.mapError(unavailable)),
         projects,
         createConnection,
+        registerLocalRunner,
+        setRemoteThreadCreation,
+        pollLocalRunner,
         admitRun,
         authorizeThread,
         activatePrincipal,

@@ -14,6 +14,7 @@ import {
   Timestamp,
   WorkspaceId,
 } from "./model"
+import { CheckoutFingerprint } from "./local-runner-registration"
 
 const OpaqueId = Schema.String.check(Schema.isPattern(/^[\x21-\x7e]{1,512}$/))
 
@@ -38,6 +39,8 @@ export type RepositoryCheckout = typeof RepositoryCheckout.Type
 
 export const LocalDevicePlacement = Schema.TaggedStruct("LocalDevicePlacement", {
   deviceId: DeviceId,
+  checkoutFingerprint: CheckoutFingerprint,
+  requestingDeviceId: DeviceId,
 })
 export type LocalDevicePlacement = typeof LocalDevicePlacement.Type
 

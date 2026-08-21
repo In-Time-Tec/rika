@@ -22,6 +22,7 @@
     "./migrations/postgres/0008-hosted-turn-worker.sql": "./migrations/postgres/0008-hosted-turn-worker.sql",
     "./migrations/postgres/0009-provider-credentials.sql": "./migrations/postgres/0009-provider-credentials.sql",
     "./migrations/postgres/0013-thread-protocol.sql": "./migrations/postgres/0013-thread-protocol.sql",
+    "./migrations/postgres/0014-local-runner-registration.sql": "./migrations/postgres/0014-local-runner-registration.sql",
     "./product-database-layer": "./src/database/product-database-layer.ts",
     "./postgres-product-repositories": "./src/database/postgres-product-repositories.ts",
     "./sqlite-goal-repository": "./src/goal/sqlite-goal-repository.ts",

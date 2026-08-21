@@ -280,6 +280,7 @@ export const layer = Layer.effect(
                 owner,
                 ...(command.projectId === undefined ? {} : { projectId: command.projectId }),
                 placement: command.placement,
+                ...(command.localRunnerTarget === undefined ? {} : { localRunnerTarget: command.localRunnerTarget }),
                 threadId: command.commandId,
               })
               .pipe(Effect.mapError(productFailure))

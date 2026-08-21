@@ -1,6 +1,12 @@
 import { Context, Effect, Layer, Schema } from "effect"
 import { BetterAuthUserId, OrganizationId, ThreadId } from "@rika/product/hosted-model"
 import { ClientTicketResponse } from "@rika/product/client-protocol"
+import {
+  CheckoutFingerprint,
+  LocalRunnerProfile,
+  LocalRunnerPollResult,
+  RemoteThreadCreationPreference,
+} from "@rika/product/local-runner-registration"
 import { HttpRouter, HttpServer, HttpServerRequest } from "effect/unstable/http"
 import {
   HttpApi,
@@ -121,6 +127,27 @@ class ProductGroup extends HttpApiGroup.make("product", { topLevel: true })
       payload: LocalExecutorAdmissionRequest,
       success: LocalExecutorAdmissionResponse,
       error: [Forbidden, NotFound, Conflict, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.put("registerLocalRunner", "/api/v1/local-runners/:checkoutFingerprint", {
+      params: { checkoutFingerprint: CheckoutFingerprint },
+      payload: LocalRunnerProfile,
+      success: HttpApiSchema.NoContent,
+      error: [Forbidden, Conflict, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.put(
+      "setRemoteThreadCreation",
+      "/api/v1/local-runners/:checkoutFingerprint/remote-thread-creation",
+      {
+        params: { checkoutFingerprint: CheckoutFingerprint },
+        payload: RemoteThreadCreationPreference,
+        success: HttpApiSchema.NoContent,
+        error: [NotFound, Forbidden, ServiceUnavailable],
+      },
+    ),
+    HttpApiEndpoint.post("pollLocalRunner", "/api/v1/local-runners/:checkoutFingerprint/admissions", {
+      params: { checkoutFingerprint: CheckoutFingerprint },
+      success: LocalRunnerPollResult,
+      error: [Forbidden, Conflict, ServiceUnavailable],
     }),
     HttpApiEndpoint.get("models", "/api/v1/models", {
       success: ModelsResponse,
@@ -297,6 +324,67 @@ const productHandlers = (dependencies: HttpDependencies) =>
               }),
             )
         }),
+      registerLocalRunner: ({ params, payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          yield* dependencies.product
+            .registerLocalRunner({
+              principal: authenticatedPrincipal(access),
+              checkoutFingerprint: params.checkoutFingerprint,
+              registration: payload,
+            })
+            .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Local runner registration failed" })))
+        }),
+      setRemoteThreadCreation: ({ params, payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          yield* dependencies.product
+            .setRemoteThreadCreation({
+              principal: authenticatedPrincipal(access),
+              checkoutFingerprint: params.checkoutFingerprint,
+              preference: payload,
+            })
+            .pipe(
+              Effect.mapError((error) =>
+                error.kind === "not-found"
+                  ? NotFound.make({ message: error.message })
+                  : ServiceUnavailable.make({ message: "Local runner preference failed" }),
+              ),
+            )
+        }),
+      pollLocalRunner: ({ params }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          const principal = authenticatedPrincipal(access)
+          const candidate = yield* dependencies.product
+            .pollLocalRunner({
+              principal,
+              checkoutFingerprint: params.checkoutFingerprint,
+            })
+            .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Local runner polling failed" })))
+          if (candidate === undefined) return { _tag: "Waiting" as const }
+          const serverRequest = yield* HttpServerRequest.HttpServerRequest
+          const request = yield* HttpServerRequest.toWeb(serverRequest).pipe(
+            Effect.mapError(() => ServiceUnavailable.make({ message: "Request is unavailable" })),
+          )
+          const executorUrl = new URL("/api/v1/local-executors", request.url)
+          executorUrl.protocol = "wss:"
+          const admission = yield* dependencies.executor
+            .admitLocal({
+              threadId: candidate.threadId,
+              workspaceFingerprint: params.checkoutFingerprint,
+              executorUrl: executorUrl.toString(),
+              principal,
+            })
+            .pipe(Effect.mapError(() => Conflict.make({ message: "Local runner admission is unavailable" })))
+          return { _tag: "Admitted" as const, ...admission }
+        }),
       models: () =>
         dependencies.models === undefined
           ? Effect.fail(ServiceUnavailable.make({ message: "Model registry unavailable" }))
@@ -365,6 +453,7 @@ export const isRikaApiPath = (pathname: string) =>
   pathname === "/api/v1/models" ||
   pathname === "/api/v1/provider-credentials/list" ||
   /^\/api\/v1\/provider-credentials\/[^/]+$/.test(pathname) ||
+  /^\/api\/v1\/local-runners\/[^/]+(?:\/remote-thread-creation|\/admissions)?$/.test(pathname) ||
   /^\/api\/v1\/threads\/[^/]+\/local-executor-admissions$/.test(pathname)
 
 export const makeRikaApiHandler = (dependencies: HttpDependencies) =>

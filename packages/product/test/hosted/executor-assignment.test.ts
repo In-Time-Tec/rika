@@ -21,7 +21,12 @@ const base = {
 
 it("rejects executor kinds that contradict their placement", () => {
   const e2bPlacement = { _tag: "E2BPlacement", templateBuildId: "build-1", providerScope: "scope-1" }
-  const localPlacement = { _tag: "LocalDevicePlacement", deviceId: "device-1" }
+  const localPlacement = {
+    _tag: "LocalDevicePlacement",
+    deviceId: "device-1",
+    checkoutFingerprint: "checkout-1",
+    requestingDeviceId: "device-1",
+  }
 
   expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "e2b", placement: e2bPlacement })).toBe(true)
   expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "local_device", placement: localPlacement })).toBe(true)

@@ -22,6 +22,7 @@ import {
   WorkspaceId,
 } from "@rika/product/hosted-model"
 import { HostedStore } from "@rika/product/hosted-store"
+import { CheckoutFingerprint } from "@rika/product/local-runner-registration"
 import { Effect, Layer, Random, Redacted } from "effect"
 import { Pool } from "pg"
 import { identityMigrations } from "../../../identity/src/migrations"
@@ -280,7 +281,12 @@ it.effect.skipIf(!live)(
                 ownerId: ids.owner,
                 threadId: ids.thread,
                 workspaceId: ids.workspace,
-                placement: { _tag: "LocalDevicePlacement", deviceId: ids.device },
+                placement: {
+                  _tag: "LocalDevicePlacement",
+                  deviceId: ids.device,
+                  checkoutFingerprint: CheckoutFingerprint.make("recovery-checkout"),
+                  requestingDeviceId: ids.device,
+                },
                 checkout: null,
               })
               const provisioning = yield* assignments.beginProvisioning({
