@@ -501,6 +501,7 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
 
       const authorizeThread: HostedProductService["authorizeThread"] = Effect.fn("HostedProduct.authorizeThread")(
         function* (principal, threadId, action) {
+          yield* activateClient(principal, BetterAuthUserId.make(principal.userId))
           const threadRows = yield* sql<{
             readonly ownerId: string
             readonly kind: "personal" | "organization"
