@@ -72,6 +72,9 @@ const smoke = Effect.fn("ExecutorImageSmoke.run")(function* (
     RIKA_EXECUTOR_TEMPLATE_BUILD_ID: buildId,
     RIKA_DOCTOR_NETWORK_URL: "https://example.com/",
   }
+  const environmentCommand = Object.entries(environment)
+    .map(([name, value]) => `${name}=${value}`)
+    .join(" ")
   const manifest = yield* Effect.tryPromise(() =>
     Bun.file(new URL("../../../infra/e2b/executor-v1/tool-manifest.json", import.meta.url)).text(),
   ).pipe(Effect.flatMap(decodeImageManifest))
@@ -92,7 +95,7 @@ const smoke = Effect.fn("ExecutorImageSmoke.run")(function* (
         if (user.stdout.trim() !== "rika-executor")
           return yield* SmokeError.make({ message: `Promoted E2B command user is ${user.stdout.trim()}` })
         const result = yield* Effect.tryPromise(() =>
-          sandbox.commands.run('rika executor doctor --json || [ "$?" -eq 1 ]', {
+          sandbox.commands.run(`env ${environmentCommand} rika executor doctor --json || [ "$?" -eq 1 ]`, {
             timeoutMs: 180_000,
             user: "rika-executor",
             envs: environment,

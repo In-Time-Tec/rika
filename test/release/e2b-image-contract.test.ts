@@ -153,7 +153,7 @@ describe("E2B image source contract", () => {
     expect(smoke).toContain('GH_CONFIG_DIR: "/run/rika/gh"')
     expect(smoke).toContain('sandbox.commands.run("id -un", { user: "rika-executor", envs: environment })')
     expect(smoke).toContain('user.stdout.trim() !== "rika-executor"')
-    expect(smoke).toContain("rika executor doctor --json ||")
+    expect(smoke).toContain("env ${environmentCommand} rika executor doctor --json ||")
     expect(smoke).toContain('user: "rika-executor",\n            envs: environment')
     expect(doctor).toContain("!output.includes(tool.expect)")
     expect(doctor).toContain("output !== installed.version")
