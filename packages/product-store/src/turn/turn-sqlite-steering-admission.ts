@@ -20,6 +20,7 @@ const Row = Schema.Struct({
   target_turn_id: Schema.String,
   source_turn_id: Schema.NullOr(Schema.String),
   admission_json: Schema.String,
+  source_withdrawn: Schema.Number,
   status: Schema.Literals(["pending", "accepted", "rejected"]),
 })
 const equivalentTarget = Schema.toEquivalence(ExecutionLink)
@@ -36,6 +37,7 @@ const decodeAdmission = (row: unknown) =>
       value.request_id !== admission.input.idempotencyKey ||
       value.target_turn_id !== admission.target.turnId ||
       value.source_turn_id !== (admission.source?.id ?? null) ||
+      value.source_withdrawn !== Number(admission.sourceWithdrawn === true) ||
       value.status !== status
     )
       return yield* RepositoryError.make({ message: `Steering admission ${value.request_id} is inconsistent` })
@@ -83,9 +85,9 @@ const insertAdmission = (sql: SqlClient, admission: SteeringAdmission) =>
   Effect.gen(function* () {
     const encoded = yield* encodeAdmission(admission)
     yield* sql`INSERT INTO rika_turn_steering_outbox
-      (request_id, target_turn_id, source_turn_id, thread_id, admission_json, status, prepared_at)
+      (request_id, target_turn_id, source_turn_id, thread_id, admission_json, source_withdrawn, status, prepared_at)
       VALUES (${admission.input.idempotencyKey}, ${admission.target.turnId}, ${admission.source?.id ?? null},
-        ${admission.target.threadId}, ${encoded}, 'pending', ${admission.preparedAt})`
+        ${admission.target.threadId}, ${encoded}, ${Number(admission.sourceWithdrawn === true)}, 'pending', ${admission.preparedAt})`
   })
 
 const preserveQueuedUnavailable = (error: unknown) =>
@@ -184,7 +186,8 @@ export const makeTurnSqliteSteeringAdmission = (
             yield* insertAdmission(sql, admission)
             yield* sql`UPDATE rika_turns SET queue_claim_token = NULL WHERE id = ${sourceTurn.id}`
             const queueRows = yield* sql`UPDATE rika_thread_queue_state
-            SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0)
+            SET revision = revision + 1,
+              queued_count = CASE WHEN queued_count > 0 THEN queued_count - 1 ELSE 0 END
             WHERE thread_id = ${sourceTurn.threadId} RETURNING *`
             if (queueRows[0] === undefined)
               return yield* RepositoryError.make({ message: `Queue state ${sourceTurn.threadId} does not exist` })
@@ -263,7 +266,7 @@ export const makeTurnSqliteSteeringAdmission = (
                         WHERE source_turn_id = rika_turns.id AND status != 'rejected'
                       )
                     )
-                  ORDER BY created_at ASC, rowid ASC`
+                  ORDER BY created_at ASC, id ASC`
                 const position = visibleRows.findIndex(
                   (row) => String((row as { readonly id: unknown }).id) === admission.source!.id,
                 )
@@ -326,7 +329,8 @@ export const makeTurnSqliteSteeringAdmission = (
             WHERE id = ${admission.source.id} AND turn_kind = 'AgentExecution' AND status = 'queued'`
             if (admission.sourceWithdrawn === true) return undefined
             const queueRows = yield* sql`UPDATE rika_thread_queue_state
-              SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0)
+              SET revision = revision + 1,
+                queued_count = CASE WHEN queued_count > 0 THEN queued_count - 1 ELSE 0 END
               WHERE thread_id = ${admission.source.threadId} RETURNING *`
             if (queueRows[0] === undefined)
               return yield* RepositoryError.make({ message: `Queue state ${admission.source.threadId} does not exist` })

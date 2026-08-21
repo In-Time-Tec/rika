@@ -61,21 +61,25 @@ const migrateExecutionRouteJson = (serialized: string, path: ReadonlyArray<strin
 export const create = Effect.gen(function* () {
   const sql = yield* SqlClient
   yield* sql`CREATE TABLE rika_workspaces (
-    path TEXT PRIMARY KEY NOT NULL,
-    created_at INTEGER NOT NULL
+    owner_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (owner_id, path)
   )`
   yield* sql`CREATE TABLE rika_threads (
     id TEXT PRIMARY KEY NOT NULL,
-    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),
+    owner_id TEXT NOT NULL,
+    workspace TEXT NOT NULL,
     title TEXT NOT NULL,
     labels_json TEXT NOT NULL DEFAULT '[]',
     pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
     archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
     lineage_json TEXT NOT NULL DEFAULT '{"_tag":"Original"}',
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (owner_id, workspace) REFERENCES rika_workspaces(owner_id, path)
   )`
-  yield* sql`CREATE INDEX rika_threads_listing ON rika_threads (pinned DESC, updated_at DESC, id ASC)`
+  yield* sql`CREATE INDEX rika_threads_listing ON rika_threads (owner_id, pinned DESC, updated_at DESC, id ASC)`
   yield* sql`CREATE TABLE rika_thread_deletion_outbox (
     thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
     requested_at INTEGER NOT NULL
@@ -150,6 +154,7 @@ export const create = Effect.gen(function* () {
     source_turn_id TEXT UNIQUE,
     thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
     admission_json TEXT NOT NULL,
+    source_withdrawn INTEGER NOT NULL CHECK (source_withdrawn IN (0, 1)),
     status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'rejected')),
     prepared_at INTEGER NOT NULL
   )`
@@ -508,6 +513,7 @@ export const additions: ReadonlyArray<{
     source_turn_id TEXT UNIQUE,
     thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
     admission_json TEXT NOT NULL,
+    source_withdrawn INTEGER NOT NULL CHECK (source_withdrawn IN (0, 1)),
     status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'rejected')),
     prepared_at INTEGER NOT NULL
   )`,

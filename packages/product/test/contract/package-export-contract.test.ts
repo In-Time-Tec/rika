@@ -154,6 +154,8 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "migrations/postgres/0003-hosted-authority-fences.sql",
     "migrations/postgres/0004-local-executor.sql",
     "migrations/postgres/0005-local-executor-recovery.sql",
+    "migrations/postgres/0006-product-state.sql",
+    "postgres-product-repositories",
     "product-database-layer",
     "sqlite-goal-repository",
     "sqlite-thread-search-repository",

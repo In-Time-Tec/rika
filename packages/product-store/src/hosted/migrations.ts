@@ -30,4 +30,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "5f8c77195f9479471379539a6f75e902aec4de05bf89c53f7ad1ec72958f49f4",
     url: new URL("../../migrations/postgres/0005-local-executor-recovery.sql", import.meta.url),
   },
+  {
+    id: "product/0006_product_state",
+    checksum: "c8414d553f8eb3775b6930944f07cdf76a9ac857c324d24d71e0e66816741f29",
+    url: new URL("../../migrations/postgres/0006-product-state.sql", import.meta.url),
+  },
 ]

@@ -6,7 +6,7 @@ import { decodeAgent } from "./turn-row-codec"
 const listAgentTurnsImpl = (sql: SqlClientType, mapError: (cause: unknown) => RepositoryError) =>
   sql`SELECT * FROM rika_turns
     WHERE turn_kind = 'AgentExecution' AND status IN ('queued', 'accepted', 'running', 'waiting', 'cancelling')
-    ORDER BY created_at ASC, rowid ASC`.pipe(
+    ORDER BY created_at ASC, id ASC`.pipe(
     Effect.mapError(mapError),
     Effect.flatMap((rows) => Effect.all(rows.map(decodeAgent))),
   )

@@ -38,7 +38,7 @@ export const makeTurnSqliteSubmission = (sql: SqlClient): Pick<Interface, "creat
               AND queued_count + (
                 SELECT COUNT(*) FROM rika_turn_steering_outbox
                 WHERE thread_id = ${input.threadId} AND source_turn_id IS NOT NULL AND status != 'rejected'
-                  AND json_extract(admission_json, '$.sourceWithdrawn') = 1
+                  AND source_withdrawn = 1
               ) < ${input.queueCapacity}
             RETURNING *`
           if (queueRows[0] === undefined) {
@@ -48,7 +48,7 @@ export const makeTurnSqliteSubmission = (sql: SqlClient): Pick<Interface, "creat
             const state = yield* decodeQueueState(stateRows[0])
             const reservedRows = yield* sql`SELECT COUNT(*) AS count FROM rika_turn_steering_outbox
               WHERE thread_id = ${input.threadId} AND source_turn_id IS NOT NULL AND status != 'rejected'
-                AND json_extract(admission_json, '$.sourceWithdrawn') = 1`
+                AND source_withdrawn = 1`
             return yield* QueueFull.make({
               threadId: input.threadId,
               capacity: input.queueCapacity,
@@ -100,7 +100,7 @@ export const makeTurnSqliteSubmission = (sql: SqlClient): Pick<Interface, "creat
               AND queued_count + (
                 SELECT COUNT(*) FROM rika_turn_steering_outbox
                 WHERE thread_id = ${turn.threadId} AND source_turn_id IS NOT NULL AND status != 'rejected'
-                  AND json_extract(admission_json, '$.sourceWithdrawn') = 1
+                  AND source_withdrawn = 1
               ) < ${queueCapacity}
             RETURNING *`
           if (queueRows[0] === undefined) {
@@ -109,7 +109,7 @@ export const makeTurnSqliteSubmission = (sql: SqlClient): Pick<Interface, "creat
             const state = yield* decodeQueueState(stateRows[0])
             const reservedRows = yield* sql`SELECT COUNT(*) AS count FROM rika_turn_steering_outbox
               WHERE thread_id = ${turn.threadId} AND source_turn_id IS NOT NULL AND status != 'rejected'
-                AND json_extract(admission_json, '$.sourceWithdrawn') = 1`
+                AND source_withdrawn = 1`
             return yield* QueueFull.make({
               threadId: turn.threadId,
               capacity: queueCapacity,

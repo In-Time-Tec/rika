@@ -59,14 +59,22 @@ export const makeTranscriptSqlitePage = (sql: SqlClient): Pick<Interface, "page"
       const limit = options.limit ?? 200
       if (!Number.isInteger(limit) || limit < 1 || limit > 500)
         return yield* RepositoryError.make({ message: "Transcript page limit must be from 1 to 500" })
-      const rows = yield* sql`SELECT u.unit_json, u.unit_order_key,
-        c.revision AS projection_revision, c.projection_version, c.state_json, t.*
-      FROM rika_transcript_units u
-      JOIN rika_transcript_checkpoints c ON c.turn_id = u.turn_id
-      JOIN rika_turns t ON t.id = u.turn_id
-      WHERE u.thread_id = ${threadId} AND t.status <> 'queued'
-        AND (${options.projectionVersion ?? null} IS NULL OR c.projection_version = ${options.projectionVersion ?? null})
-      ORDER BY u.created_at DESC, u.turn_id DESC, u.unit_order_key DESC`.pipe(Effect.mapError(error))
+      const rows = yield* (options.projectionVersion === undefined
+        ? sql`SELECT u.unit_json, u.unit_order_key,
+            c.revision AS projection_revision, c.projection_version, c.state_json, t.*
+          FROM rika_transcript_units u
+          JOIN rika_transcript_checkpoints c ON c.turn_id = u.turn_id
+          JOIN rika_turns t ON t.id = u.turn_id
+          WHERE u.thread_id = ${threadId} AND t.status <> 'queued'
+          ORDER BY u.created_at DESC, u.turn_id DESC, u.unit_order_key DESC`
+        : sql`SELECT u.unit_json, u.unit_order_key,
+            c.revision AS projection_revision, c.projection_version, c.state_json, t.*
+          FROM rika_transcript_units u
+          JOIN rika_transcript_checkpoints c ON c.turn_id = u.turn_id
+          JOIN rika_turns t ON t.id = u.turn_id
+          WHERE u.thread_id = ${threadId} AND t.status <> 'queued'
+            AND c.projection_version = ${options.projectionVersion}
+          ORDER BY u.created_at DESC, u.turn_id DESC, u.unit_order_key DESC`).pipe(Effect.mapError(error))
       const decoded = yield* Effect.forEach(rows, (raw) =>
         Effect.gen(function* () {
           const row = raw as Record<string, unknown>

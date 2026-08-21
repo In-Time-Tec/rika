@@ -35,7 +35,7 @@ export const layer = Layer.effect(
         import("@rika/product/turn-repository").RepositoryError
       > {
         const rows =
-          yield* sql`SELECT * FROM rika_turns WHERE thread_id = ${threadId} ORDER BY created_at ASC, rowid ASC`.pipe(
+          yield* sql`SELECT * FROM rika_turns WHERE thread_id = ${threadId} ORDER BY created_at ASC, id ASC`.pipe(
             Effect.mapError(repositoryError),
           )
         return yield* Effect.all(rows.map(decode))
@@ -82,7 +82,7 @@ export const layer = Layer.effect(
         import("@rika/product/turn-repository").RepositoryError
       > {
         const rows =
-          yield* sql`SELECT * FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status IN ('accepted', 'running', 'waiting', 'cancelling') ORDER BY created_at ASC, rowid ASC LIMIT 1`.pipe(
+          yield* sql`SELECT * FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status IN ('accepted', 'running', 'waiting', 'cancelling') ORDER BY created_at ASC, id ASC LIMIT 1`.pipe(
             Effect.mapError(repositoryError),
           )
         return rows[0] === undefined ? undefined : yield* decodeAgent(rows[0])

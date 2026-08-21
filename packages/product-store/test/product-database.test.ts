@@ -91,6 +91,7 @@ it.layer(BunServices.layer)("product database", (test) => {
             "source_turn_id",
             "thread_id",
             "admission_json",
+            "source_withdrawn",
             "status",
             "prepared_at",
           ])
@@ -196,7 +197,8 @@ it.layer(BunServices.layer)("product database", (test) => {
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
           yield* sql`ALTER TABLE rika_workspaces ADD COLUMN unexpected TEXT`
-          yield* sql`INSERT INTO rika_workspaces (path, created_at, unexpected) VALUES ('/preserve', 1, 'value')`
+          yield* sql`INSERT INTO rika_workspaces (owner_id, path, created_at, unexpected)
+            VALUES ('local', '/preserve', 1, 'value')`
         }).pipe(Effect.provide(client))
 
         expect((yield* Layer.build(layer(filename)).pipe(Effect.exit))._tag).toBe("Failure")
@@ -226,9 +228,9 @@ it.layer(BunServices.layer)("product database", (test) => {
             WHERE type IN ('table', 'index', 'trigger', 'view') AND name NOT LIKE 'sqlite_%'
             ORDER BY type ASC, name ASC`
           yield* sql`UPDATE rika_schema_identity SET fingerprint = ${schemaFingerprint(objects as never)} WHERE id = 1`
-          yield* sql`INSERT INTO rika_workspaces (path, created_at) VALUES ('/preserved', 1)`
-          yield* sql`INSERT INTO rika_threads (id, workspace, title, labels_json, created_at, updated_at)
-            VALUES ('t1', '/preserved', 'Keep', '[]', 1, 1)`
+          yield* sql`INSERT INTO rika_workspaces (owner_id, path, created_at) VALUES ('local', '/preserved', 1)`
+          yield* sql`INSERT INTO rika_threads (id, owner_id, workspace, title, labels_json, created_at, updated_at)
+            VALUES ('t1', 'local', '/preserved', 'Keep', '[]', 1, 1)`
           yield* sql`INSERT INTO rika_turns (id, thread_id, turn_kind, status, prompt, created_at, updated_at, execution_route_json)
             VALUES ('v1', 't1', 'AgentExecution', 'completed', 'v1', 1, 1, ${encodeJson(legacyExecutionRoute(1))})`
           yield* sql`INSERT INTO rika_turns (id, thread_id, turn_kind, status, prompt, created_at, updated_at, execution_route_json)
@@ -242,7 +244,7 @@ it.layer(BunServices.layer)("product database", (test) => {
               executionRoute: legacyExecutionRoute(1),
             })}, 3)`
           yield* sql`INSERT INTO rika_turn_steering_outbox
-            (request_id, target_turn_id, source_turn_id, thread_id, admission_json, status, prepared_at)
+            (request_id, target_turn_id, source_turn_id, thread_id, admission_json, source_withdrawn, status, prepared_at)
             VALUES ('steer-v2', 'v2', 'v1', 't1', ${encodeJson({
               target: { runId: "run-v2", turnId: "v2", threadId: "t1" },
               input: { text: "steer", idempotencyKey: "steer-v2" },
@@ -260,7 +262,7 @@ it.layer(BunServices.layer)("product database", (test) => {
               },
               preparedAt: 4,
               outcome: { _tag: "Pending" },
-            })}, 'pending', 4)`
+            })}, 0, 'pending', 4)`
         }).pipe(Effect.provide(client))
 
         const reopened = yield* Layer.build(layer(filename))
@@ -371,8 +373,9 @@ it.layer(BunServices.layer)("product database", (test) => {
             WHERE type IN ('table', 'index', 'trigger', 'view') AND name NOT LIKE 'sqlite_%'
             ORDER BY type ASC, name ASC`
           yield* sql`UPDATE rika_schema_identity SET fingerprint = ${schemaFingerprint(objects as never)} WHERE id = 1`
-          yield* sql`INSERT INTO rika_workspaces (path, created_at) VALUES ('/preserved', 1)`
-          yield* sql`INSERT INTO rika_threads (id, workspace, title, labels_json, created_at, updated_at) VALUES ('t1', '/preserved', 'Keep', '[]', 1, 1)`
+          yield* sql`INSERT INTO rika_workspaces (owner_id, path, created_at) VALUES ('local', '/preserved', 1)`
+          yield* sql`INSERT INTO rika_threads (id, owner_id, workspace, title, labels_json, created_at, updated_at)
+            VALUES ('t1', 'local', '/preserved', 'Keep', '[]', 1, 1)`
           yield* sql`INSERT INTO rika_turns (id, thread_id, turn_kind, status, prompt, created_at, updated_at, execution_route_json)
             VALUES ('turn-1', 't1', 'AgentExecution', 'completed', 'keep me', 1, 1, '{}')`
         }).pipe(Effect.provide(client))
@@ -401,7 +404,8 @@ it.layer(BunServices.layer)("product database", (test) => {
             ORDER BY type ASC, name ASC`
           yield* sql`UPDATE rika_schema_identity SET fingerprint = ${schemaFingerprint(objects as never)} WHERE id = 1`
           yield* sql`ALTER TABLE rika_workspaces ADD COLUMN unexpected TEXT`
-          yield* sql`INSERT INTO rika_workspaces (path, created_at, unexpected) VALUES ('/drift', 1, 'value')`
+          yield* sql`INSERT INTO rika_workspaces (owner_id, path, created_at, unexpected)
+            VALUES ('local', '/drift', 1, 'value')`
         }).pipe(Effect.provide(driftedClient))
         expect((yield* Layer.build(layer(drifted)).pipe(Effect.exit))._tag).toBe("Failure")
         const preserved = yield* Layer.build(SqliteClient.layer({ filename: drifted }))

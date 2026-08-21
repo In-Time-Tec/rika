@@ -25,7 +25,7 @@ export const layer = Layer.effect(
         LEFT JOIN rika_transcript_checkpoints c ON c.turn_id = t.id
         WHERE t.turn_kind = 'AgentExecution' AND t.status NOT IN ('queued', 'completed', 'failed', 'cancelled')
           AND (c.turn_id IS NULL OR c.projection_version <> ${projectionVersion} OR c.projector_version IS NULL)
-        ORDER BY t.created_at ASC, t.rowid ASC`.pipe(Effect.mapError(error))
+        ORDER BY t.created_at ASC, t.id ASC`.pipe(Effect.mapError(error))
           return rows.map((raw) => {
             const row = raw as Record<string, unknown>
             return { threadId: String(row.thread_id) as never, turnId: String(row.turn_id) as never }

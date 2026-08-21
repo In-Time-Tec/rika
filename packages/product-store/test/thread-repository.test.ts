@@ -150,11 +150,19 @@ describe("sql layer", () => {
         })
         expect(created.labels).toEqual([])
         expect(sql.statements.map((statement) => statement.sql)).toEqual([
-          "INSERT INTO rika_workspaces (path, created_at) VALUES (?, ?) ON CONFLICT(path) DO NOTHING",
-          "INSERT INTO rika_threads (id, workspace, title, labels_json, pinned, archived, lineage_json, created_at, updated_at) VALUES (?, ?, ?, '[]', 0, 0, ?, ?, ?)",
-          "SELECT * FROM rika_threads WHERE id = ? AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id)",
+          "INSERT INTO rika_workspaces (owner_id, path, created_at) VALUES (?, ?, ?) ON CONFLICT(owner_id, path) DO NOTHING",
+          "INSERT INTO rika_threads (id, owner_id, workspace, title, labels_json, pinned, archived, lineage_json, created_at, updated_at) VALUES (?, ?, ?, ?, '[]', 0, 0, ?, ?, ?)",
+          "SELECT * FROM rika_threads WHERE id = ? AND owner_id = ? AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id)",
         ])
-        expect(sql.statements[1]?.parameters).toEqual(["thread-a", "/work/a", "First", '{"_tag":"Original"}', 1, 1])
+        expect(sql.statements[1]?.parameters).toEqual([
+          "thread-a",
+          "local",
+          "/work/a",
+          "First",
+          '{"_tag":"Original"}',
+          1,
+          1,
+        ])
       }),
     ),
   )
@@ -177,11 +185,11 @@ describe("sql layer", () => {
 
         expect(created.id).toBe(id("thread-b"))
         expect(sql.statements.map((statement) => statement.sql)).toEqual([
-          "SELECT * FROM rika_threads WHERE id = ? AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id)",
-          "INSERT INTO rika_workspaces (path, created_at) VALUES (?, ?) ON CONFLICT(path) DO NOTHING",
-          "INSERT INTO rika_threads (id, workspace, title, labels_json, pinned, archived, lineage_json, created_at, updated_at) VALUES (?, ?, ?, '[]', 0, 0, ?, ?, ?)",
-          "SELECT * FROM rika_threads WHERE id = ? AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id)",
-          "UPDATE rika_threads SET archived = 1, updated_at = ? WHERE id = ?",
+          "SELECT * FROM rika_threads WHERE id = ? AND owner_id = ? AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id)",
+          "INSERT INTO rika_workspaces (owner_id, path, created_at) VALUES (?, ?, ?) ON CONFLICT(owner_id, path) DO NOTHING",
+          "INSERT INTO rika_threads (id, owner_id, workspace, title, labels_json, pinned, archived, lineage_json, created_at, updated_at) VALUES (?, ?, ?, ?, '[]', 0, 0, ?, ?, ?)",
+          "SELECT * FROM rika_threads WHERE id = ? AND owner_id = ? AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id)",
+          "UPDATE rika_threads SET archived = 1, updated_at = ? WHERE id = ? AND owner_id = ?",
         ])
       }),
     ),
@@ -221,14 +229,14 @@ describe("sql layer", () => {
         expect(yield* repository.list({ includeArchived: true, query: "/OTHER", limit: 200 })).toHaveLength(1)
         expect(yield* repository.list({ includeArchived: true, limit: 200 })).toHaveLength(100)
         expect(sql.statements[0]).toEqual({
-          sql: "SELECT * FROM rika_threads WHERE NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id) AND (? = 1 OR archived = 0) AND (? = 1 OR INSTR(LOWER(title), LOWER(?)) > 0 OR INSTR(LOWER(workspace), LOWER(?)) > 0 OR EXISTS (SELECT 1 FROM json_each(labels_json) WHERE INSTR(LOWER(CAST(value AS TEXT)), LOWER(?)) > 0)) ORDER BY pinned DESC, updated_at DESC, id ASC LIMIT ?",
-          parameters: [0, 1, "", "", "", 50],
+          sql: "SELECT * FROM rika_threads WHERE owner_id = ? AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id) AND (? = 1 OR archived = 0) AND (? = 1 OR LOWER(title) LIKE '%' || LOWER(?) || '%' OR LOWER(workspace) LIKE '%' || LOWER(?) || '%' OR LOWER(labels_json) LIKE '%' || LOWER(?) || '%') ORDER BY pinned DESC, updated_at DESC, id ASC LIMIT ?",
+          parameters: ["local", 0, 1, "", "", "", 50],
         })
-        expect(sql.statements[1]?.parameters).toEqual([1, 0, "urgent", "urgent", "urgent", 1])
-        expect(sql.statements[2]?.parameters).toEqual([1, 0, "/OTHER", "/OTHER", "/OTHER", 100])
+        expect(sql.statements[1]?.parameters).toEqual(["local", 1, 0, "urgent", "urgent", "urgent", 1])
+        expect(sql.statements[2]?.parameters).toEqual(["local", 1, 0, "/OTHER", "/OTHER", "/OTHER", 100])
         expect(sql.statements[3]).toEqual({
-          sql: "SELECT * FROM rika_threads WHERE NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id) AND (? = 1 OR archived = 0) AND (? = 1 OR INSTR(LOWER(title), LOWER(?)) > 0 OR INSTR(LOWER(workspace), LOWER(?)) > 0 OR EXISTS (SELECT 1 FROM json_each(labels_json) WHERE INSTR(LOWER(CAST(value AS TEXT)), LOWER(?)) > 0)) ORDER BY pinned DESC, updated_at DESC, id ASC LIMIT ?",
-          parameters: [1, 1, "", "", "", 100],
+          sql: "SELECT * FROM rika_threads WHERE owner_id = ? AND NOT EXISTS (SELECT 1 FROM rika_thread_deletion_outbox WHERE thread_id = rika_threads.id) AND (? = 1 OR archived = 0) AND (? = 1 OR LOWER(title) LIKE '%' || LOWER(?) || '%' OR LOWER(workspace) LIKE '%' || LOWER(?) || '%' OR LOWER(labels_json) LIKE '%' || LOWER(?) || '%') ORDER BY pinned DESC, updated_at DESC, id ASC LIMIT ?",
+          parameters: ["local", 1, 1, "", "", "", 100],
         })
       }),
     ),
@@ -241,22 +249,22 @@ describe("sql layer", () => {
         const cases = [
           [
             () => repository.rename(id("thread-a"), "Renamed", 2),
-            ["Renamed", null, null, null, 2, "thread-a"],
+            ["Renamed", null, null, null, 2, "thread-a", "local"],
             row({ title: "Renamed", updated_at: 2 }),
           ],
           [
             () => repository.label(id("thread-a"), ["bug", "bug"], 3),
-            [null, '["bug"]', null, null, 3, "thread-a"],
+            [null, '["bug"]', null, null, 3, "thread-a", "local"],
             row({ labels_json: '["bug"]', updated_at: 3 }),
           ],
           [
             () => repository.setPinned(id("thread-a"), true, 4),
-            [null, null, 1, null, 4, "thread-a"],
+            [null, null, 1, null, 4, "thread-a", "local"],
             row({ pinned: 1, updated_at: 4 }),
           ],
           [
             () => repository.setArchived(id("thread-a"), false, 5),
-            [null, null, null, 0, 5, "thread-a"],
+            [null, null, null, 0, 5, "thread-a", "local"],
             row({ updated_at: 5 }),
           ],
         ] satisfies ReadonlyArray<
@@ -286,7 +294,10 @@ describe("sql layer", () => {
         const repository = yield* ThreadRepository.Service
         yield* repository.discard(id("thread-a"))
         const missing = yield* Effect.result(repository.discard(id("missing")))
-        expect(sql.statements[1]).toEqual({ sql: "DELETE FROM rika_threads WHERE id = ?", parameters: ["thread-a"] })
+        expect(sql.statements[1]).toEqual({
+          sql: "DELETE FROM rika_threads WHERE id = ? AND owner_id = ?",
+          parameters: ["thread-a", "local"],
+        })
         expect(missing._tag).toBe("Failure")
       }),
     ),

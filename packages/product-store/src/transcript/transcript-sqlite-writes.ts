@@ -52,7 +52,7 @@ export const transcriptSqliteWrites = {
               ${turn.id}, ${turn.threadId}, 0, ${change.revision}, ${ExecutionProjection.projectionVersion}, ${encodeState(change.state)},
               ${checkpoint?.version ?? null}, ${checkpoint?.cursor ?? null}, ${checkpoint?.state ?? null}, ${now}
             ) ON CONFLICT(turn_id) DO UPDATE SET
-              checkpoint_generation = checkpoint_generation + 1,
+              checkpoint_generation = rika_transcript_checkpoints.checkpoint_generation + 1,
               revision = excluded.revision,
               projection_version = excluded.projection_version,
               state_json = excluded.state_json,
@@ -117,7 +117,8 @@ export const transcriptSqliteWrites = {
             ${turn.id}, ${turn.threadId}, 0, ${revision}, ${ExecutionProjection.projectionVersion}, ${encodeState(state)},
             NULL, NULL, NULL, ${now}
           ) ON CONFLICT(turn_id) DO UPDATE SET
-            checkpoint_generation = checkpoint_generation + 1, revision = excluded.revision,
+            checkpoint_generation = rika_transcript_checkpoints.checkpoint_generation + 1,
+            revision = excluded.revision,
             projection_version = excluded.projection_version, state_json = excluded.state_json,
             projector_version = NULL, projector_cursor = NULL, projector_state = NULL, updated_at = excluded.updated_at`
             yield* sql`DELETE FROM rika_transcript_units WHERE turn_id = ${turn.id}`

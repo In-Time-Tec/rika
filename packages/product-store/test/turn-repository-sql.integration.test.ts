@@ -175,7 +175,7 @@ it.effect("sql turns create, get, and list current turn shapes", () =>
       expect(executionRoute).toEqual(ExecutionRouteSnapshot.testExecutionRoute())
       expect(parameters.slice(5)).toEqual(['{"_tag":"Human"}', '{"_tag":"Original"}', "thread-a", 1, 1])
       expect(sql.statements.at(-1)).toEqual({
-        sql: "SELECT * FROM rika_turns WHERE thread_id = ? ORDER BY created_at ASC, rowid ASC",
+        sql: "SELECT * FROM rika_turns WHERE thread_id = ? ORDER BY created_at ASC, id ASC",
         parameters: ["thread-a"],
       })
     }),
@@ -343,9 +343,13 @@ it.effect("sql finds active turns and lists queued turns", () =>
 it.effect("sql claims queued turns and reports empty, malformed, and failed queries", () =>
   sqlTest((sql) =>
     Effect.gen(function* () {
+      sql.rows({ thread_id: "thread-a" })
       sql.rows({ ...row({ status: "queued" }), queue_claim_token: "TOKEN" })
+      sql.rows({ thread_id: "thread-a" })
       sql.rows()
+      sql.rows({ thread_id: "thread-a" })
       sql.rows(row({ status: "invalid" }))
+      sql.rows({ thread_id: "thread-a" })
       sql.error("claim unavailable")
       sql.rows(row({ prompt: 1 }))
       sql.error("active unavailable")
@@ -364,7 +368,8 @@ it.effect("sql claims queued turns and reports empty, malformed, and failed quer
       expect(malformedActive._tag).toBe("Failure")
       expect(failedActive._tag).toBe("Failure")
       expect(failedQueue._tag).toBe("Failure")
-      expect(sql.statements[0]?.parameters).toEqual(["thread-a", "thread-a", "thread-a"])
+      expect(sql.statements[0]?.parameters).toEqual(["thread-a"])
+      expect(sql.statements[1]?.parameters.slice(1)).toEqual(["thread-a", "thread-a", "thread-a"])
     }),
   ),
 )
@@ -406,7 +411,7 @@ it.effect("sql edits and dequeues only queued turns", () =>
           parameters: ["turn-a"],
         },
         {
-          sql: "UPDATE rika_thread_queue_state SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0) WHERE thread_id = ? RETURNING *",
+          sql: "UPDATE rika_thread_queue_state SET revision = revision + 1, queued_count = CASE WHEN queued_count > 0 THEN queued_count - 1 ELSE 0 END WHERE thread_id = ? RETURNING *",
           parameters: ["thread-a"],
         },
         {

@@ -91,7 +91,7 @@ const decodeRepair = (row: unknown) =>
     })
   }).pipe(Effect.mapError(repositoryError))
 
-export const layer = Layer.effect(
+export const layerForOwner = (ownerId: string) => Layer.effect(
   Service,
   Effect.gen(function* () {
     const sql = yield* SqlClient
@@ -113,8 +113,9 @@ export const layer = Layer.effect(
           summary.modified,
           summary.removed
         FROM rika_thread_picker_summary AS summary
+        JOIN rika_threads AS thread ON thread.id = summary.thread_id
         LEFT JOIN rika_thread_read_state AS read_state ON read_state.thread_id = summary.thread_id
-        WHERE NOT EXISTS (
+        WHERE thread.owner_id = ${ownerId} AND NOT EXISTS (
           SELECT 1 FROM rika_thread_deletion_outbox AS deletion WHERE deletion.thread_id = summary.thread_id
         ) AND (${input.includeArchived === true ? 1 : 0} = 1 OR summary.archived = 0)
         ORDER BY summary.pinned DESC, summary.last_activity_at DESC, summary.thread_id ASC
@@ -148,7 +149,9 @@ export const layer = Layer.effect(
         yield* sql`INSERT INTO rika_thread_read_state (thread_id, last_read_at)
           VALUES (${threadId}, ${now})
           ON CONFLICT(thread_id) DO UPDATE SET
-            last_read_at = MAX(rika_thread_read_state.last_read_at, excluded.last_read_at)`.pipe(
+            last_read_at = CASE
+              WHEN rika_thread_read_state.last_read_at > excluded.last_read_at
+                THEN rika_thread_read_state.last_read_at ELSE excluded.last_read_at END`.pipe(
           Effect.mapError(repositoryError),
         )
       }),
@@ -158,19 +161,22 @@ export const layer = Layer.effect(
           turn.thread_id,
           turn.status
         FROM rika_turns AS turn
+        JOIN rika_threads AS thread ON thread.id = turn.thread_id
         LEFT JOIN rika_thread_turn_activity AS activity ON activity.turn_id = turn.id
-        WHERE NOT EXISTS (
+        WHERE thread.owner_id = ${ownerId} AND NOT EXISTS (
           SELECT 1 FROM rika_thread_deletion_outbox AS deletion WHERE deletion.thread_id = turn.thread_id
         ) AND turn.turn_kind = 'AgentExecution' AND (
           activity.turn_id IS NULL
           OR (turn.status IN ('completed', 'failed', 'cancelled') AND activity.complete = 0)
         )
-        ORDER BY turn.created_at ASC, turn.rowid ASC
+        ORDER BY turn.created_at ASC, turn.id ASC
         LIMIT ${listLimit(limit)}`.pipe(Effect.mapError(repositoryError))
         return yield* Effect.all(rows.map(decodeRepair))
       }),
     })
   }),
 )
+
+export const layer = layerForOwner("local")
 
 export { makeMemory, memoryLayer } from "./memory-thread-summary-repository"
