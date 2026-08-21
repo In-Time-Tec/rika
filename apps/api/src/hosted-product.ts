@@ -2,6 +2,7 @@ import * as PgClient from "@effect/sql-pg/PgClient"
 import { Clock, Context, Crypto, DateTime, Effect, Layer, Schema } from "effect"
 import { AuthorizationPolicy, type AuthorizationAction } from "@rika/product/hosted-authorization"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
+import * as HostedObservability from "@rika/product/hosted-observability"
 import {
   BetterAuthMemberId,
   BetterAuthUserId,
@@ -661,18 +662,24 @@ export const layer = (options: {
         const executionRoute = yield* modelRegistry
           .resolve(authority.ownerId, input.mode)
           .pipe(Effect.mapError(modelFailure))
-        const admitted = yield* store.admitPrompt({
-          ownerId: authority.ownerId,
-          threadId: ThreadId.make(input.threadId),
-          commandId: CommandId.make(input.operationKey),
-          idempotencyKey: IdempotencyKey.make(input.operationKey),
-          turnId: TurnId.make(yield* crypto.randomUUIDv4),
-          actor: authority.actor,
-          prompt: input.prompt,
-          executionRoute,
-          admittedAt: DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis)),
-          queueCapacity: 32,
-        })
+        const commandId = CommandId.make(input.operationKey)
+        const turnId = TurnId.make(yield* crypto.randomUUIDv4)
+        const admitted = yield* HostedObservability.observe(
+          "command_admission",
+          { ownerId: authority.ownerId, threadId: input.threadId, turnId, commandId },
+          store.admitPrompt({
+            ownerId: authority.ownerId,
+            threadId: ThreadId.make(input.threadId),
+            commandId,
+            idempotencyKey: IdempotencyKey.make(input.operationKey),
+            turnId,
+            actor: authority.actor,
+            prompt: input.prompt,
+            executionRoute,
+            admittedAt: DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis)),
+            queueCapacity: 32,
+          }),
+        )
         return {
           commandId: String(admitted.command.commandId),
           turnId: String(admitted.turnId),

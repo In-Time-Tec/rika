@@ -14,6 +14,7 @@ import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import * as MachineBindings from "@rika/kernel/machine-bindings"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
+import * as HostedObservability from "@rika/product/hosted-observability"
 import {
   AssignmentLeaseEpoch,
   ExecutorAssignmentId,
@@ -63,6 +64,19 @@ const OperationIdentity = Schema.Struct({
   deadline: Schema.NullOr(Schema.String),
 })
 const encodeOperationIdentity = Schema.encodeSync(Schema.fromJsonString(OperationIdentity))
+
+const cellOutcome = (outcome: "completed" | "failed" | "cancelled" | "unknown"): HostedObservability.Outcome => {
+  switch (outcome) {
+    case "completed":
+      return "success"
+    case "cancelled":
+      return "interrupted"
+    case "failed":
+      return "failure"
+    case "unknown":
+      return "unknown"
+  }
+}
 
 export const loadConfig = Effect.fn("ExecutorConfig.load")(function* (environment: Record<string, string | undefined>) {
   const apiUrl = yield* required(environment, "RIKA_EXECUTOR_API_URL")
@@ -735,86 +749,105 @@ export const service = Layer.effect(
             kind: "fenced",
             message: "Executor workspace identity does not match the Run workspace",
           })
-        if (initial.placement._tag === "E2BPlacement") {
-          const phase = initial.lifecycle._tag === "Paused" || initial.lifecycle._tag === "Active" ? "runtime" : "setup"
-          yield* environment
-            .usePhase({ assignmentId: input.threadId, phase }, (resolved) =>
-              controller.provision(input.threadId, {
-                egress: resolved.egress,
-                environmentDigest: resolved.manifest.digest,
-              }),
-            )
-            .pipe(
-              Effect.mapError((error) =>
-                Schema.is(ControllerError)(error)
-                  ? error
-                  : ControllerError.make({
-                      kind: "repository",
-                      message: "Executor phase authorization was rejected",
-                    }),
+        yield* HostedObservability.observe(
+          "workspace_prepare",
+          { ownerId: initial.ownerId, threadId: input.threadId, turnId: input.turnId, assignmentId: initial.id },
+          Effect.gen(function* () {
+            if (initial.placement._tag === "E2BPlacement") {
+              const phase =
+                initial.lifecycle._tag === "Paused" || initial.lifecycle._tag === "Active" ? "runtime" : "setup"
+              yield* environment
+                .usePhase({ assignmentId: input.threadId, phase }, (resolved) =>
+                  controller.provision(input.threadId, {
+                    egress: resolved.egress,
+                    environmentDigest: resolved.manifest.digest,
+                  }),
+                )
+                .pipe(
+                  Effect.mapError((error) =>
+                    Schema.is(ControllerError)(error)
+                      ? error
+                      : ControllerError.make({
+                          kind: "repository",
+                          message: "Executor phase authorization was rejected",
+                        }),
+                  ),
+                )
+            }
+            const active = yield* Effect.suspend(() => assignments.get(assignmentId)).pipe(
+              Effect.flatMap((current) =>
+                current?.lifecycle._tag === "Active" &&
+                current.capabilityGeneration === current.generation &&
+                current.capabilities !== null
+                  ? Effect.succeed(current)
+                  : Effect.fail("workspace-not-ready" as const),
+              ),
+              Effect.retry({ times: 300, schedule: Schedule.spaced("100 millis") }),
+              Effect.mapError(() =>
+                ControllerError.make({
+                  kind: "assignment-conflict",
+                  message: "Executor transport connected but workspace capabilities are not ready",
+                }),
               ),
             )
-        }
-        const active = yield* Effect.suspend(() => assignments.get(assignmentId)).pipe(
-          Effect.flatMap((current) =>
-            current?.lifecycle._tag === "Active" &&
-            current.capabilityGeneration === current.generation &&
-            current.capabilities !== null
-              ? Effect.succeed(current)
-              : Effect.fail("workspace-not-ready" as const),
-          ),
-          Effect.retry({ times: 300, schedule: Schedule.spaced("100 millis") }),
-          Effect.mapError(() =>
-            ControllerError.make({
-              kind: "assignment-conflict",
-              message: "Executor transport connected but workspace capabilities are not ready",
-            }),
-          ),
+            const capabilities = active.capabilities!
+            const requiredCapabilities = [
+              "filesystem",
+              "typescriptKernel",
+              "git",
+              "process",
+              "workspaceLifecycle",
+            ] as const
+            const unavailable = requiredCapabilities.flatMap((name) => {
+              const capability = capabilities[name]
+              return capability._tag === "Ready" ? [] : [`${name}: ${capability.reason}`]
+            })
+            if (unavailable.length > 0)
+              return yield* ControllerError.make({
+                kind: "protocol",
+                message: `Run requires unavailable workspace capabilities: ${unavailable.join("; ")}`,
+              })
+            yield* sql`INSERT INTO rika_hosted_workspace_capability_admissions
+                (thread_id, turn_id, assignment_id, workspace_id, assignment_generation,
+                 environment_digest, required_capabilities)
+              VALUES (${input.threadId}, ${input.turnId}, ${active.id}, ${input.workspaceId},
+                ${active.generation}::bigint, ${capabilities.environmentDigest}, ${sql.json(requiredCapabilities)})
+              ON CONFLICT (thread_id, turn_id) DO NOTHING`.pipe(
+              Effect.mapError(() =>
+                ControllerError.make({
+                  kind: "repository",
+                  message: "Could not persist workspace capability admission",
+                }),
+              ),
+            )
+            const admitted = yield* sql<{
+              readonly workspaceId: string
+              readonly generation: string
+              readonly environmentDigest: string
+            }>`SELECT workspace_id AS "workspaceId", assignment_generation::text AS generation,
+                environment_digest AS "environmentDigest"
+              FROM rika_hosted_workspace_capability_admissions
+              WHERE thread_id = ${input.threadId} AND turn_id = ${input.turnId}`.pipe(
+              Effect.mapError(() =>
+                ControllerError.make({
+                  kind: "repository",
+                  message: "Could not inspect workspace capability admission",
+                }),
+              ),
+            )
+            const snapshot = admitted[0]
+            if (
+              snapshot === undefined ||
+              snapshot.workspaceId !== input.workspaceId ||
+              snapshot.generation !== String(active.generation) ||
+              snapshot.environmentDigest !== capabilities.environmentDigest
+            )
+              return yield* ControllerError.make({
+                kind: "fenced",
+                message: "Run capability admission conflicts with the current assignment environment",
+              })
+          }),
         )
-        const capabilities = active.capabilities!
-        const requiredCapabilities = ["filesystem", "typescriptKernel", "git", "process", "workspaceLifecycle"] as const
-        const unavailable = requiredCapabilities.flatMap((name) => {
-          const capability = capabilities[name]
-          return capability._tag === "Ready" ? [] : [`${name}: ${capability.reason}`]
-        })
-        if (unavailable.length > 0)
-          return yield* ControllerError.make({
-            kind: "protocol",
-            message: `Run requires unavailable workspace capabilities: ${unavailable.join("; ")}`,
-          })
-        yield* sql`INSERT INTO rika_hosted_workspace_capability_admissions
-            (thread_id, turn_id, assignment_id, workspace_id, assignment_generation,
-             environment_digest, required_capabilities)
-          VALUES (${input.threadId}, ${input.turnId}, ${active.id}, ${input.workspaceId},
-            ${active.generation}::bigint, ${capabilities.environmentDigest}, ${sql.json(requiredCapabilities)})
-          ON CONFLICT (thread_id, turn_id) DO NOTHING`.pipe(
-          Effect.mapError(() =>
-            ControllerError.make({ kind: "repository", message: "Could not persist workspace capability admission" }),
-          ),
-        )
-        const admitted = yield* sql<{
-          readonly workspaceId: string
-          readonly generation: string
-          readonly environmentDigest: string
-        }>`SELECT workspace_id AS "workspaceId", assignment_generation::text AS generation,
-            environment_digest AS "environmentDigest"
-          FROM rika_hosted_workspace_capability_admissions
-          WHERE thread_id = ${input.threadId} AND turn_id = ${input.turnId}`.pipe(
-          Effect.mapError(() =>
-            ControllerError.make({ kind: "repository", message: "Could not inspect workspace capability admission" }),
-          ),
-        )
-        const snapshot = admitted[0]
-        if (
-          snapshot === undefined ||
-          snapshot.workspaceId !== input.workspaceId ||
-          snapshot.generation !== String(active.generation) ||
-          snapshot.environmentDigest !== capabilities.environmentDigest
-        )
-          return yield* ControllerError.make({
-            kind: "fenced",
-            message: "Run capability admission conflicts with the current assignment environment",
-          })
       }),
       run: Effect.fn("Executor.run")(function* (input) {
         const assignment = yield* assignments
@@ -853,30 +886,44 @@ export const service = Layer.effect(
             kind: "fenced",
             message: "Run capability admission no longer matches the assignment environment",
           })
+        const correlation = {
+          ownerId: assignment.ownerId,
+          threadId: input.threadId,
+          turnId: input.turnId,
+          runId: input.runId,
+          operationId: input.operationKey,
+          assignmentId: assignment.id,
+        }
         if (assignment.placement._tag === "LocalDevicePlacement") {
-          const authority = yield* bindings(input, localGateway.machine)
-          return yield* localGateway
-            .execute({
-              assignmentId: input.threadId,
-              ...input,
-              bindings: authority,
-            })
-            .pipe(
-              Effect.map((result) => {
-                const failure = result.response._tag === "DomainFailure" ? result.response.failure : undefined
-                const kind =
-                  typeof failure === "object" && failure !== null && "kind" in failure ? failure.kind : undefined
-                let outcome: "completed" | "failed" | "cancelled" | "unknown"
-                if (kind === "unknown") outcome = "unknown"
-                else if (kind === "cancelled") outcome = "cancelled"
-                else if (result.response._tag === "Success") outcome = "completed"
-                else outcome = "failed"
-                return {
-                  ...result,
-                  outcome,
-                }
-              }),
-            )
+          return yield* HostedObservability.observe(
+            "executor_wait",
+            correlation,
+            Effect.gen(function* () {
+              const authority = yield* bindings(input, localGateway.machine)
+              const execute = localGateway
+                .execute({
+                  assignmentId: input.threadId,
+                  ...input,
+                  bindings: authority,
+                })
+                .pipe(
+                  Effect.map((result) => {
+                    const failure = result.response._tag === "DomainFailure" ? result.response.failure : undefined
+                    const kind =
+                      typeof failure === "object" && failure !== null && "kind" in failure ? failure.kind : undefined
+                    let outcome: "completed" | "failed" | "cancelled" | "unknown"
+                    if (kind === "unknown") outcome = "unknown"
+                    else if (kind === "cancelled") outcome = "cancelled"
+                    else if (result.response._tag === "Success") outcome = "completed"
+                    else outcome = "failed"
+                    return { ...result, outcome }
+                  }),
+                )
+              return yield* HostedObservability.observe("cell", correlation, execute, (result) =>
+                cellOutcome(result.outcome),
+              )
+            }),
+          )
         }
         const latestCheckpoint = yield* assignments
           .latestCheckpoint(assignment.id)
@@ -902,13 +949,24 @@ export const service = Layer.effect(
                 : ControllerError.make({ kind: "repository", message: "Executor phase authorization was rejected" }),
             ),
           )
-        const authority = yield* bindings(input, gateway.machine)
-        const result = yield* gateway.execute({
-          assignmentId: input.threadId,
-          ...input,
-          bindings: authority,
-        })
-        return { ...result, eventPersisted: false as const }
+        return yield* HostedObservability.observe(
+          "executor_wait",
+          correlation,
+          Effect.gen(function* () {
+            const authority = yield* bindings(input, gateway.machine)
+            const result = yield* HostedObservability.observe(
+              "cell",
+              correlation,
+              gateway.execute({
+                assignmentId: input.threadId,
+                ...input,
+                bindings: authority,
+              }),
+              (completed) => cellOutcome(completed.outcome),
+            )
+            return { ...result, eventPersisted: false as const }
+          }),
+        )
       }),
       pause: (key) =>
         gateway.quiesce(key.assignmentId).pipe(

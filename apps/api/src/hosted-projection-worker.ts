@@ -1,6 +1,7 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionProjectionWatch from "@rika/product/execution-projection-watch"
+import * as HostedObservability from "@rika/product/hosted-observability"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import type { ProjectionRecoveryCandidate } from "@rika/product/transcript-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
@@ -19,7 +20,10 @@ export class HostedProjectionWorker extends Context.Service<HostedProjectionWork
   "@rika/api/hosted-projection-worker/HostedProjectionWorker",
 ) {}
 
-type Health = { readonly _tag: "starting" } | { readonly _tag: "healthy" } | { readonly _tag: "failed"; readonly message: string }
+type Health =
+  | { readonly _tag: "starting" }
+  | { readonly _tag: "healthy" }
+  | { readonly _tag: "failed"; readonly message: string }
 
 export const layer = (options: { readonly concurrency: number; readonly pollIntervalMillis: number }) =>
   Layer.unwrap(
@@ -36,22 +40,26 @@ export const layer = (options: { readonly concurrency: number; readonly pollInte
           return next
         })
       const project = (candidate: ProjectionRecoveryCandidate) =>
-        ExecutionProjectionWatch.watch({ turnId: candidate.turnId, turns, transcripts, backend }).pipe(
-          Effect.flatMap((result) =>
-            Clock.currentTimeMillis.pipe(
-              Effect.flatMap((now) => turns.setStatus(candidate.turnId, result.status, now)),
+        HostedObservability.observe(
+          "projection_checkpoint",
+          { turnId: candidate.turnId },
+          ExecutionProjectionWatch.watch({ turnId: candidate.turnId, turns, transcripts, backend }).pipe(
+            Effect.flatMap((result) =>
+              Clock.currentTimeMillis.pipe(
+                Effect.flatMap((now) => turns.setStatus(candidate.turnId, result.status, now)),
+              ),
             ),
+            Effect.asVoid,
           ),
-          Effect.asVoid,
+        ).pipe(
           Effect.catchCause((cause) => {
             if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
-            const message = Cause.pretty(cause)
+            const message = "Hosted projection worker failed"
             return Ref.set(health, { _tag: "failed", message }).pipe(
               Effect.andThen(
                 Effect.logError("hosted-projection-worker.failed").pipe(
                   Effect.annotateLogs({
                     "rika.turn.id": String(candidate.turnId),
-                    "rika.failure.message": message,
                   }),
                 ),
               ),
@@ -78,13 +86,9 @@ export const layer = (options: { readonly concurrency: number; readonly pollInte
       }).pipe(
         Effect.catchCause((cause) => {
           if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
-          const message = Cause.pretty(cause)
+          const message = "Hosted projection worker poll failed"
           return Ref.set(health, { _tag: "failed", message }).pipe(
-            Effect.andThen(
-              Effect.logError("hosted-projection-worker.poll-failed").pipe(
-                Effect.annotateLogs({ "rika.failure.message": message }),
-              ),
-            ),
+            Effect.andThen(Effect.logError("hosted-projection-worker.poll-failed")),
             Effect.andThen(Effect.sleep(options.pollIntervalMillis)),
           )
         }),

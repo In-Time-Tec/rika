@@ -25,6 +25,8 @@ it.effect("starts a claimed Turn while renewing its lease", () =>
         claimToken: "claim-test",
         expiresAt: 30,
         prepared: false,
+        ownerId: "owner-test",
+        claimedAt: 0,
         input: {
           threadId: "thread-test",
           turnId: "turn-test",

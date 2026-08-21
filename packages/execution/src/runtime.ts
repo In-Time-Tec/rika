@@ -6,6 +6,7 @@ import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import { Approval, Run, RunTree, Runtime } from "tenetkit/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
+import * as HostedObservability from "@rika/product/hosted-observability"
 import type { Status } from "@rika/product/execution-status"
 import { ProviderCredentialStore, type ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
@@ -24,7 +25,7 @@ import {
 } from "./route"
 import * as Postgres from "./postgres"
 import { TreeProjector } from "./projection/tree"
-import { resolveSemanticTreeEvent } from "./projection/semantic-event"
+import { resolveSemanticTreeEvent, type SemanticTreeEvent } from "./projection/semantic-event"
 
 /**
  * The runtime database always lives directly under the profile data root as `<dataRoot>/tenetkit.db`,
@@ -179,7 +180,7 @@ const status = (value: Run.RunStatus): Status => {
   }
 }
 
-const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreShape | undefined) =>
+const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreShape | undefined, hosted: boolean) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime.Runtime
     // A replayPolicy:"never" operation interrupted by cancellation parks the Run in
@@ -352,6 +353,42 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
       approveTurn: (link, input) => respondToApproval("approve", link, input),
       denyTurn: (link, input) => respondToApproval("deny", link, input),
       watchTurn: (link, input) => {
+        const modelAttempts = new Map<string, number>()
+        const observeModel = (treeEvent: SemanticTreeEvent) => {
+          if (!hosted) return Effect.void
+          const event = treeEvent.event
+          if (event._tag === "ModelAttemptStarted") {
+            if (modelAttempts.size >= 256) modelAttempts.delete(modelAttempts.keys().next().value!)
+            modelAttempts.set(event.modelAttemptId, event.startedAt)
+            return Effect.void
+          }
+          if (event._tag === "ModelAttemptCompleted") {
+            const startedAt = modelAttempts.get(event.modelAttemptId) ?? event.completedAt
+            modelAttempts.delete(event.modelAttemptId)
+            return HostedObservability.modelObserved(
+              { threadId: link.threadId, turnId: link.turnId, runId: treeEvent.runId },
+              "success",
+              event.completedAt - startedAt,
+              {
+                ...(event.usage.inputTokens.total === undefined ? {} : { inputTokens: event.usage.inputTokens.total }),
+                ...(event.usage.outputTokens.total === undefined
+                  ? {}
+                  : { outputTokens: event.usage.outputTokens.total }),
+              },
+            )
+          }
+          if (event._tag === "ModelAttemptFailed") {
+            const startedAt = modelAttempts.get(event.modelAttemptId) ?? event.failedAt
+            modelAttempts.delete(event.modelAttemptId)
+            return HostedObservability.modelObserved(
+              { threadId: link.threadId, turnId: link.turnId, runId: treeEvent.runId },
+              "failure",
+              event.failedAt - startedAt,
+              event.providerUsage,
+            )
+          }
+          return Effect.void
+        }
         let projector: ReturnType<typeof TreeProjector.make>
         try {
           projector = TreeProjector.make(
@@ -372,6 +409,7 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
         }).pipe(
           Stream.provideService(Runtime.Runtime, runtime),
           Stream.mapEffect((event) => resolveSemanticTreeEvent(event, runtime.resolveModelResponse)),
+          Stream.tap(observeModel),
           Stream.map((event) => ({ _tag: "root" as const, event })),
         )
         const titleId = link.titleRunId
@@ -530,7 +568,7 @@ const executionLayer = <E>(
           ? undefined
           : Context.get(yield* Layer.build(options.credentialStore), ProviderCredentialStore)
       const runtime = runtimeLayer(credentialStore)
-      const providedExecution = Layer.effectContext(make(options, credentialStore)).pipe(Layer.provide(runtime))
+      const providedExecution = Layer.effectContext(make(options, credentialStore, false)).pipe(Layer.provide(runtime))
       return Layer.merge(providedExecution, runtime).pipe(
         Layer.catchCause((cause) =>
           Layer.effectContext(
@@ -573,7 +611,7 @@ export const layerHosted = (
           : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
         ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
       })
-      const execution = Layer.effectContext(make(options, credentialStore)).pipe(Layer.provide(apiPostgres))
+      const execution = Layer.effectContext(make(options, credentialStore, true)).pipe(Layer.provide(apiPostgres))
       const readiness = Layer.effect(Postgres.Readiness, Effect.map(Postgres.Readiness, Postgres.Readiness.of)).pipe(
         Layer.provide(apiPostgres),
       )

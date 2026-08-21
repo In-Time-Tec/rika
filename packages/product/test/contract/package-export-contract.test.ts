@@ -82,6 +82,7 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "environment-store",
     "hosted-authorization",
     "hosted-model",
+    "hosted-observability",
     "local-runner-registration",
     "hosted-store",
     "client-protocol",

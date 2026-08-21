@@ -1,6 +1,7 @@
 import { type ExecutorAssignment, type E2BPlacement } from "@rika/product/executor-assignment"
 import { AssignmentError, ExecutorAssignments, type Access } from "@rika/product/executor-assignments"
 import { resolveEgressPolicy, type EnvironmentPhase, type PhaseEgressPolicy } from "@rika/product/environment-policy"
+import * as HostedObservability from "@rika/product/hosted-observability"
 import {
   AssignmentLeaseEpoch,
   CheckpointId,
@@ -228,6 +229,17 @@ const providerInstanceId = (assignment: ExecutorAssignment): string | undefined 
   )
     return lifecycle.providerInstanceId ?? undefined
   return undefined
+}
+
+const assignmentCorrelation = (assignment: ExecutorAssignment): HostedObservability.Correlation => {
+  const sandboxId = providerInstanceId(assignment)
+  return {
+    ownerId: assignment.ownerId,
+    threadId: assignment.threadId,
+    assignmentId: assignment.id,
+    ...(sandboxId === undefined ? {} : { sandboxId }),
+    ...(assignment.placement._tag === "E2BPlacement" ? { buildId: assignment.placement.templateBuildId } : {}),
+  }
 }
 
 const publicAssignment = (assignment: ExecutorAssignment): Assignment => {
@@ -459,11 +471,19 @@ export const layer = (
         const matches = inventory.filter((entry) =>
           matchesGeneration(assignment, entry.templateId, entry.templateBuildId, entry.metadata),
         )
-        if (matches.length === 0) return yield* failure("provider", "create outcome is unknown and no sandbox exists")
+        if (matches.length === 0) {
+          yield* HostedObservability.unknownOutcome(assignmentCorrelation(assignment))
+          return yield* failure("provider", "create outcome is unknown and no sandbox exists")
+        }
         const [adopt, ...duplicates] = [...matches].sort((left, right) => left.sandboxId.localeCompare(right.sandboxId))
         yield* Effect.forEach(
           duplicates,
-          (entry) => provider.kill(entry.sandboxId).pipe(Effect.mapError(providerFailure)),
+          (entry) =>
+            HostedObservability.observe(
+              "sandbox_reap",
+              { ...assignmentCorrelation(assignment), sandboxId: entry.sandboxId },
+              provider.kill(entry.sandboxId).pipe(Effect.mapError(providerFailure)),
+            ),
           { discard: true },
         )
         return adopt!
@@ -542,16 +562,28 @@ export const layer = (
         assignment: ExecutorAssignment,
         authorization: WorkspaceAuthorization,
       ) {
-        yield* authorizeWorkspace(authorization, "runtime")
-        const credential = yield* issueSecret("executor-bootstrap")
-        const provisioning = yield* assignments
-          .resume({
-            ...version(assignment),
-            bootstrapCredentialDigest: yield* digest(credential),
-            bootstrapLifetimeMillis,
-          })
-          .pipe(Effect.mapError(assignmentFailure))
-        return yield* createAndBootstrap(provisioning, credential, authorization, "resume", null)
+        return yield* HostedObservability.observe(
+          "sandbox_resume",
+          assignmentCorrelation(assignment),
+          Effect.gen(function* () {
+            yield* authorizeWorkspace(authorization, "runtime")
+            const credential = yield* issueSecret("executor-bootstrap")
+            const provisioning = yield* assignments
+              .resume({
+                ...version(assignment),
+                bootstrapCredentialDigest: yield* digest(credential),
+                bootstrapLifetimeMillis,
+              })
+              .pipe(Effect.mapError(assignmentFailure))
+            return yield* createAndBootstrap(provisioning, credential, authorization, "resume", null)
+          }),
+        ).pipe(
+          Effect.tapError((error) =>
+            error.kind === "assignment-missing" || error.kind === "assignment-conflict" || error.kind === "fenced"
+              ? Effect.void
+              : HostedObservability.health("restore_failure", assignmentCorrelation(assignment)),
+          ),
+        )
       })
 
       const provision = Effect.fn("Controller.provision")(function* (
@@ -559,17 +591,28 @@ export const layer = (
         authorization: WorkspaceAuthorization,
       ) {
         const assignment = yield* load(assignmentId)
-        yield* approvedPlacement(assignment)
-        if (assignment.lifecycle._tag === "Active") {
-          yield* provider
-            .connect(assignment.lifecycle.providerInstanceId, idleTimeoutMillis)
-            .pipe(Effect.mapError(providerFailure))
-          return publicAssignment(assignment)
-        }
-        if (assignment.lifecycle._tag === "Paused") return yield* resumeAssignment(assignment, authorization)
-        if (assignment.lifecycle._tag === "Terminated")
-          return yield* failure("fenced", `Assignment ${assignmentId} is terminated`)
-        return yield* beginProvisioning(assignment, authorization)
+        return yield* Effect.gen(function* () {
+          yield* approvedPlacement(assignment)
+          if (assignment.lifecycle._tag === "Active") {
+            yield* provider
+              .connect(assignment.lifecycle.providerInstanceId, idleTimeoutMillis)
+              .pipe(Effect.mapError(providerFailure))
+            return publicAssignment(assignment)
+          }
+          if (assignment.lifecycle._tag === "Paused") return yield* resumeAssignment(assignment, authorization)
+          if (assignment.lifecycle._tag === "Terminated")
+            return yield* failure("fenced", `Assignment ${assignmentId} is terminated`)
+          return yield* beginProvisioning(assignment, authorization)
+        }).pipe(
+          Effect.tapError((error) =>
+            assignment.lifecycle._tag === "Paused" ||
+            error.kind === "assignment-missing" ||
+            error.kind === "assignment-conflict" ||
+            error.kind === "fenced"
+              ? Effect.void
+              : HostedObservability.health("setup_failure", assignmentCorrelation(assignment)),
+          ),
+        )
       })
 
       const replace = Effect.fn("Controller.replace")(function* (
@@ -578,22 +621,39 @@ export const layer = (
       ) {
         yield* authorizeWorkspace(authorization, "runtime")
         const previous = yield* current(key)
-        yield* approvedPlacement(previous)
-        if (previous.lifecycle._tag !== "Active")
-          return yield* failure("assignment-conflict", "Only an active assignment can be replaced")
-        const retiringProviderId = providerInstanceId(previous)
-        const restore = yield* restoreCheckpoint(previous)
-        const identity = yield* issueSecret("executor-bootstrap")
-        const replacing = yield* assignments
-          .beginReplacement({
-            ...version(previous),
-            bootstrapCredentialDigest: yield* digest(identity),
-            bootstrapLifetimeMillis,
-          })
-          .pipe(Effect.mapError(assignmentFailure))
-        const replacement = yield* createAndBootstrap(replacing, identity, authorization, "replacement", restore)
-        if (retiringProviderId !== undefined) yield* provider.kill(retiringProviderId).pipe(Effect.ignore)
-        return replacement
+        return yield* HostedObservability.observe(
+          "sandbox_replace",
+          assignmentCorrelation(previous),
+          Effect.gen(function* () {
+            yield* approvedPlacement(previous)
+            if (previous.lifecycle._tag !== "Active")
+              return yield* failure("assignment-conflict", "Only an active assignment can be replaced")
+            const retiringProviderId = providerInstanceId(previous)
+            const restore = yield* restoreCheckpoint(previous)
+            const identity = yield* issueSecret("executor-bootstrap")
+            const replacing = yield* assignments
+              .beginReplacement({
+                ...version(previous),
+                bootstrapCredentialDigest: yield* digest(identity),
+                bootstrapLifetimeMillis,
+              })
+              .pipe(Effect.mapError(assignmentFailure))
+            const replacement = yield* createAndBootstrap(
+              replacing,
+              identity,
+              authorization,
+              "replacement",
+              restore,
+            )
+            if (retiringProviderId !== undefined)
+              yield* HostedObservability.observe(
+                "sandbox_reap",
+                { ...assignmentCorrelation(previous), sandboxId: retiringProviderId },
+                provider.kill(retiringProviderId),
+              ).pipe(Effect.ignore)
+            return replacement
+          }),
+        )
       })
 
       const resume = Effect.fn("Controller.resume")(function* (
@@ -610,41 +670,53 @@ export const layer = (
 
       const pause = Effect.fn("Controller.pause")(function* (key: AssignmentKey, quiescence?: Quiescence) {
         const assignment = yield* current(key)
-        if (assignment.lifecycle._tag === "Paused") {
-          yield* provider
-            .pauseFilesystem(assignment.lifecycle.providerInstanceId)
-            .pipe(Effect.mapError(providerFailure))
-          return publicAssignment(assignment)
-        }
-        if (assignment.lifecycle._tag !== "Active")
-          return yield* failure("assignment-conflict", "Only an active assignment can pause")
-        if (quiescence === undefined)
-          return yield* failure("assignment-conflict", "An active assignment must quiesce before it can pause")
-        if (
-          quiescence.access.fence.assignmentId !== assignment.id ||
-          quiescence.access.fence.assignmentGeneration !== number(assignment.generation)
+        return yield* HostedObservability.observe(
+          "sandbox_pause",
+          assignmentCorrelation(assignment),
+          Effect.gen(function* () {
+            if (assignment.lifecycle._tag === "Paused") {
+              yield* provider
+                .pauseFilesystem(assignment.lifecycle.providerInstanceId)
+                .pipe(Effect.mapError(providerFailure))
+              return publicAssignment(assignment)
+            }
+            if (assignment.lifecycle._tag !== "Active")
+              return yield* failure("assignment-conflict", "Only an active assignment can pause")
+            if (quiescence === undefined)
+              return yield* failure("assignment-conflict", "An active assignment must quiesce before it can pause")
+            if (
+              quiescence.access.fence.assignmentId !== assignment.id ||
+              quiescence.access.fence.assignmentGeneration !== number(assignment.generation)
+            )
+              return yield* failure("fenced", "Quiescence belongs to a stale assignment")
+            const operationKeys = new Set(quiescence.operations.map((operation) => operation.operationKey))
+            if (operationKeys.size !== quiescence.operations.length)
+              return yield* failure("protocol", "Quiescence contains duplicate operation outcomes")
+            yield* checkpoint(quiescence.access, quiescence.checkpoint)
+            const checkpointed = yield* load(assignment.id)
+            if (checkpointed.lifecycle._tag !== "Active")
+              return yield* failure("assignment-conflict", "Assignment changed while its checkpoint was committed")
+            const paused = yield* assignments.pause(version(checkpointed)).pipe(Effect.mapError(assignmentFailure))
+            yield* provider
+              .pauseFilesystem(checkpointed.lifecycle.providerInstanceId)
+              .pipe(Effect.mapError(providerFailure))
+            return publicAssignment(paused)
+          }),
         )
-          return yield* failure("fenced", "Quiescence belongs to a stale assignment")
-        const operationKeys = new Set(quiescence.operations.map((operation) => operation.operationKey))
-        if (operationKeys.size !== quiescence.operations.length)
-          return yield* failure("protocol", "Quiescence contains duplicate operation outcomes")
-        yield* checkpoint(quiescence.access, quiescence.checkpoint)
-        const checkpointed = yield* load(assignment.id)
-        if (checkpointed.lifecycle._tag !== "Active")
-          return yield* failure("assignment-conflict", "Assignment changed while its checkpoint was committed")
-        const paused = yield* assignments.pause(version(checkpointed)).pipe(Effect.mapError(assignmentFailure))
-        yield* provider
-          .pauseFilesystem(checkpointed.lifecycle.providerInstanceId)
-          .pipe(Effect.mapError(providerFailure))
-        return publicAssignment(paused)
       })
 
       const kill = Effect.fn("Controller.kill")(function* (key: AssignmentKey) {
         const assignment = yield* current(key)
-        const sandboxId = providerInstanceId(assignment)
-        if (sandboxId !== undefined) yield* provider.kill(sandboxId).pipe(Effect.mapError(providerFailure))
-        return publicAssignment(
-          yield* assignments.terminate(version(assignment)).pipe(Effect.mapError(assignmentFailure)),
+        return yield* HostedObservability.observe(
+          "sandbox_reap",
+          assignmentCorrelation(assignment),
+          Effect.gen(function* () {
+            const sandboxId = providerInstanceId(assignment)
+            if (sandboxId !== undefined) yield* provider.kill(sandboxId).pipe(Effect.mapError(providerFailure))
+            return publicAssignment(
+              yield* assignments.terminate(version(assignment)).pipe(Effect.mapError(assignmentFailure)),
+            )
+          }),
         )
       })
 
@@ -1054,9 +1126,20 @@ export const layer = (
               !preserved(sandbox),
           )
           .map((sandbox) => sandbox.sandboxId)
-        yield* Effect.forEach(orphans, (sandboxId) => provider.kill(sandboxId).pipe(Effect.mapError(providerFailure)), {
-          discard: true,
-        })
+        yield* Effect.forEach(
+          orphans,
+          (sandboxId) =>
+            HostedObservability.health("orphan_sandbox", { sandboxId }).pipe(
+              Effect.andThen(
+                HostedObservability.observe(
+                  "sandbox_reap",
+                  { sandboxId },
+                  provider.kill(sandboxId).pipe(Effect.mapError(providerFailure)),
+                ),
+              ),
+            ),
+          { discard: true },
+        )
         return orphans
       })
 
@@ -1067,10 +1150,42 @@ export const layer = (
         pause,
         kill,
         hello,
-        reconnect,
+        reconnect: (access) =>
+          HostedObservability.observe(
+            "lease_steal",
+            {
+              assignmentId: access.fence.assignmentId,
+              sandboxId: access.fence.instanceId,
+              ...(access.fence.target === "e2b" ? { buildId: options.templateBuildId } : {}),
+            },
+            reconnect(access),
+          ),
         validateAccess,
-        heartbeat,
-        checkpoint,
+        heartbeat: (input) =>
+          HostedObservability.observe(
+            "lease_renew",
+            { assignmentId: input.access.fence.assignmentId, sandboxId: input.access.fence.instanceId },
+            heartbeat(input),
+          ).pipe(
+            Effect.tapError((error) =>
+              error.kind === "fenced" || error.kind === "lease-expired"
+                ? HostedObservability.health("stale_lease", {
+                    assignmentId: input.access.fence.assignmentId,
+                    sandboxId: input.access.fence.instanceId,
+                  })
+                : Effect.void,
+            ),
+          ),
+        checkpoint: (access, staged) =>
+          HostedObservability.observe(
+            "checkpoint",
+            {
+              assignmentId: access.fence.assignmentId,
+              sandboxId: access.fence.instanceId,
+              checkpointId: staged.checkpointId,
+            },
+            checkpoint(access, staged),
+          ),
         credential,
         revokeCredential,
         workspace,

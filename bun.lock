@@ -315,6 +315,7 @@
         "@rika/coding-tools": "workspace:*",
         "@rika/extensions": "workspace:*",
         "@rika/kernel": "workspace:*",
+        "@rika/product": "workspace:*",
         "effect": "catalog:",
         "tenetkit": "catalog:",
       },

@@ -85,6 +85,8 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
         claimToken: request.claimToken,
         expiresAt: request.now + request.leaseMillis,
         prepared,
+        ownerId: "restart-owner",
+        claimedAt: request.now,
         input,
       }
       return durable.claim

@@ -2,6 +2,7 @@ import * as PgClient from "@effect/sql-pg/PgClient"
 import { Effect, Layer, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql/SqlClient"
 import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
+import * as HostedObservability from "@rika/product/hosted-observability"
 import {
   ActorAttribution,
   AuditEvent,
@@ -511,6 +512,12 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
             to_char(admitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "admittedAt"`)
         return { command: yield* decode(ThreadCommand, rows[0]), turnId: input.turnId }
       }),
+    ).pipe((effect) =>
+      HostedObservability.observe(
+        "queue_admission",
+        { ownerId: input.ownerId, threadId: input.threadId, turnId: input.turnId, commandId: input.commandId },
+        effect,
+      ),
     )
   })
 

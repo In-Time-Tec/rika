@@ -15,6 +15,7 @@ import {
   Timestamp,
 } from "@rika/product/hosted-model"
 import { HostedStore, StoreError } from "@rika/product/hosted-store"
+import * as HostedObservability from "@rika/product/hosted-observability"
 import { InteractiveCommand } from "@rika/product/interactive-command"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import type { AuthorizationAction } from "@rika/product/hosted-authorization"
@@ -35,6 +36,10 @@ export const threadWebSocketAudience = "/api/v1/threads/socket"
 const ticketLifetimeMillis = 60_000
 const zeroCursor = ThreadEventCursor.make("0")
 const checkpointEquivalent = Schema.toEquivalence(ExecutionProjection.Checkpoint)
+const replayDistance = (cursor: string, afterCursor: string) => {
+  const distance = BigInt(cursor) - BigInt(afterCursor)
+  return distance <= 0 ? 0 : Number(distance > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : distance)
+}
 
 const repositoryServiceFailureKind = (
   reason: "conflict" | "invalid" | "missing" | "unavailable",
@@ -332,7 +337,13 @@ export const layer = Layer.effect(
                 command: encoded,
                 admittedAt: receivedAt,
               })
-              .pipe(Effect.mapError(storeFailure))
+              .pipe(Effect.mapError(storeFailure), (effect) =>
+                HostedObservability.observe(
+                  "command_admission",
+                  { ownerId: authority.ownerId, threadId, commandId: command.commandId },
+                  effect,
+                ),
+              )
             let completed: ThreadProtocolCommand
             if (admission._tag === "Duplicate") {
               if (admission.command.state !== "completed")
@@ -368,15 +379,30 @@ export const layer = Layer.effect(
             yield* store
               .initializeThread({ ownerId: authority.ownerId, threadId: command.threadId, actor: authority.actor })
               .pipe(Effect.mapError(storeFailure))
-            const replay = yield* store
-              .replay({
-                ownerId: authority.ownerId,
-                threadId: command.threadId,
-                actor: authority.actor,
-                afterCursor: command.afterCursor,
-                limit: 1_000,
-              })
-              .pipe(Effect.mapError(storeFailure))
+            const replayCorrelation = { ownerId: authority.ownerId, threadId: command.threadId }
+            const replay = yield* HostedObservability.observe(
+              "client_replay",
+              replayCorrelation,
+              Effect.gen(function* () {
+                const result = yield* store
+                  .replay({
+                    ownerId: authority.ownerId,
+                    threadId: command.threadId,
+                    actor: authority.actor,
+                    afterCursor: command.afterCursor,
+                    limit: 1_000,
+                  })
+                  .pipe(Effect.mapError(storeFailure))
+                const replayLag = replayDistance(result.cursor, command.afterCursor)
+                yield* HostedObservability.replayLagObserved(replayCorrelation, replayLag)
+                if (replayLag >= HostedObservability.replayLagAlertEvents)
+                  yield* HostedObservability.health("replay_lag", replayCorrelation, {
+                    value: replayLag,
+                    threshold: HostedObservability.replayLagAlertEvents,
+                  })
+                return result
+              }),
+            )
             attached = { threadId: command.threadId, authority }
             const replaySnapshot = replay.snapshot
             const snapshot =
@@ -459,29 +485,45 @@ export const layer = Layer.effect(
           }
 
           if (command._tag === "AcknowledgeCursor") {
+            const threadId = attached.threadId
             const cursor = yield* store
               .acknowledgeCursor({
                 ownerId: authority.ownerId,
-                threadId: attached.threadId,
+                threadId,
                 actor: authority.actor,
                 cursor: command.cursor,
                 acknowledgedAt: receivedAt,
               })
               .pipe(Effect.mapError(storeFailure))
-            const replay = yield* store
-              .replay({
-                ownerId: authority.ownerId,
-                threadId: attached.threadId,
-                actor: authority.actor,
-                afterCursor: cursor,
-                limit: 1,
-              })
-              .pipe(Effect.mapError(storeFailure))
+            const replayCorrelation = { ownerId: authority.ownerId, threadId }
+            const replay = yield* HostedObservability.observe(
+              "client_replay",
+              replayCorrelation,
+              Effect.gen(function* () {
+                const result = yield* store
+                  .replay({
+                    ownerId: authority.ownerId,
+                    threadId,
+                    actor: authority.actor,
+                    afterCursor: cursor,
+                    limit: 1,
+                  })
+                  .pipe(Effect.mapError(storeFailure))
+                const replayLag = replayDistance(result.cursor, cursor)
+                yield* HostedObservability.replayLagObserved(replayCorrelation, replayLag)
+                if (replayLag >= HostedObservability.replayLagAlertEvents)
+                  yield* HostedObservability.health("replay_lag", replayCorrelation, {
+                    value: replayLag,
+                    threshold: HostedObservability.replayLagAlertEvents,
+                  })
+                return result
+              }),
+            )
             return [
               frame({
                 _tag: "CommandAccepted",
                 requestId: message.requestId,
-                threadId: attached.threadId,
+                threadId,
                 threadVersion: replay.threadVersion,
                 cursor: replay.cursor,
                 result: { _tag: "Applied" },
@@ -501,7 +543,17 @@ export const layer = Layer.effect(
               command: encoded,
               admittedAt: receivedAt,
             })
-            .pipe(Effect.mapError(storeFailure))
+            .pipe(Effect.mapError(storeFailure), (effect) =>
+              HostedObservability.observe(
+                "command_admission",
+                {
+                  ownerId: authority.ownerId,
+                  threadId: attached!.threadId,
+                  commandId: command.commandId,
+                },
+                effect,
+              ),
+            )
           if (admission._tag === "Duplicate") {
             if (admission.command.state !== "completed")
               return yield* HostedThreadProtocolError.make({

@@ -2,6 +2,7 @@ import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
+import * as HostedObservability from "@rika/product/hosted-observability"
 import {
   Cause,
   Context,
@@ -119,6 +120,15 @@ const fileMode = 0o600
 const sandboxIdPath = "/run/e2b/.E2B_SANDBOX_ID"
 const workspaceRoot = Bun.env.RIKA_EXECUTOR_WORKSPACE_ROOT || RemoteRepositoryRoot
 const workspaceUser = "rika-workspace"
+
+const cellCorrelation = (request: CellRequest) => ({
+  threadId: request.threadId,
+  turnId: request.turnId,
+  runId: request.runId,
+  operationId: request.operationKey,
+  assignmentId: request.access.fence.assignmentId,
+  sandboxId: request.access.fence.instanceId,
+})
 
 const sandboxInstanceId = () =>
   Bun.file(sandboxIdPath)
@@ -1050,6 +1060,7 @@ const consumeApi = (
               _tag: "DomainFailure" as const,
               failure: { kind: "unknown", message: "Cell operation outcome is unknown after executor restart" },
             }
+            yield* HostedObservability.unknownOutcome(cellCorrelation(message.request))
             yield* emit(message.request.access, {
               _tag: "Terminal",
               attribution: identity,
@@ -1073,46 +1084,51 @@ const consumeApi = (
             const value = phase.values[name]
             return value === undefined ? [] : [value]
           })
-          const response = yield* environmentAccess
-            .withPermits(1)(
-              Effect.gen(function* () {
-                const applied = yield* Ref.get(appliedEnvironment)
-                const previousDigest = applied.get(message.request.sessionId)
-                if (previousDigest !== phase.digest) {
-                  for (const name of Object.keys(executionEnvironment)) delete executionEnvironment[name]
-                  Object.assign(executionEnvironment, phase.values)
-                  if (previousDigest !== undefined) yield* cells.restart(message.request.sessionId)
-                  yield* Ref.set(appliedEnvironment, new Map(applied).set(message.request.sessionId, phase.digest))
-                }
-                const result = yield* cells.execute(message.request, (chunk) =>
-                  Effect.gen(function* () {
-                    const output = redactOutput(chunk.text, secrets)
-                    const outputFrames = (yield* Ref.get(frames)).get(key) ?? []
-                    if (outputFrames.filter((frame) => frame._tag === "Output").length >= 16) return
-                    yield* emit(message.request.access, {
-                      _tag: "Output",
-                      attribution: accepted.attribution,
-                      cursor: outputFrames.length + 1,
-                      stream: chunk.stream,
-                      text: output.text,
-                      redacted: true,
-                      truncated: output.truncated,
-                    }).pipe(Effect.ignore)
-                  }),
-                )
-                return redactResponse(result, secrets)
-              }),
-            )
-            .pipe(
-              Effect.catchCause((cause) =>
-                Cause.hasInterruptsOnly(cause)
-                  ? Effect.failCause(cause)
-                  : Effect.succeed({
-                      _tag: "DomainFailure" as const,
-                      failure: { kind: "execution", message: "Cell execution failed" },
+          const response = yield* HostedObservability.observe(
+            "cell",
+            cellCorrelation(message.request),
+            environmentAccess
+              .withPermits(1)(
+                Effect.gen(function* () {
+                  const applied = yield* Ref.get(appliedEnvironment)
+                  const previousDigest = applied.get(message.request.sessionId)
+                  if (previousDigest !== phase.digest) {
+                    for (const name of Object.keys(executionEnvironment)) delete executionEnvironment[name]
+                    Object.assign(executionEnvironment, phase.values)
+                    if (previousDigest !== undefined) yield* cells.restart(message.request.sessionId)
+                    yield* Ref.set(appliedEnvironment, new Map(applied).set(message.request.sessionId, phase.digest))
+                  }
+                  const result = yield* cells.execute(message.request, (chunk) =>
+                    Effect.gen(function* () {
+                      const output = redactOutput(chunk.text, secrets)
+                      const outputFrames = (yield* Ref.get(frames)).get(key) ?? []
+                      if (outputFrames.filter((frame) => frame._tag === "Output").length >= 16) return
+                      yield* emit(message.request.access, {
+                        _tag: "Output",
+                        attribution: accepted.attribution,
+                        cursor: outputFrames.length + 1,
+                        stream: chunk.stream,
+                        text: output.text,
+                        redacted: true,
+                        truncated: output.truncated,
+                      }).pipe(Effect.ignore)
                     }),
+                  )
+                  return redactResponse(result, secrets)
+                }),
+              )
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.failCause(cause)
+                    : Effect.succeed({
+                        _tag: "DomainFailure" as const,
+                        failure: { kind: "execution", message: "Cell execution failed" },
+                      }),
+                ),
               ),
-            )
+            (result) => (result._tag === "DomainFailure" ? "failure" : "success"),
+          )
           const completedFrames = (yield* Ref.get(frames)).get(key) ?? []
           yield* emit(message.request.access, {
             _tag: "Terminal",
@@ -1314,22 +1330,30 @@ const connect = Effect.fn("Host.connect")(function* (
     : { _tag: "ExecutorReconnect" as const, access: yield* runtime.reconnect }
   yield* writer(encodeExecutorMessage(opening))
   yield* waitForWelcome(incoming, store)
-  yield* prepare(
-    config,
-    kernelProfileDigest,
-    bindingContractDigest,
-    identity,
-    restore,
-    incoming,
-    credentials,
-    writer,
-    store,
-    grants,
-    executionEnvironment,
-    appliedEnvironment,
-    cells,
-    environmentAccess,
-    redactedValues,
+  yield* HostedObservability.observe(
+    config.restoredSession === undefined ? "executor_setup" : "executor_resume",
+    {
+      assignmentId: config.fence.assignmentId,
+      sandboxId: config.fence.instanceId,
+      ...(config.templateBuildId === null ? {} : { buildId: config.templateBuildId }),
+    },
+    prepare(
+      config,
+      kernelProfileDigest,
+      bindingContractDigest,
+      identity,
+      restore,
+      incoming,
+      credentials,
+      writer,
+      store,
+      grants,
+      executionEnvironment,
+      appliedEnvironment,
+      cells,
+      environmentAccess,
+      redactedValues,
+    ),
   )
   yield* RepositoryServices.pipe(
     Effect.flatMap((services) => services.resume),
@@ -1471,6 +1495,12 @@ const host = Effect.scoped(
     const persisted = yield* store.load
     const matchingSession =
       Option.isSome(persisted) && restores(environmentIdentity, persisted.value) ? persisted.value : undefined
+    if (Option.isSome(persisted) && matchingSession === undefined)
+      yield* HostedObservability.health("restore_failure", {
+        assignmentId: environmentIdentity.assignmentId,
+        sandboxId: environmentIdentity.instanceId,
+        ...(environmentIdentity.templateBuildId === null ? {} : { buildId: environmentIdentity.templateBuildId }),
+      })
     const crypto = yield* Crypto.Crypto
     const fileSystem = yield* FileSystem.FileSystem
     const statePath = Effect.fn("Host.cellStatePath")(function* (operationKey: string) {
@@ -1694,7 +1724,15 @@ const host = Effect.scoped(
           Effect.catchCause(() => Effect.sleep("1 second")),
           Effect.forever,
         )
-      })
+      }).pipe(
+        Effect.tapError(() =>
+          HostedObservability.health(restoredSession === undefined ? "setup_failure" : "restore_failure", {
+            assignmentId: identity.assignmentId,
+            sandboxId: identity.instanceId,
+            ...(identity.templateBuildId === null ? {} : { buildId: identity.templateBuildId }),
+          }),
+        ),
+      )
     const monitor = (
       running: Fiber.Fiber<never, HostError>,
     ): Effect.Effect<

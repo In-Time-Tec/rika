@@ -2,6 +2,7 @@ import * as PgClient from "@effect/sql-pg/PgClient"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import { PromptPart } from "@rika/product/execution-request"
+import * as HostedObservability from "@rika/product/hosted-observability"
 import { Context, Effect, Layer, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql/SqlClient"
 
@@ -22,6 +23,8 @@ export interface TurnClaim {
   readonly claimToken: string
   readonly expiresAt: number
   readonly prepared: boolean
+  readonly ownerId: string
+  readonly claimedAt: number
   readonly input: ExecutionGateway.StartTurn
 }
 
@@ -65,6 +68,7 @@ interface TurnRow {
   readonly prompt: string
   readonly promptPartsJson: string | null
   readonly executionRouteJson: string
+  readonly queuedAt: string
 }
 
 const decodeInput = (row: TurnRow) =>
@@ -93,22 +97,35 @@ const claim = (
     Effect.gen(function* () {
       const row = (yield* source)[0]
       if (row === undefined) return undefined
-      yield* query(sql`DELETE FROM rika_hosted_turn_claims
-        WHERE thread_id = ${row.threadId} AND expires_at <= ${request.now}`)
-      const claims = yield* query(sql`INSERT INTO rika_hosted_turn_claims
-        (turn_id, owner_id, thread_id, worker_id, claim_token, claimed_at, heartbeat_at, expires_at)
-        VALUES (${row.turnId}, ${row.ownerId}, ${row.threadId}, ${request.workerId}, ${request.claimToken},
-          ${request.now}, ${request.now}, ${request.now + request.leaseMillis})
-        ON CONFLICT DO NOTHING RETURNING turn_id`)
-      const claimed = claims[0]
-      if (claimed === undefined) return undefined
-      return {
-        workerId: request.workerId,
-        claimToken: request.claimToken,
-        expiresAt: request.now + request.leaseMillis,
-        prepared,
-        input: yield* decodeInput(row),
-      }
+      const queuedAt = Number(row.queuedAt)
+      if (!Number.isFinite(queuedAt)) return yield* failure("Turn queue timestamp is invalid")
+      const correlation = { ownerId: row.ownerId, threadId: row.threadId, turnId: row.turnId }
+      return yield* HostedObservability.observe(
+        "queue_claim",
+        correlation,
+        Effect.gen(function* () {
+          yield* query(sql`DELETE FROM rika_hosted_turn_claims
+            WHERE thread_id = ${row.threadId} AND expires_at <= ${request.now}`)
+          const claims = yield* query(sql`INSERT INTO rika_hosted_turn_claims
+            (turn_id, owner_id, thread_id, worker_id, claim_token, claimed_at, heartbeat_at, expires_at)
+            VALUES (${row.turnId}, ${row.ownerId}, ${row.threadId}, ${request.workerId}, ${request.claimToken},
+              ${request.now}, ${request.now}, ${request.now + request.leaseMillis})
+            ON CONFLICT DO NOTHING RETURNING turn_id`)
+          const claimed = claims[0]
+          if (claimed === undefined) return undefined
+          yield* HostedObservability.queueWaitObserved(correlation, request.now - queuedAt)
+          return {
+            workerId: request.workerId,
+            claimToken: request.claimToken,
+            expiresAt: request.now + request.leaseMillis,
+            prepared,
+            ownerId: row.ownerId,
+            claimedAt: request.now,
+            input: yield* decodeInput(row),
+          }
+        }),
+        (claimed) => (claimed === undefined ? "failure" : "success"),
+      )
     }),
   )
 
@@ -122,7 +139,8 @@ export const layer = Layer.effect(
         request,
         query(sql<TurnRow>`SELECT thread_record.owner_id AS "ownerId", turn_record.thread_id AS "threadId",
           turn_record.id AS "turnId", hosted_thread.workspace_id AS "workspaceId", turn_record.prompt,
-          turn_record.prompt_parts_json AS "promptPartsJson", turn_record.execution_route_json AS "executionRouteJson"
+          turn_record.prompt_parts_json AS "promptPartsJson", turn_record.execution_route_json AS "executionRouteJson",
+          turn_record.created_at::text AS "queuedAt"
         FROM rika_turns turn_record
         JOIN rika_threads thread_record ON thread_record.id = turn_record.thread_id
         JOIN rika_hosted_threads hosted_thread ON hosted_thread.id = turn_record.thread_id
@@ -158,7 +176,8 @@ export const layer = Layer.effect(
         request,
         query(sql<TurnRow>`SELECT thread_record.owner_id AS "ownerId", turn_record.thread_id AS "threadId",
           turn_record.id AS "turnId", hosted_thread.workspace_id AS "workspaceId", turn_record.prompt,
-          turn_record.prompt_parts_json AS "promptPartsJson", turn_record.execution_route_json AS "executionRouteJson"
+          turn_record.prompt_parts_json AS "promptPartsJson", turn_record.execution_route_json AS "executionRouteJson",
+          admission.prepared_at::text AS "queuedAt"
         FROM rika_turn_admission_outbox admission
         JOIN rika_turns turn_record ON turn_record.id = admission.turn_id
         JOIN rika_threads thread_record ON thread_record.id = turn_record.thread_id

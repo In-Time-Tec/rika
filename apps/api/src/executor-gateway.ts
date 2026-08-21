@@ -1,6 +1,7 @@
 import type { ControllerError, Interface as Controller, Quiescence } from "@rika/e2b-executor/controller"
 import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import type * as MachineBindings from "@rika/kernel/machine-bindings"
+import * as HostedObservability from "@rika/product/hosted-observability"
 import { HostBindingRegistry } from "tenetkit/repl"
 import {
   ApiMessage,
@@ -778,6 +779,15 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           yield* Ref.update(frames, (current) => new Map(current).set(operationKey, [...known, frame]))
         }
         if (frame._tag === "Terminal") {
+          if (frame.outcome === "unknown")
+            yield* HostedObservability.unknownOutcome({
+              threadId: attribution.threadId,
+              turnId: attribution.turnId,
+              runId: attribution.runId,
+              operationId: attribution.operationKey,
+              assignmentId,
+              sandboxId: access.fence.instanceId,
+            })
           yield* Ref.update(terminals, (current) => new Map(current).set(operationKey, frame))
           socket.send(
             encode({
@@ -1187,8 +1197,13 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         return yield* preparation.output(message)
       case "WorkspacePreparationReady":
         return yield* preparation.complete(message)
-      case "WorkspacePreparationFailed":
+      case "WorkspacePreparationFailed": {
+        yield* HostedObservability.health("setup_failure", {
+          assignmentId: message.access.fence.assignmentId,
+          sandboxId: message.access.fence.instanceId,
+        })
         return yield* preparation.fail(message)
+      }
       case "CellResult":
         return yield* complete(socket, message.access, message.operationKey, message.attempt, message.response)
       case "BindingInvoke": {

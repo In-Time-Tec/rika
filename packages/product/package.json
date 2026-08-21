@@ -31,6 +31,7 @@
     "./environment-store": "./src/hosted/environment-store.ts",
     "./workspace-preparation": "./src/hosted/workspace-preparation.ts",
     "./hosted-authorization": "./src/hosted/authorization.ts",
+    "./hosted-observability": "./src/hosted/observability.ts",
     "./hosted-model": "./src/hosted/model.ts",
     "./local-runner-registration": "./src/hosted/local-runner-registration.ts",
     "./workspace-capability": "./src/hosted/workspace-capability.ts",

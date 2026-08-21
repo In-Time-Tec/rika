@@ -1,8 +1,6 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import {
-  HostedTurnWorkerStore,
-  type TurnClaim,
-} from "@rika/product-store/postgres-turn-worker-store"
+import * as HostedObservability from "@rika/product/hosted-observability"
+import { HostedTurnWorkerStore, type TurnClaim } from "@rika/product-store/postgres-turn-worker-store"
 import { Cause, Clock, Context, Crypto, Effect, Layer, Ref, Schema } from "effect"
 
 export class HostedTurnWorkerError extends Schema.TaggedError<HostedTurnWorkerError>()("HostedTurnWorkerError", {
@@ -17,12 +15,16 @@ export class HostedTurnWorker extends Context.Service<HostedTurnWorker, HostedTu
   "@rika/api/hosted-turn-worker/HostedTurnWorker",
 ) {}
 
-type Health = { readonly _tag: "starting" } | { readonly _tag: "healthy" } | { readonly _tag: "failed"; readonly message: string }
+type Health =
+  | { readonly _tag: "starting" }
+  | { readonly _tag: "healthy" }
+  | { readonly _tag: "failed"; readonly message: string }
 
 export const layer = (options: {
   readonly workerId: string
   readonly leaseMillis: number
   readonly pollIntervalMillis: number
+  readonly stuckClaimMillis?: number
 }) =>
   Layer.unwrap(
     Effect.gen(function* () {
@@ -31,11 +33,34 @@ export const layer = (options: {
       const crypto = yield* Crypto.Crypto
       const health = yield* Ref.make<Health>({ _tag: "starting" })
       const heartbeatInterval = Math.max(1, Math.floor(options.leaseMillis / 3))
-      const heartbeat = (claim: TurnClaim) =>
-        Effect.forever(
+      const stuckClaimMillis = options.stuckClaimMillis ?? options.leaseMillis * 4
+      const correlation = (claim: TurnClaim): HostedObservability.Correlation => ({
+        ownerId: claim.ownerId,
+        threadId: claim.input.threadId,
+        turnId: claim.input.turnId,
+      })
+      const heartbeat = (claim: TurnClaim) => {
+        let stuckReported = false
+        return Effect.forever(
           Effect.sleep(heartbeatInterval).pipe(
             Effect.andThen(Clock.currentTimeMillis),
+            Effect.tap((now) => {
+              const age = now - claim.claimedAt
+              if (stuckReported || age < stuckClaimMillis) return Effect.void
+              stuckReported = true
+              return HostedObservability.health("stuck_queue_claim", correlation(claim), {
+                value: age,
+                threshold: stuckClaimMillis,
+              }).pipe(
+                Effect.andThen(
+                  Ref.set(health, { _tag: "failed", message: "Hosted Turn worker has a stuck queue claim" }),
+                ),
+              )
+            }),
             Effect.flatMap((now) => store.renew(claim, now, options.leaseMillis)),
+            Effect.tap((renewed) =>
+              renewed ? Effect.void : HostedObservability.health("stale_lease", correlation(claim)),
+            ),
             Effect.filterOrFail(
               (renewed) => renewed,
               () => HostedTurnWorkerError.make({ message: `Lost claim for Turn ${claim.input.turnId}` }),
@@ -43,6 +68,7 @@ export const layer = (options: {
             Effect.asVoid,
           ),
         )
+      }
       const execute = Effect.fn("HostedTurnWorker.execute")(function* (claim: TurnClaim) {
         if (!claim.prepared) {
           const prepared = yield* store.prepare(claim, yield* Clock.currentTimeMillis)
@@ -51,12 +77,16 @@ export const layer = (options: {
             return
           }
         }
-        yield* Effect.raceFirst(
-          Effect.gen(function* () {
-            const link = yield* gateway.startTurn(claim.input)
-            yield* store.complete(claim, link, yield* Clock.currentTimeMillis)
-          }),
-          heartbeat(claim),
+        yield* HostedObservability.observe(
+          "run_start",
+          correlation(claim),
+          Effect.raceFirst(
+            Effect.gen(function* () {
+              const link = yield* gateway.startTurn(claim.input)
+              yield* store.complete(claim, link, yield* Clock.currentTimeMillis)
+            }),
+            heartbeat(claim),
+          ),
         )
       })
       const next = Effect.fn("HostedTurnWorker.next")(function* () {
@@ -80,13 +110,9 @@ export const layer = (options: {
       }).pipe(
         Effect.catchCause((cause) => {
           if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
-          const message = Cause.pretty(cause)
+          const message = "Hosted Turn worker failed"
           return Ref.set(health, { _tag: "failed", message }).pipe(
-            Effect.andThen(
-              Effect.logError("hosted-turn-worker.failed").pipe(
-                Effect.annotateLogs({ "rika.failure.message": message }),
-              ),
-            ),
+            Effect.andThen(Effect.logError("hosted-turn-worker.failed")),
             Effect.andThen(Effect.sleep(options.pollIntervalMillis)),
           )
         }),
@@ -98,7 +124,8 @@ export const layer = (options: {
               ? Effect.void
               : Effect.fail(
                   HostedTurnWorkerError.make({
-                    message: state._tag === "starting" ? "Hosted Turn worker has not completed its first poll" : state.message,
+                    message:
+                      state._tag === "starting" ? "Hosted Turn worker has not completed its first poll" : state.message,
                   }),
                 ),
           ),
