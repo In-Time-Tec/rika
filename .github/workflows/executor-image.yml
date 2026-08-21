@@ -1,0 +1,168 @@
+name: executor-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      generation:
+        description: New immutable executor image generation
+        required: true
+        type: number
+      promote:
+        description: Publish the image and create the E2B template build
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      digest: ${{ steps.image.outputs.digest }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/rika-executor
+      TAG: g${{ inputs.generation }}-${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Authenticate to GHCR
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build immutable candidate
+        id: image
+        run: |
+          test "${{ inputs.generation }}" -gt 0
+          docker manifest inspect "$IMAGE:$TAG" >/dev/null 2>&1 && {
+            echo "::error::Immutable generation $TAG already exists"
+            exit 1
+          }
+          docker build --pull --file infra/e2b/executor-v1/e2b.Dockerfile --tag "$IMAGE:$TAG" .
+          docker push "$IMAGE:$TAG"
+          digest="$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE:$TAG" | sed 's/^.*@//')"
+          test -n "$digest"
+          echo "digest=$digest" >> "$GITHUB_ENV"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          printf '%s@%s\n' "$IMAGE" "$digest" > image-subject.txt
+      - name: Make promoted image pullable by E2B
+        if: inputs.promote == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER_TYPE: ${{ github.event.repository.owner.type }}
+        run: |
+          owner_path="orgs"
+          test "$OWNER_TYPE" = Organization || owner_path="users"
+          gh api --method PATCH "/$owner_path/${{ github.repository_owner }}/packages/container/rika-executor" \
+            --field visibility=public
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@f8bdd1d8ac5e901a77a92f111440fdb1b593736b # v0.20.6
+        with:
+          image: ${{ env.IMAGE }}@${{ env.digest }}
+          format: spdx-json
+          output-file: executor-sbom.spdx.json
+          upload-artifact: false
+      - name: Scan the exact image
+        id: scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@76071ef0d7ec797419534a183b498b4d6366cf37 # 0.31.0
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ env.digest }}
+          format: json
+          output: executor-vulnerability-scan.json
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          ignore-unfixed: true
+      - name: Record candidate identity
+        run: |
+          jq -n \
+            --arg image "$IMAGE" \
+            --arg digest "$digest" \
+            --arg source "$GITHUB_SHA" \
+            --arg generation "${{ inputs.generation }}" \
+            '{generation:($generation|tonumber),sourceCommit:$source,image:$image,imageDigest:$digest,dockerfile:"infra/e2b/executor-v1/e2b.Dockerfile"}' \
+            > executor-build.json
+      - name: Attest exact image manifest
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.digest }}
+          push-to-registry: true
+      - name: Attest build identity
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: executor-build.json
+      - name: Upload retrievable evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: executor-g${{ inputs.generation }}-${{ github.sha }}-evidence
+          path: |-
+            executor-build.json
+            executor-sbom.spdx.json
+            executor-vulnerability-scan.json
+          if-no-files-found: error
+      - name: Enforce vulnerability gate
+        if: always()
+        run: test "${{ steps.scan.outcome }}" = success
+
+  promote:
+    if: inputs.promote == true
+    needs: build
+    environment: executor-production
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      digest: ${{ needs.build.outputs.digest }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Create new immutable E2B template build
+        env:
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+        run: |
+          test -n "$E2B_API_KEY"
+          printf 'FROM ghcr.io/${{ github.repository_owner }}/rika-executor@%s\n' "${{ env.digest }}" > e2b-promoted.Dockerfile
+          bunx @e2b/cli@2.16.2 template create rika-executor-v1 \
+            --path . \
+            --dockerfile e2b-promoted.Dockerfile \
+            --cmd "/opt/rika/start.sh" \
+            --ready-cmd "curl --fail --silent http://127.0.0.1:7070/health"
+          bunx @e2b/cli@2.16.2 template list --format json > e2b-templates.json
+          build_id="$(jq -er '[.[] | select(.aliases | index("rika-executor-v1"))][0].buildID' e2b-templates.json)"
+          test -n "$build_id"
+          bun run packages/e2b-executor/scripts/image-smoke.ts "$build_id"
+          jq -n \
+            --arg buildId "$build_id" \
+            --arg image "ghcr.io/${{ github.repository_owner }}/rika-executor" \
+            --arg digest "${{ env.digest }}" \
+            --arg source "$GITHUB_SHA" \
+            --arg generation "${{ inputs.generation }}" \
+            '{generation:($generation|tonumber),sourceCommit:$source,image:$image,imageDigest:$digest,e2bTemplate:"rika-executor-v1",e2bBuildId:$buildId}' \
+            > executor-promotion.json
+          cat executor-promotion.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Attest promoted template identity
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: executor-promotion.json
+      - name: Retain promotion receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: executor-g${{ inputs.generation }}-${{ github.sha }}-promotion
+          path: |-
+            executor-promotion.json
+            executor-smoke.json
+          if-no-files-found: error

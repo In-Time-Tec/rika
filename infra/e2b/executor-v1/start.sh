@@ -8,4 +8,4 @@ elif [ -z "${E2B_SANDBOX_ID:-}" ]; then
   E2B_SANDBOX_ID="template-readiness"
 fi
 export E2B_SANDBOX_ID
-exec bun run /opt/rika/src/host.ts
+exec bun run /opt/rika/packages/remote-execution/src/host.ts

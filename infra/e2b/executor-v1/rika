@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+if [ "$#" -eq 3 ] && [ "$1" = executor ] && [ "$2" = doctor ] && [ "$3" = --json ]; then
+  exec bun run /opt/rika/doctor.ts
+fi
+printf 'usage: rika executor doctor --json\n' >&2
+exit 2

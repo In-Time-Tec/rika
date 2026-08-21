@@ -58,6 +58,7 @@ export default defineConfig({
             "packages/*/test/**/*.proc.test.ts",
             "apps/*/test/**/*.proc.test.ts",
             "test/process/**/*.proc.test.ts",
+            "test/release/**/*.proc.test.ts",
           ],
           fileParallelism: false,
         },
