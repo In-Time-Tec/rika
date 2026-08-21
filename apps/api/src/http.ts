@@ -15,12 +15,14 @@ import type { HostedEnvironmentService } from "./hosted-environment"
 import type { HostedRecoveryService } from "./hosted-recovery"
 import type { Runtime as Executor } from "./executor"
 import type { ReadinessInterface as ExecutionReadiness } from "@rika/execution/postgres"
+import type { HostedToolPolicyService } from "./hosted-tool-policy"
 
 export interface HttpDependencies {
   readonly identity: IdentityRuntime
   readonly directory: IdentityDirectory
   readonly devices: CliDeviceDirectory
   readonly product: HostedProductService
+  readonly toolPolicy: HostedToolPolicyService
   readonly threads?: HostedThreadProtocolService
   readonly credentials?: HostedProviderCredentialsService
   readonly environment?: HostedEnvironmentService

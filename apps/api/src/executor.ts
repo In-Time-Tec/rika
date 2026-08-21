@@ -37,6 +37,7 @@ import type { AuthenticatedPrincipal } from "./hosted-product"
 import { LocalExecutor } from "./local-executor"
 import { HostedRepositories } from "./hosted-repositories"
 import { makeLocalGateway, type LocalGateway } from "./local-executor-gateway"
+import { HostedToolPolicy } from "./hosted-tool-policy"
 
 export class ExecutorConfigError extends Schema.TaggedError<ExecutorConfigError>()("ExecutorConfigError", {
   message: Schema.String,
@@ -195,6 +196,7 @@ export const service = Layer.effect(
     const assignments = yield* ExecutorAssignments
     const environment = yield* HostedEnvironment
     const preparations = yield* WorkspacePreparations
+    const toolPolicy = yield* HostedToolPolicy
     const sql = yield* PgClient.PgClient
     const crypto = yield* Crypto.Crypto
     const scope = yield* Effect.scope
@@ -705,9 +707,10 @@ export const service = Layer.effect(
           ),
       },
       bindingContract,
+      toolPolicy,
     )
     const local = yield* LocalExecutor
-    const localGateway = yield* makeLocalGateway(local)
+    const localGateway = yield* makeLocalGateway(local, toolPolicy)
     const bindings = Effect.fn("Executor.bindings")(function* (
       input: Parameters<Runtime["run"]>[0],
       machine: typeof gateway.machine,

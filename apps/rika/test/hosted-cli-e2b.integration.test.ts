@@ -24,6 +24,7 @@ import { HostedProduct, layer as hostedProductLayer } from "../../api/src/hosted
 import { testLayer as hostedModelRegistryTestLayer } from "../../api/src/hosted-model-registry"
 import { testLayer as hostedRepositoriesTestLayer } from "../../api/src/hosted-repositories"
 import { layer as localExecutorLayer } from "../../api/src/local-executor"
+import { HostedToolPolicy, layer as hostedToolPolicyLayer } from "../../api/src/hosted-tool-policy"
 import { makeRikaApiHandler } from "../../api/src/api"
 import type { HttpDependencies } from "../../api/src/http"
 import * as HostedCommand from "../src/command/root/hosted-command-dispatch"
@@ -259,14 +260,19 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
           encryptionKey: Redacted.make(Buffer.alloc(32, 1).toString("base64")),
           protectedEgressHosts: new Set([new URL(url).hostname]),
         }).pipe(Layer.provide(shared))
+        const toolPolicyLayer = hostedToolPolicyLayer.pipe(Layer.provide(shared))
         const executorLayer = executorService.pipe(
           Layer.provide(controller),
           Layer.provide(environmentLayer),
+          Layer.provide(toolPolicyLayer),
           Layer.provideMerge(localExecutorLayer.pipe(Layer.provide(shared))),
           Layer.provide(shared),
         )
-        const context = yield* Layer.build(Layer.merge(productLayer, executorLayer).pipe(Layer.provideMerge(shared)))
+        const context = yield* Layer.build(
+          Layer.mergeAll(productLayer, executorLayer, toolPolicyLayer).pipe(Layer.provideMerge(shared)),
+        )
         const product = Context.get(context, HostedProduct)
+        const toolPolicy = Context.get(context, HostedToolPolicy)
         const executor = Context.get(context, Executor)
         gateway = executor.gateway
         const databaseTime = yield* Effect.promise(() =>
@@ -336,6 +342,7 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
             revokeAll: () => Effect.void,
           } satisfies CliDeviceDirectory,
           product,
+          toolPolicy,
           threads: {
             issueTicket: () =>
               Effect.succeed({ ticket: "thread-ticket", expiresAt: "2026-08-21T07:00:00.000Z" as never }),

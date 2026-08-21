@@ -11,6 +11,7 @@ import {
   type IdentityRuntime,
 } from "@rika/identity"
 import { handleRequest, type HttpDependencies } from "../src/http"
+import { testToolPolicy } from "./hosted-tool-policy-fixture"
 import { HostedProductError, type HostedProductService } from "../src/hosted-product"
 import type { Runtime as Executor } from "../src/executor"
 import { isRikaApiPath, makeRikaApiHandler } from "../src/api"
@@ -109,6 +110,7 @@ const dependencies = (
   devices,
   product,
   recovery,
+  toolPolicy: testToolPolicy,
   executor,
   execution,
   production: true,
@@ -163,6 +165,7 @@ describe("api HTTP", () => {
         devices,
         product: { ...product, ready: Effect.fail(HostedProductError.make({ message: "product readiness" })) },
         recovery,
+        toolPolicy: testToolPolicy,
         executor,
         execution,
         production: true,

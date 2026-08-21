@@ -32,7 +32,9 @@ import { HostedOperations, type HostedOperationsService } from "../src/hosted-op
 import { HostedProduct, type HostedProductService, type OwnerSelection } from "../src/hosted-product"
 import { HostedThreadProtocol, layer as hostedThreadProtocolLayer } from "../src/hosted-thread-protocol"
 import { layer as hostedStoreLayer } from "@rika/product-store/memory-store"
+import { HostedToolPolicy } from "../src/hosted-tool-policy"
 import { HostedWorkspace } from "../src/hosted-workspace"
+import { testToolPolicy } from "./hosted-tool-policy-fixture"
 
 const timestamp = Timestamp.make("2026-08-21T00:00:00.000Z")
 const userId = BetterAuthUserId.make("user-1")
@@ -239,6 +241,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
     ),
     Layer.succeed(ThreadProtocolStore, store),
     hostedStoreLayer,
+    Layer.succeed(HostedToolPolicy, testToolPolicy),
     BunCrypto.layer,
   )
   return Effect.scoped(
@@ -389,6 +392,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
 
 it.effect("binds authorization decisions to one durable checkpoint", () => {
   const store = memoryStore()
+  const decisions: Array<Parameters<typeof testToolPolicy.recordDecision>[0]> = []
   const checkpoint = {
     version: ExecutionProjection.projectionVersion,
     cursor: "authorization-cursor",
@@ -401,9 +405,9 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
         threadId,
         turnId: TurnId.make("turn-authorization"),
         authorizationId: "authorization-1",
-        operation: "shell",
-        capability: "process",
-        input: "bun test",
+        operation: "rika.tool.processes.start",
+        capability: "terminal.execute",
+        input: '{"exact":"request"}',
         inputTruncated: false,
         checkpoint,
       },
@@ -448,6 +452,10 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
     ),
     Layer.succeed(ThreadProtocolStore, store),
     hostedStoreLayer,
+    Layer.succeed(HostedToolPolicy, {
+      ...testToolPolicy,
+      recordDecision: (input) => Effect.sync(() => void decisions.push(input)),
+    }),
     BunCrypto.layer,
   )
   return Effect.scoped(
@@ -498,9 +506,9 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
           turnId: "turn-authorization",
           authorizationId: "authorization-1",
           checkpoint,
-          operation: "shell",
-          capability: "process",
-          arguments: "bun test",
+          operation: "rika.tool.processes.start",
+          capability: "terminal.execute",
+          arguments: '{"exact":"request"}',
           repository: { identity: "In-Time-Tec/rika", branch: "feature/thread-controls" },
           branch: "feature/thread-controls",
           executor: { assignmentId: threadId, kind: "e2b", generation: "7" },
@@ -508,6 +516,20 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
           result: { _tag: "Delivered" },
         },
       })
+      expect(decisions).toEqual([
+        expect.objectContaining({
+          ownerId,
+          threadId,
+          turnId: "turn-authorization",
+          actor,
+          authorizationId: "authorization-1",
+          checkpoint,
+          operation: "rika.tool.processes.start",
+          capability: "terminal.execute",
+          authorizationRequest: '{"exact":"request"}',
+          decision: "approved",
+        }),
+      ])
 
       expect(
         yield* session.receive({

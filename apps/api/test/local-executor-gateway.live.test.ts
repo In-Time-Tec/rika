@@ -11,9 +11,12 @@ import { HostBindingRegistry } from "tenetkit/repl"
 import { Context, Effect, Layer, Random, Redacted, Schema } from "effect"
 import { createHash } from "node:crypto"
 import { Pool } from "pg"
-import { makeLocalGateway, type LocalGateway } from "../src/local-executor-gateway"
+import { makeLocalGateway as makeLocalGatewayService, type LocalGateway } from "../src/local-executor-gateway"
 import type { LocalExecutorAuthority } from "../src/local-executor"
 import type { BindingAuthority, Socket } from "../src/executor-gateway"
+import { testToolPolicy } from "./hosted-tool-policy-fixture"
+
+const makeLocalGateway = (authority: LocalExecutorAuthority) => makeLocalGatewayService(authority, testToolPolicy)
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined

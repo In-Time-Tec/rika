@@ -25,8 +25,9 @@ import {
   Sequence,
 } from "@rika/product/hosted-model"
 import { HostedStore } from "@rika/product/hosted-store"
-import { Cause, Crypto, Deferred, Effect, Encoding, Option, Redacted, Ref, Schema, Semaphore } from "effect"
+import { Crypto, Deferred, Effect, Encoding, Option, Redacted, Ref, Schema, Semaphore } from "effect"
 import { GatewayError, type BindingAuthority } from "./executor-gateway"
+import { invokeAdmittedTool, type HostedToolPolicyService } from "./hosted-tool-policy"
 import type { LocalExecutorAuthority } from "./local-executor"
 import type { Socket } from "./executor-gateway"
 
@@ -160,7 +161,10 @@ export interface LocalGateway {
   ) => Effect.Effect<MachineBindings.Outcome, GatewayError>
 }
 
-export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function* (authority: LocalExecutorAuthority) {
+export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function* (
+  authority: LocalExecutorAuthority,
+  toolPolicy: HostedToolPolicyService,
+) {
   const sql = yield* PgClient.PgClient
   const store = yield* HostedStore
   const crypto = yield* Crypto.Crypto
@@ -440,34 +444,25 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
     if (call.requestDigest !== digest)
       return yield* failure("fenced", "Local binding call id conflicts with a different request")
     if (call.result === candidate) {
-      const outcome = yield* pendingOperation.bindings.registry.invoke({ ...request, input: request.input }).pipe(
+      const outcome = yield* invokeAdmittedTool({
+        policyService: toolPolicy,
+        threadId: pendingOperation.request.threadId,
+        turnId: pendingOperation.request.turnId,
+        workspaceId: pendingOperation.request.workspaceId,
+        operationKey,
+        callId,
+        request,
+        access,
+        invoke: pendingOperation.bindings.registry.invoke({ ...request, input: request.input }),
+      }).pipe(
         Effect.provideContext(pendingOperation.bindings.context),
-        Effect.matchCause({
-          onFailure: (cause): BindingOutcome => {
-            const bindingFailure = Option.getOrUndefined(Cause.findErrorOption(cause))
-            return bindingFailure === undefined
-              ? { _tag: "Unknown", message: "Binding authority was lost after its operation crossed" }
-              : {
-                  _tag: "Rejected",
-                  failure: bindingFailure as Extract<BindingOutcome, { readonly _tag: "Rejected" }>["failure"],
-                }
-          },
-          onSuccess: (response): BindingOutcome => {
-            if (
-              response._tag === "Failure" &&
-              typeof response.failure === "object" &&
-              response.failure !== null &&
-              "_tag" in response.failure &&
-              response.failure._tag === "NestedOperationFailed" &&
-              "reason" in response.failure &&
-              response.failure.reason === "suspended" &&
-              "token" in response.failure &&
-              typeof response.failure.token === "string"
-            )
-              return { _tag: "Suspend", token: response.failure.token }
-            return { _tag: "Returned", response: response as import("@rika/remote-execution/protocol").BindingResponse }
-          },
-        }),
+        Effect.provideService(Crypto.Crypto, crypto),
+        Effect.orElseSucceed(
+          (): BindingOutcome => ({
+            _tag: "Unknown",
+            message: "Tool admission could not durably record its decision",
+          }),
+        ),
       )
       yield* Deferred.succeed(candidate, outcome)
     }

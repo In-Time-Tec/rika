@@ -7,6 +7,7 @@ import type { HostedProductService } from "../src/hosted-product"
 import type { Runtime as ExecutorRuntime } from "../src/executor"
 import type { HttpDependencies } from "../src/http"
 import { canonicalPublicRequest, pollAuthority, serveApi } from "../src/adapters/bun-server"
+import { testToolPolicy } from "./hosted-tool-policy-fixture"
 
 const config: IdentityConfig = {
   production: false,
@@ -98,6 +99,7 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
       devices,
       product,
       recovery,
+      toolPolicy: testToolPolicy,
       executor,
       execution: {
         check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }),
@@ -187,6 +189,7 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
         createConnection: () => Effect.die("unused"),
         admitRun: () => Effect.die("unused"),
       },
+      toolPolicy: testToolPolicy,
       executor: {
         controller: undefined as never,
         gateway: {
@@ -296,6 +299,7 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
         createConnection: () => Effect.die("unused"),
         admitRun: () => Effect.die("unused"),
       },
+      toolPolicy: testToolPolicy,
       threads: {
         issueTicket: () => Effect.die("unused"),
         connect: (ticket, audience) => {

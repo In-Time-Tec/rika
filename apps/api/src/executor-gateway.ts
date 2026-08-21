@@ -32,7 +32,6 @@ import {
   type WorkspaceResponse,
 } from "@rika/remote-execution/protocol"
 import {
-  Cause,
   Clock,
   Context,
   Crypto,
@@ -48,6 +47,7 @@ import {
   Stream,
 } from "effect"
 import type { EnvironmentPhase } from "@rika/product/environment-policy"
+import { invokeAdmittedTool, type HostedToolPolicyService } from "./hosted-tool-policy"
 
 export interface Socket {
   readonly send: (message: string) => unknown
@@ -357,6 +357,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   phases: PhaseAuthority,
   preparation: PreparationStore,
   bindingContract: (workspaceId: string) => Effect.Effect<string, GatewayError>,
+  toolPolicy: HostedToolPolicyService,
 ) {
   const sessions = yield* Ref.make(new Map<string, Session>())
   const assignments = yield* Ref.make(new Map<Socket, string>())
@@ -846,34 +847,25 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     if (call.requestDigest !== requestDigest)
       return yield* GatewayError.make({ kind: "fenced", message: "Binding call id conflicts with a different request" })
     if (call.result === candidate) {
-      const outcome = yield* operation.bindings.registry.invoke({ ...request, input: request.input }).pipe(
+      const outcome = yield* invokeAdmittedTool({
+        policyService: toolPolicy,
+        threadId: operation.request.threadId,
+        turnId: operation.request.turnId,
+        workspaceId: operation.request.workspaceId,
+        operationKey,
+        callId,
+        request,
+        access,
+        invoke: operation.bindings.registry.invoke({ ...request, input: request.input }),
+      }).pipe(
         Effect.provideContext(operation.bindings.context),
-        Effect.matchCause({
-          onFailure: (cause): BindingOutcome => {
-            const bindingFailure = Option.getOrUndefined(Cause.findErrorOption(cause))
-            return bindingFailure === undefined
-              ? { _tag: "Unknown", message: "Binding authority was lost after its operation crossed" }
-              : {
-                  _tag: "Rejected",
-                  failure: bindingFailure as Extract<BindingOutcome, { readonly _tag: "Rejected" }>["failure"],
-                }
-          },
-          onSuccess: (response): BindingOutcome => {
-            if (
-              response._tag === "Failure" &&
-              typeof response.failure === "object" &&
-              response.failure !== null &&
-              "_tag" in response.failure &&
-              response.failure._tag === "NestedOperationFailed" &&
-              "reason" in response.failure &&
-              response.failure.reason === "suspended" &&
-              "token" in response.failure &&
-              typeof response.failure.token === "string"
-            )
-              return { _tag: "Suspend", token: response.failure.token }
-            return { _tag: "Returned", response: response as import("@rika/remote-execution/protocol").BindingResponse }
-          },
-        }),
+        Effect.provideService(Crypto.Crypto, crypto),
+        Effect.orElseSucceed(
+          (): BindingOutcome => ({
+            _tag: "Unknown",
+            message: "Tool admission could not durably record its decision",
+          }),
+        ),
       )
       yield* Deferred.succeed(candidate, outcome)
     }

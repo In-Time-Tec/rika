@@ -15,6 +15,7 @@ import {
   type PreparationStore,
   type Socket,
 } from "../src/executor-gateway"
+import { testToolPolicy } from "./hosted-tool-policy-fixture"
 
 const encode = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
 const decode = Schema.decodeSync(Schema.fromJsonString(ApiMessage))
@@ -140,6 +141,7 @@ const makeGateway = (
     },
     preparation,
     () => Effect.succeed("a".repeat(64)),
+    testToolPolicy,
   ).pipe(
     Effect.provideServiceEffect(
       Crypto.Crypto,
@@ -761,14 +763,19 @@ describe("executor gateway", () => {
       const results = target.sent.map((value) => decode(value)).filter((message) => message._tag === "BindingResult")
       expect(results).toHaveLength(2)
       expect(results[0]?.outcome).toEqual({ _tag: "Suspend", token: "approval-token" })
-      expect(nestedRequests).toEqual([
-        {
-          kind: "workspace.write",
-          payload: { path: "a", content: "b" },
-          replayPolicy: "never",
-          approval: { capability: "workspace.write", request: { path: "a" } },
+      expect(nestedRequests).toHaveLength(1)
+      expect(nestedRequests[0]).toMatchObject({
+        kind: "rika.tool.workspace.write",
+        replayPolicy: "never",
+        approval: {
+          capability: "workspace.write",
+          request: {
+            policy: { id: "hosted-tool-policy", version: 1 },
+            operation: { module: "workspace", name: "write" },
+            workspace: "workspace-1",
+          },
         },
-      ])
+      })
 
       const missing = { ...request, operation: "missing" }
       yield* gateway.receive(
@@ -781,9 +788,9 @@ describe("executor gateway", () => {
         }),
       )
       const rejected = target.sent.map((value) => decode(value)).findLast((message) => message._tag === "BindingResult")
-      expect(rejected?._tag === "BindingResult" && rejected.outcome).toMatchObject({
-        _tag: "Rejected",
-        failure: { _tag: "tenetkit/repl/HostBindingNotFound", module: "workspace", operation: "missing" },
+      expect(rejected?._tag === "BindingResult" && rejected.outcome).toEqual({
+        _tag: "Unknown",
+        message: "Tool admission could not durably record its decision",
       })
 
       const conflicting = { ...request, input: { path: "a", content: "different" } }

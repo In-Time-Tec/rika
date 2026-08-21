@@ -33,11 +33,13 @@ import { HostedRepositories, layer as hostedRepositoriesLayer } from "./hosted-r
 import { HostedTurnWorker, layer as hostedTurnWorkerLayer } from "./hosted-turn-worker"
 import { layer as hostedWorkspaceLayer } from "./hosted-workspace"
 import { layer as localExecutorLayer } from "./local-executor"
+import { HostedToolPolicy, layer as hostedToolPolicyLayer } from "./hosted-tool-policy"
 
 export interface HostedApplicationService {
   readonly product: HostedProduct["Service"]
   readonly operations: HostedOperations["Service"]
   readonly threads: HostedThreadProtocol["Service"]
+  readonly toolPolicy: HostedToolPolicy["Service"]
   readonly credentials: HostedProviderCredentials["Service"]
   readonly environment: HostedEnvironment["Service"]
   readonly models: HostedModelRegistry["Service"]
@@ -103,11 +105,14 @@ export const layer = (options: {
           Layer.provide(retainedData),
         ),
       )
+      const toolPolicyContext = yield* Layer.build(hostedToolPolicyLayer.pipe(Layer.provide(retainedData)))
       const executorContext = yield* Layer.build(
         executorService.pipe(
           Layer.provide(Layer.merge(executorLayer(options.executor), localExecutorLayer)),
           Layer.provide(
-            Layer.succeedContext(Context.merge(Context.merge(data, environmentContext), repositoryContext)),
+            Layer.succeedContext(
+              Context.merge(Context.merge(Context.merge(data, environmentContext), repositoryContext), toolPolicyContext),
+            ),
           ),
         ),
       )
@@ -158,7 +163,7 @@ export const layer = (options: {
         }),
       )
       const hostedContext = Context.merge(
-        Context.merge(Context.merge(data, executionContext), environmentContext),
+        Context.merge(Context.merge(Context.merge(data, executionContext), environmentContext), toolPolicyContext),
         Context.merge(Context.merge(credentialContext, modelContext), repositoryContext),
       )
       const recoveryContext = yield* Layer.build(
@@ -222,6 +227,7 @@ export const layer = (options: {
         product: Context.get(productContext, HostedProduct),
         operations: Context.get(operationsContext, HostedOperations),
         threads: Context.get(threadProtocolContext, HostedThreadProtocol),
+        toolPolicy: Context.get(toolPolicyContext, HostedToolPolicy),
         credentials: Context.get(credentialContext, HostedProviderCredentials),
         environment: Context.get(environmentContext, HostedEnvironment),
         models: Context.get(modelContext, HostedModelRegistry),

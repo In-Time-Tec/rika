@@ -27,6 +27,7 @@ import { accountAccess, type AccountAccess, type HttpDependencies } from "./http
 import { HostedEnvironmentError } from "./hosted-environment"
 import { HostedModelProvider, HostedProviderCredentialError } from "./hosted-provider-credentials"
 import { RecoveryOperation, type RecoveryResolution } from "./hosted-recovery"
+import { ToolAuditRecord } from "./hosted-tool-policy"
 
 const Message = { message: Schema.String }
 
@@ -110,6 +111,13 @@ const ProviderCredentialResponse = Schema.Struct({
   credentialIdentity: Schema.String,
 })
 const ProviderCredentialsResponse = Schema.Struct({ credentials: Schema.Array(ProviderCredentialResponse) })
+const ToolAuditListRequest = strict(
+  Schema.Struct({
+    owner: ConnectionOwner,
+    limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))),
+  }),
+)
+const ToolAuditListResponse = Schema.Struct({ records: Schema.Array(ToolAuditRecord) })
 const EnvironmentOwnerRequest = {
   owner: ConnectionOwner,
   project_id: Schema.optionalKey(Schema.NonEmptyString),
@@ -286,6 +294,11 @@ class ProductGroup extends HttpApiGroup.make("product", { topLevel: true })
       payload: EgressRequest,
       success: EgressResponse,
       error: [Forbidden, NotFound, Unprocessable, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.post("listToolAudit", "/api/v1/tool-audit-records/list", {
+      payload: ToolAuditListRequest,
+      success: ToolAuditListResponse,
+      error: [Forbidden, ServiceUnavailable],
     }),
   )
   .middleware(Authorization) {}
@@ -719,6 +732,24 @@ const productHandlers = (dependencies: HttpDependencies) =>
             })
             .pipe(Effect.mapError(environmentFailure))
         }),
+      listToolAudit: ({ payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          const records = yield* dependencies.toolPolicy
+            .list({
+              principal: { userId: access.principal.userId },
+              owner: hostedOwner(payload.owner, access),
+              limit: payload.limit ?? 100,
+            })
+            .pipe(
+              Effect.mapError((error) =>
+                error.kind === "forbidden"
+                  ? Forbidden.make({ message: "Audit owner is unavailable" })
+                  : ServiceUnavailable.make({ message: "Tool audit service unavailable" }),
+              ),
+            )
+          return { records: [...records] }
+        }),
     }),
   )
 
@@ -732,6 +763,7 @@ export const isRikaApiPath = (pathname: string) =>
   pathname === "/api/v1/environment-policy" ||
   pathname === "/api/v1/environment-approvals" ||
   pathname === "/api/v1/provider-credentials/list" ||
+  pathname === "/api/v1/tool-audit-records/list" ||
   /^\/api\/v1\/(environment|egress)\/[^/]+$/.test(pathname) ||
   /^\/api\/v1\/provider-credentials\/[^/]+$/.test(pathname) ||
   /^\/api\/v1\/local-runners\/[^/]+(?:\/remote-thread-creation|\/admissions)?$/.test(pathname) ||

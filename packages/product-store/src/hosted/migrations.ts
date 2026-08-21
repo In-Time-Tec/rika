@@ -95,4 +95,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "fd7d1d0c8353e78599de0745f450dc19a55df575ecfb70083acd909571a006bf",
     url: new URL("../../migrations/postgres/0018-workspace-preparation.sql", import.meta.url),
   },
+  {
+    id: "product/0020_tool_policy_audit",
+    checksum: "bc29391d7b468ab7500ebea279ef917da2e42259879041231aba3aea0a86d3f1",
+    url: new URL("../../migrations/postgres/0020-tool-policy-audit.sql", import.meta.url),
+  },
 ]

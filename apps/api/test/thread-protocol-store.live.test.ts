@@ -34,7 +34,9 @@ import {
   layer as hostedThreadProtocolLayer,
   threadWebSocketAudience,
 } from "../src/hosted-thread-protocol"
+import { HostedToolPolicy } from "../src/hosted-tool-policy"
 import { HostedWorkspace } from "../src/hosted-workspace"
+import { testToolPolicy } from "./hosted-tool-policy-fixture"
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined
@@ -378,6 +380,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
           HostedWorkspace.of({ execute: () => Effect.die("unused") }),
         ),
         Layer.succeed(ThreadProtocolStore, protocolStore),
+        Layer.succeed(HostedToolPolicy, testToolPolicy),
         BunCrypto.layer,
       )
       const protocol = Context.get(

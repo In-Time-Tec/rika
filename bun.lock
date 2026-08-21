@@ -53,6 +53,7 @@
         "@rika/product-store": "workspace:*",
         "@rika/remote-execution": "workspace:*",
         "effect": "4.0.0-rc.109",
+        "tenetkit": "catalog:",
       },
       "devDependencies": {
         "@effect/vitest": "4.0.0-rc.109",

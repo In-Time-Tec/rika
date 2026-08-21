@@ -30,6 +30,7 @@ import { ThreadProtocolStore, type ThreadProtocolCommand } from "@rika/product/t
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { HostedOperations, HostedOperationsError } from "./hosted-operations"
 import { type AuthenticatedPrincipal, HostedProduct, HostedProductError, type ThreadAuthority } from "./hosted-product"
+import { HostedToolPolicy } from "./hosted-tool-policy"
 import { HostedWorkspace } from "./hosted-workspace"
 
 export const threadWebSocketAudience = "/api/v1/threads/socket"
@@ -210,6 +211,7 @@ export const layer = Layer.effect(
     const workspace = yield* HostedWorkspace
     const store = yield* ThreadProtocolStore
     const hosted = yield* HostedStore
+    const toolPolicy = yield* HostedToolPolicy
     const crypto = yield* Crypto.Crypto
 
     const digest = Effect.fn("HostedThreadProtocol.digest")(function* (ticket: string) {
@@ -618,6 +620,38 @@ export const layer = Layer.effect(
                   kind: "conflict",
                   message: "Authorization checkpoint is stale or does not belong to this Thread",
                 })
+              if (pending.operation.startsWith("rika.tool.")) {
+                if (pending.inputTruncated)
+                  return yield* HostedThreadProtocolError.make({
+                    kind: "conflict",
+                    message: "Authorization request is not exact",
+                  })
+                yield* toolPolicy
+                  .recordDecision({
+                    ownerId: authority.ownerId,
+                    threadId: attached!.threadId,
+                    turnId: command.turnId,
+                    actor: authority.actor,
+                    authorizationId: command.authorizationId,
+                    checkpoint: command.checkpoint,
+                    operation: pending.operation,
+                    capability: pending.capability,
+                    authorizationRequest: pending.input,
+                    decision: command._tag === "Approve" ? "approved" : "denied",
+                    outcome: "admitted",
+                  })
+                  .pipe(
+                    Effect.mapError((error) =>
+                      HostedThreadProtocolError.make({
+                        kind: error.kind === "conflict" ? "conflict" : "unavailable",
+                        message:
+                          error.kind === "conflict"
+                            ? "Authorization request is not exact"
+                            : "Authorization audit is unavailable",
+                      }),
+                    ),
+                  )
+              }
               const execution = yield* product
                 .threadExecutionContext(authority.ownerId, attached!.threadId)
                 .pipe(Effect.mapError(productFailure))
