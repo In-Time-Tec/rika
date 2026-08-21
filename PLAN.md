@@ -63,7 +63,7 @@ This first deployed slice proves identity, PostgreSQL authority, immutable remot
 - Better Auth owns users, sessions, OAuth grants, organizations, memberships, invitations, and CLI device authorization.
 - E2B is the only remote execution provider.
 - A Thread's executor kind is immutable: `local_device` or `e2b`.
-- `rika thread new` stays local. `rika thread new --remote` explicitly creates E2B placement.
+- Plain interactive `rika` creates a hosted Thread with local-device placement; `rika thread new` explicitly creates E2B placement.
 - Executors connect outbound, receive only assignment-scoped credentials, and never receive PostgreSQL credentials.
 - The API owns Run and command authority. Executors own workspace effects only.
 - No Rivet Actors are introduced.
@@ -82,14 +82,14 @@ The branch contains these implemented seams:
 - Railway image and deployment contract with frozen production install, migration pre-deploy, `/readyz`, and 30-second overlap/drain.
 - Better Auth identity, organization context, DPoP-bound CLI device OAuth, organization selection, and remote Thread creation CLI surfaces.
 - Hosted product PostgreSQL stores and migrations.
-- Immutable `e2b_...` hosted Thread IDs and executor assignments created together, with no required repository checkout.
+- Opaque hosted Thread IDs and independently generated executor-assignment IDs created together, with no required repository checkout.
 - E2B controller/provider composition in the Railway process.
 - `GET /api/v1/executors` WebSocket upgrade and schema-validated executor lifecycle protocol.
 - `CellExecute`/`CellResult` transport with stable operation keys, fence validation, executor-local deduplication, and filesystem-persisted operation outcomes.
 - Workspace commands run as the unprivileged `rika-workspace` user under `/workspace`.
 - `POST /api/v1/threads/:threadId/operations` admits a product command, provisions E2B on demand, dispatches one operation, persists the executor result, and returns output.
 - Hosted JSON routes for liveness, readiness, identity context, connection creation, and operation execution are declared with Effect `HttpApi` and implemented with `HttpApiBuilder` handlers and authorization middleware.
-- `--execute --thread e2b_<id>` routes directly to hosted HTTP before the local product/server dispatcher. Hosted stream mode is rejected.
+- `--execute --thread <id>` routes directly to hosted HTTP before any local machine-bound execution. Hosted stream mode is rejected.
 - Focused routing tests prove that this CLI path does not invoke the local Run dispatcher.
 
 The current direct operation endpoint is an infrastructure vertical slice. It does not yet admit and execute a full TenetKit coding-agent Run. Do not represent the shell-operation smoke test as the completed hosted coding-agent product.
@@ -130,10 +130,9 @@ rika org use <organization>
 rika org invite <email>
 
 rika thread new
-rika thread new --remote
 ```
 
-The TUI exposes separate **New local thread** and **New remote thread** actions. It never hides placement behind one ambiguous action.
+Plain interactive `rika` creates a hosted local-device Thread for the current checkout. `rika thread new` creates an E2B Thread explicitly.
 
 ### End-state topology
 
@@ -718,8 +717,8 @@ Remote connection creation must transactionally persist:
 
 - Organization-scoped Project when one is not selected.
 - Hosted Workspace.
-- Immutable `e2b` Thread whose ID starts with `e2b_`.
-- E2B executor assignment whose ID is the Thread ID.
+- Immutable `e2b` Thread with an opaque ID.
+- E2B executor assignment with an independently generated opaque ID and an explicit Thread reference.
 - Null repository checkout for this no-checkout MVP.
 - Creator/client/device authority and inherited sharing policy.
 
@@ -857,14 +856,14 @@ rika auth login --server https://<railway-domain> --no-open
 rika auth status --json
 rika org list
 rika org use <organization-id-or-slug>
-rika thread new --remote
+rika thread new
 ```
 
-Capture the returned `e2b_...` Thread ID, then run:
+Capture the returned opaque Thread ID, then run:
 
 ```sh
 RIKA_INTERNAL_SERVER_HOST=invalid \
-rika --thread <e2b-thread-id> --execute 'echo hosted-mvp'
+rika --thread <thread-id> --execute 'echo hosted-mvp'
 ```
 
 Acceptance requires all of the following:
@@ -931,7 +930,7 @@ Also run the live PostgreSQL product-store suites and the complete live TenetKit
 Add one integration test that drives the final CLI-to-fake-E2B path and asserts:
 
 - The persisted Thread uses `executor_kind = 'e2b'`.
-- The assignment and Thread share identity.
+- The assignment and Thread IDs are distinct and joined by the assignment's Thread reference.
 - A fenced Hello is accepted.
 - Exactly one operation is sent and correlated.
 - The result event is persisted.
