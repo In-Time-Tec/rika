@@ -366,6 +366,31 @@ describe("Controller", () => {
         sandboxId: "sandbox-2",
         timeoutMillis: Controller.IdleTimeoutMillis,
       })
+      const second = yield* authenticate(harness, 2)
+      yield* service.ready(
+        second.access,
+        {
+          workspaceId: "workspace-1",
+          repositoryId: "repository-1",
+          baseCommit: "a".repeat(40),
+          headCommit: "b".repeat(40),
+          setupHookDigest: `sha256:${"c".repeat(64)}`,
+          environmentDigest,
+          templateBuildId: "template-build-v1-immutable",
+          restoredCheckpointId: "checkpoint-replacement",
+        },
+        environmentDigest,
+      )
+      const assignments = yield* ExecutorAssignments
+      expect(yield* assignments.listManaged).toMatchObject([
+        {
+          id: "assignment-1",
+          generation: "2",
+          latestCheckpointId: "checkpoint-replacement",
+          lifecycle: { _tag: "Active", providerInstanceId: "sandbox-2" },
+        },
+      ])
+      expect((yield* Effect.flip(service.validateAccess(first.access))).kind).toBe("fenced")
     }).pipe(provideLayer(harness.layer))
   })
 
@@ -509,6 +534,35 @@ describe("Controller", () => {
       expect(
         (yield* Effect.flip(service.revokeCredential(access, { ...valid, repositoryId: "repository-2" }))).kind,
       ).toBe("checkout")
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("retries a verified upload after manifest commit failure without duplicating checkpoint identity", () => {
+    const harness = makeHarness()
+    return Effect.gen(function* () {
+      const service = yield* controller
+      const assignments = yield* ExecutorAssignments
+      yield* provision()
+      const { access } = yield* authenticate(harness, 1)
+      const proposal = {
+        version: 1 as const,
+        checkpointId: "checkpoint-commit-retry",
+        archive,
+        cursor: { sequence: 0, value: "" },
+      }
+
+      harness.checkpointCommitFailures = 1
+      expect((yield* Effect.flip(service.checkpoint(access, proposal))).kind).toBe("repository")
+      expect(yield* assignments.latestCheckpoint(assignmentInput.id)).toBeUndefined()
+      expect(harness.checkpointInspections).toEqual([proposal.checkpointId])
+
+      const committed = yield* service.checkpoint(access, proposal)
+      expect((yield* assignments.latestCheckpoint(assignmentInput.id))?.id).toBe(proposal.checkpointId)
+      expect(harness.checkpointCommitAttempts).toBe(2)
+      expect(harness.checkpointInspections).toEqual([proposal.checkpointId, proposal.checkpointId])
+      expect(yield* service.checkpoint(access, proposal)).toEqual(committed)
+      expect(harness.checkpointCommitAttempts).toBe(2)
+      expect(harness.checkpointInspections).toEqual([proposal.checkpointId, proposal.checkpointId])
     }).pipe(provideLayer(harness.layer))
   })
 

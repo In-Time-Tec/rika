@@ -1,6 +1,6 @@
 import { Crypto, Effect, Layer, Option, Redacted } from "effect"
 import { type ExecutorAssignment } from "@rika/product/executor-assignment"
-import { ExecutorAssignments } from "@rika/product/executor-assignments"
+import { AssignmentError, ExecutorAssignments } from "@rika/product/executor-assignments"
 import { CheckpointId, ExecutorAssignmentId, OwnerId, ThreadId, WorkspaceId } from "@rika/product/hosted-model"
 import { layer as assignmentLayer } from "@rika/product-store/memory-assignments"
 import { CheckpointError, Vault } from "../../src/checkpoint"
@@ -39,6 +39,8 @@ export interface Harness {
   readonly checkpointInspections: Array<string>
   checkpointInspection: { readonly contentDigest: string; readonly sizeBytes: number }
   checkpointLoadFailure: CheckpointError | null
+  checkpointCommitFailures: number
+  checkpointCommitAttempts: number
   readonly checkoutRequests: Array<{
     readonly installationId: string
     readonly owner: string
@@ -131,6 +133,8 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     checkpointInspections,
     checkpointInspection: { contentDigest: `sha256:${"a".repeat(64)}`, sizeBytes: 42 },
     checkpointLoadFailure: null,
+    checkpointCommitFailures: 0,
+    checkpointCommitAttempts: 0,
     checkoutRequests: [],
     layer: undefined as never,
   }
@@ -225,6 +229,25 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     }),
   )
   const dependencies = Layer.mergeAll(providerLayer(provider), cryptoLayer(), broker, vault)
+  const assignments = Layer.effect(
+    ExecutorAssignments,
+    ExecutorAssignments.pipe(
+      Effect.map((repository) =>
+        ExecutorAssignments.of({
+          ...repository,
+          commitCheckpoint: (input) =>
+            Effect.suspend(() => {
+              harness.checkpointCommitAttempts += 1
+              if (harness.checkpointCommitFailures === 0) return repository.commitCheckpoint(input)
+              harness.checkpointCommitFailures -= 1
+              return Effect.fail(
+                AssignmentError.make({ reason: "database", message: "checkpoint manifest commit failed" }),
+              )
+            }),
+        }),
+      ),
+    ),
+  ).pipe(Layer.provide(assignmentLayer))
   const controller = controllerLayer({
     appId: "rika",
     deploymentId: "test",
@@ -233,8 +256,8 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     apiUrl: "wss://api.example.test/executors",
     controlEgress: ["api.example.test"],
     ...overrides,
-  }).pipe(Layer.provide(dependencies), Layer.provide(assignmentLayer))
-  harness.layer = Layer.merge(controller, assignmentLayer)
+  }).pipe(Layer.provide(dependencies), Layer.provide(assignments))
+  harness.layer = Layer.merge(controller, assignments)
   return harness
 }
 

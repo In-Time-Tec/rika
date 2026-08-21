@@ -403,7 +403,10 @@ it.effect("prepares an empty workspace and runs resume exactly once per cold wak
       yield* fileSystem.chmod(`${root}/.agents/setup`, 0o700)
       yield* fileSystem.writeFileString(`${root}/.agents/resume`, `#!/bin/sh\nprintf x >> "${root}/resume-count"\n`)
       yield* fileSystem.chmod(`${root}/.agents/resume`, 0o700)
-      yield* fileSystem.writeFileString(`${root}/untracked`, "keep")
+      const modified = Uint8Array.from([0, 255, 109, 111, 100, 105, 102, 105, 101, 100])
+      const untracked = Uint8Array.from([117, 110, 116, 114, 97, 99, 107, 101, 100, 0, 255])
+      yield* fileSystem.writeFile(`${root}/tracked-modified.bin`, modified)
+      yield* fileSystem.writeFile(`${root}/untracked.bin`, untracked)
       const coldAssignment = {
         access: { ...access, leaseEpoch: 2 },
         workspaceId: "workspace-1",
@@ -418,9 +421,21 @@ it.effect("prepares an empty workspace and runs resume exactly once per cold wak
       expect(cold.resume?.outcome).toBe("completed")
       expect(yield* fileSystem.exists(`${root}/setup-count`)).toBe(false)
       expect(yield* fileSystem.readFileString(`${root}/resume-count`)).toBe("x")
-      expect(yield* fileSystem.readFileString(`${root}/untracked`)).toBe("keep")
+      expect(Array.from(yield* fileSystem.readFile(`${root}/tracked-modified.bin`))).toEqual(Array.from(modified))
+      expect(Array.from(yield* fileSystem.readFile(`${root}/untracked.bin`))).toEqual(Array.from(untracked))
       yield* prepare({ ...base, assignment: coldAssignment })
       expect(yield* fileSystem.readFileString(`${root}/resume-count`)).toBe("x")
+      yield* prepare({
+        ...base,
+        assignment: {
+          ...coldAssignment,
+          access: { ...access, leaseEpoch: 3 },
+          wakeId: "wake-3",
+        },
+      })
+      expect(yield* fileSystem.readFileString(`${root}/resume-count`)).toBe("xx")
+      expect(Array.from(yield* fileSystem.readFile(`${root}/tracked-modified.bin`))).toEqual(Array.from(modified))
+      expect(Array.from(yield* fileSystem.readFile(`${root}/untracked.bin`))).toEqual(Array.from(untracked))
       const markerDirectory = `${stateDirectory}/workspace`
       const markerName = (yield* fileSystem.readDirectory(markerDirectory)).find((name) => name.endsWith(".json"))!
       const markerPath = `${markerDirectory}/${markerName}`
@@ -430,8 +445,8 @@ it.effect("prepares an empty workspace and runs resume exactly once per cold wak
         ...base,
         assignment: {
           ...coldAssignment,
-          access: { ...access, leaseEpoch: 3 },
-          wakeId: "wake-3",
+          access: { ...access, leaseEpoch: 4 },
+          wakeId: "wake-4",
           attempt: 2,
           retry: true,
         },
