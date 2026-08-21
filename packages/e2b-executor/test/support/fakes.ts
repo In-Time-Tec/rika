@@ -44,7 +44,7 @@ export interface Harness {
     readonly ownerId: string
     readonly workspaceId: string
     readonly repositoryId: string
-    readonly purpose: "git-read" | "github-read"
+    readonly purpose: "git-read" | "github-read" | "branch-push"
   }>
   layer: Layer.Layer<Controller | ExecutorAssignments, ControllerError>
 }

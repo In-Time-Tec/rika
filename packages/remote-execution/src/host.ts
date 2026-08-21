@@ -49,7 +49,13 @@ import {
   repositoryLayer as repositoryServiceRepositoryLayer,
 } from "./repository-services"
 import { Runtime, layer as runtimeLayer } from "./runtime"
-import { prepare as prepareWorkspace, RemoteRepositoryRoot, WorkspaceError, type KernelIdentity } from "./workspace"
+import {
+  prepare as prepareWorkspace,
+  pushApprovedBranch,
+  RemoteRepositoryRoot,
+  WorkspaceError,
+  type KernelIdentity,
+} from "./workspace"
 import { WorkspaceFiles, layer as workspaceFilesLayer } from "./workspace-files"
 import {
   ApiMessage,
@@ -61,6 +67,7 @@ import {
   type CheckpointRestore,
   type Fence,
   ExecutorMessage,
+  type RepositoryCheckoutWire,
   SessionWire,
   Target,
   type CellRequest,
@@ -453,7 +460,7 @@ const prepare = (
       attempt: number,
       retry: boolean,
     ): Effect.Effect<
-      void,
+      RepositoryCheckoutWire | null,
       HostError | WorkspaceError,
       Crypto.Crypto | FileSystem.FileSystem | import("effect").Scope.Scope
     > {
@@ -660,7 +667,7 @@ const prepare = (
           yield* receive((message) =>
             message._tag === "WorkspaceAccepted" && sameFence(message.fence, access.fence) ? message : undefined,
           )
-          return
+          return assigned.checkout
         }
         const error = outcome.failure
         yield* send({
@@ -683,7 +690,7 @@ const prepare = (
         return yield* runAttempt(next, true)
       })
     }
-    yield* runAttempt(1, false).pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
+    return yield* runAttempt(1, false).pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
   })
 
 const sameAccess = (
@@ -934,7 +941,10 @@ const dispatchWorkspace = Effect.fn("Host.dispatchWorkspace")(function* (
 })
 
 const consumeApi = (
+  config: Config,
   incoming: Queue.Queue<IncomingMessage>,
+  credentials: Queue.Queue<Extract<IncomingMessage, { readonly _tag: "RepositoryCredential" }>>,
+  checkout: RepositoryCheckoutWire | null,
   writer: (chunk: string) => Effect.Effect<void, Socket.SocketError>,
   store: SessionStore,
   receipts: OperationReceiptStore,
@@ -1032,6 +1042,107 @@ const consumeApi = (
           environmentAccess,
           redactedValues,
         )
+      }
+      if (message._tag === "BranchPush") {
+        const request = message.request
+        const access = yield* runtime.access.pipe(
+          Effect.mapError((cause) => HostError.make({ message: cause.message })),
+        )
+        const valid =
+          sameAccess(access, request.access) &&
+          request.access.fence.assignmentId === config.fence.assignmentId &&
+          request.access.fence.assignmentGeneration === config.fence.assignmentGeneration &&
+          request.access.leaseEpoch === access.leaseEpoch &&
+          request.workspaceId === config.workspaceId &&
+          checkout !== null &&
+          request.ownerId === checkout.ownerId &&
+          request.repositoryId === checkout.repositoryId
+        if (!valid) {
+          yield* writer(
+            encodeExecutorMessage({
+              _tag: "BranchPushResult",
+              access,
+              publicationId: request.publicationId,
+              branch: request.branch,
+              commitSha: request.commitSha,
+              outcome: { _tag: "Failed", kind: "stale", message: "Approved workspace assignment is not current" },
+            }),
+          )
+        } else {
+          yield* writer(
+            encodeExecutorMessage({
+              _tag: "CredentialRequested",
+              requestId: request.publicationId,
+              access,
+              ownerId: request.ownerId,
+              assignmentId: access.fence.assignmentId,
+              repositoryId: request.repositoryId,
+              workspaceId: request.workspaceId,
+              purpose: "branch-push",
+              publicationId: request.publicationId,
+              branch: request.branch,
+              ref: request.ref,
+              commitSha: request.commitSha,
+              assignmentGeneration: access.fence.assignmentGeneration,
+              leaseEpoch: access.leaseEpoch,
+            }),
+          )
+          const supplied = yield* Queue.take(credentials)
+          const wire = supplied.credential
+          const credentialValid =
+            wire.requestId === request.publicationId &&
+            wire.ownerId === request.ownerId &&
+            wire.assignmentId === access.fence.assignmentId &&
+            wire.repositoryId === request.repositoryId &&
+            wire.workspaceId === request.workspaceId &&
+            wire.purpose === "branch-push" &&
+            wire.publicationId === request.publicationId &&
+            wire.branch === request.branch &&
+            wire.ref === request.ref &&
+            wire.commitSha === request.commitSha &&
+            wire.assignmentGeneration === access.fence.assignmentGeneration &&
+            wire.leaseEpoch === access.leaseEpoch
+          const outcome = credentialValid
+            ? yield* pushApprovedBranch({
+                request,
+                repositoryUrl: `https://github.com/${checkout.owner}/${checkout.name}.git`,
+                credential: {
+                  token: Redacted.make(wire.token, { label: "repository-branch-push" }),
+                  username: wire.username,
+                  repositoryUrl: wire.repositoryUrl,
+                  expiresAt: wire.expiresAt,
+                },
+                root: workspaceRoot,
+              })
+            : { _tag: "Failed" as const, kind: "stale" as const, message: "Branch credential scope is stale" }
+          yield* writer(
+            encodeExecutorMessage({
+              _tag: "CredentialRevocationRequested",
+              access,
+              ownerId: request.ownerId,
+              assignmentId: access.fence.assignmentId,
+              repositoryId: request.repositoryId,
+              workspaceId: request.workspaceId,
+              purpose: "branch-push",
+              publicationId: request.publicationId,
+              branch: request.branch,
+              ref: request.ref,
+              commitSha: request.commitSha,
+              assignmentGeneration: access.fence.assignmentGeneration,
+              leaseEpoch: access.leaseEpoch,
+            }),
+          )
+          yield* writer(
+            encodeExecutorMessage({
+              _tag: "BranchPushResult",
+              access,
+              publicationId: request.publicationId,
+              branch: request.branch,
+              commitSha: request.commitSha,
+              outcome,
+            }),
+          )
+        }
       }
       if (message._tag === "CellExecute") {
         if (yield* Ref.get(quiesced))
@@ -1330,7 +1441,7 @@ const connect = Effect.fn("Host.connect")(function* (
     : { _tag: "ExecutorReconnect" as const, access: yield* runtime.reconnect }
   yield* writer(encodeExecutorMessage(opening))
   yield* waitForWelcome(incoming, store)
-  yield* HostedObservability.observe(
+  const checkout = yield* HostedObservability.observe(
     config.restoredSession === undefined ? "executor_setup" : "executor_resume",
     {
       assignmentId: config.fence.assignmentId,
@@ -1384,7 +1495,10 @@ const connect = Effect.fn("Host.connect")(function* (
         Effect.mapError(() => HostError.make({ message: "Executor controller connection closed" })),
       ),
       consumeApi(
+        config,
         incoming,
+        credentials,
+        checkout,
         writer,
         store,
         receipts,

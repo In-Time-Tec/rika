@@ -2,7 +2,7 @@ import { BunCrypto, BunFileSystem } from "@effect/platform-bun"
 import { expect, it } from "@effect/vitest"
 import { Clock, Effect, FileSystem, Layer, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
-import { prepare, testing, WorkspaceError } from "../src/workspace"
+import { prepare, pushApprovedBranch, testing, WorkspaceError } from "../src/workspace"
 import { createArchive, encodeArchive } from "../src/workspace-archive"
 import { provideLayer } from "./support/layer"
 
@@ -25,6 +25,115 @@ const access = {
   leaseEpoch: 1,
   sessionToken: "session-secret",
 }
+
+it.effect("pushes only an approved HEAD ref with one ephemeral credential and removes it", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-approved-push-" })
+      const root = `${parent}/repo`
+      const credentialRoot = `${parent}/run`
+      const command = `${parent}/command`
+      const calls = `${parent}/calls`
+      const unsafe = `${parent}/unsafe`
+      const repositoryUrl = "https://github.com/example/repo.git"
+      const commitSha = "a".repeat(40)
+      yield* fileSystem.makeDirectory(root)
+      yield* fileSystem.writeFileString(
+        command,
+        `#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "${calls}"
+[ "$1" = git ] || exit 2
+case " $* " in
+  *" -C ${root} rev-parse HEAD "*) printf '%s\n' '${commitSha}' ;;
+  *" -C ${root} remote get-url origin "*) printf '%s\n' '${repositoryUrl}' ;;
+  *" -C ${root} remote get-url --push origin "*) printf '%s\n' '${repositoryUrl}' ;;
+  *" -C ${root} config --local --includes --name-only --get-regexp "*)
+    if [ -f "${unsafe}" ]; then printf '%s\n' 'http.extraheader'; else exit 1; fi
+    ;;
+  *" init --bare "*) ;;
+  *" fetch --no-tags ${root} HEAD "*) ;;
+  *" rev-parse FETCH_HEAD "*) printf '%s\n' '${commitSha}' ;;
+  *" update-ref refs/heads/publication ${commitSha} "*) ;;
+  *" symbolic-ref HEAD refs/heads/publication "*) ;;
+  *" remote add origin ${repositoryUrl} "*) ;;
+  *" push --porcelain origin HEAD:refs/heads/rika/thread-1 "*)
+    helper=''
+    previous=''
+    before=''
+    for value in "$@"; do
+      case "$previous:$value" in
+        -c:credential.helper=*) helper="\${value#credential.helper=}" ;;
+      esac
+      before="$previous"
+      previous="$value"
+    done
+    [ -n "$helper" ] || exit 4
+    supplied=$("$helper" get)
+    printf '%s' "$supplied" | grep -q 'password=approved-secret' || exit 5
+    [ -z "$("$helper" get)" ] || exit 6
+    [ "$before" = origin ] || exit 7
+    [ "$previous" = 'HEAD:refs/heads/rika/thread-1' ] || exit 8
+    ;;
+  *) exit 9 ;;
+esac
+`,
+      )
+      yield* fileSystem.chmod(command, 0o700)
+      const request = {
+        access,
+        publicationId: "publication-1",
+        ownerId: "owner-1",
+        repositoryId: "repository-1",
+        workspaceId: "workspace-1",
+        branch: "rika/thread-1",
+        ref: "refs/heads/rika/thread-1",
+        commitSha,
+      } as const
+      const outcome = yield* pushApprovedBranch({
+        request,
+        repositoryUrl,
+        credential: {
+          token: Redacted.make("approved-secret"),
+          username: "x-access-token",
+          repositoryUrl,
+          expiresAt: (yield* Clock.currentTimeMillis) + 10 * 60 * 1_000,
+        },
+        root,
+        workspaceCommandPrefix: [command],
+        credentialRoot,
+      })
+      expect(outcome).toEqual({
+        _tag: "Succeeded",
+        branch: request.branch,
+        ref: request.ref,
+        commitSha,
+      })
+      const recorded = yield* fileSystem.readFileString(calls)
+      expect(recorded).toContain(`push --porcelain origin HEAD:${request.ref}`)
+      expect(recorded).not.toContain("approved-secret")
+      expect(yield* fileSystem.readDirectory(credentialRoot)).toEqual([])
+      yield* fileSystem.writeFileString(unsafe, "")
+      expect(
+        yield* pushApprovedBranch({
+          request,
+          repositoryUrl,
+          credential: {
+            token: Redacted.make("unused-secret"),
+            username: "x-access-token",
+            repositoryUrl,
+            expiresAt: (yield* Clock.currentTimeMillis) + 10 * 60 * 1_000,
+          },
+          root,
+          workspaceCommandPrefix: [command],
+          credentialRoot,
+        }),
+      ).toMatchObject({ _tag: "Failed", kind: "stale" })
+      expect((yield* fileSystem.readFileString(calls)).match(/push --porcelain/g)).toHaveLength(1)
+    }),
+  ).pipe(provideLayer(platform)),
+)
 
 it.effect("forces gh API reads to GET and rejects every write-capable surface", () =>
   Effect.scoped(

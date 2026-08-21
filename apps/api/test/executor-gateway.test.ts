@@ -128,6 +128,7 @@ const makeGateway = (
     lifecycleStore(append, load),
     {
       activate: (_access, _phase, use) => use({ digest: environmentDigest, values: {}, redactedNames: [] }),
+      publication: (_access, use) => use(),
       replace: (key) =>
         service
           .replace(key, {
@@ -301,6 +302,187 @@ describe("executor gateway", () => {
     }),
   )
 
+  it.effect("routes one publication-fenced branch push and its purpose-scoped credential", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      const commands: Array<unknown> = []
+      const gateway = yield* makeGateway(
+        controller({
+          credential: (_access, command) => {
+            commands.push(command)
+            return Effect.succeed({
+              repositoryUrl: "https://github.com/example/repo.git",
+              username: "x-access-token",
+              token: Redacted.make("write-secret"),
+              expiresAt: 4_102_444_800_000,
+            })
+          },
+        }),
+      )
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: true, pty: true },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      yield* workspaceReady(gateway, target)
+      const input = {
+        assignmentId: fence.assignmentId,
+        publicationId: "publication-1",
+        ownerId: "owner-1",
+        repositoryId: "repository-1",
+        workspaceId: "workspace-1",
+        branch: "rika/thread-1",
+        ref: "refs/heads/rika/thread-1",
+        commitSha: "a".repeat(40),
+      }
+      const pushed = yield* Effect.forkChild(gateway.pushBranch(input))
+      yield* Effect.yieldNow
+      const { assignmentId: _, ...wireInput } = input
+      expect(target.sent.map((frame) => decode(frame)).find((message) => message._tag === "BranchPush")).toMatchObject({
+        _tag: "BranchPush",
+        request: wireInput,
+      })
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "CredentialRequested",
+          requestId: input.publicationId,
+          access,
+          ownerId: input.ownerId,
+          assignmentId: input.assignmentId,
+          repositoryId: input.repositoryId,
+          workspaceId: input.workspaceId,
+          purpose: "branch-push",
+          publicationId: input.publicationId,
+          branch: input.branch,
+          ref: input.ref,
+          commitSha: input.commitSha,
+          assignmentGeneration: 1,
+          leaseEpoch: 1,
+        }),
+      )
+      expect(commands).toEqual([
+        {
+          ownerId: input.ownerId,
+          assignmentId: input.assignmentId,
+          repositoryId: input.repositoryId,
+          workspaceId: input.workspaceId,
+          purpose: "branch-push",
+          publicationId: input.publicationId,
+          branch: input.branch,
+          ref: input.ref,
+          commitSha: input.commitSha,
+          assignmentGeneration: 1,
+          leaseEpoch: 1,
+        },
+      ])
+      expect(
+        target.sent.map((frame) => decode(frame)).find((message) => message._tag === "RepositoryCredential"),
+      ).toMatchObject({
+        _tag: "RepositoryCredential",
+        credential: {
+          purpose: "branch-push",
+          publicationId: input.publicationId,
+          branch: input.branch,
+          ref: input.ref,
+          commitSha: input.commitSha,
+        },
+      })
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "BranchPushResult",
+          access,
+          publicationId: input.publicationId,
+          branch: input.branch,
+          commitSha: input.commitSha,
+          outcome: {
+            _tag: "Succeeded",
+            branch: input.branch,
+            ref: input.ref,
+            commitSha: input.commitSha,
+          },
+        }),
+      )
+      expect(yield* Fiber.join(pushed)).toEqual({
+        _tag: "Succeeded",
+        branch: input.branch,
+        ref: input.ref,
+        commitSha: input.commitSha,
+      })
+      expect(target.closed).toEqual([])
+    }),
+  )
+
+  it.effect("rejects a branch-push credential request without an active approved operation", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      const commands: Array<unknown> = []
+      const gateway = yield* makeGateway(
+        controller({
+          credential: (_access, command) => {
+            commands.push(command)
+            return Effect.die("unreachable")
+          },
+        }),
+      )
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: true, pty: true },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "CredentialRequested",
+          requestId: "publication-1",
+          access,
+          ownerId: "owner-1",
+          assignmentId: fence.assignmentId,
+          repositoryId: "repository-1",
+          workspaceId: "workspace-1",
+          purpose: "branch-push",
+          publicationId: "publication-1",
+          branch: "rika/thread-1",
+          ref: "refs/heads/rika/thread-1",
+          commitSha: "a".repeat(40),
+          assignmentGeneration: 1,
+          leaseEpoch: 1,
+        }),
+      )
+      expect(commands).toEqual([])
+      expect(target.closed).toContainEqual([1008, "fenced"])
+    }),
+  )
+
   it.effect("routes assignment-fenced PTY requests and events through the live executor session", () =>
     Effect.gen(function* () {
       const target = socket()
@@ -460,7 +642,9 @@ describe("executor gateway", () => {
       }
       const pending = yield* Effect.forkChild(gateway.workspace("assignment-1", request))
       yield* Effect.yieldNow
-      expect(first.sent.map((message) => decode(message)).find((message) => message._tag === "WorkspaceRequest")).toEqual({
+      expect(
+        first.sent.map((message) => decode(message)).find((message) => message._tag === "WorkspaceRequest"),
+      ).toEqual({
         _tag: "WorkspaceRequest",
         fence,
         request,
@@ -470,7 +654,9 @@ describe("executor gateway", () => {
       yield* gateway.receive(resumed, encode({ _tag: "ExecutorReconnect", access }))
       const resumedAccess = { ...access, leaseEpoch: 2 }
       yield* workspaceReady(gateway, resumed, resumedAccess)
-      expect(resumed.sent.map((message) => decode(message)).find((message) => message._tag === "WorkspaceRequest")).toEqual({
+      expect(
+        resumed.sent.map((message) => decode(message)).find((message) => message._tag === "WorkspaceRequest"),
+      ).toEqual({
         _tag: "WorkspaceRequest",
         fence,
         request,

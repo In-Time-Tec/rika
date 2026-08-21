@@ -13,6 +13,7 @@ import type { HostedModelRegistryService } from "./hosted-model-registry"
 import type { HostedProviderCredentialsService } from "./hosted-provider-credentials"
 import type { HostedEnvironmentService } from "./hosted-environment"
 import type { HostedRecoveryService } from "./hosted-recovery"
+import type { HostedPublicationService } from "./hosted-publication"
 import type { Runtime as Executor } from "./executor"
 import type { ReadinessInterface as ExecutionReadiness } from "@rika/execution/postgres"
 import type { HostedToolPolicyService } from "./hosted-tool-policy"
@@ -28,6 +29,7 @@ export interface HttpDependencies {
   readonly environment?: HostedEnvironmentService
   readonly models?: HostedModelRegistryService
   readonly recovery: HostedRecoveryService
+  readonly publication?: HostedPublicationService
   readonly executor: Executor
   readonly execution: ExecutionReadiness
   readonly production: boolean

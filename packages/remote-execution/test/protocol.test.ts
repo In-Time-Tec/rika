@@ -6,6 +6,7 @@ import {
   CellLifecycleFrame,
   FilesystemCheckpoint,
   ExecutorMessage,
+  BranchPushRequest,
   LocalExecutorMessage,
 } from "../src/protocol"
 import { workspaceCapabilities } from "./support/workspace-capabilities"
@@ -83,6 +84,45 @@ describe("executor protocol v1", () => {
           Schema.decodeUnknownEffect(FilesystemCheckpoint)({ ...checkpoint, contentDigest: "sha256:not-a-digest" }),
         )).issue,
       ).toBeDefined()
+    }),
+  )
+
+  it.effect("binds a branch push to one publication, workspace, ref, and commit", () =>
+    Effect.gen(function* () {
+      const request = {
+        access: { version: 1 as const, fence, leaseEpoch: 1, sessionToken: "session" },
+        publicationId: "publication-1",
+        ownerId: "owner-1",
+        repositoryId: "repository-1",
+        workspaceId: "workspace-1",
+        branch: "rika/thread-1",
+        ref: "refs/heads/rika/thread-1",
+        commitSha: "a".repeat(40),
+      }
+      expect(yield* Schema.decodeUnknownEffect(BranchPushRequest)(request)).toEqual(request)
+      expect(
+        (yield* Effect.flip(Schema.decodeUnknownEffect(BranchPushRequest)({ ...request, commitSha: "b" }))).issue,
+      ).toBeDefined()
+      expect(
+        (yield* Effect.flip(
+          Schema.decodeUnknownEffect(ApiMessage)({ _tag: "BranchPush", request: { ...request, workspaceId: "" } }),
+        )).issue,
+      ).toBeDefined()
+      expect(
+        yield* Schema.decodeUnknownEffect(ExecutorMessage)({
+          _tag: "BranchPushResult",
+          access: request.access,
+          publicationId: request.publicationId,
+          branch: request.branch,
+          commitSha: request.commitSha,
+          outcome: {
+            _tag: "Succeeded",
+            branch: request.branch,
+            ref: request.ref,
+            commitSha: request.commitSha,
+          },
+        }),
+      ).toMatchObject({ _tag: "BranchPushResult", publicationId: "publication-1" })
     }),
   )
 

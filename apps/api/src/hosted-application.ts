@@ -22,6 +22,7 @@ import { HostedOperations, layer as hostedOperationsLayer } from "./hosted-opera
 import { HostedThreadProtocol, layer as hostedThreadProtocolLayer } from "./hosted-thread-protocol"
 import { HostedModelRegistry, layer as hostedModelRegistryLayer } from "./hosted-model-registry"
 import { HostedProduct, HostedProductError, layer as hostedProductLayer } from "./hosted-product"
+import { HostedPublication, layer as hostedPublicationLayer } from "./hosted-publication"
 import {
   HostedProviderCredentials,
   layer as hostedProviderCredentialsLayer,
@@ -46,6 +47,7 @@ export interface HostedApplicationService {
   readonly executor: Executor["Service"]
   readonly recovery: HostedRecoveryService
   readonly repositories: HostedRepositories["Service"]
+  readonly publication: HostedPublication["Service"]
   readonly projectionWorker: HostedProjectionWorker["Service"]
   readonly turnWorker: HostedTurnWorker["Service"]
   readonly execution: {
@@ -208,6 +210,11 @@ export const layer = (options: {
               ),
         }).pipe(Layer.provide(Layer.succeedContext(hostedContext))),
       )
+      const publicationContext = yield* Layer.build(
+        hostedPublicationLayer({ product: Context.get(productContext, HostedProduct), executor }).pipe(
+          Layer.provide(Layer.succeedContext(repositoryContext)),
+        ),
+      )
       const operationsContext = yield* Layer.build(
         hostedOperationsLayer.pipe(Layer.provide(Layer.succeedContext(hostedContext))),
       )
@@ -234,6 +241,7 @@ export const layer = (options: {
         executor,
         recovery: Context.get(recoveryContext, HostedRecovery),
         repositories: Context.get(repositoryContext, HostedRepositories),
+        publication: Context.get(publicationContext, HostedPublication),
         projectionWorker,
         turnWorker,
         execution: {

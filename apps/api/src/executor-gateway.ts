@@ -1,4 +1,9 @@
-import type { ControllerError, Interface as Controller, Quiescence } from "@rika/e2b-executor/controller"
+import type {
+  ControllerError,
+  CredentialCommand,
+  Interface as Controller,
+  Quiescence,
+} from "@rika/e2b-executor/controller"
 import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import type * as MachineBindings from "@rika/kernel/machine-bindings"
 import * as HostedObservability from "@rika/product/hosted-observability"
@@ -12,6 +17,7 @@ import {
   redactHeartbeat,
   redactHello,
   type AccessWire,
+  type BranchPushOutcome,
   type CellLifecycleFrame,
   type CellResponse,
   type Fence,
@@ -122,6 +128,31 @@ interface WorkspaceCall {
   readonly result: Deferred.Deferred<WorkspaceResponse, GatewayError>
 }
 
+interface BranchPushCall {
+  readonly assignmentId: string
+  readonly publicationId: string
+  readonly ownerId: string
+  readonly repositoryId: string
+  readonly workspaceId: string
+  readonly branch: string
+  readonly ref: string
+  readonly commitSha: string
+  readonly socket: Socket
+  readonly access: AccessWire
+  readonly result: Deferred.Deferred<BranchPushOutcome, GatewayError>
+}
+
+export interface BranchPushInput {
+  readonly assignmentId: string
+  readonly publicationId: string
+  readonly ownerId: string
+  readonly repositoryId: string
+  readonly workspaceId: string
+  readonly branch: string
+  readonly ref: string
+  readonly commitSha: string
+}
+
 export interface BindingAuthority {
   readonly registry: HostBindingRegistry.Interface
   readonly context: Context.Context<ExecutorRuntime.CellServices>
@@ -172,6 +203,7 @@ export interface Gateway {
     request: WorkspaceRequestValue,
   ) => Effect.Effect<WorkspaceResponse, GatewayError>
   readonly quiesce: (assignmentId: string) => Effect.Effect<Quiescence, GatewayError>
+  readonly pushBranch: (input: BranchPushInput) => Effect.Effect<BranchPushOutcome, GatewayError>
 }
 
 export interface LifecycleStore {
@@ -209,6 +241,10 @@ export interface PhaseAuthority {
     access: AccessWire,
     phase: EnvironmentPhase,
     use: (grant: PhaseEnvironmentGrant) => Effect.Effect<A, GatewayError, R>,
+  ) => Effect.Effect<A, GatewayError, R>
+  readonly publication: <A, R>(
+    access: AccessWire,
+    use: () => Effect.Effect<A, GatewayError, R>,
   ) => Effect.Effect<A, GatewayError, R>
   readonly replace: (key: {
     readonly assignmentId: string
@@ -335,6 +371,7 @@ const fenceOf = (message: ExecutorMessageValue): Fence | undefined => {
     case "CellLifecycle":
     case "BindingInvoke":
     case "MachineResult":
+    case "BranchPushResult":
       return message.access.fence
     case "CellResult":
       return message.access.fence
@@ -364,6 +401,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   const pending = yield* Ref.make(new Map<string, Pending>())
   const machineCalls = yield* Ref.make(new Map<string, MachineCall>())
   const workspaceCalls = yield* Ref.make(new Map<string, WorkspaceCall>())
+  const branchPushCalls = yield* Ref.make(new Map<string, BranchPushCall>())
   const frames = yield* Ref.make(new Map<string, ReadonlyArray<CellLifecycleFrame>>())
   const terminals = yield* Ref.make(new Map<string, Extract<CellLifecycleFrame, { readonly _tag: "Terminal" }>>())
   const quiescing = yield* Ref.make(new Set<string>())
@@ -388,6 +426,24 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         .pipe(
           Effect.mapError(() => GatewayError.make({ kind: "transport", message: "Could not identify RPC request" })),
         ),
+    )
+  })
+
+  const failBranchPushes = Effect.fn("ExecutorGateway.failBranchPushes")(function* (
+    predicate: (call: BranchPushCall) => boolean,
+    message: string,
+  ) {
+    const failed = yield* Ref.modify(branchPushCalls, (current) => {
+      const calls = [...current.values()].filter(predicate)
+      if (calls.length === 0) return [calls, current] as const
+      const next = new Map(current)
+      for (const call of calls) next.delete(call.publicationId)
+      return [calls, next] as const
+    })
+    yield* Effect.forEach(
+      failed,
+      (call) => Deferred.fail(call.result, GatewayError.make({ kind: "disconnected", message })),
+      { discard: true },
     )
   })
 
@@ -529,8 +585,14 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
             return [displacedPending.map(([, operation]) => operation.result), next] as const
           },
         )
-        if (displaced.previous !== undefined && displaced.previous.socket !== session.socket)
-          close(displaced.previous.socket, 1008, "fenced")
+        const previousSocket = displaced.previous?.socket
+        if (previousSocket !== undefined && previousSocket !== session.socket) {
+          close(previousSocket, 1008, "fenced")
+          yield* failBranchPushes(
+            (call) => call.socket === previousSocket,
+            "Executor connection changed during the approved branch push",
+          )
+        }
         yield* Effect.forEach(
           failed,
           (result) =>
@@ -678,6 +740,10 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
               GatewayError.make({ kind: "disconnected", message: "Executor disconnected while quiescing" }),
             )
         }
+        yield* failBranchPushes(
+          (call) => call.socket === socket,
+          "Executor disconnected during the approved branch push",
+        )
       }),
     )
   })
@@ -968,7 +1034,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   })
 
   const handle = Effect.fn("ExecutorGateway.handle")(function* (socket: Socket, message: ExecutorMessageValue) {
-    if (message._tag === "CellResult" || message._tag === "CellLifecycle")
+    if (message._tag === "CellResult" || message._tag === "CellLifecycle" || message._tag === "BranchPushResult")
       yield* controller.validateAccess(redactAccess(message.access))
     switch (message._tag) {
       case "ExecutorHello": {
@@ -1127,7 +1193,64 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         return
       }
       case "CredentialRequested": {
-        const credential = yield* controller.credential(redactAccess(message.access), message)
+        if (
+          (message.purpose === "branch-push" &&
+            (message.publicationId === undefined ||
+              message.publicationId !== message.requestId ||
+              message.branch === undefined ||
+              message.ref === undefined ||
+              message.commitSha === undefined)) ||
+          (message.purpose !== "branch-push" &&
+            (message.publicationId !== undefined ||
+              message.branch !== undefined ||
+              message.ref !== undefined ||
+              message.commitSha !== undefined))
+        )
+          return yield* GatewayError.make({ kind: "fenced", message: "Credential request purpose is invalid" })
+        if (message.purpose === "branch-push") {
+          const call = (yield* Ref.get(branchPushCalls)).get(message.publicationId!)
+          if (
+            call === undefined ||
+            call.socket !== socket ||
+            !sameAccess(call.access, message.access) ||
+            call.assignmentId !== message.assignmentId ||
+            call.ownerId !== message.ownerId ||
+            call.repositoryId !== message.repositoryId ||
+            call.workspaceId !== message.workspaceId ||
+            call.branch !== message.branch ||
+            call.ref !== message.ref ||
+            call.commitSha !== message.commitSha
+          )
+            return yield* GatewayError.make({
+              kind: "fenced",
+              message: "Branch push credential was not requested by the approved operation",
+            })
+        }
+        const command: CredentialCommand =
+          message.purpose === "branch-push"
+            ? {
+                ownerId: message.ownerId,
+                assignmentId: message.assignmentId,
+                repositoryId: message.repositoryId,
+                workspaceId: message.workspaceId,
+                assignmentGeneration: message.assignmentGeneration,
+                leaseEpoch: message.leaseEpoch,
+                purpose: "branch-push",
+                publicationId: message.publicationId!,
+                branch: message.branch!,
+                ref: message.ref!,
+                commitSha: message.commitSha!,
+              }
+            : {
+                ownerId: message.ownerId,
+                assignmentId: message.assignmentId,
+                repositoryId: message.repositoryId,
+                workspaceId: message.workspaceId,
+                assignmentGeneration: message.assignmentGeneration,
+                leaseEpoch: message.leaseEpoch,
+                purpose: message.purpose,
+              }
+        const credential = yield* controller.credential(redactAccess(message.access), command)
         socket.send(
           encode({
             _tag: "RepositoryCredential",
@@ -1138,6 +1261,14 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
               repositoryId: message.repositoryId,
               workspaceId: message.workspaceId,
               purpose: message.purpose,
+              ...(message.purpose === "branch-push"
+                ? {
+                    publicationId: message.publicationId,
+                    branch: message.branch,
+                    ref: message.ref,
+                    commitSha: message.commitSha,
+                  }
+                : {}),
               assignmentGeneration: message.assignmentGeneration,
               leaseEpoch: message.leaseEpoch,
               ...credential,
@@ -1155,7 +1286,60 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           message.leaseEpoch !== message.access.leaseEpoch
         )
           return yield* GatewayError.make({ kind: "fenced", message: "Credential revocation scope is stale" })
-        yield* controller.revokeCredential(redactAccess(message.access), message)
+        if (
+          (message.purpose === "branch-push" &&
+            (message.publicationId === undefined ||
+              message.branch === undefined ||
+              message.ref === undefined ||
+              message.commitSha === undefined)) ||
+          (message.purpose !== "branch-push" &&
+            (message.publicationId !== undefined ||
+              message.branch !== undefined ||
+              message.ref !== undefined ||
+              message.commitSha !== undefined))
+        )
+          return yield* GatewayError.make({ kind: "fenced", message: "Credential revocation purpose is invalid" })
+        if (message.purpose === "branch-push") {
+          const call = (yield* Ref.get(branchPushCalls)).get(message.publicationId!)
+          if (
+            call === undefined ||
+            call.socket !== socket ||
+            !sameAccess(call.access, message.access) ||
+            call.assignmentId !== message.assignmentId ||
+            call.ownerId !== message.ownerId ||
+            call.repositoryId !== message.repositoryId ||
+            call.workspaceId !== message.workspaceId ||
+            call.branch !== message.branch ||
+            call.ref !== message.ref ||
+            call.commitSha !== message.commitSha
+          )
+            return yield* GatewayError.make({ kind: "fenced", message: "Branch push revocation scope is stale" })
+        }
+        const command: CredentialCommand =
+          message.purpose === "branch-push"
+            ? {
+                ownerId: message.ownerId,
+                assignmentId: message.assignmentId,
+                repositoryId: message.repositoryId,
+                workspaceId: message.workspaceId,
+                assignmentGeneration: message.assignmentGeneration,
+                leaseEpoch: message.leaseEpoch,
+                purpose: "branch-push",
+                publicationId: message.publicationId!,
+                branch: message.branch!,
+                ref: message.ref!,
+                commitSha: message.commitSha!,
+              }
+            : {
+                ownerId: message.ownerId,
+                assignmentId: message.assignmentId,
+                repositoryId: message.repositoryId,
+                workspaceId: message.workspaceId,
+                assignmentGeneration: message.assignmentGeneration,
+                leaseEpoch: message.leaseEpoch,
+                purpose: message.purpose,
+              }
+        yield* controller.revokeCredential(redactAccess(message.access), command)
         return
       }
       case "WorkspacePreparationRequested": {
@@ -1224,6 +1408,22 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
       }
       case "WorkspaceResponse":
         return yield* receiveWorkspace(socket, message.access, message.response)
+      case "BranchPushResult": {
+        const call = (yield* Ref.get(branchPushCalls)).get(message.publicationId)
+        const succeeded = message.outcome._tag === "Succeeded" ? message.outcome : undefined
+        if (
+          call === undefined ||
+          call.socket !== socket ||
+          !sameAccess(call.access, message.access) ||
+          call.branch !== message.branch ||
+          call.commitSha !== message.commitSha ||
+          (succeeded !== undefined &&
+            (succeeded.branch !== call.branch || succeeded.ref !== call.ref || succeeded.commitSha !== call.commitSha))
+        )
+          return yield* GatewayError.make({ kind: "fenced", message: "Branch push result scope is stale" })
+        yield* Deferred.succeed(call.result, message.outcome)
+        return
+      }
       case "CellLifecycle":
         return yield* persistLifecycle(socket, message.access, message.frame)
       case "PtyOpened":
@@ -1690,6 +1890,74 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     )
   })
 
+  const pushBranch = Effect.fn("ExecutorGateway.pushBranch")(function* (input: BranchPushInput) {
+    const connected = yield* awaitSession(input.assignmentId).pipe(Effect.timeoutOption("30 seconds"))
+    if (Option.isNone(connected))
+      return yield* GatewayError.make({ kind: "timeout", message: "Approved workspace did not connect in time" })
+    const call = yield* admission.withPermits(1)(
+      Effect.gen(function* () {
+        const session = (yield* Ref.get(sessions)).get(input.assignmentId)
+        if (session === undefined || !session.ready)
+          return yield* GatewayError.make({ kind: "disconnected", message: "Approved workspace is not ready" })
+        if ((yield* Ref.get(quiescing)).has(input.assignmentId))
+          return yield* GatewayError.make({ kind: "fenced", message: "Approved workspace is quiescing" })
+        if ((yield* Clock.currentTimeMillis) >= session.leaseExpiresAt) return yield* expired()
+        yield* controller.validateAccess(redactAccess(session.access)).pipe(Effect.mapError(accessFailure))
+        yield* preparation.ready(session.access)
+        const result = yield* Deferred.make<BranchPushOutcome, GatewayError>()
+        const candidate: BranchPushCall = { ...input, socket: session.socket, access: session.access, result }
+        const known = yield* Ref.modify(branchPushCalls, (current) => {
+          const previous = current.get(input.publicationId)
+          if (previous !== undefined) return [previous, current] as const
+          return [candidate, new Map(current).set(input.publicationId, candidate)] as const
+        })
+        if (
+          known !== candidate ||
+          known.assignmentId !== input.assignmentId ||
+          known.ownerId !== input.ownerId ||
+          known.repositoryId !== input.repositoryId ||
+          known.workspaceId !== input.workspaceId ||
+          known.branch !== input.branch ||
+          known.ref !== input.ref ||
+          known.commitSha !== input.commitSha
+        )
+          return yield* GatewayError.make({ kind: "fenced", message: "Publication id was reused with another scope" })
+        return candidate
+      }),
+    )
+    return yield* phases
+      .publication(call.access, () =>
+        Effect.try({
+          try: () =>
+            call.socket.send(
+              encode({
+                _tag: "BranchPush",
+                request: { ...input, access: call.access },
+              }),
+            ),
+          catch: () => GatewayError.make({ kind: "transport", message: "Could not send approved branch push" }),
+        }).pipe(
+          Effect.andThen(Deferred.await(call.result)),
+          Effect.timeoutOption("60 seconds"),
+          Effect.flatMap((outcome) =>
+            Option.isSome(outcome)
+              ? Effect.succeed(outcome.value)
+              : GatewayError.make({ kind: "timeout", message: "Approved branch push outcome is unknown" }),
+          ),
+        ),
+      )
+      .pipe(
+        Effect.ensuring(
+          Ref.update(branchPushCalls, (current) => {
+            if (current.get(input.publicationId) !== call) return current
+            const next = new Map(current)
+            next.delete(input.publicationId)
+            return next
+          }),
+        ),
+      )
+  })
+
   const active: Gateway["active"] = (socket) =>
     Effect.gen(function* () {
       const assignmentId = (yield* Ref.get(assignments)).get(socket)
@@ -1763,5 +2031,6 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     retryPreparation,
     workspace,
     quiesce,
+    pushBranch,
   } satisfies Gateway
 })

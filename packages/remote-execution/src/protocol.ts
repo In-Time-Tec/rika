@@ -491,7 +491,11 @@ export const CredentialWire = Schema.Struct({
   assignmentId: Identifier,
   repositoryId: Identifier,
   workspaceId: Identifier,
-  purpose: Schema.Literals(["git-read", "github-read"]),
+  purpose: Schema.Literals(["git-read", "github-read", "branch-push"]),
+  publicationId: Schema.optionalKey(Identifier),
+  branch: Schema.optionalKey(Identifier),
+  ref: Schema.optionalKey(Identifier),
+  commitSha: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/))),
   assignmentGeneration: Generation,
   leaseEpoch: LeaseEpoch,
   repositoryUrl: Identifier,
@@ -499,6 +503,31 @@ export const CredentialWire = Schema.Struct({
   token: Identifier,
   expiresAt: Timestamp,
 })
+
+export const BranchPushOutcome = Schema.Union([
+  Schema.TaggedStruct("Succeeded", {
+    branch: Identifier,
+    ref: Identifier,
+    commitSha: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/)),
+  }),
+  Schema.TaggedStruct("Failed", {
+    kind: Schema.Literals(["stale", "local", "git"]),
+    message: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
+  }),
+])
+export type BranchPushOutcome = typeof BranchPushOutcome.Type
+
+export const BranchPushRequest = Schema.Struct({
+  access: AccessWire,
+  publicationId: Identifier,
+  ownerId: Identifier,
+  repositoryId: Identifier,
+  workspaceId: Identifier,
+  branch: Identifier,
+  ref: Identifier,
+  commitSha: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/)),
+})
+export type BranchPushRequest = typeof BranchPushRequest.Type
 
 export const RepositoryCheckoutWire = Schema.Struct({
   ownerId: Identifier,
@@ -602,7 +631,11 @@ export const ExecutorMessage = Schema.Union([
     assignmentId: Identifier,
     repositoryId: Identifier,
     workspaceId: Identifier,
-    purpose: Schema.Literals(["git-read", "github-read"]),
+    purpose: Schema.Literals(["git-read", "github-read", "branch-push"]),
+    publicationId: Schema.optionalKey(Identifier),
+    branch: Schema.optionalKey(Identifier),
+    ref: Schema.optionalKey(Identifier),
+    commitSha: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/))),
     assignmentGeneration: Generation,
     leaseEpoch: LeaseEpoch,
   }),
@@ -612,7 +645,11 @@ export const ExecutorMessage = Schema.Union([
     assignmentId: Identifier,
     repositoryId: Identifier,
     workspaceId: Identifier,
-    purpose: Schema.Literals(["git-read", "github-read"]),
+    purpose: Schema.Literals(["git-read", "github-read", "branch-push"]),
+    publicationId: Schema.optionalKey(Identifier),
+    branch: Schema.optionalKey(Identifier),
+    ref: Schema.optionalKey(Identifier),
+    commitSha: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/))),
     assignmentGeneration: Generation,
     leaseEpoch: LeaseEpoch,
   }),
@@ -675,6 +712,13 @@ export const ExecutorMessage = Schema.Union([
     requestId: Identifier,
     key: SetupCacheKey,
     archive: EncodedArchive,
+  }),
+  Schema.TaggedStruct("BranchPushResult", {
+    access: AccessWire,
+    publicationId: Identifier,
+    branch: Identifier,
+    commitSha: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/)),
+    outcome: BranchPushOutcome,
   }),
   Schema.TaggedStruct("PtyOpened", { access: AccessWire, pty: PtyCreate }),
   Schema.TaggedStruct("PtyOutput", { access: AccessWire, ptyId: Identifier, chunk: PtyTranscriptChunk }),
@@ -741,6 +785,7 @@ export const ApiMessage = Schema.Union([
     archive: Schema.NullOr(EncodedArchive),
   }),
   Schema.TaggedStruct("SetupCacheAccepted", { requestId: Identifier }),
+  Schema.TaggedStruct("BranchPush", { request: BranchPushRequest }),
   Schema.TaggedStruct("PtyCreate", { fence: Fence, request: PtyCreate }),
   Schema.TaggedStruct("PtyInput", { fence: Fence, request: PtyInput }),
   Schema.TaggedStruct("PtyResize", { fence: Fence, request: PtyResize }),

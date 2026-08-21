@@ -124,17 +124,31 @@ export const layer = (options: ExecutorConfig) =>
           return Credentials.of({
             issue: (request) =>
               repositories
-                .credential({
-                  access: request.access,
-                  ownerId: request.ownerId,
-                  workspaceId: request.workspaceId,
-                  repositoryId: request.repositoryId,
-                  purpose: request.purpose,
-                })
+                .credential(
+                  request.purpose === "branch-push"
+                    ? {
+                        access: request.access,
+                        ownerId: request.ownerId,
+                        workspaceId: request.workspaceId,
+                        repositoryId: request.repositoryId,
+                        purpose: "branch-push",
+                        publicationId: request.publicationId,
+                        branch: request.branch,
+                        ref: request.ref,
+                        commitSha: request.commitSha,
+                      }
+                    : {
+                        access: request.access,
+                        ownerId: request.ownerId,
+                        workspaceId: request.workspaceId,
+                        repositoryId: request.repositoryId,
+                        purpose: request.purpose,
+                      },
+                )
                 .pipe(Effect.mapError((error) => CredentialError.make({ message: error.message }))),
-            revoke: (access, purpose) =>
+            revoke: (access, purpose, publicationId) =>
               repositories
-                .revoke(access, purpose)
+                .revoke(access, purpose, publicationId)
                 .pipe(Effect.mapError((error) => CredentialError.make({ message: error.message }))),
           })
         }),
@@ -634,6 +648,38 @@ export const service = Layer.effect(
                 Schema.is(GatewayError)(error)
                   ? error
                   : GatewayError.make({ kind: "fenced", message: "Executor phase authorization was rejected" }),
+              ),
+            ),
+        publication: (executorAccess, use) =>
+          environment
+            .usePhase({ assignmentId: executorAccess.fence.assignmentId, phase: "runtime" }, (resolved) =>
+              Effect.gen(function* () {
+                const access = {
+                  ...executorAccess,
+                  sessionToken: Redacted.make(executorAccess.sessionToken, { label: "executor-session" }),
+                }
+                const update = (egress: typeof resolved.egress) =>
+                  controller
+                    .activatePhase(access, egress)
+                    .pipe(
+                      Effect.mapError(() =>
+                        GatewayError.make({ kind: "fenced", message: "Repository publication egress was rejected" }),
+                      ),
+                    )
+                yield* update({
+                  phase: "runtime",
+                  allow: [...new Set([...resolved.egress.allow, "github.com"])].sort(),
+                })
+                const outcome = yield* Effect.exit(use())
+                yield* update(resolved.egress)
+                return yield* outcome
+              }),
+            )
+            .pipe(
+              Effect.mapError((error) =>
+                Schema.is(GatewayError)(error)
+                  ? error
+                  : GatewayError.make({ kind: "fenced", message: "Repository publication egress is unavailable" }),
               ),
             ),
         replace: (key) =>

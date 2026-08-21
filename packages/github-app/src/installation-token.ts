@@ -11,6 +11,7 @@ export const RepositoryTokenRequest = Schema.Struct({
   installationId: GitHub.PositiveInt,
   repositoryIds: GitHub.RepositoryIds,
   permissions: RequiredPermissions,
+  fresh: Schema.optionalKey(Schema.Boolean),
 })
 export type RepositoryTokenRequest = typeof RepositoryTokenRequest.Type
 
@@ -126,7 +127,7 @@ export const installationTokenLayer = (options: InstallationTokenOptions = {}) =
             for (const [cachedKey, entry] of cache) {
               if (now >= entry.usableUntilMillis) cache.delete(cachedKey)
             }
-            const cached = cache.get(key)
+            const cached = normalizedRequest.fresh === true ? undefined : cache.get(key)
             if (cached !== undefined) return cached.value
             const jwt = yield* appJwt.sign.pipe(
               Effect.mapError(() => failure("authentication", "mint repository token", "App authentication failed")),
@@ -182,7 +183,8 @@ export const installationTokenLayer = (options: InstallationTokenOptions = {}) =
               permissions: request.permissions,
             }
             const usableUntilMillis = expiry - 5 * 60 * 1_000
-            if (now < usableUntilMillis) cache.set(key, { value, usableUntilMillis })
+            if (normalizedRequest.fresh !== true && now < usableUntilMillis)
+              cache.set(key, { value, usableUntilMillis })
             return value
           }),
         )

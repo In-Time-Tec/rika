@@ -17,6 +17,7 @@ import type { Runtime as Executor } from "../src/executor"
 import { isRikaApiPath, makeRikaApiHandler } from "../src/api"
 import type { HostedProviderCredentialsService } from "../src/hosted-provider-credentials"
 import type { HostedEnvironmentService } from "../src/hosted-environment"
+import type { HostedPublicationService } from "../src/hosted-publication"
 import { EnvironmentReferenceId } from "@rika/product/environment-policy"
 
 const account: Account = {
@@ -296,6 +297,83 @@ describe("api HTTP", () => {
       const rejected = yield* response("/api/v1/me/context", withDevice(false))
       expect(accepted.status).toBe(200)
       expect(rejected.status).toBe(401)
+    }),
+  )
+
+  it.effect("publishes only an authenticated device's approved repository commit", () =>
+    Effect.gen(function* () {
+      const base = dependencies({ account: { ...account, memberships: [] } })
+      const calls: Array<Parameters<HostedPublicationService["publish"]>[0]> = []
+      const publication: HostedPublicationService = {
+        publish: (input) =>
+          Effect.sync(() => {
+            calls.push(input)
+            return {
+              id: "publication-1",
+              ownerId: "owner-1",
+              threadId: input.threadId,
+              projectId: "project-1",
+              repositoryId: "repository-1",
+              assignmentId: "assignment-1",
+              assignmentGeneration: 1,
+              leaseEpoch: 1,
+              workspaceId: "workspace-1",
+              authorizationCheckpointId: "publication-1",
+              authorizationDigest: `sha256:${"a".repeat(64)}`,
+              sourceBranch: `rika/${input.threadId}`,
+              sourceRef: `refs/heads/rika/${input.threadId}`,
+              sourceCommitSha: input.commitSha,
+              target: { ref: "main", commitSha: "c".repeat(40), protected: true },
+              title: input.title,
+              body: input.body,
+              state: "completed" as const,
+              pushResult: { outcome: "succeeded" },
+              pullRequestResult: { outcome: "succeeded", number: 7 },
+            }
+          }),
+      }
+      const deps: HttpDependencies = {
+        ...base,
+        identity: {
+          ...base.identity,
+          identify: () => Effect.succeed({ userId: "user-1", clientId: "client-1" }),
+        },
+        devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
+        publication,
+      }
+      const headers = { "idempotency-key": "11111111-1111-4111-8111-111111111111" }
+      const commitSha = "b".repeat(40)
+      const accepted = yield* response("/api/v1/threads/thread-1/repository-publications", deps, {
+        method: "POST",
+        headers,
+        body: encodeJson({ commit_sha: commitSha, title: "Publish thread-1", body: "Approved publication" }),
+      })
+      expect(accepted.status).toBe(200)
+      expect(yield* Effect.promise(() => accepted.json())).toMatchObject({
+        state: "completed",
+        branch: "rika/thread-1",
+        ref: "refs/heads/rika/thread-1",
+        commitSha,
+      })
+      expect(calls).toHaveLength(1)
+      expect(calls[0]).toMatchObject({
+        principal: { userId: "user-1", clientId: "client-1", deviceId: "device-1" },
+        threadId: "thread-1",
+        idempotencyKey: headers["idempotency-key"],
+        commitSha,
+      })
+      const rejected = yield* response("/api/v1/threads/thread-1/repository-publications", deps, {
+        method: "POST",
+        headers,
+        body: encodeJson({
+          commit_sha: commitSha,
+          source_branch: "attacker/branch",
+          title: "Publish thread-1",
+          body: "Approved publication",
+        }),
+      })
+      expect(rejected.status).toBe(400)
+      expect(calls).toHaveLength(1)
     }),
   )
 

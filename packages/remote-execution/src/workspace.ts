@@ -2,6 +2,8 @@ import { Clock, Crypto, Effect, Encoding, Exit, Fiber, FileSystem, Option, Redac
 import type {
   AccessWire,
   EncodedArchive,
+  BranchPushOutcome,
+  BranchPushRequest,
   RepositoryCheckoutWire,
   WorkspacePreparationEvidenceWire,
   WorkspacePreparationPhase,
@@ -119,7 +121,7 @@ const readOnlyGhWrapper = (executable = ghExecutable, credentialClient?: string)
 const credentialClientSource = (socketPath: string) =>
   `#!/usr/bin/env bun
 const operation = process.argv[2] ?? ""
-if (operation !== "git-read" && operation !== "github-read") process.exit(2)
+if (operation !== "git-read" && operation !== "github-read" && operation !== "branch-push") process.exit(2)
 let response = ""
 const timeout = setTimeout(() => process.exit(1), 5000)
 await Bun.connect({
@@ -135,14 +137,14 @@ await Bun.connect({
 
 const credentialBrokerAdapter = (
   socketPath: string,
-  credential: (purpose: "git-read" | "github-read") => Credential | undefined,
+  credential: (purpose: "git-read" | "github-read" | "branch-push") => Credential | undefined,
 ) =>
   Bun.listen({
     unix: socketPath,
     socket: {
       data(socket, data) {
         const operation = new TextDecoder().decode(data).trim()
-        if (operation !== "git-read" && operation !== "github-read") {
+        if (operation !== "git-read" && operation !== "github-read" && operation !== "branch-push") {
           socket.end()
           return
         }
@@ -152,7 +154,7 @@ const credentialBrokerAdapter = (
           return
         }
         const token = Redacted.value(current.token)
-        socket.end(operation === "git-read" ? `username=${current.username}\npassword=${token}\n\n` : token)
+        socket.end(operation === "github-read" ? token : `username=${current.username}\npassword=${token}\n\n`)
       },
     },
   })
@@ -205,6 +207,183 @@ const commandAdapter = (
       }),
     ),
   )
+
+export interface BranchPushOptions {
+  readonly request: BranchPushRequest
+  readonly repositoryUrl: string
+  readonly credential: Credential
+  readonly root?: string
+  readonly workspaceCommandPrefix?: ReadonlyArray<string>
+  readonly credentialRoot?: string
+}
+
+export const pushApprovedBranch = Effect.fn("Workspace.pushApprovedBranch")(function* (options: BranchPushOptions) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const crypto = yield* Crypto.Crypto
+  const root = options.root ?? RemoteRepositoryRoot
+  const prefix = options.workspaceCommandPrefix ?? []
+  const credentialRoot = options.credentialRoot ?? EphemeralCredentialRoot
+  const request = options.request
+  const failed = (kind: "stale" | "local" | "git", message: string): BranchPushOutcome => ({
+    _tag: "Failed",
+    kind,
+    message,
+  })
+  if (
+    request.ref !== `refs/heads/${request.branch}` ||
+    !/^rika\/[A-Za-z0-9](?:[A-Za-z0-9._/-]*[A-Za-z0-9])?$/.test(request.branch) ||
+    request.branch.includes("..") ||
+    request.branch.includes("//") ||
+    request.branch.includes("@{") ||
+    request.branch.endsWith(".lock")
+  )
+    return failed("stale", "Approved branch ref is invalid")
+  const now = yield* Clock.currentTimeMillis
+  if (
+    options.credential.repositoryUrl !== options.repositoryUrl ||
+    options.credential.expiresAt <= now ||
+    options.credential.expiresAt > now + 60 * 60 * 1_000
+  )
+    return failed("stale", "Branch push credential scope is invalid")
+  const run = (command: ReadonlyArray<string>) =>
+    commandAdapter(
+      [...prefix, ...command],
+      root,
+      {
+        PATH: Bun.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+        GIT_TERMINAL_PROMPT: "0",
+        GCM_INTERACTIVE: "Never",
+        GIT_ASKPASS: "/bin/false",
+        SSH_ASKPASS: "/bin/false",
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_CONFIG_GLOBAL: "/dev/null",
+      },
+      () => {},
+    )
+  const head = yield* run(["git", "-C", root, "rev-parse", "HEAD"]).pipe(Effect.option)
+  const remote = yield* run(["git", "-C", root, "remote", "get-url", "origin"]).pipe(Effect.option)
+  const pushRemote = yield* run(["git", "-C", root, "remote", "get-url", "--push", "origin"]).pipe(Effect.option)
+  const localAuthority = yield* run([
+    "git",
+    "-C",
+    root,
+    "config",
+    "--local",
+    "--includes",
+    "--name-only",
+    "--get-regexp",
+    "^(http\\.|remote\\.origin\\.(pushurl|receivepack|proxy|mirror)$|url\\.|credential\\.)",
+  ]).pipe(Effect.option)
+  const localAuthorityKeys = Option.isSome(localAuthority)
+    ? localAuthority.value.output
+        .trim()
+        .split("\n")
+        .filter((name) => name.length > 0 && name !== "credential.helper" && name !== "credential.usehttppath")
+    : []
+  if (
+    Option.isNone(head) ||
+    Option.isNone(remote) ||
+    Option.isNone(pushRemote) ||
+    Option.isNone(localAuthority) ||
+    head.value.code !== 0 ||
+    remote.value.code !== 0 ||
+    pushRemote.value.code !== 0 ||
+    (localAuthority.value.code !== 0 && localAuthority.value.code !== 1) ||
+    head.value.output.trim() !== request.commitSha ||
+    remote.value.output.trim() !== options.repositoryUrl ||
+    pushRemote.value.output.trim() !== options.repositoryUrl ||
+    localAuthorityKeys.length > 0
+  )
+    return failed("stale", "Workspace HEAD or repository changed after approval")
+  const digest = Encoding.encodeHex(
+    yield* crypto.digest("SHA-256", new TextEncoder().encode(request.publicationId)).pipe(Effect.orDie),
+  )
+  const directory = `${credentialRoot}/publication-${digest}`
+  const socketPath = `${directory}/credential.sock`
+  const clientPath = `${directory}/credential-client.js`
+  const helperPath = `${directory}/git-credential-rika-push`
+  const snapshot = `${directory}/repository.git`
+  let available: Credential | undefined = options.credential
+  let broker: ReturnType<typeof credentialBrokerAdapter> | undefined
+  return yield* Effect.gen(function* () {
+    yield* fileSystem.remove(directory, { recursive: true, force: true })
+    yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 })
+    const initialized = yield* run(["git", "init", "--bare", snapshot])
+    if (initialized.code !== 0) return failed("local", "Approved branch snapshot could not start")
+    const fetched = yield* run([
+      "git",
+      `--git-dir=${snapshot}`,
+      "-c",
+      `safe.directory=${root}`,
+      "fetch",
+      "--no-tags",
+      root,
+      "HEAD",
+    ])
+    if (fetched.code !== 0) return failed("stale", "Workspace HEAD changed while publication was isolated")
+    const snapshotHead = yield* run(["git", `--git-dir=${snapshot}`, "rev-parse", "FETCH_HEAD"])
+    if (snapshotHead.code !== 0 || snapshotHead.output.trim() !== request.commitSha)
+      return failed("stale", "Workspace HEAD changed while publication was isolated")
+    for (const command of [
+      ["git", `--git-dir=${snapshot}`, "update-ref", "refs/heads/publication", request.commitSha],
+      ["git", `--git-dir=${snapshot}`, "symbolic-ref", "HEAD", "refs/heads/publication"],
+      ["git", `--git-dir=${snapshot}`, "remote", "add", "origin", options.repositoryUrl],
+    ]) {
+      const configured = yield* run(command)
+      if (configured.code !== 0) return failed("local", "Approved branch snapshot could not be sealed")
+    }
+    broker = yield* Effect.try({
+      try: () =>
+        credentialBrokerAdapter(socketPath, (purpose) => {
+          if (purpose !== "branch-push") return undefined
+          const current = available
+          available = undefined
+          return current
+        }),
+      catch: () => undefined,
+    })
+    if (broker === undefined) return failed("local", "Branch push credential broker could not start")
+    yield* fileSystem.chmod(socketPath, 0o600)
+    yield* fileSystem.writeFileString(clientPath, credentialClientSource(socketPath), { mode: 0o700 })
+    yield* fileSystem.writeFileString(
+      helperPath,
+      `#!/bin/sh\nset -eu\ncase "\${1:-}" in get) exec ${clientPath} branch-push ;; *) exit 0 ;; esac\n`,
+      { mode: 0o700 },
+    )
+    const pushed = yield* run([
+      "git",
+      `--git-dir=${snapshot}`,
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "credential.helper=",
+      "-c",
+      `credential.helper=${helperPath}`,
+      "-c",
+      "credential.useHttpPath=true",
+      "-c",
+      "credential.interactive=false",
+      "-c",
+      "http.extraHeader=",
+      "-c",
+      "http.cookieFile=",
+      "push",
+      "--porcelain",
+      "origin",
+      `HEAD:${request.ref}`,
+    ]).pipe(Effect.timeoutOption("45 seconds"), Effect.orElseSucceed(Option.none))
+    if (Option.isNone(pushed) || pushed.value.code !== 0) return failed("git", "Git rejected the approved branch push")
+    return { _tag: "Succeeded", branch: request.branch, ref: request.ref, commitSha: request.commitSha } as const
+  }).pipe(
+    Effect.ensuring(
+      Effect.sync(() => broker?.stop(true)).pipe(
+        Effect.andThen(fileSystem.remove(directory, { recursive: true, force: true })),
+        Effect.ignore,
+      ),
+    ),
+    Effect.orElseSucceed(() => failed("local", "Approved branch push could not run")),
+  )
+})
 
 const make = (options: Options) =>
   Effect.gen(function* () {
@@ -321,7 +500,10 @@ const make = (options: Options) =>
       yield* fileSystem.makeDirectory(`${credentialRoot}/gh`, { recursive: true, mode: 0o2750 })
       yield* fileSystem.remove(credentialSocket, { force: true })
       credentialBroker = yield* Effect.try({
-        try: () => credentialBrokerAdapter(credentialSocket, (purpose) => activeCredentials.get(purpose)),
+        try: () =>
+          credentialBrokerAdapter(credentialSocket, (purpose) =>
+            purpose === "branch-push" ? undefined : activeCredentials.get(purpose),
+          ),
         catch: () =>
           WorkspaceError.make({ phase: "checkout", message: "Credential broker failed to start", retryable: true }),
       })

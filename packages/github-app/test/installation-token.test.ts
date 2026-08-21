@@ -33,7 +33,12 @@ const resolvedLayer = (clientLayer: Layer.Layer<HttpClient.HttpClient>) =>
 describe("GitHub installation repository tokens", () => {
   it.effect("mints exact repository and permission scopes and caches only until expiry minus five minutes", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
-    const expiries = ["2023-11-14T23:13:20.000Z", "2023-11-14T23:13:20.000Z", "2023-11-15T00:08:20.000Z"]
+    const expiries = [
+      "2023-11-14T23:13:20.000Z",
+      "2023-11-14T23:13:20.000Z",
+      "2023-11-14T23:13:20.000Z",
+      "2023-11-15T00:08:20.000Z",
+    ]
     const clientLayer = Layer.succeed(
       HttpClient.HttpClient,
       HttpClient.make((request) => {
@@ -78,6 +83,15 @@ describe("GitHub installation repository tokens", () => {
       })
       expect(Redacted.value(broader.token)).toBe("installation-token-2")
       expect(requests).toHaveLength(2)
+      const fresh = yield* tokens.mint({
+        installationId: 42,
+        repositoryIds: [1, 2],
+        permissions: { contents: "read" },
+        fresh: true,
+      })
+      expect(Redacted.value(fresh.token)).toBe("installation-token-3")
+      expect(fresh.token).not.toBe(first.token)
+      expect(requests).toHaveLength(3)
       yield* TestClock.adjust("54 minutes")
       expect(
         Redacted.value(
@@ -97,8 +111,8 @@ describe("GitHub installation repository tokens", () => {
             permissions: { contents: "read" },
           })).token,
         ),
-      ).toBe("installation-token-3")
-      expect(requests).toHaveLength(3)
+      ).toBe("installation-token-4")
+      expect(requests).toHaveLength(4)
     }).pipe(provide(resolvedLayer(clientLayer)))
   })
 

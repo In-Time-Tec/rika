@@ -24,6 +24,7 @@ it.effect("keeps hosted PostgreSQL migration identities and checksums exact", ()
       "product/0016_authority_revocation",
       "product/0017_executor_recovery_capabilities",
       "product/0018_workspace_preparation",
+      "product/0019_approved_repository_publication",
       "product/0020_tool_policy_audit",
     ])
     for (const migration of migrations) {

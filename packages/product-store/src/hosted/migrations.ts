@@ -96,6 +96,11 @@ export const migrations: ReadonlyArray<Migration> = [
     url: new URL("../../migrations/postgres/0018-workspace-preparation.sql", import.meta.url),
   },
   {
+    id: "product/0019_approved_repository_publication",
+    checksum: "208b2958e8c09ac1e449735c31c22f19face3761c875c004d0d60968acb8ce0a",
+    url: new URL("../../migrations/postgres/0019-approved-repository-publication.sql", import.meta.url),
+  },
+  {
     id: "product/0020_tool_policy_audit",
     checksum: "bc29391d7b468ab7500ebea279ef917da2e42259879041231aba3aea0a86d3f1",
     url: new URL("../../migrations/postgres/0020-tool-policy-audit.sql", import.meta.url),

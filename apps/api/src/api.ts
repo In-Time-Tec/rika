@@ -96,6 +96,26 @@ const RecoveryResolutionRequest = strict(
     Schema.Struct({ action: Schema.Literal("abort"), reason: Schema.NonEmptyString }),
   ]),
 )
+const RepositoryPublicationRequest = strict(
+  Schema.Struct({
+    commit_sha: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/)),
+    target_branch: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255))),
+    title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+    body: Schema.String.check(Schema.isMaxLength(65_536)),
+  }),
+)
+const RepositoryPublicationResponse = Schema.Struct({
+  publicationId: Schema.String,
+  state: Schema.Literals(["approved", "pushing", "pushed", "completed", "failed", "unknown"]),
+  branch: Schema.String,
+  ref: Schema.String,
+  commitSha: Schema.String,
+  targetBranch: Schema.String,
+  targetCommitSha: Schema.String,
+  targetProtected: Schema.Boolean,
+  pushResult: Schema.NullOr(Schema.Unknown),
+  pullRequestResult: Schema.NullOr(Schema.Unknown),
+})
 const ModelsResponse = Schema.Struct({ modes: Schema.Array(Schema.String) })
 const ProviderCredentialRequest = strict(
   Schema.Struct({
@@ -239,6 +259,13 @@ class ProductGroup extends HttpApiGroup.make("product", { topLevel: true })
       headers: { "idempotency-key": OperationKey },
       payload: RecoveryResolutionRequest,
       success: RecoveryOperation,
+      error: [Forbidden, NotFound, Conflict, Unprocessable, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.post("publishRepository", "/api/v1/threads/:threadId/repository-publications", {
+      params: { threadId: ThreadId },
+      headers: { "idempotency-key": OperationKey },
+      payload: RepositoryPublicationRequest,
+      success: RepositoryPublicationResponse,
       error: [Forbidden, NotFound, Conflict, Unprocessable, ServiceUnavailable],
     }),
     HttpApiEndpoint.get("models", "/api/v1/models", {
@@ -570,6 +597,45 @@ const productHandlers = (dependencies: HttpDependencies) =>
               }),
             )
         }),
+      publishRepository: ({ headers, params, payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          if (dependencies.publication === undefined)
+            return yield* ServiceUnavailable.make({ message: "Repository publication service unavailable" })
+          const result = yield* dependencies.publication
+            .publish({
+              principal: authenticatedPrincipal(access),
+              threadId: params.threadId,
+              idempotencyKey: headers["idempotency-key"],
+              commitSha: payload.commit_sha,
+              ...(payload.target_branch === undefined ? {} : { targetRef: payload.target_branch }),
+              title: payload.title,
+              body: payload.body,
+            })
+            .pipe(
+              Effect.mapError((error) => {
+                if (error.kind === "missing") return NotFound.make({ message: error.message })
+                if (error.kind === "forbidden") return Forbidden.make({ message: error.message })
+                if (error.kind === "conflict") return Conflict.make({ message: error.message })
+                if (error.kind === "invalid") return Unprocessable.make({ message: error.message })
+                return ServiceUnavailable.make({ message: error.message })
+              }),
+            )
+          return {
+            publicationId: result.id,
+            state: result.state,
+            branch: result.sourceBranch,
+            ref: result.sourceRef,
+            commitSha: result.sourceCommitSha,
+            targetBranch: result.target.ref,
+            targetCommitSha: result.target.commitSha,
+            targetProtected: result.target.protected,
+            pushResult: result.pushResult,
+            pullRequestResult: result.pullRequestResult,
+          }
+        }),
       models: () =>
         dependencies.models === undefined
           ? Effect.fail(ServiceUnavailable.make({ message: "Model registry unavailable" }))
@@ -768,6 +834,7 @@ export const isRikaApiPath = (pathname: string) =>
   /^\/api\/v1\/provider-credentials\/[^/]+$/.test(pathname) ||
   /^\/api\/v1\/local-runners\/[^/]+(?:\/remote-thread-creation|\/admissions)?$/.test(pathname) ||
   /^\/api\/v1\/threads\/[^/]+\/local-executor-admissions$/.test(pathname) ||
+  /^\/api\/v1\/threads\/[^/]+\/repository-publications$/.test(pathname) ||
   /^\/api\/v1\/threads\/[^/]+\/runs\/[^/]+\/recovery(?:\/[^/]+)?$/.test(pathname)
 
 export const makeRikaApiHandler = (dependencies: HttpDependencies) =>

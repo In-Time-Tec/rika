@@ -1,8 +1,10 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
+import { BunCrypto } from "@effect/platform-bun"
 import { expect, it } from "@effect/vitest"
 import { installationTestLayer } from "@rika/github-app/installation-service"
 import { InstallationToken } from "@rika/github-app/installation-token"
 import { identityMigrations, runMigration } from "@rika/identity"
+import { BetterAuthUserId, ClientId, DeviceId } from "@rika/product/hosted-model"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { layer as assignmentLayer } from "@rika/product-store/memory-assignments"
 import { Clock, Context, Effect, Layer, Random, Redacted } from "effect"
@@ -99,18 +101,21 @@ it.effect.skipIf(databaseUrl === undefined)(
         const httpLayer = Layer.succeed(
           HttpClient.HttpClient,
           HttpClient.make((request) =>
-            Effect.succeed(
-              HttpClientResponse.fromWeb(
-                request,
-                new Response(JSON.stringify({ sha: "a".repeat(40) }), {
-                  status: 200,
-                  headers: { "content-type": "application/json" },
-                }),
-              ),
-            ),
+            Effect.sync(() => {
+              const path = new URL(request.url).pathname
+              const response = path.includes("/branches/rika%2Fthread-personal")
+                ? new Response(undefined, { status: 404 })
+                : Response.json(
+                    path.endsWith("/branches/main")
+                      ? { name: "main", protected: true, commit: { sha: "b".repeat(40) } }
+                      : { sha: "a".repeat(40) },
+                  )
+              return HttpClientResponse.fromWeb(request, response)
+            }),
           ),
         )
         const dependencies = Layer.mergeAll(
+          BunCrypto.layer,
           PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }),
           assignmentLayer,
           installationLayer,
@@ -152,8 +157,126 @@ it.effect.skipIf(databaseUrl === undefined)(
           private: true,
           gitIdentity: { name: "Organization Committer", email: "committer@example.test" },
         })
-        expect(minted).toEqual([{ installationId: 42, repositoryIds: [99], permissions: { contents: "read" } }])
+        expect(minted).toEqual([
+          { installationId: 42, repositoryIds: [99], permissions: { contents: "read" }, fresh: false },
+        ])
         expect(revoked).toEqual(["repository-secret-1"])
+        yield* Effect.promise(() =>
+          pool.query(`INSERT INTO rika_hosted_owners (id, kind, user_id)
+            VALUES ('owner-personal', 'personal', 'user-1');
+          INSERT INTO rika_hosted_projects (id, owner_id, name, created_by_user_id, created_at, updated_at)
+            VALUES ('project-personal', 'owner-personal', 'Personal Project', 'user-1', now(), now());
+          INSERT INTO rika_hosted_devices
+            (id, user_id, display_name, public_key_fingerprint, created_at, last_seen_at)
+            VALUES ('device-personal', 'user-1', 'Personal Device', 'fingerprint-personal', now(), now());
+          INSERT INTO rika_hosted_clients
+            (id, user_id, device_id, authenticated_at, last_seen_at, expires_at)
+            VALUES ('client-personal', 'user-1', 'device-personal', now(), now(), now() + interval '5 minutes')`),
+        )
+        yield* service.authorize({
+          ...input,
+          ownerId: "owner-personal",
+          projectId: "project-personal",
+          setup: { ...setup, authoritySubject: "owner-personal" },
+          gitIdentity: { name: "Personal Committer", email: "personal@example.test" },
+        })
+        const personalCheckout = {
+          ownerId: "owner-personal",
+          projectId: "project-personal",
+          repositoryId: "99",
+          installationId: "42",
+          owner: "octo-org",
+          name: "private-repo",
+          ref: "main",
+          commitSha: "a".repeat(40),
+          private: true,
+          gitIdentity: { name: "Personal Committer", email: "personal@example.test" },
+        }
+        yield* Effect.promise(() =>
+          pool.query(`INSERT INTO rika_hosted_workspaces
+              (id, owner_id, project_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
+              VALUES ('workspace-personal', 'owner-personal', 'project-personal', 'user-1', 'e2b', true, now());
+            INSERT INTO rika_hosted_threads
+              (id, owner_id, project_id, workspace_id, created_by_user_id, executor_kind,
+                inherit_project_grants, created_at)
+              VALUES ('thread-personal', 'owner-personal', 'project-personal', 'workspace-personal',
+                'user-1', 'e2b', true, now())`),
+        )
+        yield* Effect.promise(() =>
+          pool.query(
+            `INSERT INTO rika_hosted_executor_assignments
+              (id, owner_id, thread_id, workspace_id, executor_kind, placement, checkout, generation, revision,
+                last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
+                session_digest, lease_epoch, lease_expires_at)
+              VALUES ('thread-personal', 'owner-personal', 'thread-personal', 'workspace-personal', 'e2b',
+                '{"_tag":"E2BPlacement","templateBuildId":"build-personal"}'::jsonb, $1::jsonb,
+                1, 1, 1, 'active', 'provider-personal', 'executor-personal', 'process-personal',
+                'session-personal', 1, now() + interval '5 minutes')`,
+            [personalCheckout],
+          ),
+        )
+        yield* Effect.promise(() =>
+          pool.query(`INSERT INTO rika_hosted_workspace_preparations
+              (assignment_id, owner_id, workspace_id, generation, lease_epoch, attempt, state, phase,
+                evidence, started_at, updated_at)
+              VALUES ('thread-personal', 'owner-personal', 'workspace-personal', 1, 1, 1, 'ready',
+                'capabilities', '{}'::jsonb, now(), now())`),
+        )
+        const publication = yield* service.approvePublication({
+          ownerId: "owner-personal",
+          threadId: "thread-personal",
+          actor: {
+            _tag: "PersonalActor",
+            owner: { _tag: "PersonalOwner", userId: BetterAuthUserId.make("user-1") },
+            userId: BetterAuthUserId.make("user-1"),
+            clientId: ClientId.make("client-personal"),
+            deviceId: DeviceId.make("device-personal"),
+          },
+          idempotencyKey: "11111111-1111-4111-8111-111111111111",
+          commitSha: "c".repeat(40),
+          title: "Publish personal Thread",
+          body: "Approved publication",
+        })
+        expect(publication).toMatchObject({
+          state: "approved",
+          ownerId: "owner-personal",
+          threadId: "thread-personal",
+          sourceRef: "refs/heads/rika/thread-personal",
+          sourceCommitSha: "c".repeat(40),
+          authorizationCheckpointId: publication.id,
+        })
+        expect(publication.authorizationDigest).toMatch(/^sha256:[a-f0-9]{64}$/)
+        const evidence = yield* Effect.promise(() =>
+          pool.query(
+            `SELECT assignment.latest_checkpoint_id, audit.authority, audit.fence, audit.result
+            FROM rika_hosted_repository_publications publication
+            JOIN rika_hosted_executor_assignments assignment ON assignment.id = publication.assignment_id
+            JOIN rika_hosted_repository_publication_audit audit ON audit.publication_id = publication.id
+            WHERE publication.id = $1`,
+            [publication.id],
+          ),
+        )
+        expect(evidence.rows[0]).toMatchObject({
+          latest_checkpoint_id: null,
+          authority: { ownerId: "owner-personal", sourceRef: "refs/heads/rika/thread-personal" },
+          fence: {
+            assignmentId: "thread-personal",
+            authorizationCheckpointId: publication.id,
+            authorizationDigest: publication.authorizationDigest,
+          },
+          result: { outcome: "approved", purpose: "branch-push" },
+        })
+        yield* Effect.promise(() =>
+          pool
+            .query(`UPDATE rika_hosted_repository_publications SET source_commit_sha = $1 WHERE id = $2`, [
+              "d".repeat(40),
+              publication.id,
+            ])
+            .then(
+              () => Promise.reject(new Error("publication authority mutation unexpectedly succeeded")),
+              () => undefined,
+            ),
+        )
         repositories = []
         expect((yield* Effect.flip(service.resolve({ ownerId: "owner-1", projectId: "project-1" }))).reason).toBe(
           "authorization",
