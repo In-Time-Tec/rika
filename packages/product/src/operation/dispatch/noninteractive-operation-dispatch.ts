@@ -84,7 +84,7 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
         yield* dependencies.rootTurnOwner.startTurn({
           threadId: turn.threadId,
           turnId: turn.id,
-          workspace: thread.workspace,
+          workspaceId: thread.workspace,
           prompt: prepared.prompt,
           executionRoute: turn.executionRoute,
           ...(prepared.promptParts === undefined ? {} : { promptParts: prepared.promptParts }),

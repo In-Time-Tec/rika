@@ -239,7 +239,7 @@ it.layer(BunServices.layer)("product database", (test) => {
             VALUES ('v1', ${encodeJson({
               threadId: "t1",
               turnId: "v1",
-              workspace: "/preserved",
+              workspaceId: "/preserved",
               prompt: "v1",
               executionRoute: legacyExecutionRoute(1),
             })}, 3)`

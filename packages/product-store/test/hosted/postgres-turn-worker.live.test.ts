@@ -2,10 +2,7 @@ import * as PgClient from "@effect/sql-pg/PgClient"
 import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
-import {
-  HostedTurnWorkerStore,
-  layer as workerStoreLayer,
-} from "../../src/hosted/postgres-turn-worker-store"
+import { HostedTurnWorkerStore, layer as workerStoreLayer } from "../../src/hosted/postgres-turn-worker-store"
 import { Context, Effect, Layer, Random, Redacted, Schema } from "effect"
 import { Pool } from "pg"
 import { identityMigrations } from "../../../identity/src/migrations"
@@ -36,15 +33,21 @@ it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers pre
           const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
           yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
         }
-        const route = yield* Schema.encodeEffect(
-          Schema.fromJsonString(ExecutionRoute.ExecutionRouteSnapshot),
-        )(ExecutionRoute.testExecutionRoute())
+        const route = yield* Schema.encodeEffect(Schema.fromJsonString(ExecutionRoute.ExecutionRouteSnapshot))(
+          ExecutionRoute.testExecutionRoute(),
+        )
         yield* Effect.promise(() =>
           pool.query(
             `INSERT INTO "user" (id,name,email,email_verified,created_at,updated_at)
                VALUES ('worker-user','Worker','worker@example.test',true,now(),now());
              INSERT INTO rika_hosted_owners (id,kind,user_id,organization_id)
                VALUES ('worker-owner','personal','worker-user',NULL);
+             INSERT INTO rika_hosted_workspaces
+               (id,owner_id,project_id,created_by_user_id,executor_kind,inherit_project_grants,created_at)
+               VALUES ('workspace-1','worker-owner',NULL,'worker-user','e2b',false,now());
+             INSERT INTO rika_hosted_threads
+               (id,owner_id,project_id,workspace_id,created_by_user_id,executor_kind,inherit_project_grants,created_at)
+               VALUES ('thread-1','worker-owner',NULL,'workspace-1','worker-user','e2b',false,now());
              INSERT INTO rika_workspaces (owner_id,path,created_at)
                VALUES ('worker-owner','workspace-1',1);
              INSERT INTO rika_threads (id,owner_id,workspace,title,created_at,updated_at)
@@ -65,9 +68,7 @@ it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers pre
             VALUES ('thread-1',2,2)`),
         )
         const context = yield* Layer.build(
-          workerStoreLayer.pipe(
-            Layer.provide(PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })),
-          ),
+          workerStoreLayer.pipe(Layer.provide(PgClient.layer({ url: Redacted.make(url), maxConnections: 8 }))),
         )
         const store = Context.get(context, HostedTurnWorkerStore)
         const claims = yield* Effect.forEach(
@@ -84,18 +85,14 @@ it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers pre
         const recovered = yield* store.claimRecovery(request("recovery", "recovery-claim", 201))
         if (recovered === undefined) return yield* Effect.die("Prepared Turn was not recovered")
         expect(recovered).toMatchObject({ prepared: true, input: first.input })
-        yield* store.complete(
-          recovered,
-          { runId: "run-turn-1", turnId: "turn-1", threadId: "thread-1" },
-          202,
-        )
+        yield* store.complete(recovered, { runId: "run-turn-1", turnId: "turn-1", threadId: "thread-1" }, 202)
         const durable = yield* Effect.promise(() =>
           pool.query(`SELECT status, execution_link_json FROM rika_turns WHERE id = 'turn-1'`),
         )
         expect(durable.rows[0]).toMatchObject({ status: "running" })
-        const executionLink = yield* Schema.decodeUnknownEffect(
-          Schema.fromJsonString(ExecutionGateway.ExecutionLink),
-        )(String(durable.rows[0].execution_link_json))
+        const executionLink = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ExecutionGateway.ExecutionLink))(
+          String(durable.rows[0].execution_link_json),
+        )
         expect(executionLink).toEqual({
           runId: "run-turn-1",
           turnId: "turn-1",
@@ -103,12 +100,10 @@ it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers pre
         })
         expect(
           Number(
-            (
-              yield* Effect.promise(() =>
-                pool.query(`SELECT count(*) FROM rika_turn_admission_outbox UNION ALL
+            (yield* Effect.promise(() =>
+              pool.query(`SELECT count(*) FROM rika_turn_admission_outbox UNION ALL
                   SELECT count(*) FROM rika_hosted_turn_claims`),
-              )
-            ).rows.reduce((total, row) => total + Number(row.count), 0),
+            )).rows.reduce((total, row) => total + Number(row.count), 0),
           ),
         ).toBe(0)
         yield* Effect.promise(() => pool.query(`UPDATE rika_turns SET status = 'completed' WHERE id = 'turn-1'`))

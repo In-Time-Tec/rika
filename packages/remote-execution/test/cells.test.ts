@@ -16,11 +16,17 @@ const request = (operationKey: string, attempt?: number) =>
   CellRequest.make({
     access: { version: 1, fence, leaseEpoch: 1, sessionToken: "session-1" },
     operationKey,
-    workspace: "/workspace",
+    workspaceId: "workspace-1",
     sessionId: "session-1",
+    threadId: "thread-1",
+    turnId: "turn-1",
+    runId: "run-1",
+    rootRunId: "run-1",
     toolCallId: "call-1",
     code: "1 + 1",
-    ...(attempt === undefined ? {} : { attempt }),
+    attempt: attempt ?? 0,
+    admittedAt: null,
+    deadline: null,
   })
 
 const run = <A, E>(effect: Effect.Effect<A, E, Cells>, cells: Layer.Layer<Cells>) =>
@@ -41,7 +47,7 @@ describe("Cells", () => {
     Effect.gen(function* () {
       const calls = yield* Ref.make(0)
       const cells = layer({
-        workspace: "/workspace",
+        workspaceId: "workspace-1",
         ...stored(),
         execute: () =>
           Ref.updateAndGet(calls, (value) => value + 1).pipe(
@@ -71,7 +77,7 @@ describe("Cells", () => {
   it.effect("rejects a stale attempt and a request for another workspace", () =>
     Effect.gen(function* () {
       const cells = layer({
-        workspace: "/workspace",
+        workspaceId: "workspace-1",
         ...stored(),
         execute: () => Effect.succeed({ _tag: "Success" as const, result: null }),
       })
@@ -80,7 +86,9 @@ describe("Cells", () => {
           const service = yield* Cells
           yield* service.execute(request("operation-1", 2))
           const stale = yield* Effect.flip(service.execute(request("operation-1", 1)))
-          const workspace = yield* Effect.flip(service.execute({ ...request("operation-2"), workspace: "/other" }))
+          const workspace = yield* Effect.flip(
+            service.execute({ ...request("operation-2"), workspaceId: "workspace-2" }),
+          )
           return { stale, workspace }
         }),
         cells,
@@ -95,15 +103,21 @@ describe("Cells", () => {
       const calls = yield* Ref.make(0)
       const state = stored()
       const options = {
-        workspace: "/workspace",
+        workspaceId: "workspace-1",
         ...state,
         execute: () =>
           Ref.updateAndGet(calls, (value) => value + 1).pipe(
             Effect.map((value) => ({ _tag: "Success" as const, result: value })),
           ),
       }
-      const first = yield* run(Effect.flatMap(Cells, (cells) => cells.execute(request("operation-1"))), layer(options))
-      const replay = yield* run(Effect.flatMap(Cells, (cells) => cells.execute(request("operation-1"))), layer(options))
+      const first = yield* run(
+        Effect.flatMap(Cells, (cells) => cells.execute(request("operation-1"))),
+        layer(options),
+      )
+      const replay = yield* run(
+        Effect.flatMap(Cells, (cells) => cells.execute(request("operation-1"))),
+        layer(options),
+      )
 
       expect(first).toEqual({ _tag: "Success", result: 1 })
       expect(replay).toEqual(first)
@@ -119,12 +133,10 @@ describe("Cells", () => {
       const response = yield* run(
         Effect.flatMap(Cells, (cells) => cells.execute(request("operation-1"))),
         layer({
-          workspace: "/workspace",
+          workspaceId: "workspace-1",
           ...state,
           execute: () =>
-            Ref.update(calls, (value) => value + 1).pipe(
-              Effect.as({ _tag: "Success" as const, result: null }),
-            ),
+            Ref.update(calls, (value) => value + 1).pipe(Effect.as({ _tag: "Success" as const, result: null })),
         }),
       )
 

@@ -1,7 +1,7 @@
 import { Crypto, Effect, Layer, Redacted } from "effect"
 import { type ExecutorAssignment } from "@rika/product/executor-assignment"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
-import { CheckpointId, ExecutorAssignmentId, OwnerId, ThreadId } from "@rika/product/hosted-model"
+import { CheckpointId, ExecutorAssignmentId, OwnerId, ThreadId, WorkspaceId } from "@rika/product/hosted-model"
 import { layer as assignmentLayer } from "@rika/product-store/memory-assignments"
 import { Inspector } from "../../src/checkpoint"
 import {
@@ -155,6 +155,7 @@ export const assignmentInput = {
   id: ExecutorAssignmentId.make("assignment-1"),
   ownerId: OwnerId.make("owner-1"),
   threadId: ThreadId.make("thread-1"),
+  workspaceId: WorkspaceId.make("workspace-1"),
   placement: {
     _tag: "E2BPlacement" as const,
     templateBuildId: "template-build-v1-immutable",

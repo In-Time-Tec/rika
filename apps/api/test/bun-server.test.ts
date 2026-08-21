@@ -50,8 +50,18 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
     }
     const executor: ExecutorRuntime = {
       controller: undefined as never,
-      gateway: { receive: () => Effect.void, disconnected: () => Effect.void, execute: () => Effect.die("unused") },
-      localGateway: { receive: () => Effect.void, disconnected: () => Effect.void, execute: () => Effect.die("unused") },
+      gateway: {
+        receive: () => Effect.void,
+        disconnected: () => Effect.void,
+        execute: () => Effect.die("unused"),
+        cancel: () => Effect.void,
+      },
+      localGateway: {
+        receive: () => Effect.void,
+        disconnected: () => Effect.void,
+        execute: () => Effect.die("unused"),
+        cancel: () => Effect.void,
+      },
       admitLocal: () => Effect.die("unused"),
       run: () => Effect.die("unused"),
       ready: Effect.void,
@@ -146,8 +156,18 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
       },
       executor: {
         controller: undefined as never,
-        gateway: { receive: () => Effect.void, disconnected: () => Effect.void, execute: () => Effect.die("unused") },
-        localGateway: { receive: () => Effect.void, disconnected: () => Effect.void, execute: () => Effect.die("unused") },
+        gateway: {
+          receive: () => Effect.void,
+          disconnected: () => Effect.void,
+          execute: () => Effect.die("unused"),
+          cancel: () => Effect.void,
+        },
+        localGateway: {
+          receive: () => Effect.void,
+          disconnected: () => Effect.void,
+          execute: () => Effect.die("unused"),
+          cancel: () => Effect.void,
+        },
         admitLocal: () => Effect.die("unused"),
         run: () => Effect.die("unused"),
         ready: Effect.void,

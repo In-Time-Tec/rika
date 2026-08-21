@@ -5,13 +5,7 @@ import type { Unit } from "@rika/product/execution-transcript-contract"
 import { Runtime } from "tenetkit/runtime"
 import { Context, Effect, Layer, Random, Schedule, Schema, Stream } from "effect"
 import { sqliteLayer as layer } from "./test-adapters"
-import {
-  laneExecutionRoute,
-  makeLaneModels,
-  step as model,
-  type LaneModels,
-  type Profile,
-} from "../src/test-harness"
+import { laneExecutionRoute, makeLaneModels, step as model, type LaneModels, type Profile } from "../src/test-harness"
 
 const waitForRequests = (models: LaneModels, profile: Profile, count: number) =>
   models.requestCountFor(profile).pipe(
@@ -116,7 +110,7 @@ it.live(
             const admitted = yield* gateway.startTurn({
               threadId: "recursive-recovery-thread",
               turnId: "recursive-recovery-turn",
-              workspace: "/workspace",
+              workspaceId: "/workspace",
               prompt: "Recover recursive work",
               executionRoute: route,
             })

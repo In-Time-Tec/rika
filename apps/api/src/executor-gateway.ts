@@ -1,11 +1,14 @@
 import type { ControllerError, Interface as Controller } from "@rika/e2b-executor/controller"
 import {
   ApiMessage,
+  CellLifecycleFrame as CellLifecycleFrameSchema,
+  CellResponse as CellResponseSchema,
   ExecutorMessage,
   redactAccess,
   redactHeartbeat,
   redactHello,
   type AccessWire,
+  type CellLifecycleFrame,
   type CellResponse,
   type Fence,
   type ExecutorMessage as ExecutorMessageValue,
@@ -30,6 +33,9 @@ export interface ExecutionResult {
 
 interface Pending {
   readonly assignmentId: string
+  readonly operationKey: string
+  readonly attempt: number
+  readonly request: ExecuteInput
   readonly socket: Socket
   readonly access: AccessWire
   readonly result: Deferred.Deferred<ExecutionResult, GatewayError>
@@ -44,24 +50,52 @@ export class GatewayError extends Schema.TaggedError<GatewayError>()("ExecutorGa
 export interface ExecuteInput {
   readonly assignmentId: string
   readonly operationKey: string
-  readonly workspace: string
+  readonly workspaceId: string
   readonly sessionId: string
+  readonly threadId: string
+  readonly turnId: string
+  readonly runId: string
+  readonly toolCallId: string
   readonly code: string
-  readonly attempt?: number
+  readonly rootRunId: string
+  readonly attempt: number
+  readonly admittedAt: string | null
+  readonly deadline: string | null
 }
 
 export interface Gateway {
   readonly receive: (socket: Socket, frame: unknown) => Effect.Effect<void>
   readonly disconnected: (socket: Socket) => Effect.Effect<void>
   readonly execute: (input: ExecuteInput) => Effect.Effect<ExecutionResult, GatewayError>
+  readonly cancel: (assignmentId: string, operationKey: string) => Effect.Effect<void, GatewayError>
+}
+
+export interface LifecycleStore {
+  readonly append: (assignmentId: string, frame: CellLifecycleFrame) => Effect.Effect<void, GatewayError>
+  readonly load: (
+    assignmentId: string,
+    operationKey: string,
+  ) => Effect.Effect<ReadonlyArray<CellLifecycleFrame>, GatewayError>
+  readonly prepare: (input: ExecuteInput) => Effect.Effect<void, GatewayError>
 }
 
 const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(ExecutorMessage))
 const encode = Schema.encodeSync(Schema.fromJsonString(ApiMessage))
+const equivalentLifecycle = Schema.toEquivalence(CellLifecycleFrameSchema)
+const equivalentResponse = Schema.toEquivalence(CellResponseSchema)
 const key = (assignmentId: string, operationKey: string) => `${assignmentId}\u0000${operationKey}`
 
 const sameAccess = (left: AccessWire, right: AccessWire) =>
   left.leaseEpoch === right.leaseEpoch &&
+  left.sessionToken === right.sessionToken &&
+  left.fence.target === right.fence.target &&
+  left.fence.assignmentId === right.fence.assignmentId &&
+  left.fence.assignmentGeneration === right.fence.assignmentGeneration &&
+  left.fence.instanceId === right.fence.instanceId &&
+  left.fence.executorId === right.fence.executorId &&
+  left.fence.processIncarnation === right.fence.processIncarnation
+
+const sameExecutor = (left: AccessWire, right: AccessWire) =>
   left.sessionToken === right.sessionToken &&
   left.fence.target === right.fence.target &&
   left.fence.assignmentId === right.fence.assignmentId &&
@@ -78,9 +112,6 @@ const accessFailure = (error: ControllerError) =>
 
 const expired = () => GatewayError.make({ kind: "fenced", message: "Executor lease expired before work could be sent" })
 
-const disconnectedFailure = () =>
-  GatewayError.make({ kind: "disconnected", message: "Executor disconnected before returning a result" })
-
 const fenceOf = (message: ExecutorMessageValue): Fence | undefined => {
   switch (message._tag) {
     case "ExecutorHello":
@@ -94,9 +125,10 @@ const fenceOf = (message: ExecutorMessageValue): Fence | undefined => {
     case "PtyOpened":
     case "PtyOutput":
     case "PtyDisconnected":
+    case "CellLifecycle":
       return message.access.fence
     case "CellResult":
-      return undefined
+      return message.access.fence
   }
 }
 
@@ -104,17 +136,62 @@ const close = (socket: Socket, code: number, reason: string) => {
   socket.close(code, reason)
 }
 
-const failure = (socket: Socket, message: ExecutorMessageValue, error: ControllerError) => {
+const failure = (socket: Socket, message: ExecutorMessageValue, error: ControllerError | GatewayError) => {
   const fence = fenceOf(message)
   if (fence !== undefined) socket.send(encode({ _tag: "Fenced", fence, message: error.message }))
   close(socket, 1008, error.kind)
 }
 
-export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controller: Controller) {
+export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
+  controller: Controller,
+  lifecycle: LifecycleStore,
+) {
   const sessions = yield* Ref.make(new Map<string, Session>())
   const assignments = yield* Ref.make(new Map<Socket, string>())
   const pending = yield* Ref.make(new Map<string, Pending>())
+  const frames = yield* Ref.make(new Map<string, ReadonlyArray<CellLifecycleFrame>>())
+  const terminals = yield* Ref.make(new Map<string, Extract<CellLifecycleFrame, { readonly _tag: "Terminal" }>>())
   const admission = yield* Semaphore.make(1)
+
+  const hydrate = Effect.fn("ExecutorGateway.hydrate")(function* (input: ExecuteInput) {
+    const retained = yield* lifecycle.load(input.assignmentId, input.operationKey)
+    let outputCount = 0
+    let terminal: Extract<CellLifecycleFrame, { readonly _tag: "Terminal" }> | undefined
+    for (const [index, frame] of retained.entries()) {
+      const identity = frame.attribution
+      if (
+        frame.cursor !== index + 1 ||
+        identity.operationKey !== input.operationKey ||
+        identity.workspaceId !== input.workspaceId ||
+        identity.sessionId !== input.sessionId ||
+        identity.threadId !== input.threadId ||
+        identity.turnId !== input.turnId ||
+        identity.runId !== input.runId ||
+        identity.rootRunId !== input.rootRunId ||
+        identity.toolCallId !== input.toolCallId ||
+        identity.attempt !== input.attempt ||
+        (index === 0 && frame._tag !== "Accepted") ||
+        (index === 1 && frame._tag !== "Started") ||
+        (index > 1 && frame._tag !== "Output" && frame._tag !== "Terminal") ||
+        terminal !== undefined
+      )
+        return yield* GatewayError.make({ kind: "transport", message: "Persisted executor lifecycle is invalid" })
+      if (frame._tag === "Output") {
+        outputCount += 1
+        if (outputCount > 16)
+          return yield* GatewayError.make({ kind: "transport", message: "Persisted executor lifecycle is invalid" })
+      }
+      if (frame._tag === "Terminal") terminal = frame
+    }
+    const operationKey = key(input.assignmentId, input.operationKey)
+    yield* Ref.update(frames, (current) => new Map(current).set(operationKey, retained))
+    yield* Ref.update(terminals, (current) => {
+      const next = new Map(current)
+      if (terminal === undefined) next.delete(operationKey)
+      else next.set(operationKey, terminal)
+      return next
+    })
+  })
 
   const register = Effect.fn("ExecutorGateway.register")(function* (session: Session) {
     return yield* admission.withPermits(1)(
@@ -158,8 +235,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controll
             current,
           ): readonly [ReadonlyArray<Deferred.Deferred<ExecutionResult, GatewayError>>, Map<string, Pending>] => {
             const displacedPending = [...current.entries()].filter(([, operation]) => {
-              if (operation.assignmentId === assignmentId)
-                return operation.socket !== session.socket || !sameAccess(operation.access, session.access)
+              if (operation.assignmentId === assignmentId) return !sameExecutor(operation.access, session.access)
               return (
                 displaced.previousAssignment !== undefined &&
                 displaced.previousAssignment !== assignmentId &&
@@ -187,9 +263,45 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controll
             ),
           { discard: true },
         )
+        yield* Ref.update(pending, (current) => {
+          const next = new Map(current)
+          for (const [pendingKey, operation] of next)
+            if (operation.assignmentId === assignmentId)
+              next.set(pendingKey, { ...operation, socket: session.socket, access: session.access })
+          return next
+        })
         return true
       }),
     )
+  })
+
+  const replayPending = Effect.fn("ExecutorGateway.replayPending")(function* (session: Session) {
+    for (const operation of (yield* Ref.get(pending)).values()) {
+      if (operation.assignmentId !== session.access.fence.assignmentId) continue
+      const operationKey = key(operation.assignmentId, operation.operationKey)
+      const terminal = (yield* Ref.get(terminals)).get(operationKey)
+      if (terminal !== undefined) {
+        session.socket.send(
+          encode({
+            _tag: "CellTerminalReceipt",
+            access: session.access,
+            operationKey: operation.operationKey,
+            attempt: operation.attempt,
+            cursor: terminal.cursor,
+          }),
+        )
+        continue
+      }
+      const retained = (yield* Ref.get(frames)).get(operationKey) ?? []
+      session.socket.send(
+        encode({
+          _tag: "CellReplay",
+          access: session.access,
+          operationKey: operation.operationKey,
+          afterCursor: retained.at(-1)?.cursor ?? 0,
+        }),
+      )
+    }
   })
 
   const disconnected = Effect.fn("ExecutorGateway.disconnected")(function* (socket: Socket) {
@@ -209,26 +321,15 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controll
             next.delete(assignmentId)
             return next
           })
-        const waiting = yield* Ref.modify(
-          pending,
-          (
-            current,
-          ): readonly [ReadonlyArray<Deferred.Deferred<ExecutionResult, GatewayError>>, Map<string, Pending>] => {
-            const failed = [...current.entries()].filter(([, value]) => value.socket === socket)
-            if (failed.length === 0) return [[], current] as const
-            const next = new Map(current)
-            for (const [pendingKey] of failed) next.delete(pendingKey)
-            return [failed.map(([, value]) => value.result), next] as const
-          },
-        )
-        yield* Effect.forEach(waiting, (result) => Deferred.fail(result, disconnectedFailure()), { discard: true })
       }),
     )
   })
 
   const complete = Effect.fn("ExecutorGateway.complete")(function* (
     socket: Socket,
+    access: AccessWire,
     operationKey: string,
+    attempt: number,
     response: CellResponse,
   ) {
     yield* admission.withPermits(1)(
@@ -238,7 +339,15 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controll
         const operation = yield* Ref.get(pending).pipe(
           Effect.map((current) => current.get(key(assignmentId, operationKey))),
         )
-        if (operation === undefined || operation.socket !== socket) return
+        if (
+          operation === undefined ||
+          operation.socket !== socket ||
+          operation.attempt !== attempt ||
+          !sameAccess(operation.access, access)
+        )
+          return
+        const terminal = (yield* Ref.get(terminals)).get(key(assignmentId, operationKey))
+        if (terminal === undefined || !equivalentResponse(terminal.response, response)) return
         const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(assignmentId)))
         if (session === undefined || session.socket !== socket || !sameAccess(session.access, operation.access)) return
         if ((yield* Clock.currentTimeMillis) >= session.leaseExpiresAt) {
@@ -255,9 +364,78 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controll
     )
   })
 
+  const persistLifecycle = Effect.fn("ExecutorGateway.persistLifecycle")(function* (
+    socket: Socket,
+    access: AccessWire,
+    frame: CellLifecycleFrame,
+  ) {
+    yield* admission.withPermits(1)(
+      Effect.gen(function* () {
+        const assignmentId = yield* Ref.get(assignments).pipe(Effect.map((current) => current.get(socket)))
+        if (assignmentId === undefined)
+          return yield* GatewayError.make({ kind: "fenced", message: "Executor is not registered" })
+        const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(assignmentId)))
+        const operationKey = key(assignmentId, frame.attribution.operationKey)
+        const operation = yield* Ref.get(pending).pipe(Effect.map((current) => current.get(operationKey)))
+        if (
+          session?.socket !== socket ||
+          !sameAccess(session.access, access) ||
+          operation === undefined ||
+          operation.socket !== socket ||
+          operation.attempt !== frame.attribution.attempt
+        )
+          return yield* GatewayError.make({ kind: "fenced", message: "Executor lifecycle frame has a stale session" })
+        const request = operation.request
+        const attribution = frame.attribution
+        if (
+          attribution.workspaceId !== request.workspaceId ||
+          attribution.sessionId !== request.sessionId ||
+          attribution.threadId !== request.threadId ||
+          attribution.turnId !== request.turnId ||
+          attribution.runId !== request.runId ||
+          attribution.rootRunId !== request.rootRunId ||
+          attribution.toolCallId !== request.toolCallId
+        )
+          return yield* GatewayError.make({ kind: "fenced", message: "Executor lifecycle attribution is invalid" })
+        const known = (yield* Ref.get(frames)).get(operationKey) ?? []
+        const existing = known.find((retained) => retained.cursor === frame.cursor)
+        if (existing !== undefined && !equivalentLifecycle(existing, frame))
+          return yield* GatewayError.make({
+            kind: "fenced",
+            message: "Executor lifecycle cursor has different content",
+          })
+        if (existing === undefined) {
+          if (
+            frame.cursor !== known.length + 1 ||
+            known.some((retained) => retained._tag === "Terminal") ||
+            (frame.cursor === 1 && frame._tag !== "Accepted") ||
+            (frame.cursor === 2 && frame._tag !== "Started") ||
+            (frame.cursor > 2 && frame._tag !== "Output" && frame._tag !== "Terminal") ||
+            (frame._tag === "Output" && known.filter((retained) => retained._tag === "Output").length >= 16)
+          )
+            return yield* GatewayError.make({ kind: "fenced", message: "Executor lifecycle sequence is invalid" })
+          yield* lifecycle.append(assignmentId, frame)
+          yield* Ref.update(frames, (current) => new Map(current).set(operationKey, [...known, frame]))
+        }
+        if (frame._tag === "Terminal") {
+          yield* Ref.update(terminals, (current) => new Map(current).set(operationKey, frame))
+          socket.send(
+            encode({
+              _tag: "CellTerminalReceipt",
+              access,
+              operationKey: attribution.operationKey,
+              attempt: attribution.attempt,
+              cursor: frame.cursor,
+            }),
+          )
+        }
+      }),
+    )
+  })
+
   const recover = Effect.fn("ExecutorGateway.recover")(function* (
     message: ExecutorMessageValue,
-    error: ControllerError,
+    error: ControllerError | GatewayError,
   ) {
     if (message._tag !== "ExecutorReconnect" || error.kind !== "fenced") return
     const current = yield* Ref.get(sessions).pipe(Effect.map((active) => active.get(message.access.fence.assignmentId)))
@@ -296,7 +474,15 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controll
           access: { ...message.access, leaseEpoch: welcome.leaseEpoch },
           leaseExpiresAt: welcome.leaseExpiresAt,
         })
-        if (registered) socket.send(encode({ _tag: "ExecutorReconnected", welcome }))
+        if (registered) {
+          const session = {
+            socket,
+            access: { ...message.access, leaseEpoch: welcome.leaseEpoch },
+            leaseExpiresAt: welcome.leaseExpiresAt,
+          }
+          socket.send(encode({ _tag: "ExecutorReconnected", welcome }))
+          yield* replayPending(session)
+        }
         return
       }
       case "ExecutorHeartbeat": {
@@ -331,7 +517,9 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controll
         return
       }
       case "CellResult":
-        return yield* complete(socket, message.operationKey, message.response)
+        return yield* complete(socket, message.access, message.operationKey, message.attempt, message.response)
+      case "CellLifecycle":
+        return yield* persistLifecycle(socket, message.access, message.frame)
       case "PtyOpened":
       case "PtyOutput":
       case "PtyDisconnected":
@@ -383,6 +571,8 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controll
           })
         if ((yield* Clock.currentTimeMillis) >= session.leaseExpiresAt) return yield* expired()
         yield* controller.validateAccess(redactAccess(session.access)).pipe(Effect.mapError(accessFailure))
+        yield* lifecycle.prepare(input)
+        yield* hydrate(input)
         const result = yield* Deferred.make<ExecutionResult, GatewayError>()
         const known = yield* Ref.get(pending).pipe(Effect.map((current) => current.get(pendingKey)))
         if (known !== undefined && known.socket === session.socket && sameAccess(known.access, session.access)) {
@@ -412,6 +602,9 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controll
         }
         const created: Pending = {
           assignmentId: input.assignmentId,
+          operationKey: input.operationKey,
+          attempt: input.attempt,
+          request: input,
           socket: session.socket,
           access: session.access,
           result,
@@ -426,11 +619,17 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controll
                 request: {
                   access: session.access,
                   operationKey: input.operationKey,
-                  workspace: input.workspace,
+                  workspaceId: input.workspaceId,
                   sessionId: input.sessionId,
-                  toolCallId: input.operationKey,
+                  threadId: input.threadId,
+                  turnId: input.turnId,
+                  runId: input.runId,
+                  toolCallId: input.toolCallId,
                   code: input.code,
-                  ...(input.attempt === undefined ? {} : { attempt: input.attempt }),
+                  rootRunId: input.rootRunId,
+                  attempt: input.attempt,
+                  admittedAt: input.admittedAt,
+                  deadline: input.deadline,
                 },
               }),
             ),
@@ -450,14 +649,29 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controll
       }),
     )
     const removePending = admission.withPermits(1)(
-      Ref.update(pending, (current) => {
-        const known = current.get(pendingKey)
-        if (known === undefined || known.result !== operation.result) return current
-        const next = new Map(current)
-        if (known.waiters === 1) next.delete(pendingKey)
-        else next.set(pendingKey, { ...known, waiters: known.waiters - 1 })
-        return next
-      }),
+      Effect.all(
+        [
+          Ref.update(pending, (current) => {
+            const known = current.get(pendingKey)
+            if (known === undefined || known.result !== operation.result) return current
+            const next = new Map(current)
+            if (known.waiters === 1) next.delete(pendingKey)
+            else next.set(pendingKey, { ...known, waiters: known.waiters - 1 })
+            return next
+          }),
+          Ref.update(terminals, (current) => {
+            const next = new Map(current)
+            next.delete(pendingKey)
+            return next
+          }),
+          Ref.update(frames, (current) => {
+            const next = new Map(current)
+            next.delete(pendingKey)
+            return next
+          }),
+        ],
+        { discard: true },
+      ),
     )
     return yield* Deferred.await(operation.result).pipe(
       Effect.timeoutOption("60 seconds"),
@@ -466,9 +680,37 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (controll
           ? GatewayError.make({ kind: "timeout", message: "Executor operation did not finish in time" })
           : Effect.succeed(completed.value),
       ),
+      Effect.onInterrupt(() =>
+        Effect.try({
+          try: () =>
+            operation.socket.send(
+              encode({
+                _tag: "CellCancel",
+                access: operation.access,
+                operationKey: operation.operationKey,
+                attempt: operation.attempt,
+              }),
+            ),
+          catch: () => undefined,
+        }).pipe(Effect.ignore),
+      ),
       Effect.ensuring(removePending),
     )
   })
 
-  return { receive, disconnected, execute } satisfies Gateway
+  const cancel = Effect.fn("ExecutorGateway.cancel")(function* (assignmentId: string, operationKey: string) {
+    const operation = (yield* Ref.get(pending)).get(key(assignmentId, operationKey))
+    const session = (yield* Ref.get(sessions)).get(assignmentId)
+    if (operation === undefined || session === undefined || operation.socket !== session.socket)
+      return yield* GatewayError.make({ kind: "disconnected", message: "Executor operation is not running" })
+    yield* Effect.try({
+      try: () =>
+        session.socket.send(
+          encode({ _tag: "CellCancel", access: session.access, operationKey, attempt: operation.attempt }),
+        ),
+      catch: () => GatewayError.make({ kind: "transport", message: "Could not cancel executor operation" }),
+    })
+  })
+
+  return { receive, disconnected, execute, cancel } satisfies Gateway
 })

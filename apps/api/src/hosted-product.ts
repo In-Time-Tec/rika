@@ -260,9 +260,7 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
                 })
                 yield* sql`INSERT INTO rika_workspaces (owner_id, path, created_at)
                   VALUES (${authority.owner.id}, ${workspaceId}, ${currentTime})`.pipe(Effect.mapError(unavailable))
-                const threadId = ThreadId.make(
-                  `${executorKind === "e2b" ? "e2b" : "local"}_${yield* crypto.randomUUIDv4}`,
-                )
+                const threadId = ThreadId.make(yield* crypto.randomUUIDv4)
                 const thread = yield* store.createThread({
                   id: threadId,
                   ownerId: authority.owner.id,
@@ -293,6 +291,7 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
                   id: ExecutorAssignmentId.make(thread.id),
                   ownerId: authority.owner.id,
                   threadId: thread.id,
+                  workspaceId,
                   placement:
                     executorKind === "e2b"
                       ? {

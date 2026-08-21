@@ -587,14 +587,14 @@ describe("api HTTP", () => {
         { workspace_fingerprint: "workspace-1", organization_id: "organization-1" },
         { workspace_fingerprint: "workspace-1", member_id: "member-1" },
       ]) {
-        const result = yield* response("/api/v1/threads/local_thread-1/local-executor-admissions", deps, {
+        const result = yield* response("/api/v1/threads/thread-2/local-executor-admissions", deps, {
           method: "POST",
           body: encodeJson(body),
         })
         expect(result.status).toBe(400)
       }
       for (const obsolete of [{ organization_id: "organization-1" }, { member_id: "member-1" }]) {
-        const result = yield* response("/api/v1/threads/e2b_thread-1/operations", deps, {
+        const result = yield* response("/api/v1/threads/thread-1/operations", deps, {
           method: "POST",
           headers: { "idempotency-key": operationKey },
           body: encodeJson({ kind: "run", prompt: ["echo clean"], ...obsolete }),
@@ -612,7 +612,7 @@ describe("api HTTP", () => {
       let admitted: Parameters<HostedProductService["admitRun"]>[0] | undefined
       let executed = false
       const result = yield* response(
-        "/api/v1/threads/e2b_thread-1/operations",
+        "/api/v1/threads/thread-1/operations",
         {
           ...base,
           identity: { ...base.identity, identify: () => Effect.succeed(principal) },
@@ -651,7 +651,7 @@ describe("api HTTP", () => {
           clientId: "client-1",
           dpopJkt: "thumbprint-1",
         },
-        threadId: "e2b_thread-1",
+        threadId: "thread-1",
         operationKey,
         prompt: "echo hosted-mvp",
       })
@@ -665,7 +665,7 @@ describe("api HTTP", () => {
       const base = dependencies({ userId: "user-1", account })
       let dispatched = false
       const result = yield* response(
-        "/api/v1/threads/e2b_thread-1/operations",
+        "/api/v1/threads/thread-1/operations",
         {
           ...base,
           identity: {
@@ -707,7 +707,7 @@ describe("api HTTP", () => {
       const base = dependencies({ userId: "user-1", account })
       let dispatched = false
       const result = yield* response(
-        "/api/v1/threads/e2b_thread-1/operations",
+        "/api/v1/threads/thread-1/operations",
         {
           ...base,
           identity: {

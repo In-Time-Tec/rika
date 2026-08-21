@@ -1,6 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { CellRequest, ApiMessage, FilesystemCheckpoint, ExecutorMessage, LocalExecutorMessage } from "../src/protocol"
+import {
+  CellRequest,
+  ApiMessage,
+  CellLifecycleFrame,
+  FilesystemCheckpoint,
+  ExecutorMessage,
+  LocalExecutorMessage,
+} from "../src/protocol"
 
 const fence = {
   target: "e2b" as const,
@@ -75,15 +82,34 @@ describe("executor protocol v1", () => {
       const request = CellRequest.make({
         access: { version: 1, fence, leaseEpoch: 1, sessionToken: "session" },
         operationKey: "run:1:cell:1",
-        workspace: "/workspace",
+        workspaceId: "workspace-1",
         sessionId: "session-1",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        runId: "run-1",
+        rootRunId: "run-1",
         toolCallId: "call-1",
         code: "console.log('hello')",
+        attempt: 0,
+        admittedAt: null,
+        deadline: null,
       })
       expect(yield* Schema.decodeUnknownEffect(ApiMessage)({ _tag: "CellExecute", request })).toEqual({
         _tag: "CellExecute",
         request,
       })
+      for (const identity of [
+        "workspaceId",
+        "sessionId",
+        "threadId",
+        "turnId",
+        "runId",
+        "rootRunId",
+        "toolCallId",
+      ] as const) {
+        const { [identity]: _, ...incomplete } = request
+        expect((yield* Effect.flip(Schema.decodeUnknownEffect(CellRequest)(incomplete))).issue).toBeDefined()
+      }
       expect(
         (yield* Effect.flip(Schema.decodeUnknownEffect(CellRequest)({ ...request, operationKey: "" }))).issue,
       ).toBeDefined()
@@ -104,6 +130,39 @@ describe("executor protocol v1", () => {
       })
       expect(yield* Schema.decodeUnknownEffect(LocalExecutorMessage)(local)).toEqual(local)
       expect((yield* Effect.flip(Schema.decodeUnknownEffect(ExecutorMessage)(local))).issue).toBeDefined()
+    }),
+  )
+
+  it.effect("decodes attributed lifecycle frames and bounds redacted output", () =>
+    Effect.gen(function* () {
+      const attribution = {
+        operationKey: "operation-1",
+        workspaceId: "workspace-1",
+        sessionId: "session-1",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        runId: "run-1",
+        rootRunId: "run-1",
+        toolCallId: "call-1",
+        attempt: 0,
+      }
+      const output = {
+        _tag: "Output" as const,
+        attribution,
+        cursor: 3,
+        stream: "stdout" as const,
+        text: "safe output",
+        redacted: true as const,
+        truncated: false,
+      }
+      expect(yield* Schema.decodeUnknownEffect(CellLifecycleFrame)(output)).toEqual(output)
+      expect(
+        (yield* Effect.flip(Schema.decodeUnknownEffect(CellLifecycleFrame)({ ...output, text: "x".repeat(16_385) })))
+          .issue,
+      ).toBeDefined()
+      expect(
+        (yield* Effect.flip(Schema.decodeUnknownEffect(CellLifecycleFrame)({ ...output, redacted: false }))).issue,
+      ).toBeDefined()
     }),
   )
 
@@ -128,15 +187,13 @@ describe("executor protocol v1", () => {
       expect(yield* Schema.decodeUnknownEffect(LocalExecutorMessage)(goodbye)).toEqual(goodbye)
       expect(yield* Schema.decodeUnknownEffect(ApiMessage)(receipt)).toEqual(receipt)
       expect(
-        (
-          yield* Effect.flip(
-            Schema.decodeUnknownEffect(LocalExecutorMessage)({
-              _tag: "PtyOpened",
-              access: localAccess,
-              pty: { ptyId: "pty-1", command: "bash", cwd: "/tmp", cols: 80, rows: 24 },
-            }),
-          )
-        ).issue,
+        (yield* Effect.flip(
+          Schema.decodeUnknownEffect(LocalExecutorMessage)({
+            _tag: "PtyOpened",
+            access: localAccess,
+            pty: { ptyId: "pty-1", command: "bash", cwd: "/tmp", cols: 80, rows: 24 },
+          }),
+        )).issue,
       ).toBeDefined()
     }),
   )

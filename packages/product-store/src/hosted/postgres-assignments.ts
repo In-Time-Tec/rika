@@ -23,6 +23,7 @@ interface AssignmentRow {
   readonly id: string
   readonly ownerId: string
   readonly threadId: string
+  readonly workspaceId: string
   readonly executorKind: "e2b" | "local_device"
   readonly placement: unknown
   readonly checkout: unknown
@@ -115,6 +116,7 @@ const decodeAssignment = (row: AssignmentRow) =>
     id: row.id,
     ownerId: row.ownerId,
     threadId: row.threadId,
+    workspaceId: row.workspaceId,
     executorKind: row.executorKind,
     placement: row.placement,
     checkout: row.checkout,
@@ -179,7 +181,8 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
 
   const select = (assignmentId: string) =>
     query(sql<AssignmentRow>`SELECT id, owner_id AS "ownerId", thread_id AS "threadId",
-      executor_kind AS "executorKind", placement, checkout, generation::text AS generation,
+      workspace_id AS "workspaceId", executor_kind AS "executorKind", placement, checkout,
+      generation::text AS generation,
       revision::text AS revision, last_lease_epoch::text AS "lastLeaseEpoch", lifecycle,
       provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",
       CASE WHEN bootstrap_expires_at IS NULL THEN NULL
@@ -200,7 +203,8 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
   const selectLocked = (assignmentId: string, lock: "SHARE" | "UPDATE") =>
     lock === "UPDATE"
       ? query(sql<AssignmentRow>`SELECT id, owner_id AS "ownerId", thread_id AS "threadId",
-          executor_kind AS "executorKind", placement, checkout, generation::text AS generation,
+          workspace_id AS "workspaceId", executor_kind AS "executorKind", placement, checkout,
+          generation::text AS generation,
           revision::text AS revision, last_lease_epoch::text AS "lastLeaseEpoch", lifecycle,
           provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",
           CASE WHEN bootstrap_expires_at IS NULL THEN NULL
@@ -218,7 +222,8 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
           to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"
           FROM rika_hosted_executor_assignments WHERE id = ${assignmentId} FOR UPDATE`)
       : query(sql<AssignmentRow>`SELECT id, owner_id AS "ownerId", thread_id AS "threadId",
-          executor_kind AS "executorKind", placement, checkout, generation::text AS generation,
+          workspace_id AS "workspaceId", executor_kind AS "executorKind", placement, checkout,
+          generation::text AS generation,
           revision::text AS revision, last_lease_epoch::text AS "lastLeaseEpoch", lifecycle,
           provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",
           CASE WHEN bootstrap_expires_at IS NULL THEN NULL
@@ -258,19 +263,21 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
       sql,
       Effect.gen(function* () {
         const kind = input.placement._tag === "E2BPlacement" ? "e2b" : "local_device"
-        const threads = yield* query(sql<{ readonly executorKind: string }>`SELECT executor_kind AS "executorKind"
+        const threads = yield* query(sql<{ readonly executorKind: string; readonly workspaceId: string }>`SELECT
+          executor_kind AS "executorKind", workspace_id AS "workspaceId"
           FROM rika_hosted_threads
           WHERE id = ${input.threadId} AND owner_id = ${input.ownerId}
           FOR KEY SHARE`)
-        if (threads[0]?.executorKind !== kind)
+        if (threads[0]?.executorKind !== kind || threads[0]?.workspaceId !== input.workspaceId)
           return yield* failure(
             "invalid-authority",
-            "Assignment placement does not match the immutable thread placement",
+            "Assignment workspace and placement must match the immutable Thread authority",
           )
         const rows = yield* query(sql`INSERT INTO rika_hosted_executor_assignments
-          (id, owner_id, thread_id, executor_kind, placement, checkout, generation, revision,
+          (id, owner_id, thread_id, workspace_id, executor_kind, placement, checkout, generation, revision,
             last_lease_epoch, lifecycle)
-          VALUES (${input.id}, ${input.ownerId}, ${input.threadId}, ${kind}, ${sql.json(input.placement)},
+          VALUES (${input.id}, ${input.ownerId}, ${input.threadId}, ${input.workspaceId}, ${kind},
+            ${sql.json(input.placement)},
             ${input.checkout === null ? null : sql.json(input.checkout)}, 1, 0, 0, 'pending')
           ON CONFLICT DO NOTHING RETURNING id`)
         if (rows[0] === undefined) return yield* failure("conflict", "Thread already has an executor assignment")
@@ -601,7 +608,8 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
 
   const listManaged: AssignmentsService["listManaged"] = query(
     sql<AssignmentRow>`SELECT id, owner_id AS "ownerId", thread_id AS "threadId",
-        executor_kind AS "executorKind", placement, checkout, generation::text AS generation,
+        workspace_id AS "workspaceId", executor_kind AS "executorKind", placement, checkout,
+        generation::text AS generation,
         revision::text AS revision, last_lease_epoch::text AS "lastLeaseEpoch", lifecycle,
         provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",
         CASE WHEN bootstrap_expires_at IS NULL THEN NULL

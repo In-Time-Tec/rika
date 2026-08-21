@@ -8,6 +8,7 @@ const ByteLength = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 const Dimension = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(10_000))
 const Sha256 = Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/))
 const LeaseEpoch = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+const OutputText = Schema.String.check(Schema.isMaxLength(16_384))
 
 export const ProtocolVersion = Schema.Literal(1)
 export type ProtocolVersion = typeof ProtocolVersion.Type
@@ -23,7 +24,7 @@ export const ExecutorBootstrapIdentity = Schema.Struct({
   executorId: Identifier,
   templateBuildId: Identifier,
   apiUrl: Identifier,
-  workspace: Identifier,
+  workspaceId: Identifier,
 })
 export type ExecutorBootstrapIdentity = typeof ExecutorBootstrapIdentity.Type
 
@@ -151,17 +152,32 @@ export const redactAccess = (access: AccessWire): Access => ({
 export const CellRequest = Schema.Struct({
   access: AccessWire,
   operationKey: Identifier,
-  workspace: Identifier,
+  workspaceId: Identifier,
   sessionId: Identifier,
+  threadId: Identifier,
+  turnId: Identifier,
+  runId: Identifier,
+  rootRunId: Identifier,
   toolCallId: Identifier,
   code: Schema.String,
-  runId: Schema.optionalKey(Identifier),
-  rootRunId: Schema.optionalKey(Identifier),
-  attempt: Schema.optionalKey(Sequence),
-  admittedAt: Schema.optionalKey(Identifier),
-  deadline: Schema.optionalKey(Identifier),
+  attempt: Sequence,
+  admittedAt: Schema.NullOr(Identifier),
+  deadline: Schema.NullOr(Identifier),
 })
 export type CellRequest = typeof CellRequest.Type
+
+export const CellAttribution = Schema.Struct({
+  operationKey: Identifier,
+  workspaceId: Identifier,
+  sessionId: Identifier,
+  threadId: Identifier,
+  turnId: Identifier,
+  runId: Identifier,
+  rootRunId: Identifier,
+  toolCallId: Identifier,
+  attempt: Sequence,
+})
+export type CellAttribution = typeof CellAttribution.Type
 
 export const CellResponse = Schema.Union([
   Schema.TaggedStruct("Success", { result: Schema.Json }),
@@ -169,6 +185,29 @@ export const CellResponse = Schema.Union([
   Schema.TaggedStruct("Suspend", { token: Schema.String }),
 ])
 export type CellResponse = typeof CellResponse.Type
+
+export const CellTerminalOutcome = Schema.Literals(["completed", "failed", "cancelled", "unknown"])
+export type CellTerminalOutcome = typeof CellTerminalOutcome.Type
+
+export const CellLifecycleFrame = Schema.Union([
+  Schema.TaggedStruct("Accepted", { attribution: CellAttribution, cursor: Sequence }),
+  Schema.TaggedStruct("Started", { attribution: CellAttribution, cursor: Sequence }),
+  Schema.TaggedStruct("Output", {
+    attribution: CellAttribution,
+    cursor: Sequence,
+    stream: Schema.Literals(["stdout", "stderr"]),
+    text: OutputText,
+    redacted: Schema.Literal(true),
+    truncated: Schema.Boolean,
+  }),
+  Schema.TaggedStruct("Terminal", {
+    attribution: CellAttribution,
+    cursor: Sequence,
+    outcome: CellTerminalOutcome,
+    response: CellResponse,
+  }),
+])
+export type CellLifecycleFrame = typeof CellLifecycleFrame.Type
 
 export const HeartbeatWire = Schema.Struct({
   version: ProtocolVersion,
@@ -290,6 +329,7 @@ export const LocalExecutorMessage = Schema.Union([
     attempt: Sequence,
     response: CellResponse,
   }),
+  Schema.TaggedStruct("CellLifecycle", { access: AccessWire, frame: CellLifecycleFrame }),
 ])
 export type LocalExecutorMessage = typeof LocalExecutorMessage.Type
 
@@ -302,7 +342,13 @@ export const ExecutorMessage = Schema.Union([
   Schema.TaggedStruct("PtyOpened", { access: AccessWire, pty: PtyCreate }),
   Schema.TaggedStruct("PtyOutput", { access: AccessWire, ptyId: Identifier, chunk: PtyTranscriptChunk }),
   Schema.TaggedStruct("PtyDisconnected", { access: AccessWire, ptyId: Identifier, cursor: Sequence }),
-  Schema.TaggedStruct("CellResult", { operationKey: Identifier, response: CellResponse }),
+  Schema.TaggedStruct("CellResult", {
+    access: AccessWire,
+    operationKey: Identifier,
+    attempt: Sequence,
+    response: CellResponse,
+  }),
+  Schema.TaggedStruct("CellLifecycle", { access: AccessWire, frame: CellLifecycleFrame }),
 ])
 export type ExecutorMessage = typeof ExecutorMessage.Type
 
@@ -319,6 +365,14 @@ export const ApiMessage = Schema.Union([
   Schema.TaggedStruct("PtyDisconnect", { fence: Fence, ptyId: Identifier }),
   Schema.TaggedStruct("PtyReconnect", { fence: Fence, request: PtyReconnect }),
   Schema.TaggedStruct("CellExecute", { request: CellRequest }),
+  Schema.TaggedStruct("CellCancel", { access: AccessWire, operationKey: Identifier, attempt: Sequence }),
+  Schema.TaggedStruct("CellReplay", { access: AccessWire, operationKey: Identifier, afterCursor: Sequence }),
+  Schema.TaggedStruct("CellTerminalReceipt", {
+    access: AccessWire,
+    operationKey: Identifier,
+    attempt: Sequence,
+    cursor: Sequence,
+  }),
   Schema.TaggedStruct("Fenced", { fence: Fence, message: Schema.String }),
 ])
 export type ApiMessage = typeof ApiMessage.Type

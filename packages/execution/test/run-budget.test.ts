@@ -50,7 +50,7 @@ it.live(
         const receipt = yield* gateway.startTurn({
           threadId: "thread-budget",
           turnId: "turn-budget",
-          workspace: "/workspace",
+          workspaceId: "/workspace",
           prompt: "work",
           executionRoute: {
             ...route,

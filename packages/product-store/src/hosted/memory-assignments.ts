@@ -130,6 +130,7 @@ const make = Effect.gen(function* () {
           id: input.id,
           ownerId: input.ownerId,
           threadId: input.threadId,
+          workspaceId: input.workspaceId,
           executorKind,
           placement: input.placement,
           checkout: input.checkout,

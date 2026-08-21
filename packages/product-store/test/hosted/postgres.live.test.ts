@@ -262,6 +262,7 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               id: ExecutorAssignmentId.make(ids.thread),
               ownerId: ids.organizationOwner,
               threadId: ids.thread,
+              workspaceId: ids.workspace,
               placement: { _tag: "E2BPlacement", templateBuildId: "template", providerScope: "scope" },
               checkout: null,
             })

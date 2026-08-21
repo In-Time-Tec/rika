@@ -61,7 +61,7 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
           return Effect.succeed(
             response(request, { threadId: "thread-1", url: "https://hosted.example.test/threads/thread-1" }),
           )
-        if (path === "/api/v1/threads/e2b_thread-1/operations")
+        if (path === "/api/v1/threads/thread-1/operations")
           return Effect.succeed(
             response(request, { commandId: "operation-1", turnId: "turn-1", status: "queued" }, 202),
           )
@@ -77,7 +77,7 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
       const jkt = yield* thumbprint(publicKey)
       const accessToken = Redacted.make("access")
       const session = { accessToken, privateJwk }
-      const threadId = "e2b_thread-1"
+      const threadId = "thread-1"
       expect((yield* http.register(origin, "device-1", publicKey, jkt)).clientId).toBe("install-client")
       expect((yield* http.startDeviceAuthorization(origin, "install-client", privateJwk)).deviceCode).toBe(
         "device-code",
@@ -121,7 +121,7 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
         "/api/v1/auth/cli/devices/revoke-all",
         "/api/v1/connections",
         "/api/v1/connections",
-        "/api/v1/threads/e2b_thread-1/operations",
+        "/api/v1/threads/thread-1/operations",
       ])
       for (const request of requests.slice(1)) expect(request.headers.dpop).toEqual(expect.any(String))
       expect(requests[4]?.headers.authorization).toBe("DPoP access")

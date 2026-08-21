@@ -77,7 +77,7 @@ describe("Controller", () => {
           RIKA_EXECUTOR_TARGET: "e2b",
           RIKA_EXECUTOR_ID: "assignment-1:g1",
           RIKA_EXECUTOR_TEMPLATE_BUILD_ID: "template-build-v1-immutable",
-          RIKA_EXECUTOR_WORKSPACE: "/workspace",
+          RIKA_EXECUTOR_WORKSPACE_ID: "workspace-1",
         },
       })
       expect(Object.keys(harness.provider.creates[0]!.environment).sort()).toEqual([
@@ -88,7 +88,7 @@ describe("Controller", () => {
         "RIKA_EXECUTOR_ID",
         "RIKA_EXECUTOR_TARGET",
         "RIKA_EXECUTOR_TEMPLATE_BUILD_ID",
-        "RIKA_EXECUTOR_WORKSPACE",
+        "RIKA_EXECUTOR_WORKSPACE_ID",
       ])
       const bootstrapRequest = harness.provider.bootstraps[0]!
       expect(bootstrapRequest.identity).toEqual({
@@ -99,7 +99,7 @@ describe("Controller", () => {
         executorId: "assignment-1:g1",
         templateBuildId: "template-build-v1-immutable",
         apiUrl: "wss://api.example.test/executors",
-        workspace: "/workspace",
+        workspaceId: "workspace-1",
       })
       const bootstrap = bootstrapRequest.credential
       expect(String(bootstrap)).toBe("<redacted:executor-bootstrap>")

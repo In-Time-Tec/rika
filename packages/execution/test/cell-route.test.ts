@@ -10,6 +10,7 @@ import * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import * as RemoteCells from "../src/remote-cells"
 
 const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const
+const executionIdentity = { threadId: "thread-1", turnId: "turn-1" } as const
 
 const profile = KernelProfile.make({
   runtime: { name: "bun", version: kernel.runtimeVersion, digest: "runtime-digest" },
@@ -55,6 +56,9 @@ const cellContext = (sessionId: string) =>
       sessionId,
       toolCallId: `call-${sessionId}`,
       operationKey: `operation-${sessionId}`,
+      runId: `run-${sessionId}`,
+      rootRunId: `root-${sessionId}`,
+      attempt: 0,
     }),
   )
 
@@ -159,6 +163,7 @@ it.effect("routes a cell through the explicit remote adapter without a kernel po
     const configured = yield* configure({
       executionRoute: testExecutionRoute(),
       workspace: "/workspace",
+      executionIdentity,
       kernel,
       cell: {
         _tag: "Remote",
@@ -181,8 +186,14 @@ it.effect("routes a cell through the explicit remote adapter without a kernel po
     expect(dispatched).toEqual([
       expect.objectContaining({
         operationKey: "operation-session-a",
-        workspace: "/workspace",
+        workspaceId: "/workspace",
         sessionId: "session-a",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        runId: "run-session-a",
+        rootRunId: "root-session-a",
+        toolCallId: "call-session-a",
+        attempt: 0,
         code: "1",
       }),
     ])
@@ -194,6 +205,7 @@ it.effect("rejects an invalid remote cell response at the schema boundary", () =
     const configured = yield* configure({
       executionRoute: testExecutionRoute(),
       workspace: "/workspace",
+      executionIdentity,
       kernel,
       cell: {
         _tag: "Remote",
@@ -225,6 +237,7 @@ it.effect("keeps TenetKit's operation key stable across a remote retry", () =>
     const configured = yield* configure({
       executionRoute: testExecutionRoute(),
       workspace: "/workspace",
+      executionIdentity,
       kernel,
       cell: {
         _tag: "Remote",
@@ -259,6 +272,7 @@ it.effect("accepts the same deduplicated remote result after recovered dispatch"
     const configured = yield* configure({
       executionRoute: testExecutionRoute(),
       workspace: "/workspace",
+      executionIdentity,
       kernel,
       cell: {
         _tag: "Remote",

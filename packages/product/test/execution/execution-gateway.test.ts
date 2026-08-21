@@ -43,7 +43,7 @@ it.effect("passes one opaque execution link through all gateway operations", () 
     const started = yield* gateway.startTurn({
       threadId: "thread-1",
       turnId: "turn-1",
-      workspace: "/workspace",
+      workspaceId: "/workspace",
       prompt: "work",
       executionRoute: {} as never,
     })

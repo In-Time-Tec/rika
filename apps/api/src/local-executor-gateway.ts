@@ -1,11 +1,14 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
 import {
   ApiMessage,
+  CellLifecycleFrame as CellLifecycleFrameSchema,
   CellResponse as CellResponseSchema,
   LocalExecutorMessage,
   redactAccess,
   redactHeartbeat,
   type AccessWire,
+  type CellLifecycleFrame,
+  type CellRequest,
   type CellResponse,
 } from "@rika/remote-execution/protocol"
 import {
@@ -46,8 +49,17 @@ interface Pending {
 
 interface OperationRow {
   readonly requestDigest: string
+  readonly workspaceId: string
+  readonly sessionId: string
+  readonly threadId: string
+  readonly turnId: string
+  readonly runId: string
+  readonly rootRunId: string
+  readonly toolCallId: string
   readonly code: string
   readonly attempt: string
+  readonly admittedAt: string | null
+  readonly deadline: string | null
   readonly state: "accepted" | "dispatched" | "completed" | "unknown"
   readonly dispatchedGeneration: string | null
   readonly dispatchedLeaseEpoch: string | null
@@ -57,10 +69,28 @@ interface OperationRow {
   readonly response: unknown
 }
 
+type LocalExecuteInput = Omit<CellRequest, "access"> & { readonly assignmentId: string }
+
 const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(LocalExecutorMessage))
 const encode = Schema.encodeSync(Schema.fromJsonString(ApiMessage))
 const decodeResponse = Schema.decodeUnknownEffect(CellResponseSchema)
 const equivalentResponse = Schema.toEquivalence(CellResponseSchema)
+const decodeLifecycle = Schema.decodeUnknownEffect(CellLifecycleFrameSchema)
+const equivalentLifecycle = Schema.toEquivalence(CellLifecycleFrameSchema)
+const OperationIdentity = Schema.Struct({
+  workspaceId: Schema.String,
+  sessionId: Schema.String,
+  threadId: Schema.String,
+  turnId: Schema.String,
+  runId: Schema.String,
+  rootRunId: Schema.String,
+  toolCallId: Schema.String,
+  code: Schema.String,
+  attempt: Schema.Int,
+  admittedAt: Schema.NullOr(Schema.String),
+  deadline: Schema.NullOr(Schema.String),
+})
+const encodeOperationIdentity = Schema.encodeSync(Schema.fromJsonString(OperationIdentity))
 const key = (assignmentId: string, operationKey: string) => `${assignmentId}\u001f${operationKey}`
 const failure = (kind: GatewayError["kind"], message: string): GatewayError => GatewayError.make({ kind, message })
 const same = (left: AccessWire, right: AccessWire) =>
@@ -83,11 +113,8 @@ const unknownResponse: CellResponse = {
 export interface LocalGateway {
   readonly receive: (socket: Socket, frame: unknown) => Effect.Effect<void>
   readonly disconnected: (socket: Socket) => Effect.Effect<void>
-  readonly execute: (input: {
-    readonly assignmentId: string
-    readonly operationKey: string
-    readonly code: string
-  }) => Effect.Effect<FinalResult, GatewayError>
+  readonly execute: (input: LocalExecuteInput) => Effect.Effect<FinalResult, GatewayError>
+  readonly cancel: (assignmentId: string, operationKey: string) => Effect.Effect<void, GatewayError>
 }
 
 export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function* (authority: LocalExecutorAuthority) {
@@ -98,6 +125,7 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
   const assignments = yield* Ref.make(new Map<Socket, string>())
   const pending = yield* Ref.make(new Map<string, Pending>())
   const gatewayLock = yield* Semaphore.make(1)
+  const lifecycleLock = yield* Semaphore.make(1)
 
   const requestDigest = Effect.fn("LocalExecutorGateway.requestDigest")(function* (code: string) {
     const bytes = yield* crypto
@@ -107,7 +135,10 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
   })
 
   const operation = (assignmentId: string, operationKey: string) =>
-    sql<OperationRow>`SELECT request_digest AS "requestDigest", code, attempt::text AS attempt, state,
+    sql<OperationRow>`SELECT request_digest AS "requestDigest", workspace_id AS "workspaceId",
+      session_id AS "sessionId", thread_id AS "threadId", turn_id AS "turnId", run_id AS "runId",
+      root_run_id AS "rootRunId", tool_call_id AS "toolCallId", code, attempt::text AS attempt,
+      admitted_at AS "admittedAt", deadline, state,
       dispatched_generation::text AS "dispatchedGeneration",
       dispatched_lease_epoch::text AS "dispatchedLeaseEpoch",
       dispatched_executor_instance_id AS "dispatchedExecutorInstanceId",
@@ -117,7 +148,10 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
       WHERE assignment_id = ${assignmentId} AND operation_key = ${operationKey}`
 
   const lockedOperation = (assignmentId: string, operationKey: string) =>
-    sql<OperationRow>`SELECT request_digest AS "requestDigest", code, attempt::text AS attempt, state,
+    sql<OperationRow>`SELECT request_digest AS "requestDigest", workspace_id AS "workspaceId",
+      session_id AS "sessionId", thread_id AS "threadId", turn_id AS "turnId", run_id AS "runId",
+      root_run_id AS "rootRunId", tool_call_id AS "toolCallId", code, attempt::text AS attempt,
+      admitted_at AS "admittedAt", deadline, state,
       dispatched_generation::text AS "dispatchedGeneration",
       dispatched_lease_epoch::text AS "dispatchedLeaseEpoch",
       dispatched_executor_instance_id AS "dispatchedExecutorInstanceId",
@@ -127,15 +161,28 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
       WHERE assignment_id = ${assignmentId} AND operation_key = ${operationKey}
       FOR UPDATE`
 
-  const prepare = Effect.fn("LocalExecutorGateway.prepare")(function* (input: {
-    readonly assignmentId: string
-    readonly operationKey: string
-    readonly code: string
-  }) {
-    const digest = yield* requestDigest(input.code)
+  const prepare = Effect.fn("LocalExecutorGateway.prepare")(function* (input: LocalExecuteInput) {
+    const digest = yield* requestDigest(
+      encodeOperationIdentity({
+        workspaceId: input.workspaceId,
+        sessionId: input.sessionId,
+        threadId: input.threadId,
+        turnId: input.turnId,
+        runId: input.runId,
+        rootRunId: input.rootRunId,
+        toolCallId: input.toolCallId,
+        code: input.code,
+        attempt: input.attempt,
+        admittedAt: input.admittedAt,
+        deadline: input.deadline,
+      }),
+    )
     yield* sql`INSERT INTO rika_hosted_executor_operations
-      (assignment_id, owner_id, operation_key, request_digest, code, attempt, state)
-      SELECT assignment.id, assignment.owner_id, ${input.operationKey}, ${digest}, ${input.code}, 0, 'accepted'
+      (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id, turn_id,
+       run_id, root_run_id, tool_call_id, code, attempt, admitted_at, deadline, state)
+      SELECT assignment.id, assignment.owner_id, ${input.operationKey}, ${digest}, ${input.workspaceId},
+        ${input.sessionId}, ${input.threadId}, ${input.turnId}, ${input.runId}, ${input.rootRunId},
+        ${input.toolCallId}, ${input.code}, ${input.attempt}, ${input.admittedAt}, ${input.deadline}, 'accepted'
       FROM rika_hosted_executor_assignments assignment
       WHERE assignment.id = ${input.assignmentId}
       ON CONFLICT (assignment_id, operation_key) DO NOTHING`.pipe(
@@ -145,8 +192,21 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
       Effect.mapError(() => failure("transport", "Could not read local executor operation")),
     ))[0]
     if (row === undefined) return yield* failure("transport", "Local executor operation is unavailable")
-    if (row.requestDigest !== digest || row.code !== input.code)
-      return yield* failure("fenced", "Local executor operation identity conflicts with different code")
+    if (
+      row.requestDigest !== digest ||
+      row.workspaceId !== input.workspaceId ||
+      row.sessionId !== input.sessionId ||
+      row.threadId !== input.threadId ||
+      row.turnId !== input.turnId ||
+      row.runId !== input.runId ||
+      row.rootRunId !== input.rootRunId ||
+      row.toolCallId !== input.toolCallId ||
+      row.code !== input.code ||
+      Number(row.attempt) !== input.attempt ||
+      row.admittedAt !== input.admittedAt ||
+      row.deadline !== input.deadline
+    )
+      return yield* failure("fenced", "Local executor operation key conflicts with a different request")
     return row
   })
 
@@ -250,6 +310,19 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
         if (previous !== undefined && previous.socket !== session.socket) previous.socket.close(1008, "fenced")
       }),
     )
+  })
+
+  const replayPending = Effect.fn("LocalExecutorGateway.replayPending")(function* (session: Session) {
+    for (const pendingOperation of (yield* Ref.get(pending)).values())
+      if (pendingOperation.assignmentId === session.access.fence.assignmentId)
+        session.socket.send(
+          encode({
+            _tag: "CellReplay",
+            access: session.access,
+            operationKey: pendingOperation.operationKey,
+            afterCursor: 0,
+          }),
+        )
   })
 
   const finalize = Effect.fn("LocalExecutorGateway.finalize")(function* (input: {
@@ -584,6 +657,21 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
     const pendingCurrent = yield* gatewayLock.withPermits(1)(
       Ref.get(pending).pipe(Effect.map((value) => value.get(key(access.fence.assignmentId, operationKey)))),
     )
+    const terminalRows = yield* sql<{ readonly frame: unknown }>`SELECT frame
+      FROM rika_hosted_executor_operation_frames
+      WHERE assignment_id = ${access.fence.assignmentId}
+        AND operation_key = ${operationKey}
+        AND kind = 'Terminal'`.pipe(
+      Effect.mapError(() => failure("transport", "Could not read local executor terminal receipt")),
+    )
+    const terminal = terminalRows[0]
+    if (terminal === undefined)
+      return yield* failure("fenced", "Local executor result arrived before its terminal receipt")
+    const terminalFrame = yield* decodeLifecycle(terminal.frame).pipe(
+      Effect.mapError(() => failure("transport", "Persisted local executor terminal receipt is invalid")),
+    )
+    if (terminalFrame._tag !== "Terminal" || !equivalentResponse(terminalFrame.response, response))
+      return yield* failure("fenced", "Local executor result conflicts with its terminal receipt")
     const result = yield* gatewayLock
       .withPermits(1)(
         Effect.gen(function* () {
@@ -605,6 +693,81 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
       )
     if (pendingCurrent !== undefined) yield* Deferred.succeed(pendingCurrent.result, result)
     return result
+  })
+
+  const persistLifecycle = Effect.fn("LocalExecutorGateway.persistLifecycle")(function* (
+    socket: Socket,
+    access: AccessWire,
+    frame: CellLifecycleFrame,
+  ) {
+    yield* lifecycleLock.withPermits(1)(
+      Effect.gen(function* () {
+        const assignmentId = yield* Ref.get(assignments).pipe(Effect.map((value) => value.get(socket)))
+        const session =
+          assignmentId === undefined
+            ? undefined
+            : yield* Ref.get(sessions).pipe(Effect.map((value) => value.get(assignmentId)))
+        if (assignmentId === undefined || session?.socket !== socket || !same(session.access, access))
+          return yield* failure("fenced", "Local executor lifecycle frame has a stale session")
+        const persisted = (yield* operation(assignmentId, frame.attribution.operationKey).pipe(
+          Effect.mapError(() => failure("transport", "Could not read local executor lifecycle operation")),
+        ))[0]
+        const attribution = frame.attribution
+        if (
+          persisted === undefined ||
+          Number(persisted.attempt) !== attribution.attempt ||
+          persisted.workspaceId !== attribution.workspaceId ||
+          persisted.sessionId !== attribution.sessionId ||
+          persisted.threadId !== attribution.threadId ||
+          persisted.turnId !== attribution.turnId ||
+          persisted.runId !== attribution.runId ||
+          persisted.rootRunId !== attribution.rootRunId ||
+          persisted.toolCallId !== attribution.toolCallId
+        )
+          return yield* failure("fenced", "Local executor lifecycle attribution is invalid")
+        const stored = yield* sql<{ readonly frame: unknown }>`SELECT frame
+          FROM rika_hosted_executor_operation_frames
+          WHERE assignment_id = ${assignmentId} AND operation_key = ${attribution.operationKey}
+          ORDER BY cursor`.pipe(
+          Effect.mapError(() => failure("transport", "Could not read local executor lifecycle frames")),
+        )
+        const known = yield* Effect.forEach(stored, (row) =>
+          decodeLifecycle(row.frame).pipe(
+            Effect.mapError(() => failure("transport", "Persisted local executor lifecycle frame is invalid")),
+          ),
+        )
+        const existing = known.find((retained) => retained.cursor === frame.cursor)
+        if (existing !== undefined && !equivalentLifecycle(existing, frame))
+          return yield* failure("fenced", "Local executor lifecycle cursor has different content")
+        if (existing === undefined) {
+          if (
+            frame.cursor !== known.length + 1 ||
+            known.some((retained) => retained._tag === "Terminal") ||
+            (frame.cursor === 1 && frame._tag !== "Accepted") ||
+            (frame.cursor === 2 && frame._tag !== "Started") ||
+            (frame.cursor > 2 && frame._tag !== "Output" && frame._tag !== "Terminal") ||
+            (frame._tag === "Output" && known.filter((retained) => retained._tag === "Output").length >= 16)
+          )
+            return yield* failure("fenced", "Local executor lifecycle sequence is invalid")
+          yield* sql`INSERT INTO rika_hosted_executor_operation_frames
+            (assignment_id, operation_key, attempt, cursor, kind, frame)
+            VALUES (${assignmentId}, ${attribution.operationKey}, ${attribution.attempt},
+              ${frame.cursor}, ${frame._tag}, ${sql.json(frame)})`.pipe(
+            Effect.mapError(() => failure("transport", "Could not persist local executor lifecycle frame")),
+          )
+        }
+        if (frame._tag === "Terminal")
+          socket.send(
+            encode({
+              _tag: "CellTerminalReceipt",
+              access,
+              operationKey: attribution.operationKey,
+              attempt: attribution.attempt,
+              cursor: frame.cursor,
+            }),
+          )
+      }),
+    )
   })
 
   const receive = (socket: Socket, frame: unknown) =>
@@ -648,19 +811,22 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
             )
           if (message._tag === "ExecutorReconnect")
             return authority.reconnect(redactAccess(message.access)).pipe(
-              Effect.tap((welcome) =>
-                register({
+              Effect.flatMap((welcome) => {
+                const session = {
                   socket,
                   access: { ...message.access, leaseEpoch: welcome.leaseEpoch },
                   leaseExpiresAt: welcome.leaseExpiresAt,
-                }),
-              ),
-              Effect.tap((welcome) => recoverStale({ ...message.access, leaseEpoch: welcome.leaseEpoch })),
-              Effect.tap((welcome) =>
-                Effect.sync(() => {
-                  socket.send(encode({ _tag: "ExecutorReconnected", welcome }))
-                }),
-              ),
+                }
+                return register(session).pipe(
+                  Effect.andThen(recoverStale(session.access)),
+                  Effect.andThen(
+                    Effect.sync(() => {
+                      socket.send(encode({ _tag: "ExecutorReconnected", welcome }))
+                    }),
+                  ),
+                  Effect.andThen(replayPending(session)),
+                )
+              }),
               Effect.catch((error) => Effect.sync(() => socket.close(1008, error.kind))),
             )
           if (message._tag === "ExecutorHeartbeat")
@@ -678,6 +844,10 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
                 }),
               ),
               Effect.catch((error) => Effect.sync(() => socket.close(1008, error.kind))),
+            )
+          if (message._tag === "CellLifecycle")
+            return persistLifecycle(socket, message.access, message.frame).pipe(
+              Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
             )
           if (message._tag === "LocalExecutorGoodbye")
             return shutdown(socket, message.access).pipe(
@@ -732,11 +902,7 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
       ),
     )
 
-  const execute = Effect.fn("LocalExecutorGateway.execute")(function* (input: {
-    readonly assignmentId: string
-    readonly operationKey: string
-    readonly code: string
-  }) {
+  const execute = Effect.fn("LocalExecutorGateway.execute")(function* (input: LocalExecuteInput) {
     yield* recoverDue().pipe(Effect.ignore)
     const pendingKey = key(input.assignmentId, input.operationKey)
     const existingPending = yield* gatewayLock.withPermits(1)(
@@ -819,11 +985,17 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
                 request: {
                   access: currentSession.access,
                   operationKey: input.operationKey,
-                  workspace,
-                  sessionId: input.assignmentId,
-                  toolCallId: input.operationKey,
+                  workspaceId: workspace,
+                  sessionId: input.sessionId,
+                  threadId: input.threadId,
+                  turnId: input.turnId,
+                  runId: input.runId,
+                  toolCallId: input.toolCallId,
                   code: input.code,
+                  rootRunId: input.rootRunId,
                   attempt: current.attempt,
+                  admittedAt: input.admittedAt,
+                  deadline: input.deadline,
                 },
               }),
             )
@@ -846,7 +1018,22 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
           response: unknownResponse,
           state: "unknown",
         })
-      return yield* Deferred.await(setup.current.result)
+      return yield* Deferred.await(setup.current.result).pipe(
+        Effect.onInterrupt(() =>
+          Effect.try({
+            try: () =>
+              setup.current.socket.send(
+                encode({
+                  _tag: "CellCancel",
+                  access: setup.current.access,
+                  operationKey: setup.current.operationKey,
+                  attempt: setup.current.attempt,
+                }),
+              ),
+            catch: () => undefined,
+          }).pipe(Effect.ignore),
+        ),
+      )
     }).pipe(
       Effect.ensuring(
         Ref.update(pending, (values) => {
@@ -858,13 +1045,40 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
     )
   })
 
+  const cancel = Effect.fn("LocalExecutorGateway.cancel")(function* (assignmentId: string, operationKey: string) {
+    const pendingOperation = (yield* Ref.get(pending)).get(key(assignmentId, operationKey))
+    const session = (yield* Ref.get(sessions)).get(assignmentId)
+    if (pendingOperation === undefined || session === undefined || pendingOperation.socket !== session.socket)
+      return yield* failure("disconnected", "Local executor operation is not running")
+    yield* Effect.try({
+      try: () =>
+        session.socket.send(
+          encode({ _tag: "CellCancel", access: session.access, operationKey, attempt: pendingOperation.attempt }),
+        ),
+      catch: () => failure("transport", "Could not cancel local executor operation"),
+    })
+  })
+
   const pollAccepted = Effect.fn("LocalExecutorGateway.pollAccepted")(function* () {
     yield* recoverDue().pipe(Effect.ignore)
     const rows = yield* sql<{
       readonly assignmentId: string
       readonly operationKey: string
+      readonly workspaceId: string
+      readonly sessionId: string
+      readonly threadId: string
+      readonly turnId: string
+      readonly runId: string
+      readonly rootRunId: string
+      readonly toolCallId: string
       readonly code: string
-    }>`SELECT assignment_id AS "assignmentId", operation_key AS "operationKey", code
+      readonly attempt: string
+      readonly admittedAt: string | null
+      readonly deadline: string | null
+    }>`SELECT assignment_id AS "assignmentId", operation_key AS "operationKey",
+        workspace_id AS "workspaceId", session_id AS "sessionId", thread_id AS "threadId",
+        turn_id AS "turnId", run_id AS "runId", root_run_id AS "rootRunId",
+        tool_call_id AS "toolCallId", code, attempt::text AS attempt, admitted_at AS "admittedAt", deadline
       FROM rika_hosted_executor_operations
       WHERE state = 'accepted'
       ORDER BY created_at ASC
@@ -874,7 +1088,21 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
       rows,
       (row) => {
         if (!current.has(row.assignmentId)) return Effect.void
-        return execute(row).pipe(
+        return execute({
+          assignmentId: row.assignmentId,
+          operationKey: row.operationKey,
+          workspaceId: row.workspaceId,
+          sessionId: row.sessionId,
+          threadId: row.threadId,
+          turnId: row.turnId,
+          runId: row.runId,
+          rootRunId: row.rootRunId,
+          toolCallId: row.toolCallId,
+          code: row.code,
+          attempt: Number(row.attempt),
+          admittedAt: row.admittedAt,
+          deadline: row.deadline,
+        }).pipe(
           Effect.catch(() => Effect.void),
           Effect.forkScoped,
           Effect.asVoid,
@@ -887,5 +1115,5 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
   const pollTick = Effect.sleep("100 millis").pipe(Effect.andThen(pollAccepted()), Effect.ignore)
   yield* Effect.forever(pollTick).pipe(Effect.forkScoped)
 
-  return { receive, disconnected, execute }
+  return { receive, disconnected, execute, cancel }
 })

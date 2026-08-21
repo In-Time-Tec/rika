@@ -77,7 +77,7 @@ it.live(
             const receipt = yield* gateway.startTurn({
               threadId,
               turnId,
-              workspace: "/workspace",
+              workspaceId: "/workspace",
               prompt,
               executionRoute: routeWithIdentity("continuity-root", "continuity-root"),
             })
@@ -132,7 +132,7 @@ it.live(
             const receipt = yield* gateway.startTurn({
               threadId,
               turnId,
-              workspace: "/workspace",
+              workspaceId: "/workspace",
               prompt,
               executionRoute: routeWithIdentity("isolation-root", "isolation-title"),
               ...(titled ? { titleIntent: { _tag: "GenerateThreadTitle" as const, expectedTitle: prompt } } : {}),

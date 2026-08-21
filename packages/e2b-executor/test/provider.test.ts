@@ -29,7 +29,7 @@ const bootstrapIdentity = (sandboxId: string) => ({
   executorId: "assignment-1:g3",
   templateBuildId: request.templateBuildId,
   apiUrl: "wss://api.example.test/api/v1/executors",
-  workspace: "/workspace",
+  workspaceId: "workspace-1",
 })
 
 const sandboxInfo = (sandboxId: string, state: "running" | "paused"): SandboxInfo =>

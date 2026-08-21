@@ -260,12 +260,13 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
       startTurn: (input) =>
         Effect.gen(function* () {
           const resolver = resolveCells(options.cells)
-          const cell = resolver === undefined ? undefined : yield* resolveCellRoute(resolver, input.workspace)
+          const cell = resolver === undefined ? undefined : yield* resolveCellRoute(resolver, input.workspaceId)
           const turnCapabilities =
-            options.capabilities === undefined ? undefined : yield* options.capabilities(input.workspace)
+            options.capabilities === undefined ? undefined : yield* options.capabilities(input.workspaceId)
           const configured = yield* configure({
             executionRoute: input.executionRoute,
-            workspace: input.workspace,
+            workspace: input.workspaceId,
+            executionIdentity: { threadId: input.threadId, turnId: input.turnId },
             kernel: options.kernel,
             ...(cell === undefined ? {} : { cell }),
             ...(turnCapabilities === undefined

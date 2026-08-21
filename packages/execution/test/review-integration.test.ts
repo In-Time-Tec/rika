@@ -25,7 +25,7 @@ const testLayer = (filename: string, fixture: TestModel.Fixture) =>
 const input = (route: ReturnType<typeof testExecutionRoute>) => ({
   threadId: "review-thread",
   turnId: "review-turn",
-  workspace: "/workspace",
+  workspaceId: "/workspace",
   prompt: "Review the production change",
   executionRoute: route,
   reviewIntent: reviewIntent("Review the production change"),

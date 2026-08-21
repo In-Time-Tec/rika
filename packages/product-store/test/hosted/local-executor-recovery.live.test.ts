@@ -279,6 +279,7 @@ it.effect.skipIf(!live)(
                 id: ids.assignment,
                 ownerId: ids.owner,
                 threadId: ids.thread,
+                workspaceId: ids.workspace,
                 placement: { _tag: "LocalDevicePlacement", deviceId: ids.device },
                 checkout: null,
               })
@@ -313,9 +314,12 @@ it.effect.skipIf(!live)(
               yield* Effect.promise(() =>
                 pool.query(
                   `INSERT INTO rika_hosted_executor_operations
-                (assignment_id, owner_id, operation_key, request_digest, code, attempt, state, dispatched_generation,
+                (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
+                  turn_id, run_id, root_run_id, tool_call_id, code, attempt, state, dispatched_generation,
                   dispatched_lease_epoch, dispatched_executor_instance_id, dispatched_process_incarnation, response)
-                VALUES ($1, $2, 'operation-recovered', 'digest', 'printf recover', 0, 'unknown', $3, $4, $5, $6,
+                VALUES ($1, $2, 'operation-recovered', 'digest', 'workspace-recovery', 'thread-recovery',
+                  'thread-recovery', 'turn-recovery', 'run-recovery', 'run-recovery', 'call-recovery',
+                  'printf recover', 0, 'unknown', $3, $4, $5, $6,
                   '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"Local operation outcome is unknown after executor disconnect"}}'::jsonb)`,
                   [
                     access.assignmentId,

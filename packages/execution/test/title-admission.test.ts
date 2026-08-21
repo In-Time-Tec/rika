@@ -93,7 +93,7 @@ it.live(
           const receipt = yield* gateway.startTurn({
             threadId: "thread-title-nonblocking",
             turnId: "turn-title-nonblocking",
-            workspace: "/workspace",
+            workspaceId: "/workspace",
             prompt: "answer immediately",
             executionRoute: routeWithIdentity("title-nonblocking-root", "title-nonblocking-title"),
             titleIntent: { _tag: "GenerateThreadTitle", expectedTitle: "answer immediately" },
@@ -155,7 +155,7 @@ it.live(
           const receipt = yield* gateway.startTurn({
             threadId: "thread-title-first",
             turnId: "turn-title-first",
-            workspace: "/workspace",
+            workspaceId: "/workspace",
             prompt: "keep the root running",
             executionRoute: routeWithIdentity("title-first-root", "title-first-title"),
             titleIntent: { _tag: "GenerateThreadTitle", expectedTitle: "keep the root running" },
@@ -199,7 +199,7 @@ it.live(
           const receipt = yield* gateway.startTurn({
             threadId: "thread-title-cancel",
             turnId: "turn-title-cancel",
-            workspace: "/workspace",
+            workspaceId: "/workspace",
             prompt: "the user prompt that must not be dropped",
             executionRoute: routeWithIdentity("title-cancel-root", "title-cancel-title"),
             titleIntent: { _tag: "GenerateThreadTitle", expectedTitle: "the user prompt" },
@@ -268,7 +268,7 @@ it.live(
           const first = yield* gateway.startTurn({
             threadId: "thread-title-isolation",
             turnId: "turn-title-isolation-first",
-            workspace: "/workspace",
+            workspaceId: "/workspace",
             prompt: "first request",
             executionRoute: route,
             titleIntent: { _tag: "GenerateThreadTitle", expectedTitle: "first request" },
@@ -277,7 +277,7 @@ it.live(
           const second = yield* gateway.startTurn({
             threadId: "thread-title-isolation",
             turnId: "turn-title-isolation-second",
-            workspace: "/workspace",
+            workspaceId: "/workspace",
             prompt: "second request",
             executionRoute: route,
           })
@@ -316,7 +316,7 @@ it.live(
           const receipt = yield* gateway.startTurn({
             threadId: "thread-title-missing",
             turnId: "turn-title-missing",
-            workspace: "/workspace",
+            workspaceId: "/workspace",
             prompt: "title run disappeared",
             executionRoute: routeWithIdentity("title-missing-root", "title-missing-title"),
           })
@@ -359,7 +359,7 @@ it.live(
         const receipt = yield* gateway.startTurn({
           threadId: "thread-title-restart",
           turnId: "turn-title-restart",
-          workspace: "/workspace",
+          workspaceId: "/workspace",
           prompt: "restart safe prompt",
           executionRoute: routeWithIdentity("title-restart-root", "title-restart-title"),
           titleIntent: { _tag: "GenerateThreadTitle", expectedTitle: "restart safe prompt" },

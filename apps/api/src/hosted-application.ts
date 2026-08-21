@@ -75,7 +75,7 @@ export const layer = (options: {
       const executor = Context.get(executorContext, Executor)
       const executionContext = yield* Layer.build(
         HostedExecution.layerHosted({
-          kernel: { runtimeVersion: Bun.version, dataRoot: "/workspace" },
+          kernel: { runtimeVersion: Bun.version, dataRoot: `${Bun.env.TMPDIR ?? "/tmp"}/rika-hosted` },
           credentialStore: Layer.succeed(
             ProviderCredentialStore,
             Context.get(credentialContext, ProviderCredentialStore),
@@ -83,12 +83,10 @@ export const layer = (options: {
           cells: HostedExecution.remoteCells({
             cells: RemoteCells.layer({
               execute: (request) =>
-                executor
-                  .run({ threadId: request.sessionId, operationKey: request.operationKey, code: request.code })
-                  .pipe(
-                    Effect.map((result) => result.response),
-                    Effect.mapError((error) => RemoteCells.Unavailable.make({ message: error.message })),
-                  ),
+                executor.run(request).pipe(
+                  Effect.map((result) => result.response),
+                  Effect.mapError((error) => RemoteCells.Unavailable.make({ message: error.message })),
+                ),
             }),
             maxRetries: 3,
             retryDelayMillis: 250,

@@ -130,7 +130,7 @@ export const RemoteConnection = Schema.Struct({
 })
 export type RemoteConnection = typeof RemoteConnection.Type
 
-export const HostedThreadId = Schema.String.check(Schema.isPattern(/^e2b_[A-Za-z0-9_-]+$/))
+export const HostedThreadId = Schema.NonEmptyString
 export type HostedThreadId = typeof HostedThreadId.Type
 
 export const isHostedThreadId = Schema.is(HostedThreadId)

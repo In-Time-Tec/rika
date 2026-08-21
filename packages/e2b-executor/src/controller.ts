@@ -260,7 +260,7 @@ export const layer = (
             RIKA_EXECUTOR_ID: `${assignment.id}:g${assignment.generation}`,
             RIKA_EXECUTOR_TEMPLATE_BUILD_ID: placement.templateBuildId,
             RIKA_EXECUTOR_API_URL: options.apiUrl,
-            RIKA_EXECUTOR_WORKSPACE: "/workspace",
+            RIKA_EXECUTOR_WORKSPACE_ID: assignment.workspaceId,
             RIKA_CHECKPOINT_OBJECT_PREFIX: `assignments/${assignment.id}/g${assignment.generation}/`,
           },
         }
@@ -280,7 +280,7 @@ export const layer = (
           executorId: `${assignment.id}:g${assignment.generation}`,
           templateBuildId: placement.templateBuildId,
           apiUrl: options.apiUrl,
-          workspace: "/workspace",
+          workspaceId: assignment.workspaceId,
         }
       })
 

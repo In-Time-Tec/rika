@@ -5,15 +5,17 @@ const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
 export const Request = Schema.Struct({
   operationKey: NonEmptyString,
-  workspace: NonEmptyString,
+  workspaceId: NonEmptyString,
   sessionId: NonEmptyString,
+  threadId: NonEmptyString,
+  turnId: NonEmptyString,
+  runId: NonEmptyString,
+  rootRunId: NonEmptyString,
   toolCallId: NonEmptyString,
   code: Schema.String,
-  runId: Schema.optionalKey(NonEmptyString),
-  rootRunId: Schema.optionalKey(NonEmptyString),
-  attempt: Schema.optionalKey(NonNegativeInt),
-  admittedAt: Schema.optionalKey(NonEmptyString),
-  deadline: Schema.optionalKey(NonEmptyString),
+  attempt: NonNegativeInt,
+  admittedAt: Schema.NullOr(NonEmptyString),
+  deadline: Schema.NullOr(NonEmptyString),
 })
 
 export type Request = typeof Request.Type
@@ -26,10 +28,9 @@ export const Response = Schema.Union([
 
 export type Response = typeof Response.Type
 
-export class Unavailable extends Schema.TaggedError<Unavailable>()(
-  "@rika/execution/remote-cells/Unavailable",
-  { message: Schema.String },
-) {}
+export class Unavailable extends Schema.TaggedError<Unavailable>()("@rika/execution/remote-cells/Unavailable", {
+  message: Schema.String,
+}) {}
 
 export interface Interface {
   readonly execute: (request: Request) => Effect.Effect<unknown, Unavailable>

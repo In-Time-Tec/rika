@@ -50,4 +50,19 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "5511abe15bfa0da11a07637c9f84f802b0f0a2417cd98fe9cd0f55de33547fc1",
     url: new URL("../../migrations/postgres/0009-provider-credentials.sql", import.meta.url),
   },
+  {
+    id: "product/0010_logical_workspace_identity",
+    checksum: "f278641b3e6d72ec086518569ad7373f9b197d8a9ade4073ecc4a14e8a3f771f",
+    url: new URL("../../migrations/postgres/0010-logical-workspace-identity.sql", import.meta.url),
+  },
+  {
+    id: "product/0011_executor_operation_identity",
+    checksum: "513d0d28cac6b127c22490bb0e04f6d49f926a569c9c3e0b94b3f150429edd4b",
+    url: new URL("../../migrations/postgres/0011-executor-operation-identity.sql", import.meta.url),
+  },
+  {
+    id: "product/0012_executor_operation_lifecycle",
+    checksum: "ce55d4ca510832e84ac77f80a245fdcd8b9818c932b7cd283d8c8eb442bdbc47",
+    url: new URL("../../migrations/postgres/0012-executor-operation-lifecycle.sql", import.meta.url),
+  },
 ]

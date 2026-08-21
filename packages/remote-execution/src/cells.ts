@@ -1,5 +1,4 @@
-import { Context, Deferred, Effect, Layer, Ref, Schema } from "effect"
-import type { Executor } from "@rika/kernel/executor-runtime"
+import { Cause, Context, Deferred, Effect, Layer, Ref, Schema } from "effect"
 import { CellResponse, type CellRequest, type CellResponse as CellResponseValue } from "./protocol"
 
 export class CellError extends Schema.TaggedError<CellError>()("CellError", {
@@ -7,14 +6,26 @@ export class CellError extends Schema.TaggedError<CellError>()("CellError", {
   message: Schema.String,
 }) {}
 
-export interface Options extends Executor<CellRequest, CellResponse, CellError> {
-  readonly workspace: string
+export interface OutputChunk {
+  readonly stream: "stdout" | "stderr"
+  readonly text: string
+}
+
+export interface Options {
+  readonly workspaceId: string
   readonly read: (operationKey: string) => Effect.Effect<State | undefined, CellError>
   readonly write: (operationKey: string, state: State) => Effect.Effect<void, CellError>
+  readonly execute: (
+    request: CellRequest,
+    output: (chunk: OutputChunk) => Effect.Effect<void>,
+  ) => Effect.Effect<CellResponse, CellError>
 }
 
 export interface Interface {
-  readonly execute: (request: CellRequest) => Effect.Effect<CellResponse, CellError>
+  readonly execute: (
+    request: CellRequest,
+    output?: (chunk: OutputChunk) => Effect.Effect<void>,
+  ) => Effect.Effect<CellResponse, CellError>
 }
 
 export class Cells extends Context.Service<Cells, Interface>()("@rika/remote-execution/cells") {}
@@ -42,8 +53,8 @@ export const layer = (options: Options): Layer.Layer<Cells> =>
     Cells,
     Effect.gen(function* () {
       const entries = yield* Ref.make(new Map<string, Entry>())
-      const execute: Interface["execute"] = Effect.fn("Cells.execute")(function* (request) {
-        if (request.workspace !== options.workspace)
+      const execute: Interface["execute"] = Effect.fn("Cells.execute")(function* (request, output = () => Effect.void) {
+        if (request.workspaceId !== options.workspaceId)
           return yield* CellError.make({ kind: "workspace", message: "Cell workspace does not match this executor" })
         const attempt = request.attempt ?? 0
         const result = yield* Deferred.make<CellResponseValue, CellError>()
@@ -66,12 +77,14 @@ export const layer = (options: Options): Layer.Layer<Cells> =>
               return stored._tag === "Completed" ? stored.response : unknown
             }
             yield* options.write(request.operationKey, { _tag: "Running", attempt })
-            const response = yield* options.execute(request).pipe(
-              Effect.catchCause(() =>
-                Effect.succeed<CellResponseValue>({
-                  _tag: "DomainFailure",
-                  failure: { kind: "execution", message: "Cell execution failed" },
-                }),
+            const response = yield* options.execute(request, output).pipe(
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.failCause(cause)
+                  : Effect.succeed<CellResponseValue>({
+                      _tag: "DomainFailure",
+                      failure: { kind: "execution", message: "Cell execution failed" },
+                    }),
               ),
             )
             yield* options.write(request.operationKey, { _tag: "Completed", attempt, response })

@@ -264,7 +264,7 @@ const executeInteractiveSubmissionImpl = (
           yield* rootTurnOwner.startTurn({
             threadId: thread.id,
             turnId: current.id,
-            workspace: thread.workspace,
+            workspaceId: thread.workspace,
             prompt: prepared.prompt,
             ...(prepared.promptParts === undefined ? {} : { promptParts: prepared.promptParts }),
             executionRoute: current.executionRoute,

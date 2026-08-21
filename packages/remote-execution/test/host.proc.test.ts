@@ -1,5 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import { Crypto, Effect, FileSystem, Layer, Schema } from "effect"
+import { testing } from "../src/host"
 
 const packageRoot = new URL("..", import.meta.url).pathname
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
@@ -8,6 +10,7 @@ const bootstrapProof = `
 import { Effect, Redacted } from "effect"
 import { createConnection } from "node:net"
 import { testing } from "./src/host.ts"
+const sandboxId = await Bun.file("/run/e2b/.E2B_SANDBOX_ID").text().then((value) => value.trim()).catch(() => "sandbox-1")
 const received = Effect.runPromise(testing.receiveBootstrap)
 await Bun.sleep(20)
 const hanging = createConnection({ host: "127.0.0.1", port: 7070 })
@@ -35,11 +38,11 @@ const valid = (credential) => ({
       target: "e2b",
       assignmentId: "assignment-1",
       assignmentGeneration: 1,
-      instanceId: "sandbox-1",
+      instanceId: sandboxId,
       executorId: "assignment-1:g1",
       templateBuildId: "build-1",
       apiUrl: "wss://api.example.test/api/v1/executors",
-      workspace: "/workspace",
+      workspaceId: "workspace-1",
     },
   }),
 })
@@ -67,6 +70,7 @@ console.log(
 const bootstrapIdentityProof = `
 let resolveMessage
 const message = new Promise((resolve) => { resolveMessage = resolve })
+const sandboxId = await Bun.file("/run/e2b/.E2B_SANDBOX_ID").text().then((value) => value.trim()).catch(() => "sandbox-from-bootstrap")
 const server = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
@@ -88,7 +92,7 @@ const host = Bun.spawn(["bun", "run", "./src/host.ts"], {
     RIKA_EXECUTOR_ID: "template-readiness:g1",
     RIKA_EXECUTOR_TEMPLATE_BUILD_ID: "template-readiness",
     RIKA_EXECUTOR_API_URL: "ws://127.0.0.1:1",
-    RIKA_EXECUTOR_WORKSPACE: "/workspace",
+    RIKA_EXECUTOR_WORKSPACE_ID: "workspace-readiness",
     RIKA_EXECUTOR_STATE_DIRECTORY: stateDirectory,
   },
   stdout: "ignore",
@@ -111,11 +115,11 @@ try {
         target: "e2b",
         assignmentId: "assignment-from-bootstrap",
         assignmentGeneration: 7,
-        instanceId: "sandbox-from-bootstrap",
+        instanceId: sandboxId,
         executorId: "executor-from-bootstrap",
         templateBuildId: "build-from-bootstrap",
         apiUrl: "ws://127.0.0.1:" + server.port + "/executors",
-        workspace: "/workspace",
+        workspaceId: "workspace-from-bootstrap",
       },
     }),
   })
@@ -131,7 +135,46 @@ try {
 }
 `
 
-describe("executor host process", () => {
+describe.sequential("executor host process", () => {
+  it.effect("restores durable operation receipts after host replacement", () =>
+    Effect.scoped(
+      Effect.flatMap(Layer.build(BunServices.layer), (context) =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem
+          const crypto = yield* Crypto.Crypto
+          const directory = `/tmp/rika-operation-receipts-${yield* crypto.randomUUIDv4}`
+          const identity = {
+            operationKey: "operation-1",
+            workspaceId: "workspace-1",
+            sessionId: "session-1",
+            threadId: "thread-1",
+            turnId: "turn-1",
+            runId: "run-1",
+            rootRunId: "run-1",
+            toolCallId: "call-1",
+            attempt: 0,
+          }
+          const frames = new Map([
+            [
+              "operation-1",
+              [
+                { _tag: "Accepted" as const, attribution: identity, cursor: 1 },
+                { _tag: "Started" as const, attribution: identity, cursor: 2 },
+              ],
+            ],
+          ])
+          const first = yield* testing.operationReceiptStore(directory, "assignment-1", 1)
+          yield* first.save(frames)
+          const replacement = yield* testing.operationReceiptStore(directory, "assignment-1", 1)
+          expect(yield* replacement.load).toEqual(frames)
+          const nextGeneration = yield* testing.operationReceiptStore(directory, "assignment-1", 2)
+          expect(yield* nextGeneration.load).toEqual(new Map())
+          yield* fileSystem.remove(directory, { recursive: true, force: true })
+        }).pipe(Effect.provide(context)),
+      ),
+    ),
+  )
+
   it.effect("flushes the accepted bootstrap response and closes its one-shot listener", () =>
     Effect.acquireUseRelease(
       Effect.sync(() =>
@@ -160,11 +203,11 @@ describe("executor host process", () => {
                   target: "e2b",
                   assignmentId: "assignment-1",
                   assignmentGeneration: 1,
-                  instanceId: "sandbox-1",
+                  instanceId: expect.any(String),
                   executorId: "assignment-1:g1",
                   templateBuildId: "build-1",
                   apiUrl: "wss://api.example.test/api/v1/executors",
-                  workspace: "/workspace",
+                  workspaceId: "workspace-1",
                   stateDirectory: "/var/lib/rika-executor",
                 },
               })
@@ -202,7 +245,7 @@ describe("executor host process", () => {
                       target: "e2b",
                       assignmentId: "assignment-from-bootstrap",
                       assignmentGeneration: 7,
-                      instanceId: "sandbox-from-bootstrap",
+                      instanceId: expect.any(String),
                       executorId: expect.stringMatching(/^executor-from-bootstrap:/),
                     },
                     templateBuildId: "build-from-bootstrap",

@@ -43,7 +43,7 @@ it.layer(BunServices.layer)("SQLite turn admission outbox", (test) => {
         const input: ExecutionGateway.StartTurn = {
           threadId,
           turnId,
-          workspace: "/workspace",
+          workspaceId: "/workspace",
           prompt: "persisted admission",
           promptParts,
           executionRoute: ExecutionRouteSnapshot.testExecutionRoute("high"),
@@ -56,7 +56,7 @@ it.layer(BunServices.layer)("SQLite turn admission outbox", (test) => {
             const threads = yield* ThreadRepository.Service
             const turns = yield* TurnRepository.Service
             const sql = yield* SqlClient
-            yield* threads.create({ id: threadId, workspace: input.workspace, title: "Admission", now: 1 })
+            yield* threads.create({ id: threadId, workspace: input.workspaceId, title: "Admission", now: 1 })
             yield* turns.createForSubmission({
               id: turnId,
               threadId,

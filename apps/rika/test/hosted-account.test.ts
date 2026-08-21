@@ -394,7 +394,7 @@ it.effect("creates for Personal with zero organizations and fails closed for a s
             context: () => Effect.succeed({ account: { id: "user-1", email: "dev@example.test" }, organizations: [] }),
             createRemoteConnection: (_origin, owner) => {
               expect(owner).toEqual({ kind: "personal" })
-              return Ref.update(created, (value) => value + 1).pipe(Effect.as({ threadId: "e2b_thread-1" }))
+              return Ref.update(created, (value) => value + 1).pipe(Effect.as({ threadId: "thread-1" }))
             },
           }),
         ),

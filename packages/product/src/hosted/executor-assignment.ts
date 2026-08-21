@@ -12,6 +12,7 @@ import {
   Sequence,
   ThreadId,
   Timestamp,
+  WorkspaceId,
 } from "./model"
 
 const OpaqueId = Schema.String.check(Schema.isPattern(/^[\x21-\x7e]{1,512}$/))
@@ -91,10 +92,11 @@ export const AssignmentLifecycle = Schema.Union([
 ])
 export type AssignmentLifecycle = typeof AssignmentLifecycle.Type
 
-export const ExecutorAssignment = Schema.Struct({
+const ExecutorAssignmentStruct = Schema.Struct({
   id: ExecutorAssignmentId,
   ownerId: OwnerId,
   threadId: ThreadId,
+  workspaceId: WorkspaceId,
   executorKind: ExecutorKind,
   placement: ExecutorPlacement,
   checkout: Schema.NullOr(RepositoryCheckout),
@@ -108,6 +110,14 @@ export const ExecutorAssignment = Schema.Struct({
   createdAt: Timestamp,
   updatedAt: Timestamp,
 })
+export const ExecutorAssignment = ExecutorAssignmentStruct.check(
+  Schema.makeFilter((assignment) =>
+    (assignment.executorKind === "e2b" && assignment.placement._tag === "E2BPlacement") ||
+    (assignment.executorKind === "local_device" && assignment.placement._tag === "LocalDevicePlacement")
+      ? []
+      : [{ path: ["placement"], issue: "placement must match executor kind" }],
+  ),
+)
 export type ExecutorAssignment = typeof ExecutorAssignment.Type
 
 export const WorkspaceCheckpointManifest = Schema.Struct({

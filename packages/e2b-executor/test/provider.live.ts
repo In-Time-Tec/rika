@@ -54,7 +54,7 @@ const program = Effect.gen(function* () {
             executorId: "live-validation:g1",
             templateBuildId,
             apiUrl: "wss://api.invalid/executors",
-            workspace: "/workspace",
+            workspaceId: "live-validation-workspace",
           },
         })
         yield* provider.touch(sandbox.sandboxId, 900_000)

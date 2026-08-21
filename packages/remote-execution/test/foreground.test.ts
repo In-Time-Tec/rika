@@ -60,6 +60,30 @@ const eventually = <A>(read: () => A | undefined): Effect.Effect<A, EventuallyTi
     }),
   )
 
+const terminal = (socket: FakeWebSocket, operationKey: string, occurrence = 0) =>
+  eventually(
+    () =>
+      socket.sent.filter(
+        (message: any) =>
+          message._tag === "CellLifecycle" &&
+          message.frame._tag === "Terminal" &&
+          message.frame.attribution.operationKey === operationKey,
+      )[occurrence] as any,
+  )
+
+const acknowledgeTerminal = (socket: FakeWebSocket, access: AccessWire, operationKey: string, occurrence = 0) =>
+  Effect.gen(function* () {
+    const message = yield* terminal(socket, operationKey, occurrence)
+    socket.message({
+      _tag: "CellTerminalReceipt",
+      access,
+      operationKey,
+      attempt: message.frame.attribution.attempt,
+      cursor: message.frame.cursor,
+    })
+    return message
+  })
+
 describe.sequential("foreground local executor", () => {
   it.effect("uses only a local admission and replays cell results in memory", () =>
     Effect.acquireUseRelease(
@@ -133,12 +157,20 @@ describe.sequential("foreground local executor", () => {
               request: {
                 access,
                 operationKey: "operation-mismatch",
-                workspace: "another-workspace-binding",
+                workspaceId: "another-workspace-binding",
                 sessionId: "session-1",
+                threadId: "thread-1",
+                turnId: "turn-1",
+                runId: "run-1",
+                rootRunId: "run-1",
                 toolCallId: "call-mismatch",
                 code: 'printf "must-not-run"',
+                attempt: 0,
+                admittedAt: null,
+                deadline: null,
               },
             })
+            yield* acknowledgeTerminal(socket, access, "operation-mismatch")
             const mismatch = yield* eventually(
               () =>
                 socket.sent.find(
@@ -153,19 +185,29 @@ describe.sequential("foreground local executor", () => {
             const request = {
               access,
               operationKey: "operation-1",
-              workspace: "workspace-binding-1",
+              workspaceId: "workspace-binding-1",
               sessionId: "session-1",
+              threadId: "thread-1",
+              turnId: "turn-1",
+              runId: "run-1",
+              rootRunId: "run-1",
               toolCallId: "call-1",
-              code: 'printf "$$"',
+              code: "const answer: number = 42; answer",
+              attempt: 0,
+              admittedAt: null,
+              deadline: null,
             }
             socket.message({ _tag: "CellExecute", request })
+            yield* acknowledgeTerminal(socket, access, "operation-1")
             const first = yield* eventually(
               () =>
                 socket.sent.find(
                   (message: any) => message._tag === "LocalCellResult" && message.operationKey === "operation-1",
                 ) as any,
             )
+            expect(first.response._tag).toBe("Success")
             socket.message({ _tag: "CellExecute", request })
+            yield* acknowledgeTerminal(socket, access, "operation-1", 1)
             const results = yield* eventually(() => {
               const values = socket.sent.filter(
                 (message: any) => message._tag === "LocalCellResult" && message.operationKey === "operation-1",
@@ -188,6 +230,63 @@ describe.sequential("foreground local executor", () => {
                 response: first.response,
               },
             ])
+            const outputRequest = {
+              ...request,
+              operationKey: "operation-output",
+              toolCallId: "call-output",
+              code: `console.log('token="sensitive" ' + 'x'.repeat(20_000))`,
+            }
+            socket.message({ _tag: "CellExecute", request: outputRequest })
+            yield* acknowledgeTerminal(socket, access, "operation-output")
+            const output = yield* eventually(
+              () =>
+                socket.sent.find(
+                  (message: any) =>
+                    message._tag === "CellLifecycle" &&
+                    message.frame._tag === "Output" &&
+                    message.frame.attribution.operationKey === "operation-output",
+                ) as any,
+            )
+            expect(output.frame.text).not.toContain("sensitive")
+            expect(output.frame.text.length).toBeLessThanOrEqual(16_384)
+            expect(output.frame.redacted).toBe(true)
+            expect(output.frame.truncated).toBe(true)
+            const cancelRequest = {
+              ...request,
+              operationKey: "operation-cancel",
+              toolCallId: "call-cancel",
+              code: "await new Promise<void>(() => {})",
+            }
+            socket.message({ _tag: "CellExecute", request: cancelRequest })
+            yield* eventually(
+              () =>
+                socket.sent.find(
+                  (message: any) =>
+                    message._tag === "CellLifecycle" &&
+                    message.frame._tag === "Started" &&
+                    message.frame.attribution.operationKey === "operation-cancel",
+                ) as any,
+            )
+            socket.message({
+              _tag: "CellCancel",
+              access,
+              operationKey: "operation-cancel",
+              attempt: 0,
+            })
+            const cancelled = yield* acknowledgeTerminal(socket, access, "operation-cancel")
+            expect(cancelled.frame.outcome).toBe("cancelled")
+            expect(cancelled.frame.response).toEqual({
+              _tag: "DomainFailure",
+              failure: { kind: "cancelled", message: "Cell operation cancelled" },
+            })
+            expect(
+              socket.sent.filter(
+                (message: any) =>
+                  message._tag === "CellLifecycle" &&
+                  message.frame._tag === "Terminal" &&
+                  message.frame.attribution.operationKey === "operation-cancel",
+              ),
+            ).toHaveLength(1)
             expect(
               yield* Effect.promise(() => import("node:fs/promises").then((fs) => fs.readdir(workspacePath))),
             ).toEqual([])
@@ -264,13 +363,20 @@ describe.sequential("foreground local executor", () => {
               request: {
                 access,
                 operationKey: "operation-reconnect",
-                workspace: "workspace-binding-1",
+                workspaceId: "workspace-binding-1",
                 sessionId: "session-1",
+                threadId: "thread-1",
+                turnId: "turn-1",
+                runId: "run-1",
+                rootRunId: "run-1",
                 toolCallId: "call-1",
                 code: 'printf "reconnect"',
+                attempt: 0,
+                admittedAt: null,
+                deadline: null,
               },
             })
-            yield* Effect.yieldNow
+            yield* terminal(socket, "operation-reconnect")
             socket.close()
             for (let index = 0; index < 10; index += 1) {
               yield* Effect.yieldNow
@@ -293,10 +399,18 @@ describe.sequential("foreground local executor", () => {
                 cursor: { sequence: 0, value: "" },
               },
             })
+            reconnectedSocket.message({
+              _tag: "CellReplay",
+              access: renewed,
+              operationKey: "operation-reconnect",
+              afterCursor: 0,
+            })
+            yield* acknowledgeTerminal(reconnectedSocket, renewed, "operation-reconnect")
             const resent = yield* eventually(
               () =>
                 reconnectedSocket.sent.find(
-                  (message: any) => message._tag === "LocalCellResult" && message.operationKey === "operation-reconnect",
+                  (message: any) =>
+                    message._tag === "LocalCellResult" && message.operationKey === "operation-reconnect",
                 ) as any,
             )
             expect(resent.access).toEqual(renewed)
@@ -354,18 +468,33 @@ describe.sequential("foreground local executor", () => {
                   leaseExpiresAt: 10_000,
                   heartbeatIntervalMillis: 60_000,
                   cursor: { sequence: 0, value: "" },
-                  receipts: [{
-                    operationKey: "operation-resume",
-                    attempt: 0,
-                    state: "running",
-                  }],
+                  receipts: [
+                    {
+                      operationKey: "operation-resume",
+                      attempt: 0,
+                      attribution: {
+                        operationKey: "operation-resume",
+                        workspaceId: "workspace-binding-1",
+                        sessionId: "cell-session-resume",
+                        threadId: "thread-resume",
+                        turnId: "turn-resume",
+                        runId: "run-resume",
+                        rootRunId: "run-resume",
+                        toolCallId: "tool-call-resume",
+                        attempt: 0,
+                      },
+                      frames: [],
+                      state: "running",
+                    },
+                  ],
                 },
                 workspacePath: "/tmp",
                 receiptScope: "resume-scope",
                 receiptStore: {
-                  save: (_scope, snapshot) => Effect.sync(() => {
-                    latestSnapshot = snapshot
-                  }),
+                  save: (_scope, snapshot) =>
+                    Effect.sync(() => {
+                      latestSnapshot = snapshot
+                    }),
                 },
                 ready,
               }).pipe(Effect.provide(foregroundContext)),
@@ -388,6 +517,25 @@ describe.sequential("foreground local executor", () => {
               },
             })
             yield* Deferred.await(ready)
+            socket.message({
+              _tag: "CellExecute",
+              request: {
+                access: renewed,
+                operationKey: "operation-resume",
+                workspaceId: "workspace-binding-1",
+                sessionId: "cell-session-resume",
+                threadId: "thread-resume",
+                turnId: "turn-resume",
+                runId: "run-resume",
+                rootRunId: "run-resume",
+                toolCallId: "tool-call-resume",
+                code: "mustNotRun()",
+                attempt: 0,
+                admittedAt: null,
+                deadline: null,
+              },
+            })
+            yield* acknowledgeTerminal(socket, renewed, "operation-resume")
             const result = yield* eventually(
               () =>
                 socket.sent.find(
@@ -404,9 +552,7 @@ describe.sequential("foreground local executor", () => {
               operationKey: "operation-resume",
               attempt: 0,
             })
-            const latest = yield* eventually(() =>
-              latestSnapshot?.receipts.length === 0 ? latestSnapshot : undefined,
-            )
+            const latest = yield* eventually(() => (latestSnapshot?.receipts.length === 0 ? latestSnapshot : undefined))
             expect(latest.receipts).toEqual([])
             yield* Fiber.interrupt(runner)
           }),
@@ -488,12 +634,20 @@ describe.sequential("foreground local executor", () => {
               request: {
                 access,
                 operationKey: "operation-goodbye",
-                workspace: "workspace-binding-1",
+                workspaceId: "workspace-binding-1",
                 sessionId: "session-1",
+                threadId: "thread-1",
+                turnId: "turn-1",
+                runId: "run-1",
+                rootRunId: "run-1",
                 toolCallId: "call-1",
                 code: 'printf "goodbye"',
+                attempt: 0,
+                admittedAt: null,
+                deadline: null,
               },
             })
+            const firstTerminal = yield* acknowledgeTerminal(firstSocket, access, "operation-goodbye")
             const completed = yield* eventually(
               () =>
                 firstSocket.sent.find(
@@ -507,12 +661,13 @@ describe.sequential("foreground local executor", () => {
                 : undefined,
             )
             expect(pending.receipts).toEqual([
-              {
+              expect.objectContaining({
                 operationKey: "operation-goodbye",
                 attempt: 0,
                 state: "completed",
                 response: completed.response,
-              },
+                attribution: firstTerminal.frame.attribution,
+              }),
             ])
             firstSocket.close()
             for (let index = 0; index < 10; index += 1) {
@@ -532,6 +687,13 @@ describe.sequential("foreground local executor", () => {
                 cursor: { sequence: 0, value: "" },
               },
             })
+            reconnectedSocket.message({
+              _tag: "CellReplay",
+              access,
+              operationKey: "operation-goodbye",
+              afterCursor: 0,
+            })
+            yield* acknowledgeTerminal(reconnectedSocket, access, "operation-goodbye")
             yield* eventually(
               () =>
                 reconnectedSocket.sent.find(
@@ -539,12 +701,13 @@ describe.sequential("foreground local executor", () => {
                 ) as any,
             )
             expect(latestSnapshot?.receipts).toEqual([
-              {
+              expect.objectContaining({
                 operationKey: "operation-goodbye",
                 attempt: 0,
                 state: "completed",
                 response: completed.response,
-              },
+                attribution: firstTerminal.frame.attribution,
+              }),
             ])
             reconnectedSocket.message({
               _tag: "LocalCellReceipt",
@@ -553,11 +716,9 @@ describe.sequential("foreground local executor", () => {
               attempt: 0,
             })
             expect(
-              (
-                yield* eventually(() =>
-                  latestSnapshot !== undefined && latestSnapshot.receipts.length === 0 ? latestSnapshot : undefined,
-                )
-              ).receipts,
+              (yield* eventually(() =>
+                latestSnapshot !== undefined && latestSnapshot.receipts.length === 0 ? latestSnapshot : undefined,
+              )).receipts,
             ).toEqual([])
             yield* Fiber.interrupt(runner)
             expect(

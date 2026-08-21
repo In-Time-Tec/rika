@@ -28,7 +28,7 @@ it.effect("starts a claimed Turn while renewing its lease", () =>
         input: {
           threadId: "thread-test",
           turnId: "turn-test",
-          workspace: "workspace-test",
+          workspaceId: "workspace-test",
           prompt: "test",
           executionRoute: ExecutionRoute.testExecutionRoute(),
         },
@@ -36,9 +36,7 @@ it.effect("starts a claimed Turn while renewing its lease", () =>
       const store: HostedTurnWorkerStoreService = {
         claimRecovery: () => Effect.succeed(noClaim),
         claimNext: () =>
-          Ref.getAndUpdate(claims, (value) => value + 1).pipe(
-            Effect.map((value) => (value === 0 ? claim : undefined)),
-          ),
+          Ref.getAndUpdate(claims, (value) => value + 1).pipe(Effect.map((value) => (value === 0 ? claim : undefined))),
         prepare: () => Effect.succeed(true),
         renew: () => Ref.update(renewals, (value) => value + 1).pipe(Effect.as(true)),
         complete: () => Deferred.succeed(completed, undefined),
@@ -64,7 +62,10 @@ it.effect("starts a claimed Turn while renewing its lease", () =>
       expect(yield* Ref.get(renewals)).toBeGreaterThan(0)
       yield* Deferred.succeed(release, undefined)
       yield* Deferred.await(completed)
-      yield* HostedTurnWorker.pipe(Effect.provide(context), Effect.flatMap((worker) => worker.ready))
+      yield* HostedTurnWorker.pipe(
+        Effect.provide(context),
+        Effect.flatMap((worker) => worker.ready),
+      )
       expect(yield* Ref.get(claims)).toBeGreaterThanOrEqual(1)
     }),
   ),

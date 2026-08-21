@@ -2,10 +2,15 @@ import { describe, expect, it } from "@effect/vitest"
 import { ControllerError, type Interface as Controller } from "@rika/e2b-executor/controller"
 import { ApiMessage, ExecutorMessage } from "@rika/remote-execution/protocol"
 import { Effect, Fiber, Redacted, Schema } from "effect"
-import { makeGateway, type Socket } from "../src/executor-gateway"
+import { makeGateway as makeGatewayService, type LifecycleStore, type Socket } from "../src/executor-gateway"
 
 const encode = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
 const decode = Schema.decodeSync(Schema.fromJsonString(ApiMessage))
+const makeGateway = (
+  service: Controller,
+  append: LifecycleStore["append"] = () => Effect.void,
+  load: LifecycleStore["load"] = () => Effect.succeed([]),
+) => makeGatewayService(service, { append, load, prepare: () => Effect.void })
 
 const fence = {
   target: "e2b" as const,
@@ -17,6 +22,27 @@ const fence = {
 }
 
 const access = { version: 1 as const, fence, leaseEpoch: 1, sessionToken: "session-token" }
+const cellIdentity = {
+  threadId: "thread-1",
+  turnId: "turn-1",
+  runId: "run-1",
+  rootRunId: "run-1",
+  toolCallId: "call-1",
+  attempt: 0,
+  admittedAt: null,
+  deadline: null,
+} as const
+const attribution = (operationKey: string) => ({
+  operationKey,
+  workspaceId: "workspace-1",
+  sessionId: "thread-1",
+  threadId: cellIdentity.threadId,
+  turnId: cellIdentity.turnId,
+  runId: cellIdentity.runId,
+  rootRunId: cellIdentity.rootRunId,
+  toolCallId: cellIdentity.toolCallId,
+  attempt: cellIdentity.attempt,
+})
 
 const socket = () => {
   const sent: Array<string> = []
@@ -202,8 +228,9 @@ describe("executor gateway", () => {
         gateway.execute({
           assignmentId: "assignment-1",
           operationKey: "operation-1",
-          workspace: "/workspace",
+          workspaceId: "workspace-1",
           sessionId: "thread-1",
+          ...cellIdentity,
           code: "echo hosted-mvp",
         }),
       )
@@ -213,23 +240,291 @@ describe("executor gateway", () => {
         request: {
           access,
           operationKey: "operation-1",
-          workspace: "/workspace",
+          workspaceId: "workspace-1",
           sessionId: "thread-1",
+          ...cellIdentity,
           code: "echo hosted-mvp",
         },
+      })
+      const response = { _tag: "Success" as const, result: { stdout: "hosted-mvp\n", stderr: "", exitCode: 0 } }
+      for (const frame of [
+        { _tag: "Accepted" as const, attribution: attribution("operation-1"), cursor: 1 },
+        { _tag: "Started" as const, attribution: attribution("operation-1"), cursor: 2 },
+      ])
+        yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame }))
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "CellLifecycle",
+          access,
+          frame: {
+            _tag: "Terminal",
+            attribution: attribution("operation-1"),
+            cursor: 3,
+            outcome: "completed",
+            response,
+          },
+        }),
+      )
+      expect(decode(target.sent[2]!)).toEqual({
+        _tag: "CellTerminalReceipt",
+        access,
+        operationKey: "operation-1",
+        attempt: 0,
+        cursor: 3,
       })
       yield* gateway.receive(
         target,
         encode({
           _tag: "CellResult",
+          access,
           operationKey: "operation-1",
-          response: { _tag: "Success", result: { stdout: "hosted-mvp\n", stderr: "", exitCode: 0 } },
+          attempt: 0,
+          response,
         }),
       )
       expect(yield* Fiber.join(running)).toEqual({
         access,
-        response: { _tag: "Success", result: { stdout: "hosted-mvp\n", stderr: "", exitCode: 0 } },
+        response,
       })
+    }),
+  )
+
+  it.effect("persists one bounded lifecycle before acknowledging terminal replay", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      const persisted: Array<string> = []
+      const gateway = yield* makeGateway(controller(), (_assignmentId, frame) =>
+        Effect.sync(() => persisted.push(`${frame.cursor}:${frame._tag}`)).pipe(Effect.asVoid),
+      )
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      const running = yield* Effect.forkChild(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-lifecycle",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "42",
+        }),
+      )
+      yield* Effect.yieldNow
+      const identity = attribution("operation-lifecycle")
+      const lifecycle = [
+        { _tag: "Accepted" as const, attribution: identity, cursor: 1 },
+        { _tag: "Started" as const, attribution: identity, cursor: 2 },
+        ...Array.from({ length: 16 }, (_, index) => ({
+          _tag: "Output" as const,
+          attribution: identity,
+          cursor: index + 3,
+          stream: "stdout" as const,
+          text: `output-${index}`,
+          redacted: true as const,
+          truncated: false,
+        })),
+      ]
+      for (const frame of lifecycle) yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame }))
+      const response = { _tag: "Success" as const, result: 42 }
+      const terminalFrame = {
+        _tag: "Terminal" as const,
+        attribution: identity,
+        cursor: 19,
+        outcome: "completed" as const,
+        response,
+      }
+      yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame: terminalFrame }))
+      yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame: terminalFrame }))
+      expect(persisted).toEqual(lifecycle.map((frame) => `${frame.cursor}:${frame._tag}`).concat("19:Terminal"))
+      expect(
+        target.sent.map((message) => decode(message)).filter((message) => message._tag === "CellTerminalReceipt"),
+      ).toHaveLength(2)
+      yield* gateway.receive(
+        target,
+        encode({ _tag: "CellResult", access, operationKey: "operation-lifecycle", attempt: 0, response }),
+      )
+      expect((yield* Fiber.join(running)).response).toEqual(response)
+    }),
+  )
+
+  it.effect("hydrates a durable terminal after API replacement", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      const response = { _tag: "Success" as const, result: 42 }
+      const identity = attribution("operation-restored")
+      const retained = [
+        { _tag: "Accepted" as const, attribution: identity, cursor: 1 },
+        { _tag: "Started" as const, attribution: identity, cursor: 2 },
+        {
+          _tag: "Output" as const,
+          attribution: identity,
+          cursor: 3,
+          stream: "stdout" as const,
+          text: "restored",
+          redacted: true as const,
+          truncated: false,
+        },
+        { _tag: "Terminal" as const, attribution: identity, cursor: 4, outcome: "completed" as const, response },
+      ]
+      const gateway = yield* makeGateway(controller(), () => Effect.void, () => Effect.succeed(retained))
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      const running = yield* Effect.forkChild(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-restored",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "42",
+        }),
+      )
+      yield* Effect.yieldNow
+      yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame: retained[3]! }))
+      expect(decode(target.sent.at(-1)!)).toEqual({
+        _tag: "CellTerminalReceipt",
+        access,
+        operationKey: "operation-restored",
+        attempt: 0,
+        cursor: 4,
+      })
+      yield* gateway.receive(
+        target,
+        encode({ _tag: "CellResult", access, operationKey: "operation-restored", attempt: 0, response }),
+      )
+      expect(yield* Fiber.join(running)).toEqual({ access, response })
+    }),
+  )
+
+  it.effect("rejects excess output without acknowledging a terminal result", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      const gateway = yield* makeGateway(controller())
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      const running = yield* Effect.forkChild(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-overflow",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "42",
+        }),
+      )
+      yield* Effect.yieldNow
+      const identity = attribution("operation-overflow")
+      for (const frame of [
+        { _tag: "Accepted" as const, attribution: identity, cursor: 1 },
+        { _tag: "Started" as const, attribution: identity, cursor: 2 },
+      ])
+        yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame }))
+      for (let index = 0; index < 17; index += 1)
+        yield* gateway.receive(
+          target,
+          encode({
+            _tag: "CellLifecycle",
+            access,
+            frame: {
+              _tag: "Output",
+              attribution: identity,
+              cursor: index + 3,
+              stream: "stdout",
+              text: "bounded",
+              redacted: true,
+              truncated: false,
+            },
+          }),
+        )
+      expect(target.closed.at(-1)).toEqual([1008, "fenced"])
+      expect(
+        target.sent.map((message) => decode(message)).some((message) => message._tag === "CellTerminalReceipt"),
+      ).toBe(false)
+      yield* Fiber.interrupt(running)
+    }),
+  )
+
+  it.effect("sends an attributed cancellation for a running operation", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      const gateway = yield* makeGateway(controller())
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      const running = yield* Effect.forkChild(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-cancel",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "await never",
+        }),
+      )
+      yield* Effect.yieldNow
+      yield* gateway.cancel("assignment-1", "operation-cancel")
+      expect(decode(target.sent.at(-1)!)).toEqual({
+        _tag: "CellCancel",
+        access,
+        operationKey: "operation-cancel",
+        attempt: 0,
+      })
+      yield* Fiber.interrupt(running)
     }),
   )
 
@@ -312,8 +607,9 @@ describe("executor gateway", () => {
         gateway.execute({
           assignmentId: "assignment-1",
           operationKey: "expired-operation",
-          workspace: "/workspace",
+          workspaceId: "workspace-1",
           sessionId: "thread-1",
+          ...cellIdentity,
           code: "echo should-not-run",
         }),
       )
@@ -322,7 +618,7 @@ describe("executor gateway", () => {
     }),
   )
 
-  it.effect("disconnects replaced sockets and fails their pending cell results", () =>
+  it.effect("moves pending cells to a replacement connection for the same executor", () =>
     Effect.gen(function* () {
       const firstSocket = socket()
       const replacementSocket = socket()
@@ -359,24 +655,63 @@ describe("executor gateway", () => {
         gateway.execute({
           assignmentId: "assignment-1",
           operationKey: "replacement-operation",
-          workspace: "/workspace",
+          workspaceId: "workspace-1",
           sessionId: "thread-1",
+          ...cellIdentity,
           code: "echo hosted-mvp",
         }),
       )
       yield* Effect.yieldNow
       yield* gateway.receive(replacementSocket, encode({ _tag: "ExecutorReconnect", access }))
       expect(firstSocket.closed).toEqual([[1008, "fenced"]])
-      expect((yield* Effect.flip(Fiber.join(running))).kind).toBe("disconnected")
+      const replacementAccess = { ...access, leaseEpoch: 2 }
+      expect(decode(replacementSocket.sent[1]!)).toEqual({
+        _tag: "CellReplay",
+        access: replacementAccess,
+        operationKey: "replacement-operation",
+        afterCursor: 0,
+      })
       yield* gateway.receive(
         firstSocket,
         encode({
           _tag: "CellResult",
+          access,
           operationKey: "replacement-operation",
+          attempt: 0,
           response: { _tag: "Success", result: { stdout: "stale\n", stderr: "", exitCode: 0 } },
         }),
       )
-      expect(replacementSocket.sent).toHaveLength(1)
+      const response = { _tag: "Success" as const, result: { stdout: "fresh\n", stderr: "", exitCode: 0 } }
+      for (const frame of [
+        { _tag: "Accepted" as const, attribution: attribution("replacement-operation"), cursor: 1 },
+        { _tag: "Started" as const, attribution: attribution("replacement-operation"), cursor: 2 },
+      ])
+        yield* gateway.receive(replacementSocket, encode({ _tag: "CellLifecycle", access: replacementAccess, frame }))
+      yield* gateway.receive(
+        replacementSocket,
+        encode({
+          _tag: "CellLifecycle",
+          access: replacementAccess,
+          frame: {
+            _tag: "Terminal",
+            attribution: attribution("replacement-operation"),
+            cursor: 3,
+            outcome: "completed",
+            response,
+          },
+        }),
+      )
+      yield* gateway.receive(
+        replacementSocket,
+        encode({
+          _tag: "CellResult",
+          access: replacementAccess,
+          operationKey: "replacement-operation",
+          attempt: 0,
+          response,
+        }),
+      )
+      expect(yield* Fiber.join(running)).toEqual({ access: replacementAccess, response })
     }),
   )
 })

@@ -235,7 +235,7 @@ test(
               const link = yield* backend.startTurn({
                 threadId,
                 turnId: activeTurnId,
-                workspace,
+                workspaceId: workspace,
                 prompt: "Run a real agentic step before product recovery.",
                 executionRoute: laneExecutionRoute(),
               })

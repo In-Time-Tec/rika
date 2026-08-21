@@ -75,6 +75,10 @@ export const resolveCellRoute: {
 export interface ConfigureOptions {
   readonly executionRoute: RouteSnapshot
   readonly workspace: string
+  readonly executionIdentity?: {
+    readonly threadId: string
+    readonly turnId: string
+  }
   readonly kernel: KernelOptions
   readonly cell?: CellRoute
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
@@ -150,8 +154,17 @@ export const agentInstructionsWith: {
   own === profileInstructions.title ? own : [own, "", surface].join("\n"),
 )
 
-const applicationPin = (route: RouteSnapshot, workspace: string) =>
-  Pins.makeCapability({ ...Registration.codecs.applicationContext.identity, route, workspace })
+const applicationPin = (
+  route: RouteSnapshot,
+  workspace: string,
+  executionIdentity: ConfigureOptions["executionIdentity"],
+) =>
+  Pins.makeCapability({
+    ...Registration.codecs.applicationContext.identity,
+    route,
+    workspace,
+    ...(executionIdentity === undefined ? {} : { executionIdentity }),
+  })
 
 const modelRegistryPin = (route: ModelSnapshot) =>
   Pins.makeCapability({
@@ -371,7 +384,11 @@ const cellExecutor = (
     }),
   )
 
-const remoteCellExecutor = (route: RemoteCellRoute, workspace: string): Layer.Layer<ToolExecutor.ToolExecutor> =>
+const remoteCellExecutor = (
+  route: RemoteCellRoute,
+  workspace: string,
+  executionIdentity: ConfigureOptions["executionIdentity"],
+): Layer.Layer<ToolExecutor.ToolExecutor> =>
   Layer.effect(
     ToolExecutor.ToolExecutor,
     Effect.map(RemoteCells.Service, (cells) =>
@@ -387,6 +404,15 @@ const remoteCellExecutor = (route: RemoteCellRoute, workspace: string): Layer.La
                 tool: request.call.name,
                 message: "remote cell execution requires an operation key",
               })
+            if (executionIdentity === undefined || context.runId === undefined || context.rootRunId === undefined)
+              return yield* ToolExecutor.FrameworkFailure.make({
+                stage: "placement",
+                tool: request.call.name,
+                message: "remote cell execution requires thread, turn, and run identities",
+              })
+            const identity = executionIdentity
+            const runId = context.runId
+            const rootRunId = context.rootRunId
             const remote = ToolExecutor.remote({
               toolkit: CellTool.toolkit,
               tools: [CellTool.name],
@@ -408,15 +434,17 @@ const remoteCellExecutor = (route: RemoteCellRoute, workspace: string): Layer.La
                   const response = yield* cells.execute(
                     RemoteCells.Request.make({
                       operationKey: placement.operationKey,
-                      workspace,
+                      workspaceId: workspace,
                       sessionId: placement.sessionId,
+                      threadId: identity.threadId,
+                      turnId: identity.turnId,
+                      runId,
+                      rootRunId,
                       toolCallId: context.toolCallId ?? placement.call.id,
                       code: parameters.code,
-                      ...(context.runId === undefined ? {} : { runId: context.runId }),
-                      ...(context.rootRunId === undefined ? {} : { rootRunId: context.rootRunId }),
-                      ...(context.attempt === undefined ? {} : { attempt: context.attempt }),
-                      ...(context.admittedAt === undefined ? {} : { admittedAt: context.admittedAt }),
-                      ...(context.deadline === undefined ? {} : { deadline: context.deadline }),
+                      attempt: context.attempt ?? 0,
+                      admittedAt: context.admittedAt ?? null,
+                      deadline: context.deadline ?? null,
                     }),
                   )
                   return yield* Schema.decodeUnknownEffect(RemoteCells.Response, {
@@ -447,7 +475,7 @@ export const configure = (
 > =>
   Effect.gen(function* () {
     const route = options.executionRoute
-    const contextPin = applicationPin(route, options.workspace)
+    const contextPin = applicationPin(route, options.workspace, options.executionIdentity)
     const routes = {
       Root: route.main,
       Title: route.title,
@@ -511,7 +539,8 @@ export const configure = (
         options.cell.services,
         options.kernel.limits?.cellDeadlineMillis ?? KernelProfileRegistration.defaultLimits.cellDeadlineMillis,
       )
-    if (options.cell?._tag === "Remote") cellLayer = remoteCellExecutor(options.cell, options.workspace)
+    if (options.cell?._tag === "Remote")
+      cellLayer = remoteCellExecutor(options.cell, options.workspace, options.executionIdentity)
     const environment = (name: keyof typeof routes): AgentEnvironment => {
       const model = routed[name].layer
       if (name === "Title" || name === "Compaction") return Layer.orDie(model)
@@ -634,6 +663,7 @@ export const configure = (
       contextPin,
       Registration.make(Registration.codecs.applicationContext, contextPin, {
         workspace: options.workspace,
+        ...(options.executionIdentity === undefined ? {} : { executionIdentity: options.executionIdentity }),
         executionRoute: route,
       }),
     )
@@ -726,6 +756,7 @@ export const makeResolver = (options: ResolverOptions): ExecutableResolver.Inter
         const configured = yield* configure({
           executionRoute: context.executionRoute,
           workspace: context.workspace,
+          ...(context.executionIdentity === undefined ? {} : { executionIdentity: context.executionIdentity }),
           kernel: options.kernel,
           ...(cell === undefined ? {} : { cell }),
           ...(capabilities === undefined

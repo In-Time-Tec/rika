@@ -10,6 +10,7 @@ import {
   OwnerId,
   Sequence,
   ThreadId,
+  WorkspaceId,
 } from "@rika/product/hosted-model"
 import { layer } from "../../src/hosted/memory-assignments"
 
@@ -32,6 +33,7 @@ const open = (suffix: string) =>
       id: ExecutorAssignmentId.make(`assignment-${suffix}`),
       ownerId: ids.owner,
       threadId: ThreadId.make(`thread-${suffix}`),
+      workspaceId: WorkspaceId.make(`workspace-${suffix}`),
       placement: { _tag: "E2BPlacement", templateBuildId: "template", providerScope: "scope" },
       checkout: null,
     })

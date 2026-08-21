@@ -403,7 +403,7 @@ it.effect("persists the execution link before accepting interruption", () =>
       owner.startTurn({
         threadId: "thread",
         turnId: "turn",
-        workspace: "/workspace",
+        workspaceId: "/workspace",
         prompt: "work",
         executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
       }),

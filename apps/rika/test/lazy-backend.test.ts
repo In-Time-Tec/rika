@@ -39,7 +39,7 @@ it.effect("delegates the five execution operations through the deferred backend"
         yield* backend.startTurn({
           threadId: link.threadId,
           turnId: link.turnId,
-          workspace: "/workspace",
+          workspaceId: "/workspace",
           prompt: "test",
           executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
         }),

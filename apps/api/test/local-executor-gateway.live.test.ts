@@ -8,7 +8,7 @@ import { ApiMessage, LocalExecutorMessage, type AccessWire } from "@rika/remote-
 import { Effect, Layer, Random, Redacted, Schema } from "effect"
 import { createHash } from "node:crypto"
 import { Pool } from "pg"
-import { makeLocalGateway } from "../src/local-executor-gateway"
+import { makeLocalGateway, type LocalGateway } from "../src/local-executor-gateway"
 import type { LocalExecutorAuthority } from "../src/local-executor"
 import type { Socket } from "../src/executor-gateway"
 
@@ -18,11 +18,43 @@ const encode = Schema.encodeSync(Schema.fromJsonString(LocalExecutorMessage))
 const decode = Schema.decodeSync(Schema.fromJsonString(ApiMessage))
 const encodeActor = Schema.encodeUnknownSync(Schema.fromJsonString(ActorAttribution))
 const code = 'printf "restart"'
-const digest = createHash("sha256").update(code).digest("hex")
 const sessionToken = "session-local-gateway"
 const sessionDigest = createHash("sha256").update(sessionToken).digest("hex")
 const deviceId = "11111111-1111-4111-8111-111111111111"
 const assignmentId = "thread-local-gateway"
+const cellRequest = (operationKey: string) => ({
+  assignmentId,
+  operationKey,
+  workspaceId: "workspace-local-gateway",
+  sessionId: assignmentId,
+  threadId: assignmentId,
+  turnId: "turn-local-gateway",
+  runId: "run-local-gateway",
+  rootRunId: "run-local-gateway",
+  toolCallId: "call-local-gateway",
+  code,
+  attempt: 0,
+  admittedAt: null,
+  deadline: null,
+})
+const request = cellRequest("operation")
+const digest = createHash("sha256")
+  .update(
+    JSON.stringify({
+      workspaceId: request.workspaceId,
+      sessionId: request.sessionId,
+      threadId: request.threadId,
+      turnId: request.turnId,
+      runId: request.runId,
+      rootRunId: request.rootRunId,
+      toolCallId: request.toolCallId,
+      code: request.code,
+      attempt: request.attempt,
+      admittedAt: request.admittedAt,
+      deadline: request.deadline,
+    }),
+  )
+  .digest("hex")
 
 const access: AccessWire = {
   version: 1,
@@ -42,6 +74,40 @@ const response = {
   _tag: "Success" as const,
   result: { stdout: "restart", stderr: "", exitCode: 0 },
 }
+
+const persistTerminal = (
+  gateway: LocalGateway,
+  target: Socket,
+  presented: AccessWire,
+  operationKey: string,
+  terminalResponse = response,
+) =>
+  Effect.gen(function* () {
+    const operation = cellRequest(operationKey)
+    const attribution = {
+      operationKey,
+      workspaceId: operation.workspaceId,
+      sessionId: operation.sessionId,
+      threadId: operation.threadId,
+      turnId: operation.turnId,
+      runId: operation.runId,
+      rootRunId: operation.rootRunId,
+      toolCallId: operation.toolCallId,
+      attempt: operation.attempt,
+    }
+    for (const frame of [
+      { _tag: "Accepted" as const, attribution, cursor: 1 },
+      { _tag: "Started" as const, attribution, cursor: 2 },
+      {
+        _tag: "Terminal" as const,
+        attribution,
+        cursor: 3,
+        outcome: "completed" as const,
+        response: terminalResponse,
+      },
+    ])
+      yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access: presented, frame }))
+  })
 
 const socket = () => {
   const sent: Array<string> = []
@@ -78,7 +144,7 @@ const authority = (input?: {
       cursor: { sequence: 0, value: "" },
     }),
   validateAccess: () => Effect.void,
-  workspaceIdentity: () => Effect.succeed("workspace-binding"),
+  workspaceIdentity: () => Effect.succeed("workspace-local-gateway"),
   heartbeat: () => Effect.die("unused"),
   release: input?.release ?? (() => Effect.void),
 })
@@ -192,12 +258,12 @@ const seed = (
       `INSERT INTO rika_hosted_executor_assignments
       (id, owner_id, thread_id, executor_kind, placement, checkout, generation, revision,
         last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
-        session_digest, lease_epoch, lease_expires_at, last_active_at, created_at, updated_at)
+        session_digest, lease_epoch, lease_expires_at, last_active_at, created_at, updated_at, workspace_id)
       VALUES ('thread-local-gateway', $4, 'thread-local-gateway', 'local_device',
         '{"_tag":"LocalDevicePlacement","deviceId":"11111111-1111-4111-8111-111111111111"}'::jsonb, NULL, 1, 1, 1, 'active',
         $1, 'executor-local-gateway', 'process-local-gateway', $2, 1,
         CASE WHEN $3 = 'past' THEN now() - interval '1 second' ELSE now() + interval '1 hour' END,
-        now(), now(), now())`,
+        now(), now(), now(), 'workspace-local-gateway')`,
       [deviceId, sessionDigest, options?.leaseExpires ?? "future", ownerId],
     )
     yield* query(
@@ -244,8 +310,11 @@ const seed = (
       yield* query(
         pool,
         `INSERT INTO rika_hosted_executor_operations
-        (assignment_id, owner_id, operation_key, request_digest, code, attempt, state, updated_at)
-        VALUES ('thread-local-gateway', $4, $1, $2, $3, 0, 'accepted', now())`,
+        (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
+          turn_id, run_id, root_run_id, tool_call_id, code, attempt, state, updated_at)
+        VALUES ('thread-local-gateway', $4, $1, $2, 'workspace-local-gateway', 'thread-local-gateway',
+          'thread-local-gateway', 'turn-local-gateway', 'run-local-gateway', 'run-local-gateway',
+          'call-local-gateway', $3, 0, 'accepted', now())`,
         [operationKey, digest, code, ownerId],
       )
       return
@@ -253,10 +322,13 @@ const seed = (
     yield* query(
       pool,
       `INSERT INTO rika_hosted_executor_operations
-      (assignment_id, owner_id, operation_key, request_digest, code, attempt, state, dispatched_generation,
+      (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
+        turn_id, run_id, root_run_id, tool_call_id, code, attempt, state, dispatched_generation,
         dispatched_lease_epoch, dispatched_executor_instance_id, dispatched_process_incarnation,
         dispatch_deadline_at, updated_at)
-      VALUES ('thread-local-gateway', $6, $1, $2, $3, 0, 'dispatched', 1, $4,
+      VALUES ('thread-local-gateway', $6, $1, $2, 'workspace-local-gateway', 'thread-local-gateway',
+        'thread-local-gateway', 'turn-local-gateway', 'run-local-gateway', 'run-local-gateway',
+        'call-local-gateway', $3, 0, 'dispatched', 1, $4,
         'executor-local-gateway', 'process-local-gateway',
         CASE WHEN $5 = 'past' THEN now() - interval '1 second' ELSE now() + interval '5 minutes' END, now())`,
       [operationKey, digest, code, options?.leaseEpoch ?? 1, options?.deadline ?? "future", ownerId],
@@ -328,6 +400,7 @@ it.effect.skipIf(!live)(
           const restarted = yield* makeLocalGateway(authority()).pipe(Effect.provide(context))
           const secondSocket = socket()
           yield* restarted.receive(secondSocket, encode({ _tag: "ExecutorReconnect", access }))
+          yield* persistTerminal(restarted, secondSocket, access, "operation-restart")
           const result = encode({
             _tag: "LocalCellResult",
             access,
@@ -359,9 +432,7 @@ it.effect.skipIf(!live)("fences organization dispatch immediately after membersh
         const target = socket()
         yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
         yield* query(pool, `DELETE FROM member WHERE id = 'member-local-gateway'`)
-        const error = yield* gateway
-          .execute({ assignmentId, operationKey: "operation-revoked-membership", code })
-          .pipe(Effect.flip)
+        const error = yield* gateway.execute(cellRequest("operation-revoked-membership")).pipe(Effect.flip)
         expect(error).toMatchObject({
           kind: "fenced",
           message: "Local executor fence is no longer current",
@@ -387,7 +458,7 @@ it.effect.skipIf(!live)("dispatches a personal-owner operation without any organ
         const target = socket()
         yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
         target.failSend = true
-        const result = yield* gateway.execute({ assignmentId, operationKey: "operation-personal", code })
+        const result = yield* gateway.execute(cellRequest("operation-personal"))
         expect(target.sent.map((value) => decode(value)).some((message) => message._tag === "CellExecute")).toBe(true)
         expect(result.response).toEqual({
           _tag: "DomainFailure",
@@ -413,6 +484,7 @@ it.effect.skipIf(!live)(
           const target = socket()
           const renewed = { ...access, leaseEpoch: 2 }
           yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access: renewed }))
+          yield* persistTerminal(gateway, target, renewed, "operation-stale")
           yield* gateway.receive(
             target,
             encode({
@@ -452,6 +524,7 @@ it.effect.skipIf(!live)("accepts a retained completion after reconnect renews th
         const target = socket()
         const renewed = { ...access, leaseEpoch: 2 }
         yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access: renewed }))
+        yield* persistTerminal(gateway, target, renewed, "operation-renewed")
         yield* gateway.receive(
           target,
           encode({
@@ -483,6 +556,7 @@ it.effect.skipIf(!live)("rejects a conflicting completion after a durable result
         const gateway = yield* makeLocalGateway(authority()).pipe(Effect.provide(context))
         const target = socket()
         yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* persistTerminal(gateway, target, access, "operation-conflict")
         yield* gateway.receive(
           target,
           encode({
@@ -521,10 +595,7 @@ it.effect.skipIf(!live)("recovers an overdue dispatch once across concurrent gat
         const left = yield* makeLocalGateway(authority()).pipe(Effect.provide(context))
         const right = yield* makeLocalGateway(authority()).pipe(Effect.provide(context))
         const results = yield* Effect.all(
-          [
-            left.execute({ assignmentId, operationKey: "operation-overdue", code }),
-            right.execute({ assignmentId, operationKey: "operation-overdue", code }),
-          ],
+          [left.execute(cellRequest("operation-overdue")), right.execute(cellRequest("operation-overdue"))],
           { concurrency: 2 },
         )
         expect(results.map((result) => result.response)).toEqual([
@@ -552,7 +623,7 @@ it.effect.skipIf(!live)("recovers a dispatched operation after the assignment le
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
         const gateway = yield* makeLocalGateway(authority()).pipe(Effect.provide(context))
-        const result = yield* gateway.execute({ assignmentId, operationKey: "operation-expired-lease", code })
+        const result = yield* gateway.execute(cellRequest("operation-expired-lease"))
         expect(result.response).toEqual({
           _tag: "DomainFailure",
           failure: { kind: "unknown", message: "Local operation outcome is unknown after executor disconnect" },
@@ -584,7 +655,7 @@ it.effect.skipIf(!live)("terminalizes unresolved work and releases the assignmen
           (yield* query(pool, `SELECT lifecycle FROM rika_hosted_executor_assignments WHERE id = $1`, [assignmentId]))
             .rows,
         ).toEqual([{ lifecycle: "paused" }])
-        const recovered = yield* gateway.execute({ assignmentId, operationKey: "operation-goodbye", code })
+        const recovered = yield* gateway.execute(cellRequest("operation-goodbye"))
         expect(recovered.response).toEqual({
           _tag: "DomainFailure",
           failure: { kind: "unknown", message: "Local operation outcome is unknown after executor disconnect" },
@@ -615,6 +686,7 @@ it.effect.skipIf(!live)("accepts a retained completion on the same gateway after
         ).toEqual([{ state: "dispatched" }])
         const secondSocket = socket()
         yield* gateway.receive(secondSocket, encode({ _tag: "ExecutorReconnect", access }))
+        yield* persistTerminal(gateway, secondSocket, access, "operation-live")
         yield* gateway.receive(
           secondSocket,
           encode({

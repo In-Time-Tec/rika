@@ -86,7 +86,7 @@ it.effect("memory turns attach one canonical execution link without allowing rep
       {
         threadId: created.threadId,
         turnId: created.id,
-        workspace: "/workspace",
+        workspaceId: "/workspace",
         prompt: created.prompt,
         executionRoute: created.executionRoute,
       },
@@ -122,7 +122,7 @@ it.effect("memory admission outbox snapshots exact input and exposes only unlink
     const input = {
       threadId: created.threadId,
       turnId: created.id,
-      workspace: "/prepared/workspace",
+      workspaceId: "/prepared/workspace",
       prompt: "resolved request",
       promptParts: [{ type: "text" as const, text: "resolved request" }],
       executionRoute: created.executionRoute,

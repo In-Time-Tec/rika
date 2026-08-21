@@ -16,6 +16,7 @@ import type {
   JsonObject,
   OwnerId,
   ThreadId,
+  WorkspaceId,
 } from "./model"
 
 export const AssignmentFailureReason = Schema.Literals([
@@ -38,6 +39,7 @@ export interface CreateInput {
   readonly id: ExecutorAssignmentId
   readonly ownerId: OwnerId
   readonly threadId: ThreadId
+  readonly workspaceId: WorkspaceId
   readonly placement: ExecutorPlacement
   readonly checkout: RepositoryCheckout | null
 }

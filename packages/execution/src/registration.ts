@@ -27,6 +27,12 @@ const ToolPayload = Schema.Struct({
 
 const ApplicationContextPayload = Schema.Struct({
   workspace: Schema.String.check(Schema.isNonEmpty()),
+  executionIdentity: Schema.optionalKey(
+    Schema.Struct({
+      threadId: Schema.String.check(Schema.isNonEmpty()),
+      turnId: Schema.String.check(Schema.isNonEmpty()),
+    }),
+  ),
   executionRoute: ExecutionRoute.ExecutionRouteSnapshot,
 })
 
@@ -35,7 +41,7 @@ const { role: _role, ...modelRegistryFields } = ExecutionRoute.ExecutionRouteMod
 const ModelRegistryRoutePayload = Schema.Struct(modelRegistryFields)
 
 export const codecs = {
-  applicationContext: codec("rika-application-context", "1", ApplicationContextPayload),
+  applicationContext: codec("rika-application-context", "2", ApplicationContextPayload),
   modelRoute: codec("rika-model-route", "1", ExecutionRoute.ExecutionRouteModelSnapshot),
   modelRegistryRoute: codec("rika-model-registry-route", "1", ModelRegistryRoutePayload),
   compaction: codec("rika-compaction", "1", ExecutableRegistration.CompactionPolicy),

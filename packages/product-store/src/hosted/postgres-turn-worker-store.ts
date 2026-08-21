@@ -61,7 +61,7 @@ interface TurnRow {
   readonly ownerId: string
   readonly threadId: string
   readonly turnId: string
-  readonly workspace: string
+  readonly workspaceId: string
   readonly prompt: string
   readonly promptPartsJson: string | null
   readonly executionRouteJson: string
@@ -71,13 +71,11 @@ const decodeInput = (row: TurnRow) =>
   Effect.gen(function* () {
     const executionRoute = yield* Schema.decodeUnknownEffect(ExecutionRouteJson)(row.executionRouteJson)
     const promptParts =
-      row.promptPartsJson === null
-        ? undefined
-        : yield* Schema.decodeUnknownEffect(PromptPartsJson)(row.promptPartsJson)
+      row.promptPartsJson === null ? undefined : yield* Schema.decodeUnknownEffect(PromptPartsJson)(row.promptPartsJson)
     return yield* Schema.decodeUnknownEffect(ExecutionGateway.StartTurn)({
       threadId: row.threadId,
       turnId: row.turnId,
-      workspace: row.workspace,
+      workspaceId: row.workspaceId,
       prompt: row.prompt,
       executionRoute,
       ...(promptParts === undefined ? {} : { promptParts }),
@@ -123,10 +121,12 @@ export const layer = Layer.effect(
         sql,
         request,
         query(sql<TurnRow>`SELECT thread_record.owner_id AS "ownerId", turn_record.thread_id AS "threadId",
-          turn_record.id AS "turnId", thread_record.workspace, turn_record.prompt,
+          turn_record.id AS "turnId", hosted_thread.workspace_id AS "workspaceId", turn_record.prompt,
           turn_record.prompt_parts_json AS "promptPartsJson", turn_record.execution_route_json AS "executionRouteJson"
         FROM rika_turns turn_record
         JOIN rika_threads thread_record ON thread_record.id = turn_record.thread_id
+        JOIN rika_hosted_threads hosted_thread ON hosted_thread.id = turn_record.thread_id
+          AND hosted_thread.owner_id = thread_record.owner_id
         WHERE turn_record.turn_kind = 'AgentExecution' AND turn_record.status = 'queued'
           AND NOT EXISTS (
             SELECT 1 FROM rika_hosted_turn_claims active_claim
@@ -147,11 +147,13 @@ export const layer = Layer.effect(
         sql,
         request,
         query(sql<TurnRow>`SELECT thread_record.owner_id AS "ownerId", turn_record.thread_id AS "threadId",
-          turn_record.id AS "turnId", thread_record.workspace, turn_record.prompt,
+          turn_record.id AS "turnId", hosted_thread.workspace_id AS "workspaceId", turn_record.prompt,
           turn_record.prompt_parts_json AS "promptPartsJson", turn_record.execution_route_json AS "executionRouteJson"
         FROM rika_turn_admission_outbox admission
         JOIN rika_turns turn_record ON turn_record.id = admission.turn_id
         JOIN rika_threads thread_record ON thread_record.id = turn_record.thread_id
+        JOIN rika_hosted_threads hosted_thread ON hosted_thread.id = turn_record.thread_id
+          AND hosted_thread.owner_id = thread_record.owner_id
         WHERE turn_record.turn_kind = 'AgentExecution' AND turn_record.status = 'running'
           AND turn_record.execution_link_json IS NULL
           AND NOT EXISTS (

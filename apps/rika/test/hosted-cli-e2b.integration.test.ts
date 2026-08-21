@@ -123,7 +123,13 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
               runFork(
                 gateway!.receive(
                   socket,
-                  encodeExecutorMessage({ _tag: "CellResult", operationKey: message.request.operationKey, response }),
+                  encodeExecutorMessage({
+                    _tag: "CellResult",
+                    access: message.request.access,
+                    operationKey: message.request.operationKey,
+                    attempt: message.request.attempt,
+                    response,
+                  }),
                 ),
               )
             }

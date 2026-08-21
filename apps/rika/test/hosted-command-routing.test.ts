@@ -43,12 +43,12 @@ it.effect("routes hosted execution without calling the local server operation", 
       yield* invoke(["org", "invite", "dev@example.test"])
       yield* invoke(["thread", "new"])
       yield* invoke(["thread", "new", "--remote"])
-      yield* invoke(["--execute", "hello", "--thread", "e2b_thread-1", "--mode", "low"])
+      yield* invoke(["--execute", "hello", "--thread", "thread-1", "--mode", "low"])
       yield* invoke(["credential", "list", "openrouter"])
       yield* invoke(["credential", "revoke", "openrouter"])
       expect(yield* Ref.get(productCalls)).toEqual([{ _tag: "Thread", action: "new" }])
       expect(yield* Ref.get(productCalls)).not.toContainEqual(
-        expect.objectContaining({ _tag: "Run", threadId: "e2b_thread-1" }),
+        expect.objectContaining({ _tag: "Run", threadId: "thread-1" }),
       )
       expect(yield* Ref.get(hostedCalls)).toEqual([
         { _tag: "Auth", action: "login", noOpen: false },
@@ -64,7 +64,7 @@ it.effect("routes hosted execution without calling the local server operation", 
         { _tag: "Organization", action: "use", organization: "engineering" },
         { _tag: "Organization", action: "invite", email: "dev@example.test" },
         { _tag: "RemoteThread", action: "new" },
-        { _tag: "RemoteRun", threadId: "e2b_thread-1", request: { prompt: ["hello"], mode: "low" } },
+        { _tag: "RemoteRun", threadId: "thread-1", request: { prompt: ["hello"], mode: "low" } },
         { _tag: "Credential", action: "list", provider: "openrouter" },
         { _tag: "Credential", action: "revoke", provider: "openrouter" },
       ])

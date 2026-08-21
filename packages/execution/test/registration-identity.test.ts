@@ -12,7 +12,7 @@ const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const
 test("every registration codec carries the single pre-1.0 schema baseline", () => {
   expect(Object.fromEntries(Object.entries(Registration.codecs).map(([name, { version }]) => [name, version]))).toEqual(
     {
-      applicationContext: "1",
+      applicationContext: "2",
       modelRoute: "1",
       modelRegistryRoute: "1",
       compaction: "1",

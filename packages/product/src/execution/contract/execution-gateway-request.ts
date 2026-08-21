@@ -15,7 +15,7 @@ export type ExecutionLink = typeof ExecutionLink.Type
 export const StartTurn = Schema.Struct({
   threadId: Schema.String,
   turnId: Schema.String,
-  workspace: Schema.String,
+  workspaceId: Schema.NonEmptyString,
   prompt: Schema.String,
   promptParts: Schema.optionalKey(Schema.Array(PromptPart)),
   executionRoute: ExecutionRouteSnapshot,

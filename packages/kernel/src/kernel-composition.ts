@@ -54,6 +54,7 @@ export interface Options extends ProfileOptions {
   readonly maxConcurrentBoots?: number
   readonly idleTimeToLive?: Duration.Input
   readonly environment?: Readonly<Record<string, string>>
+  readonly bootstrap?: boolean
 }
 
 const moduleOptions = (options: Options): ModuleOptions => ({
@@ -106,7 +107,7 @@ export const pool = (
         runtimeCommand: options.runtimeCommand ?? "bun",
         workerModule: options.workerModule ?? workerModule,
         startTimeoutMillis: options.startTimeoutMillis ?? 20_000,
-        bootstrap: KernelBootstrap.source(),
+        ...(options.bootstrap === false ? {} : { bootstrap: KernelBootstrap.source() }),
         interruptGraceMillis: options.interruptGraceMillis ?? 250,
         maxConcurrentBoots: options.maxConcurrentBoots ?? Number.POSITIVE_INFINITY,
         idleTimeToLive: options.idleTimeToLive ?? defaultIdleTimeToLive,

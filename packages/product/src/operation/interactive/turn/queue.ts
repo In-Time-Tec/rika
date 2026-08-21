@@ -301,7 +301,7 @@ export const promotePendingTurns = (input: {
         yield* input.owner.startTurn({
           threadId: input.thread.id,
           turnId: turn.id,
-          workspace: input.thread.workspace,
+          workspaceId: input.thread.workspace,
           prompt: prepared.prompt,
           ...(prepared.promptParts === undefined ? {} : { promptParts: prepared.promptParts }),
           executionRoute: turn.executionRoute,
@@ -372,7 +372,7 @@ export const promotePendingTurns = (input: {
           yield* input.owner.startTurn({
             threadId: input.thread.id,
             turnId: promoted.id,
-            workspace: input.thread.workspace,
+            workspaceId: input.thread.workspace,
             prompt: prepared.prompt,
             ...(prepared.promptParts === undefined ? {} : { promptParts: prepared.promptParts }),
             executionRoute: promoted.executionRoute,
