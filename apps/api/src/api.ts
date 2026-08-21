@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Schema } from "effect"
-import { BetterAuthUserId, OrganizationId } from "@rika/product/hosted-model"
+import { BetterAuthUserId, OrganizationId, ThreadId } from "@rika/product/hosted-model"
 import { HttpRouter, HttpServer, HttpServerRequest } from "effect/unstable/http"
 import {
   HttpApi,
@@ -75,7 +75,6 @@ const LocalExecutorAdmissionResponse = Schema.Struct({
   executorUrl: Schema.String,
   workspaceIdentity: Schema.String,
 }).pipe(HttpApiSchema.status(201))
-const ThreadId = Schema.String.check(Schema.isPattern(/^(local|e2b)_[A-Za-z0-9_-]+$/))
 const OperationKey = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
 )

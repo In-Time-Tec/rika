@@ -84,7 +84,7 @@ const webRequest = (request: HttpClientRequest.HttpClientRequest) => {
 
 const unusedHttpClient = HttpClient.make(() => Effect.die("The integration test did not install its HTTP client"))
 
-it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a fenced fake E2B executor", () =>
+it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tools in the HTTP request", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const database = `rika_cli_e2b_${Math.abs(yield* Random.nextInt)}`
@@ -341,8 +341,12 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
         yield* run(["--execute", "echo hosted-mvp", "--thread", connection.threadId]).pipe(Effect.provide(cli))
         expect(operationRetry).toBeDefined()
         const retried = yield* Effect.promise(() => api.handler(operationRetry!))
-        expect(retried.status).toBe(200)
-        expect(yield* Effect.promise(() => retried.json())).toEqual({ output: "hosted-mvp\n", exitCode: 0 })
+        expect(retried.status).toBe(202)
+        expect(yield* Effect.promise(() => retried.json())).toMatchObject({
+          commandId: expect.any(String),
+          turnId: expect.any(String),
+          status: "queued",
+        })
         const [thread, assignment, commands, events] = yield* Effect.promise(() =>
           Promise.all([
             migrated!.query(`SELECT executor_kind FROM rika_hosted_threads WHERE id = $1`, [connection.threadId]),
@@ -357,21 +361,13 @@ it.effect.skipIf(!live)("drives the routed CLI through HTTP, PostgreSQL, and a f
         )
         expect(thread.rows).toEqual([{ executor_kind: "e2b" }])
         expect(assignment.rows).toEqual([{ id: connection.threadId, thread_id: connection.threadId }])
-        expect(helloAccepted).toBe(1)
+        expect(helloAccepted).toBe(0)
         expect(closes).toEqual([])
         expect(commands.rows).toHaveLength(1)
-        expect(operations).toHaveLength(1)
-        expect(operations[0]?.request.operationKey).toBe(commands.rows[0]?.idempotency_key)
-        expect(operations[0]?.request.toolCallId).toBe(commands.rows[0]?.idempotency_key)
-        expect(events.rows).toHaveLength(1)
-        expect(events.rows[0]?.event).toMatchObject({
-          _tag: "CellResult",
-          operationKey: commands.rows[0]?.idempotency_key,
-          response,
-        })
-        expect(creates).toHaveLength(1)
-        expect(bootstraps).toHaveLength(1)
-        expect(creates[0]?.environment).not.toHaveProperty("DATABASE_URL")
+        expect(operations).toHaveLength(0)
+        expect(events.rows).toHaveLength(0)
+        expect(creates).toHaveLength(0)
+        expect(bootstraps).toHaveLength(0)
         expect(yield* Ref.get(localServerSpawns)).toBe(0)
         yield* Effect.promise(api.dispose)
       } finally {

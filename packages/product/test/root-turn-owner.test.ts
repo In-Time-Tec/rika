@@ -421,7 +421,7 @@ it.effect("recovers every dual-database admission crash window into one idempote
     const input: ExecutionGateway.StartTurn = {
       threadId: "thread",
       turnId: "turn",
-      workspace: "/workspace",
+      workspaceId: "/workspace",
       prompt: "prepared work",
       promptParts: [{ type: "text", text: "prepared work" }],
       executionRoute: ExecutionRouteSnapshot.testExecutionRoute("high"),
