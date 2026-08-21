@@ -9,32 +9,39 @@ import { CredentialError, Credentials } from "@rika/e2b-executor/checkout"
 import { layer as providerLayer } from "@rika/e2b-executor/provider"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
 import { ExecutorAssignmentId } from "@rika/product/hosted-model"
-import { Context, Effect, Layer, Redacted } from "effect"
+import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import { makeGateway, type Gateway, type GatewayError } from "./executor-gateway"
 import type { AuthenticatedPrincipal } from "./hosted-product"
 import { LocalExecutor } from "./local-executor"
 import { makeLocalGateway, type LocalGateway } from "./local-executor-gateway"
 
+export class ExecutorConfigError extends Schema.TaggedError<ExecutorConfigError>()("ExecutorConfigError", {
+  message: Schema.String,
+}) {}
+
 const required = (environment: Record<string, string | undefined>, name: string) => {
-  const value = environment[name]
-  if (value === undefined || value.length === 0) throw new Error(`${name} is required`)
-  return value
+  const value = environment[name]?.trim()
+  return value === undefined || value.length === 0
+    ? Effect.fail(ExecutorConfigError.make({ message: `${name} is required` }))
+    : Effect.succeed(value)
 }
 
-export const config = (environment: Record<string, string | undefined>) => {
-  const apiUrl = required(environment, "RIKA_EXECUTOR_API_URL")
+export const loadConfig = Effect.fn("ExecutorConfig.load")(function* (environment: Record<string, string | undefined>) {
+  const apiUrl = yield* required(environment, "RIKA_EXECUTOR_API_URL")
   return {
-    appId: required(environment, "E2B_APP_ID"),
-    deploymentId: required(environment, "E2B_DEPLOYMENT_ID"),
-    templateId: required(environment, "E2B_TEMPLATE_ID"),
-    templateBuildId: required(environment, "E2B_TEMPLATE_BUILD_ID"),
+    appId: yield* required(environment, "E2B_APP_ID"),
+    deploymentId: yield* required(environment, "E2B_DEPLOYMENT_ID"),
+    templateId: yield* required(environment, "E2B_TEMPLATE_ID"),
+    templateBuildId: yield* required(environment, "E2B_TEMPLATE_BUILD_ID"),
     apiUrl,
     allowedEgress: [new URL(apiUrl).hostname, "github.com", "api.github.com"],
-    apiKey: Redacted.make(required(environment, "E2B_API_KEY"), { label: "e2b-api-key" }),
+    apiKey: Redacted.make(yield* required(environment, "E2B_API_KEY"), { label: "e2b-api-key" }),
   }
-}
+})
 
-export const layer = (options: ReturnType<typeof config>) =>
+export type ExecutorConfig = Effect.Success<ReturnType<typeof loadConfig>>
+
+export const layer = (options: ExecutorConfig) =>
   controllerLayer(options).pipe(
     Layer.provide(providerLayer({ apiKey: options.apiKey })),
     Layer.provide(

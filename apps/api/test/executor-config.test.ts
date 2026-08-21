@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Redacted } from "effect"
-import { config } from "../src/executor"
+import { Effect, Redacted, Schema } from "effect"
+import { ExecutorConfigError, loadConfig } from "../src/executor"
 
 const environment = {
   E2B_API_KEY: "e2b-api-key",
@@ -12,16 +12,22 @@ const environment = {
 }
 
 describe("executor configuration", () => {
-  it("requires the E2B template ID separately from the immutable build receipt", () => {
-    const configured = config(environment)
-    expect(configured).toMatchObject({
-      templateId: "ar7-template-alias",
-      templateBuildId: "7d0-build-receipt",
-      apiUrl: "wss://api.example.test/api/v1/executors",
-      allowedEgress: ["api.example.test", "github.com", "api.github.com"],
-    })
-    expect(Redacted.value(configured.apiKey)).toBe("e2b-api-key")
-    expect(() => config({ ...environment, E2B_TEMPLATE_ID: "" })).toThrow("E2B_TEMPLATE_ID is required")
-    expect(() => config({ ...environment, RIKA_EXECUTOR_API_URL: "" })).toThrow("RIKA_EXECUTOR_API_URL is required")
-  })
+  it.effect("requires the E2B template ID separately from the immutable build receipt", () =>
+    Effect.gen(function* () {
+      const configured = yield* loadConfig(environment)
+      expect(configured).toMatchObject({
+        templateId: "ar7-template-alias",
+        templateBuildId: "7d0-build-receipt",
+        apiUrl: "wss://api.example.test/api/v1/executors",
+        allowedEgress: ["api.example.test", "github.com", "api.github.com"],
+      })
+      expect(Redacted.value(configured.apiKey)).toBe("e2b-api-key")
+      const templateError = yield* loadConfig({ ...environment, E2B_TEMPLATE_ID: "" }).pipe(Effect.flip)
+      const apiError = yield* loadConfig({ ...environment, RIKA_EXECUTOR_API_URL: "" }).pipe(Effect.flip)
+      expect(Schema.is(ExecutorConfigError)(templateError)).toBe(true)
+      expect(templateError.message).toBe("E2B_TEMPLATE_ID is required")
+      expect(Schema.is(ExecutorConfigError)(apiError)).toBe(true)
+      expect(apiError.message).toBe("RIKA_EXECUTOR_API_URL is required")
+    }),
+  )
 })

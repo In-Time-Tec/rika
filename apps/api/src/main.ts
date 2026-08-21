@@ -1,25 +1,18 @@
 import { BunCrypto } from "@effect/platform-bun"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
-import { Console, Context, Effect, Layer, Redacted } from "effect"
+import { Console, Context, Effect, Layer } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import {
   closePostgresPool,
-  loadIdentityConfig,
   makeBetterAuthIdentityRuntime,
   makePostgresCliDeviceDirectory,
   makePostgresIdentityDirectory,
   makePostgresPool,
   makeResendMailSender,
 } from "@rika/identity"
-import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
-import * as HostedExecution from "@rika/execution"
-import * as ExecutionPostgres from "@rika/execution/postgres"
-import * as RemoteCells from "@rika/execution/remote-cells"
 import { serveApi } from "./adapters/bun-server"
-import { config as executorConfig, Executor, layer as executorLayer, service as executorService } from "./executor"
-import { layer as localExecutorLayer } from "./local-executor"
-import { HostedProduct, postgres as hostedProductPostgres } from "./hosted-product"
-import { runtimeEnvironment } from "./runtime-environment"
+import { loadApiConfig } from "./api-config"
+import { HostedApplication, layer as hostedApplicationLayer } from "./hosted-application"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -36,8 +29,8 @@ const provideLayerScoped =
 
 const program = Effect.scoped(
   Effect.gen(function* () {
-    const environment = runtimeEnvironment(Bun.env)
-    const config = yield* loadIdentityConfig(environment)
+    const loaded = yield* loadApiConfig(Bun.env)
+    const { environment, identity: config, executor: executorOptions } = loaded
     const httpClient = yield* HttpClient.HttpClient
     const pool = makePostgresPool(config)
     yield* Effect.addFinalizer(() => closePostgresPool(pool).pipe(Effect.ignore))
@@ -51,59 +44,16 @@ const program = Effect.scoped(
       ssl: config.databaseSsl === "disable" ? false : { rejectUnauthorized: config.databaseSsl === "verify-full" },
       maxConnections: 10,
     }
-    const executorOptions = executorConfig(environment)
-    const product = Context.get(
+    const application = Context.get(
       yield* Layer.build(
-        hostedProductPostgres({
+        hostedApplicationLayer({
           database: postgres,
-          templateBuildId: executorOptions.templateBuildId,
-          providerScope: executorOptions.deploymentId,
+          databaseUrl: config.databaseUrl,
+          executor: executorOptions,
+          workerId: environment.RAILWAY_DEPLOYMENT_ID ?? executorOptions.deploymentId,
         }),
       ),
-      HostedProduct,
-    )
-    const executor = Context.get(
-      yield* Layer.build(
-        executorService.pipe(
-          Layer.provide(Layer.merge(executorLayer(executorOptions), localExecutorLayer)),
-          Layer.provide(postgresLayer(postgres)),
-          Layer.provide(BunCrypto.layer),
-        ),
-      ),
-      Executor,
-    )
-    const execution = Context.get(
-      yield* Layer.build(
-        HostedExecution.layerHosted({
-          kernel: { runtimeVersion: Bun.version, dataRoot: "/workspace" },
-          cells: HostedExecution.remoteCells({
-            cells: RemoteCells.layer({
-              execute: (request) =>
-                executor
-                  .run({ threadId: request.sessionId, operationKey: request.operationKey, code: request.code })
-                  .pipe(
-                    Effect.map((result) => result.response),
-                    Effect.mapError((error) => RemoteCells.Unavailable.make({ message: error.message })),
-                  ),
-            }),
-            maxRetries: 3,
-            retryDelayMillis: 250,
-          }),
-          postgres: {
-            url: Redacted.value(config.databaseUrl),
-            source: "rika-api",
-            maxConnections: postgres.maxConnections,
-            worker: {
-              workerId: Bun.env.RAILWAY_DEPLOYMENT_ID ?? executorOptions.deploymentId,
-              concurrency: 8,
-              leaseMillis: 30_000,
-              pollIntervalMillis: 250,
-              cancellationIntervalMillis: 1_000,
-            },
-          },
-        }),
-      ),
-      ExecutionPostgres.Readiness,
+      HostedApplication,
     )
     yield* serveApi({
       config,
@@ -111,9 +61,9 @@ const program = Effect.scoped(
         identity,
         directory: makePostgresIdentityDirectory(pool),
         devices: makePostgresCliDeviceDirectory(pool),
-        product,
-        executor,
-        execution,
+        product: application.product,
+        executor: application.executor,
+        execution: application.execution.readiness,
         production: config.production,
       },
     })
