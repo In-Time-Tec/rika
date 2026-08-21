@@ -157,6 +157,7 @@ describe("E2B image source contract", () => {
     const create = await text("packages/e2b-executor/scripts/create-image-template.ts", root)
 
     expect(create).toContain(".fromImage(image, { username, password: Redacted.value(password) })")
+    expect(create).toContain('.setUser("rika-executor")')
     expect(create).toContain('.setStartCmd("/opt/rika/start.sh", "curl --fail --silent http://127.0.0.1:7070/health")')
     expect(create).toContain("Template.build(template, alias, {")
     expect(create).toContain("apiKey: Redacted.value(apiKey)")

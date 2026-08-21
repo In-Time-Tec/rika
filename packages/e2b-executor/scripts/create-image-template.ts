@@ -21,6 +21,7 @@ export const createImageTemplate = Effect.fn("ExecutorImageTemplate.create")(fun
   const apiKey = yield* Config.redacted("E2B_API_KEY")
   const template = Template()
     .fromImage(image, { username, password: Redacted.value(password) })
+    .setUser("rika-executor")
     .setStartCmd("/opt/rika/start.sh", "curl --fail --silent http://127.0.0.1:7070/health")
   const built = yield* Effect.tryPromise({
     try: () =>
