@@ -44,6 +44,12 @@ test("builds one deterministic OCI candidate and canonical SPDX SBOM without reg
   expect(review).not.toContain("docker push")
   expect(review).not.toContain("docker login")
 
+  const buildx = named("review", "Set up Docker Buildx")
+  expect(buildx?.uses).toBe("docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e")
+  expect(position("review", "Set up Docker Buildx")).toBeLessThan(
+    position("review", "Build deterministic OCI candidate"),
+  )
+
   const sbom = steps("review").find((step) => step.uses?.startsWith("anchore/sbom-action@"))
   expect(sbom?.with).toMatchObject({
     image: "oci-archive:executor-image.oci.tar",
