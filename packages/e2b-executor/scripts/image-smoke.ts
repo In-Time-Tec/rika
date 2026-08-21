@@ -16,7 +16,7 @@ const DoctorResult = Schema.Struct({
   manifestSha256: Schema.String,
   manifestToolCount: Schema.Int,
   manifestPackageCount: Schema.Int,
-  checks: Schema.Array(Schema.Struct({ name: Schema.String, ok: Schema.Boolean })),
+  checks: Schema.Array(Schema.Struct({ name: Schema.String, ok: Schema.Boolean, detail: Schema.String })),
 })
 const SmokeArtifact = Schema.Struct({ ...DoctorResult.fields, sandboxId: Schema.String })
 const requiredChecks = [
@@ -80,12 +80,16 @@ const smoke = Effect.fn("ExecutorImageSmoke.run")(function* (
     (sandbox) =>
       Effect.gen(function* () {
         const result = yield* Effect.tryPromise(() =>
-          sandbox.commands.run("rika executor doctor --json", { timeoutMs: 180_000 }),
+          sandbox.commands.run('rika executor doctor --json || [ "$?" -eq 1 ]', { timeoutMs: 180_000 }),
         ).pipe(Effect.flatMap((command) => decodeDoctorResult(command.stdout)))
-        if (!acceptsDoctorResult(result, buildId, manifestSha256, manifest))
-          return yield* SmokeError.make({ message: "Promoted E2B image failed its doctor contract" })
         const artifact = yield* encodeSmokeArtifact({ ...result, sandboxId: sandbox.sandboxId })
         yield* Effect.tryPromise(() => Bun.write("executor-smoke.json", `${artifact}\n`))
+        if (!acceptsDoctorResult(result, buildId, manifestSha256, manifest)) {
+          const failed = result.checks.filter(({ ok }) => !ok).map(({ name, detail }) => `${name}: ${detail}`)
+          return yield* SmokeError.make({
+            message: failed.length === 0 ? "Promoted E2B image failed its doctor contract" : failed.join("; "),
+          })
+        }
       }),
     (sandbox) => Effect.tryPromise(() => sandbox.kill()).pipe(Effect.ignore),
   )

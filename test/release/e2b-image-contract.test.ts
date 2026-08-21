@@ -149,6 +149,7 @@ describe("E2B image source contract", () => {
     expect(doctor).toContain("manifestPackageCount: manifest.aptPackages.length")
     expect(kernelDoctor).toContain("const workspace = process.argv[2]")
     expect(smoke).toContain("Sandbox.create(`${templateId}:${buildId}`")
+    expect(smoke).toContain("rika executor doctor --json ||")
     expect(doctor).toContain("!output.includes(tool.expect)")
     expect(doctor).toContain("output !== installed.version")
   })
@@ -169,14 +170,14 @@ describe("E2B image source contract", () => {
 
   test("rejects incomplete, unusable, or mismatched doctor evidence", () => {
     const checks = [
-      { name: "tool:bun", ok: true },
-      { name: "package:bash", ok: true },
-      { name: "workspace:ready", ok: true },
-      { name: "kernel:persistence", ok: true },
-      { name: "browser:headless", ok: true },
-      { name: "network:outbound", ok: true },
-      { name: "credentials:absent", ok: true },
-      { name: "credentials:broker-ready", ok: true },
+      { name: "tool:bun", ok: true, detail: "ok" },
+      { name: "package:bash", ok: true, detail: "ok" },
+      { name: "workspace:ready", ok: true, detail: "ok" },
+      { name: "kernel:persistence", ok: true, detail: "ok" },
+      { name: "browser:headless", ok: true, detail: "ok" },
+      { name: "network:outbound", ok: true, detail: "ok" },
+      { name: "credentials:absent", ok: true, detail: "ok" },
+      { name: "credentials:broker-ready", ok: true, detail: "ok" },
     ]
     const valid = {
       ok: true,
