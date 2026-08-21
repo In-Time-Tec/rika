@@ -67,7 +67,6 @@ jobs:
             --platform linux/amd64 \
             --provenance=false \
             --sbom=false \
-            --build-arg BUILDKIT_MULTI_PLATFORM=1 \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "dev.rika.executor.manifest.sha256=$MANIFEST_SHA256" \
             --file infra/e2b/executor-v1/e2b.Dockerfile \

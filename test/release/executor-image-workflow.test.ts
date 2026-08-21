@@ -40,6 +40,7 @@ test("builds one deterministic OCI candidate and canonical SPDX SBOM without reg
   expect(review).toContain("docker buildx build")
   expect(review).toContain("--platform linux/amd64")
   expect(review).toContain("type=oci,dest=executor-image.oci.tar,rewrite-timestamp=true")
+  expect(review).not.toContain("BUILDKIT_MULTI_PLATFORM")
   expect(review).toContain("dev.rika.executor.manifest.sha256=$MANIFEST_SHA256")
   expect(review).not.toContain("docker push")
   expect(review).not.toContain("docker login")
