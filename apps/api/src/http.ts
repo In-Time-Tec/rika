@@ -88,13 +88,10 @@ const currentPath = (url: URL) => `${url.pathname}${url.search}`
 const loginRedirect = (url: URL, production: boolean) =>
   redirect(`/login?redirect=${encodeURIComponent(currentPath(url))}`, production)
 
-const organizationRedirect = (url: URL, production: boolean) =>
-  redirect(`/organizations/new?redirect=${encodeURIComponent(currentPath(url))}`, production)
-
 const isAuthPath = (path: string) =>
   path === "/api/auth" || path.startsWith("/api/auth/") || path === "/.well-known/oauth-authorization-server/api/auth"
 
-const requiresOrganization = (path: string) =>
+const requiresAuthentication = (path: string) =>
   path === "/api/auth/device/approve" || path === "/api/auth/oauth2/authorize" || path === "/api/auth/oauth2/consent"
 
 const isBrowserAuthorization = (path: string, request: Request) =>
@@ -290,20 +287,12 @@ const routeRequest = Effect.fn("ApiHttp.route")(function* (request: Request, dep
   }
 
   if (isAuthPath(pathname)) {
-    if (requiresOrganization(pathname)) {
+    if (requiresAuthentication(pathname)) {
       const access = yield* accountAccess(request, dependencies)
       if (access._tag !== "account")
         return isBrowserAuthorization(pathname, request) && (access._tag === "anonymous" || access._tag === "invalid")
           ? loginRedirect(url, dependencies.production)
           : accessFailure(access, dependencies)
-      if (access.account.memberships.length === 0)
-        return isBrowserAuthorization(pathname, request)
-          ? organizationRedirect(url, dependencies.production)
-          : json(
-              { message: "Create or join an organization before authorizing a client" },
-              dependencies.production,
-              403,
-            )
     }
     return yield* dependencies.identity.handle(request).pipe(
       Effect.map((response) => secured(response, dependencies.production)),

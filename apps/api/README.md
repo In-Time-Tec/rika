@@ -1,6 +1,6 @@
 # Rika API
 
-The API is a Railway-ready Bun service and the composition root for `@rika/identity`. Better Auth owns PostgreSQL identity, session, organization, invitation, OAuth provider, and device authorization state. Rika routes require an organization membership before product access or authorization approval.
+The API is a Railway-ready Bun service and the composition root for `@rika/identity`. Better Auth owns PostgreSQL identity, session, organization, invitation, OAuth provider, and device authorization state. Every authenticated user has a personal hosted owner; organization membership is optional.
 
 The API owns no browser pages. The separate `@rika/web` service renders those pages, and the public Caddy proxy keeps browser and API traffic on one origin. `/healthz` is liveness and `/readyz` checks PostgreSQL and the services required to admit work.
 

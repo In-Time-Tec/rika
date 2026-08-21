@@ -538,18 +538,18 @@ describe("api HTTP", () => {
     }),
   )
 
-  it.effect("requires an organization before device approval", () =>
+  it.effect("allows a personal account to approve a device without an organization", () =>
     Effect.gen(function* () {
       const withoutOrganization = dependencies({
         userId: "user-1",
         account: { ...account, memberships: [] },
       })
       const api = yield* response("/api/auth/device/approve", withoutOrganization, { method: "POST" })
-      expect(api.status).toBe(403)
+      expect(api.status).toBe(204)
     }),
   )
 
-  it.effect("requires authentication and an organization at OAuth authorization", () =>
+  it.effect("requires authentication but no organization at OAuth authorization", () =>
     Effect.gen(function* () {
       const path = "/api/auth/oauth2/authorize?client_id=client-1&response_type=code"
       const anonymous = yield* response(path)
@@ -560,9 +560,8 @@ describe("api HTTP", () => {
         userId: "user-1",
         account: { ...account, memberships: [] },
       })
-      const onboarding = yield* response(path, withoutOrganization)
-      expect(onboarding.status).toBe(303)
-      expect(onboarding.headers.get("location")).toContain("/organizations/new?redirect=")
+      const personal = yield* response(path, withoutOrganization)
+      expect(personal.status).toBe(204)
     }),
   )
 
