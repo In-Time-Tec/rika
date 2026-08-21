@@ -2,6 +2,7 @@ import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import {
   Controller,
   ControllerError,
+  DefaultOrphanGraceMillis,
   layer as controllerLayer,
   type AssignmentKey,
   type Interface as ControllerService,
@@ -221,6 +222,13 @@ export const service = Layer.effect(
       _tag: "DomainFailure",
       failure: { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" },
     }
+    const reapOrphans = controller.cleanupOrphans.pipe(
+      Effect.catch((error) =>
+        Effect.logError("executor.orphan-reaper.failed").pipe(
+          Effect.annotateLogs({ "rika.error.kind": error.kind, "rika.error.message": error.message }),
+        ),
+      ),
+    )
     const preparationAccess = Effect.fn("Executor.preparationAccess")(function* (
       input: import("@rika/remote-execution/protocol").AccessWire,
     ) {
@@ -1051,10 +1059,10 @@ export const service = Layer.effect(
                 : ControllerError.make({ kind: "repository", message: "Executor phase authorization was rejected" }),
             ),
           ),
-      ready: controller.cleanupOrphans.pipe(
+      ready: reapOrphans.pipe(
         Effect.andThen(
-          Effect.sleep("5 minutes").pipe(
-            Effect.andThen(controller.cleanupOrphans),
+          Effect.sleep(DefaultOrphanGraceMillis).pipe(
+            Effect.andThen(reapOrphans),
             Effect.forever,
             Effect.forkIn(scope),
           ),

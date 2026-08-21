@@ -694,10 +694,19 @@ describe("Controller", () => {
         templateBuildId: "template-build-v1-immutable",
         metadata: { "rika.managed": "e2b-executor", "rika.app-id": "rika", "rika.deployment-id": "test" },
       },
+      {
+        sandboxId: "sandbox-other-app",
+        state: "running",
+        templateId: "ar7-template-alias",
+        templateBuildId: "template-build-v1-immutable",
+        metadata: { "rika.managed": "e2b-executor", "rika.app-id": "other", "rika.deployment-id": "test" },
+      },
     ]
     return Effect.gen(function* () {
       const service = yield* controller
       yield* provision()
+      expect(yield* service.cleanupOrphans).toEqual([])
+      yield* TestClock.adjust("5 minutes")
       expect(yield* service.cleanupOrphans).toEqual(["sandbox-orphan"])
       expect(harness.provider.kills).toEqual(["sandbox-orphan"])
     }).pipe(provideLayer(harness.layer))
@@ -726,12 +735,85 @@ describe("Controller", () => {
 
       yield* service.kill({ assignmentId: "assignment-1", generation: 1 })
       harness.provider.kills.length = 0
+      expect(yield* service.cleanupOrphans).toEqual([])
+      yield* TestClock.adjust("5 minutes")
       expect(yield* service.cleanupOrphans).toEqual(["sandbox-1"])
       expect(harness.provider.kills).toEqual(["sandbox-1"])
     }).pipe(provideLayer(harness.layer))
   })
 
-  it.effect("preserves an unbound provisioning sandbox with the exact durable generation identity", () => {
+  it.effect("reaps superseded generations after grace", () => {
+    const harness = makeHarness()
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* provision()
+      yield* authenticate(harness, 1)
+      yield* service.replace({ assignmentId: "assignment-1", generation: 1 }, runtimeAuthorization)
+      harness.provider.kills.length = 0
+      harness.provider.inventory = [
+        {
+          sandboxId: "sandbox-1",
+          state: "running",
+          templateId: "ar7-template-alias",
+          templateBuildId: "template-build-v1-immutable",
+          metadata: {
+            "rika.app-id": "rika",
+            "rika.deployment-id": "previous-deployment",
+            "rika.assignment-id": "assignment-1",
+            "rika.generation": "1",
+          },
+        },
+        {
+          sandboxId: "sandbox-2",
+          state: "running",
+          templateId: "ar7-template-alias",
+          templateBuildId: "template-build-v1-immutable",
+          metadata: {
+            "rika.app-id": "rika",
+            "rika.deployment-id": "test",
+            "rika.assignment-id": "assignment-1",
+            "rika.generation": "2",
+          },
+        },
+      ]
+
+      expect(yield* service.cleanupOrphans).toEqual([])
+      yield* TestClock.adjust("5 minutes")
+      expect(yield* service.cleanupOrphans).toEqual(["sandbox-1"])
+      expect(harness.provider.kills).toEqual(["sandbox-1"])
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("retries failed reaps and tolerates stale provider listings", () => {
+    const harness = makeHarness()
+    harness.provider.inventory = [
+      {
+        sandboxId: "sandbox-orphan",
+        state: "paused",
+        templateId: "ar7-template-alias",
+        templateBuildId: "template-build-v1-immutable",
+        metadata: { "rika.app-id": "rika", "rika.deployment-id": "previous-deployment" },
+      },
+    ]
+    return Effect.gen(function* () {
+      const service = yield* controller
+      expect(yield* service.cleanupOrphans).toEqual([])
+      yield* TestClock.adjust("5 minutes")
+
+      harness.provider.killFailure = true
+      expect(yield* service.cleanupOrphans).toEqual([])
+      harness.provider.killFailure = false
+      expect(yield* service.cleanupOrphans).toEqual(["sandbox-orphan"])
+
+      expect(yield* service.cleanupOrphans).toEqual([])
+      yield* TestClock.adjust("5 minutes")
+      harness.provider.killResult = false
+      expect(yield* service.cleanupOrphans).toEqual(["sandbox-orphan"])
+      expect(harness.provider.kills).toEqual(["sandbox-orphan", "sandbox-orphan", "sandbox-orphan"])
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("preserves a sandbox that becomes durable during its orphan grace period", () => {
     const harness = makeHarness()
     harness.provider.inventory = [
       {
@@ -748,6 +830,9 @@ describe("Controller", () => {
       },
     ]
     return Effect.gen(function* () {
+      const service = yield* controller
+      expect(yield* service.cleanupOrphans).toEqual([])
+
       const assignments = yield* ExecutorAssignments
       const assignment = yield* createAssignment()
       yield* assignments.beginProvisioning({
@@ -757,7 +842,7 @@ describe("Controller", () => {
         bootstrapCredentialDigest: Redacted.make("bootstrap-digest"),
         bootstrapLifetimeMillis: 60_000,
       })
-      const service = yield* controller
+      yield* TestClock.adjust("5 minutes")
       expect(yield* service.cleanupOrphans).toEqual([])
       expect(harness.provider.kills).toEqual([])
     }).pipe(provideLayer(harness.layer))

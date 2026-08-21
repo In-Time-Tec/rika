@@ -24,7 +24,7 @@ import {
   type WorkspaceProof,
 } from "@rika/remote-execution/protocol"
 import { encodeArchive, type SetupCacheKey } from "@rika/remote-execution/workspace-archive"
-import { Context, Crypto, DateTime, Effect, Encoding, Layer, Option, Redacted, Schema } from "effect"
+import { Clock, Context, Crypto, DateTime, Effect, Encoding, Layer, Option, Redacted, Schema } from "effect"
 import { StoredArchive, Vault } from "./checkpoint"
 import { Credentials, type Credential } from "./checkout"
 import { Provider, type CreateRequest, type ProviderError } from "./provider"
@@ -111,6 +111,7 @@ export const IdleTimeoutMillis = 15 * 60 * 1_000
 export const DefaultHeartbeatIntervalMillis = 20_000
 export const DefaultLeaseLifetimeMillis = 60_000
 export const DefaultBootstrapLifetimeMillis = 5 * 60 * 1_000
+export const DefaultOrphanGraceMillis = 5 * 60 * 1_000
 
 export interface Options {
   readonly appId: string
@@ -123,6 +124,7 @@ export interface Options {
   readonly heartbeatIntervalMillis?: number
   readonly leaseLifetimeMillis?: number
   readonly bootstrapLifetimeMillis?: number
+  readonly orphanGraceMillis?: number
   readonly setupCache?: boolean
 }
 
@@ -287,6 +289,8 @@ export const layer = (
       const heartbeatIntervalMillis = options.heartbeatIntervalMillis ?? DefaultHeartbeatIntervalMillis
       const leaseLifetimeMillis = options.leaseLifetimeMillis ?? DefaultLeaseLifetimeMillis
       const bootstrapLifetimeMillis = options.bootstrapLifetimeMillis ?? DefaultBootstrapLifetimeMillis
+      const orphanGraceMillis = options.orphanGraceMillis ?? DefaultOrphanGraceMillis
+      const orphanCandidates = new Map<string, number>()
 
       const allowedEgress = (policy: PhaseEgressPolicy, requiredPhase?: EnvironmentPhase) => {
         if (requiredPhase !== undefined && policy.phase !== requiredPhase)
@@ -1115,29 +1119,33 @@ export const layer = (
               (assignment.lifecycle._tag === "Provisioning" || assignment.lifecycle._tag === "AwaitingBootstrap") &&
               matchesGeneration(assignment, sandbox.templateId, sandbox.templateBuildId, sandbox.metadata),
           )
-        const orphans = inventory
-          .filter(
-            (sandbox) =>
-              sandbox.metadata["rika.app-id"] === options.appId &&
-              sandbox.metadata["rika.deployment-id"] === options.deploymentId &&
-              !preserved(sandbox),
-          )
-          .map((sandbox) => sandbox.sandboxId)
-        yield* Effect.forEach(
-          orphans,
-          (sandboxId) =>
-            HostedObservability.health("orphan_sandbox", { sandboxId }).pipe(
-              Effect.andThen(
-                HostedObservability.observe(
-                  "sandbox_reap",
-                  { sandboxId },
-                  provider.kill(sandboxId).pipe(Effect.mapError(providerFailure)),
-                ),
+        const candidates = inventory.filter(
+          (sandbox) => sandbox.metadata["rika.app-id"] === options.appId && !preserved(sandbox),
+        )
+        const candidateIds = new Set(candidates.map((sandbox) => sandbox.sandboxId))
+        for (const sandboxId of orphanCandidates.keys())
+          if (!candidateIds.has(sandboxId)) orphanCandidates.delete(sandboxId)
+        const now = yield* Clock.currentTimeMillis
+        const orphans = candidates.filter((sandbox) => {
+          const firstSeenAt = orphanCandidates.get(sandbox.sandboxId) ?? now
+          orphanCandidates.set(sandbox.sandboxId, firstSeenAt)
+          return now - firstSeenAt >= orphanGraceMillis
+        })
+        const reaped = yield* Effect.forEach(orphans, (sandbox) =>
+          HostedObservability.health("orphan_sandbox", { sandboxId: sandbox.sandboxId }).pipe(
+            Effect.andThen(
+              HostedObservability.observe(
+                "sandbox_reap",
+                { sandboxId: sandbox.sandboxId },
+                provider.kill(sandbox.sandboxId).pipe(Effect.mapError(providerFailure)),
               ),
             ),
-          { discard: true },
+            Effect.as(sandbox.sandboxId),
+            Effect.tap((id) => Effect.sync(() => orphanCandidates.delete(id))),
+            Effect.orElseSucceed(() => null),
+          ),
         )
-        return orphans
+        return reaped.flatMap((sandboxId) => (sandboxId === null ? [] : [sandboxId]))
       })
 
       return Controller.of({

@@ -30,6 +30,7 @@ export interface FakeProviderState {
   connectFailure: boolean
   pauseFailure: boolean
   killFailure: boolean
+  killResult: boolean
   inventory: Array<InventoryEntry>
 }
 
@@ -86,7 +87,7 @@ const providerLayer = (state: FakeProviderState) =>
         state.kills.push(sandboxId)
         return state.killFailure
           ? Effect.fail(ProviderError.make({ operation: "kill", message: "kill failed" }))
-          : Effect.succeed(true)
+          : Effect.succeed(state.killResult)
       },
       touch: (sandboxId, timeoutMillis) => {
         state.touches.push({ sandboxId, timeoutMillis })
@@ -121,6 +122,7 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     connectFailure: false,
     pauseFailure: false,
     killFailure: false,
+    killResult: true,
     inventory: [],
   }
   const checkpointInspections: Array<string> = []
