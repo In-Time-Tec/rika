@@ -54,15 +54,34 @@ describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
         image: string
         buildId: string
         manifestSha256: string
+        manifestToolCount: number
+        manifestPackageCount: number
         checks: Array<{ name: string; ok: boolean }>
       }
-      const manifest = await readFile(new URL("tool-manifest.json", imageRoot))
+      const manifestBytes = await readFile(new URL("tool-manifest.json", imageRoot))
+      const manifest = JSON.parse(manifestBytes.toString()) as {
+        tools: ReadonlyArray<unknown>
+        aptPackages: ReadonlyArray<unknown>
+      }
       expect(result.ok).toBe(true)
       expect(result.image).toBe("rika-executor-v1")
       expect(result.buildId).toBe("template-readiness")
-      expect(result.manifestSha256).toBe(createHash("sha256").update(manifest).digest("hex"))
+      expect(result.manifestSha256).toBe(createHash("sha256").update(manifestBytes).digest("hex"))
+      expect(result.manifestToolCount).toBe(manifest.tools.length)
+      expect(result.manifestPackageCount).toBe(manifest.aptPackages.length)
       expect(result.checks.length).toBeGreaterThan(30)
       expect(result.checks.every(({ ok }) => ok)).toBe(true)
+      const names = new Set(result.checks.map(({ name }) => name))
+      expect(names.size).toBe(result.checks.length)
+      for (const name of [
+        "workspace:ready",
+        "kernel:persistence",
+        "browser:headless",
+        "network:outbound",
+        "credentials:absent",
+        "credentials:broker-ready",
+      ])
+        expect(names).toContain(name)
 
       const container = await run([...containerCommand!, "run", "--detach", "--rm", tag])
       try {

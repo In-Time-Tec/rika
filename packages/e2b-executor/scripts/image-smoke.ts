@@ -4,18 +4,56 @@ import { Sandbox } from "e2b"
 import { Effect, Layer, Schema } from "effect"
 import { Argument, Command } from "effect/unstable/cli"
 
+const ImageManifest = Schema.Struct({
+  tools: Schema.Array(Schema.Struct({ name: Schema.String })),
+  aptPackages: Schema.Array(Schema.Struct({ name: Schema.String })),
+})
 const DoctorResult = Schema.Struct({
   ok: Schema.Boolean,
   image: Schema.Literal("rika-executor-v1"),
   manifestSchemaVersion: Schema.Literal(1),
   buildId: Schema.String,
   manifestSha256: Schema.String,
-  checks: Schema.Array(Schema.Struct({ ok: Schema.Boolean })),
+  manifestToolCount: Schema.Int,
+  manifestPackageCount: Schema.Int,
+  checks: Schema.Array(Schema.Struct({ name: Schema.String, ok: Schema.Boolean })),
 })
 const SmokeArtifact = Schema.Struct({ ...DoctorResult.fields, sandboxId: Schema.String })
+const requiredChecks = [
+  "workspace:ready",
+  "kernel:persistence",
+  "browser:headless",
+  "network:outbound",
+  "credentials:absent",
+  "credentials:broker-ready",
+] as const
+
+const acceptsDoctorResult = (
+  result: typeof DoctorResult.Type,
+  buildId: string,
+  manifestSha256: string,
+  manifest: typeof ImageManifest.Type,
+) => {
+  const names = new Set(result.checks.map(({ name }) => name))
+  return (
+    result.ok === true &&
+    result.buildId === buildId &&
+    result.manifestSha256 === manifestSha256 &&
+    result.manifestToolCount === manifest.tools.length &&
+    result.manifestPackageCount === manifest.aptPackages.length &&
+    result.checks.every((check) => check.ok === true) &&
+    names.size === result.checks.length &&
+    manifest.tools.every(({ name }) => names.has(`tool:${name}`)) &&
+    manifest.aptPackages.every(({ name }) => names.has(`package:${name}`)) &&
+    requiredChecks.every((name) => names.has(name))
+  )
+}
+
+export const testing = { acceptsDoctorResult } as const
 
 class SmokeError extends Schema.TaggedError<SmokeError>()("SmokeError", { message: Schema.String }) {}
 
+const decodeImageManifest = Schema.decodeUnknownEffect(Schema.fromJsonString(ImageManifest))
 const decodeDoctorResult = Schema.decodeUnknownEffect(Schema.fromJsonString(DoctorResult))
 const encodeSmokeArtifact = Schema.encodeEffect(Schema.fromJsonString(SmokeArtifact))
 
@@ -24,6 +62,9 @@ const smoke = Effect.fn("ExecutorImageSmoke.run")(function* (
   buildId: string,
   manifestSha256: string,
 ) {
+  const manifest = yield* Effect.tryPromise(() =>
+    Bun.file(new URL("../../../infra/e2b/executor-v1/tool-manifest.json", import.meta.url)).text(),
+  ).pipe(Effect.flatMap(decodeImageManifest))
   yield* Effect.acquireUseRelease(
     Effect.tryPromise(() =>
       Sandbox.create(`${templateId}:${buildId}`, {
@@ -41,12 +82,7 @@ const smoke = Effect.fn("ExecutorImageSmoke.run")(function* (
         const result = yield* Effect.tryPromise(() =>
           sandbox.commands.run("rika executor doctor --json", { timeoutMs: 180_000 }),
         ).pipe(Effect.flatMap((command) => decodeDoctorResult(command.stdout)))
-        if (
-          result.ok !== true ||
-          result.buildId !== buildId ||
-          result.manifestSha256 !== manifestSha256 ||
-          result.checks.some((check) => check.ok !== true)
-        )
+        if (!acceptsDoctorResult(result, buildId, manifestSha256, manifest))
           return yield* SmokeError.make({ message: "Promoted E2B image failed its doctor contract" })
         const artifact = yield* encodeSmokeArtifact({ ...result, sandboxId: sandbox.sandboxId })
         yield* Effect.tryPromise(() => Bun.write("executor-smoke.json", `${artifact}\n`))

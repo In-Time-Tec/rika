@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises"
 import { describe, expect, test } from "vitest"
+import { testing as imageSmoke } from "../../packages/e2b-executor/scripts/image-smoke"
 
 const root = new URL("../..", import.meta.url)
 const image = new URL("../../infra/e2b/executor-v1/", import.meta.url)
@@ -119,5 +120,79 @@ describe("E2B image source contract", () => {
     expect(dockerfile).toContain("sudo -n -u rika-workspace")
     expect(dockerfile).not.toMatch(/ARG .*?(TOKEN|SECRET|PASSWORD|PRIVATE_KEY)/)
     expect(dockerfile).not.toMatch(/COPY .*?(\.env|\.git|\.ssh|credential)/i)
+  })
+
+  test("executes workspace, kernel, browser, network, and credential-broker readiness in the promoted build", async () => {
+    const [doctor, kernelDoctor, smoke] = await Promise.all([
+      text("doctor.ts"),
+      text("kernel-doctor.ts"),
+      text("packages/e2b-executor/scripts/image-smoke.ts", root),
+    ])
+    for (const name of [
+      "workspace:ready",
+      "kernel:persistence",
+      "browser:headless",
+      "network:outbound",
+      "credentials:absent",
+      "credentials:broker-ready",
+    ]) {
+      expect(doctor).toContain(`check("${name}"`)
+      expect(smoke).toContain(`"${name}"`)
+    }
+    expect(doctor).toContain("unix: socketPath")
+    expect(doctor).toContain('"-u",\n      "rika-workspace"')
+    expect(doctor).toContain("manifestToolCount: manifest.tools.length")
+    expect(doctor).toContain("manifestPackageCount: manifest.aptPackages.length")
+    expect(kernelDoctor).toContain("const workspace = process.argv[2]")
+    expect(smoke).toContain("Sandbox.create(`${templateId}:${buildId}`")
+    expect(doctor).toContain("!output.includes(tool.expect)")
+    expect(doctor).toContain("output !== installed.version")
+  })
+
+  test("rejects incomplete, unusable, or mismatched doctor evidence", () => {
+    const checks = [
+      { name: "tool:bun", ok: true },
+      { name: "package:bash", ok: true },
+      { name: "workspace:ready", ok: true },
+      { name: "kernel:persistence", ok: true },
+      { name: "browser:headless", ok: true },
+      { name: "network:outbound", ok: true },
+      { name: "credentials:absent", ok: true },
+      { name: "credentials:broker-ready", ok: true },
+    ]
+    const valid = {
+      ok: true,
+      image: "rika-executor-v1" as const,
+      manifestSchemaVersion: 1 as const,
+      buildId: "build-1",
+      manifestSha256: "a".repeat(64),
+      manifestToolCount: 1,
+      manifestPackageCount: 1,
+      checks,
+    }
+    const manifest = { tools: [{ name: "bun" }], aptPackages: [{ name: "bash" }] }
+    const accepts = (result: typeof valid) =>
+      imageSmoke.acceptsDoctorResult(result, valid.buildId, valid.manifestSha256, manifest)
+
+    expect(accepts(valid)).toBe(true)
+    expect(accepts({ ...valid, ok: false })).toBe(false)
+    expect(accepts({ ...valid, buildId: "mutable-default" })).toBe(false)
+    expect(accepts({ ...valid, manifestSha256: "b".repeat(64) })).toBe(false)
+    expect(accepts({ ...valid, manifestToolCount: 2 })).toBe(false)
+    expect(accepts({ ...valid, manifestPackageCount: 2 })).toBe(false)
+    expect(accepts({ ...valid, checks: checks.slice(0, -1) })).toBe(false)
+    expect(imageSmoke.acceptsDoctorResult(valid, valid.buildId, valid.manifestSha256, { ...manifest, tools: [] })).toBe(
+      false,
+    )
+    expect(
+      imageSmoke.acceptsDoctorResult(valid, valid.buildId, valid.manifestSha256, {
+        ...manifest,
+        tools: [{ name: "missing" }],
+      }),
+    ).toBe(false)
+    expect(
+      accepts({ ...valid, checks: checks.map((check, index) => (index === 0 ? { ...check, ok: false } : check)) }),
+    ).toBe(false)
+    expect(accepts({ ...valid, checks: [...checks, checks[0]!] })).toBe(false)
   })
 })
