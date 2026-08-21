@@ -80,6 +80,33 @@ describe("Workspace checkpoint vault", () => {
     )
   })
 
+  it.effect("isolates setup caches by every authority and environment key component", () => {
+    const durable = new Map<string, Uint8Array>()
+    const objects = ObjectStore.of({
+      put: (objectKey, value) => Effect.sync(() => void durable.set(objectKey, value.slice())),
+      get: (objectKey) => Effect.sync(() => Option.fromNullishOr(durable.get(objectKey)?.slice())),
+      remove: (objectKey) => Effect.sync(() => void durable.delete(objectKey)),
+    })
+    return withVault(
+      Effect.gen(function* () {
+        const vault = yield* Vault
+        const archive = yield* workspaceArchive
+        yield* vault.storeSetupCache(cacheKey, archive)
+        expect(Option.isSome(yield* vault.loadSetupCache(cacheKey))).toBe(true)
+        for (const mismatched of [
+          { ...cacheKey, ownerId: "owner-2" },
+          { ...cacheKey, repository: { ...cacheKey.repository, repositoryId: "repository-2" } },
+          { ...cacheKey, repository: { ...cacheKey.repository, commitSha: "d".repeat(40) } },
+          { ...cacheKey, setupHookDigest: `sha256:${"d".repeat(64)}` },
+          { ...cacheKey, templateBuildId: "build-2" },
+          { ...cacheKey, environmentDigest: `sha256:${"d".repeat(64)}` },
+        ])
+          expect(Option.isNone(yield* vault.loadSetupCache(mismatched))).toBe(true)
+      }),
+      objects,
+    )
+  })
+
   it.effect("rejects an upload that does not verify and treats a corrupt setup cache as a safe miss", () => {
     const durable = new Map<string, Uint8Array>()
     let corruptRead = true
