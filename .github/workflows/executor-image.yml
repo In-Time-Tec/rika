@@ -12,6 +12,11 @@ on:
         required: true
         default: false
         type: boolean
+      resume_run_id:
+        description: Failed promotion run whose exact published image should resume at E2B
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -22,6 +27,7 @@ concurrency:
 
 jobs:
   review:
+    if: inputs.resume_run_id == ''
     runs-on: ubuntu-latest
     timeout-minutes: 60
     outputs:
@@ -168,8 +174,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  promote:
-    if: inputs.promote == true
+  publish:
+    if: inputs.promote == true && inputs.resume_run_id == ''
     needs: review
     environment: executor-production
     runs-on: ubuntu-latest
@@ -187,18 +193,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.3.14
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-      - name: Require promotion credentials
-        env:
-          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
-        run: |
-          set -euo pipefail
-          test -n "$E2B_API_KEY"
       - name: Download review evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -267,7 +261,7 @@ jobs:
           predicate-type: https://github.com/${{ github.repository }}/attestations/executor-image/v1
           predicate-path: executor-build.json
           push-to-registry: true
-      - name: Verify image attestations before publication
+      - name: Verify published image attestations
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -275,35 +269,150 @@ jobs:
           subject="oci://$IMAGE@$digest"
           gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" --predicate-type "https://slsa.dev/provenance/v1" --bundle-from-oci
           gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" --predicate-type "https://github.com/$GITHUB_REPOSITORY/attestations/executor-image/v1" --bundle-from-oci
-      - name: Publish attested generation for E2B
+
+  resume:
+    if: inputs.promote == true && inputs.resume_run_id != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      digest: ${{ steps.evidence.outputs.digest }}
+      image: ${{ steps.evidence.outputs.image }}
+      manifest-sha256: ${{ steps.evidence.outputs.manifest-sha256 }}
+      source-commit: ${{ steps.run.outputs.source-commit }}
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout recovery implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Verify failed promotion run identity
+        id: run
         env:
           GH_TOKEN: ${{ github.token }}
-          OWNER_TYPE: ${{ github.event.repository.owner.type }}
+          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
         run: |
-          owner_path="orgs"
-          test "$OWNER_TYPE" = Organization || owner_path="users"
-          gh api --method PATCH "/$owner_path/${{ github.repository_owner }}/packages/container/rika-executor-g${{ inputs.generation }}" \
-            --field visibility=public
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          case "$RESUME_RUN_ID" in ''|*[!0-9]*) exit 1 ;; esac
+          gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$RESUME_RUN_ID" > resume-run.json
+          test "$(jq -er '.repository.full_name' resume-run.json)" = "$GITHUB_REPOSITORY"
+          test "$(jq -er '.path' resume-run.json)" = ".github/workflows/executor-image.yml"
+          test "$(jq -er '.event' resume-run.json)" = workflow_dispatch
+          test "$(jq -er '.head_branch' resume-run.json)" = main
+          test "$(jq -er '.status' resume-run.json)" = completed
+          test "$(jq -er '.conclusion' resume-run.json)" = failure
+          source_commit="$(jq -er '.head_sha | select(test("^[a-f0-9]{40}$"))' resume-run.json)"
+          gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$RESUME_RUN_ID/jobs?per_page=100" > resume-jobs.json
+          test "$(jq -er '.total_count' resume-jobs.json)" -lt 100
+          jq -e 'any(.jobs[]; .name == "review" and .conclusion == "success")' resume-jobs.json
+          jq -e 'any(.jobs[]; .name == "promote" and .conclusion == "failure")' resume-jobs.json
+          for step in \
+            "Upload immutable digest without a tag" \
+            "Attest exact image provenance" \
+            "Attest executor build identity" \
+            "Verify image attestations before publication"
+          do
+            jq -e --arg step "$step" 'any(.jobs[] | select(.name == "promote") | .steps[]; .name == $step and .conclusion == "success")' resume-jobs.json
+          done
+          jq -e 'any(.jobs[] | select(.name == "promote") | .steps[]; .name == "Create and smoke immutable E2B build" and .conclusion == "skipped")' resume-jobs.json
+          echo "source-commit=$source_commit" >> "$GITHUB_OUTPUT"
+      - name: Download retained review evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: executor-g${{ inputs.generation }}-${{ steps.run.outputs.source-commit }}-evidence
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify retained review evidence
+        id: evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ steps.run.outputs.source-commit }}
+        run: |
+          set -euo pipefail
+          owner="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          expected_image="ghcr.io/$owner/rika-executor-g${{ inputs.generation }}"
+          test "$(jq -er '.generation' executor-build.json)" -eq "${{ inputs.generation }}"
+          test "$(jq -er '.sourceCommit' executor-build.json)" = "$SOURCE_COMMIT"
+          test "$(jq -er '.image' executor-build.json)" = "$expected_image"
+          digest="$(jq -er '.imageDigest | select(test("^sha256:[a-f0-9]{64}$"))' executor-build.json)"
+          manifest_sha256="$(jq -er '.manifest.sha256 | select(test("^[a-f0-9]{64}$"))' executor-build.json)"
+          test "$(sha256sum infra/e2b/executor-v1/tool-manifest.json | cut -d' ' -f1)" = "$manifest_sha256"
+          test "$(sha256sum executor-sbom.spdx.json | cut -d' ' -f1)" = "$(jq -er '.sbom.sha256' executor-build.json)"
+          test "$(sha256sum executor-vulnerability-scan.json | cut -d' ' -f1)" = "$(jq -er '.vulnerabilityScan.sha256' executor-build.json)"
+          test "$(jq '[.Results[]?.Vulnerabilities[]? | select((.Severity == "HIGH" or .Severity == "CRITICAL") and (.FixedVersion // "") != "")] | length' executor-vulnerability-scan.json)" -eq 0
+          gh attestation verify executor-build.json --repo "$GITHUB_REPOSITORY"
+          {
+            echo "image=$expected_image"
+            echo "digest=$digest"
+            echo "manifest-sha256=$manifest_sha256"
+          } >> "$GITHUB_OUTPUT"
+      - name: Authenticate to private GHCR image
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Verify exact published image and attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ steps.evidence.outputs.image }}
+          digest: ${{ steps.evidence.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker manifest inspect "$IMAGE@$digest" > /dev/null
+          subject="oci://$IMAGE@$digest"
+          gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" --predicate-type "https://slsa.dev/provenance/v1" --bundle-from-oci
+          gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" --predicate-type "https://github.com/$GITHUB_REPOSITORY/attestations/executor-image/v1" --bundle-from-oci
+
+  template:
+    if: >-
+      always() && inputs.promote == true &&
+      ((inputs.resume_run_id == '' && needs.publish.result == 'success') ||
+      (inputs.resume_run_id != '' && needs.resume.result == 'success'))
+    needs: [review, publish, resume]
+    environment: executor-production
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      IMAGE: ${{ needs.resume.outputs.image || needs.review.outputs.image }}
+      digest: ${{ needs.resume.outputs.digest || needs.review.outputs.digest }}
+      MANIFEST_SHA256: ${{ needs.resume.outputs.manifest-sha256 || needs.review.outputs.manifest-sha256 }}
+      SOURCE_COMMIT: ${{ needs.resume.outputs.source-commit || github.sha }}
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Require template credentials
+        env:
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+          GHCR_PASSWORD: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -n "$E2B_API_KEY"
+          test -n "$GHCR_PASSWORD"
       - name: Create and smoke immutable E2B build
         env:
           E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_PASSWORD: ${{ github.token }}
         run: |
           set -euo pipefail
           template_alias="rika-executor-v1-g${{ inputs.generation }}"
-          template_context="$(mktemp -d)"
-          trap 'rm -rf "$template_context" "$RUNNER_TEMP/e2b-template-create.log"' EXIT
-          printf 'FROM %s@%s\n' "$IMAGE" "$digest" > "$template_context/e2b.Dockerfile"
-          bunx @e2b/cli@2.16.2 template create "$template_alias" \
-            --path "$template_context" \
-            --dockerfile e2b.Dockerfile \
-            --cmd "/opt/rika/start.sh" \
-            --ready-cmd "curl --fail --silent http://127.0.0.1:7070/health" \
-            2>&1 | tee "$RUNNER_TEMP/e2b-template-create.log"
-          identity="$(sed -n 's/.*Template created with ID: \([^,]*\), Build ID: \([^[:space:]]*\).*/\1 \2/p' "$RUNNER_TEMP/e2b-template-create.log" | tail -n 1)"
-          template_id="${identity%% *}"
-          build_id="${identity#* }"
-          test -n "$template_id"
-          test -n "$build_id"
+          bun run packages/e2b-executor/scripts/create-image-template.ts "$IMAGE@$digest" "$template_alias"
+          template_id="$(jq -er '.templateId | select(length > 0)' executor-template.json)"
+          build_id="$(jq -er '.buildId | select(length > 0)' executor-template.json)"
           test "$template_id" != "$build_id"
           bun run packages/e2b-executor/scripts/image-smoke.ts "$template_id" "$build_id" "$MANIFEST_SHA256"
           jq -S -n \
@@ -313,7 +422,7 @@ jobs:
             --arg image "$IMAGE" \
             --arg imageDigest "$digest" \
             --arg manifestSha256 "$MANIFEST_SHA256" \
-            --arg sourceCommit "$GITHUB_SHA" \
+            --arg sourceCommit "$SOURCE_COMMIT" \
             --arg generation "${{ inputs.generation }}" \
             '{schemaVersion:1,generation:($generation|tonumber),sourceCommit:$sourceCommit,image:$image,imageDigest:$imageDigest,manifestSha256:$manifestSha256,e2bTemplateAlias:$templateAlias,e2bTemplateId:$templateId,e2bBuildId:$buildId}' \
             > executor-promotion.json
@@ -325,9 +434,10 @@ jobs:
       - name: Retain promotion receipt
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: executor-g${{ inputs.generation }}-${{ github.sha }}-promotion
+          name: executor-g${{ inputs.generation }}-${{ env.SOURCE_COMMIT }}-promotion
           path: |-
             executor-promotion.json
             executor-smoke.json
+            executor-template.json
           if-no-files-found: error
           retention-days: 90

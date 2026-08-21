@@ -153,6 +153,17 @@ describe("E2B image source contract", () => {
     expect(doctor).toContain("output !== installed.version")
   })
 
+  test("imports the immutable private image with short-lived registry credentials", async () => {
+    const create = await text("packages/e2b-executor/scripts/create-image-template.ts", root)
+
+    expect(create).toContain(".fromImage(image, { username, password: Redacted.value(password) })")
+    expect(create).toContain('.setStartCmd("/opt/rika/start.sh", "curl --fail --silent http://127.0.0.1:7070/health")')
+    expect(create).toContain("Template.build(template, alias, { apiKey: Redacted.value(apiKey) })")
+    expect(create).toContain('Config.string("GHCR_USERNAME")')
+    expect(create).toContain('Config.redacted("GHCR_PASSWORD")')
+    expect(create).not.toContain("console.log")
+  })
+
   test("rejects incomplete, unusable, or mismatched doctor evidence", () => {
     const checks = [
       { name: "tool:bun", ok: true },

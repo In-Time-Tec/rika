@@ -11,12 +11,17 @@ type Step = {
 }
 type Job = {
   readonly if?: string
-  readonly needs?: string
+  readonly needs?: string | ReadonlyArray<string>
   readonly environment?: string
   readonly permissions?: Readonly<Record<string, string>>
   readonly steps?: ReadonlyArray<Step>
 }
 type Workflow = {
+  readonly on?: {
+    readonly workflow_dispatch?: {
+      readonly inputs?: Readonly<Record<string, Readonly<Record<string, unknown>>>>
+    }
+  }
   readonly concurrency?: Readonly<Record<string, unknown>>
   readonly jobs?: Readonly<Record<string, Job>>
 }
@@ -110,13 +115,13 @@ test("binds source, manifest, SBOM, scan, and image digests into signed provenan
   expect(review).toContain("vulnerabilityScan:{path:")
   expect(named("review", "Attest review build record")?.with?.["subject-path"]).toBe("executor-build.json")
 
-  const provenance = named("promote", "Attest exact image provenance")
+  const provenance = named("publish", "Attest exact image provenance")
   expect(provenance?.with).toMatchObject({
     "subject-name": "${{ env.IMAGE }}",
     "subject-digest": "${{ env.digest }}",
     "push-to-registry": true,
   })
-  const identity = named("promote", "Attest executor build identity")
+  const identity = named("publish", "Attest executor build identity")
   expect(identity?.with).toMatchObject({
     "subject-name": "${{ env.IMAGE }}",
     "subject-digest": "${{ env.digest }}",
@@ -131,51 +136,84 @@ test("cannot publish or promote a mutable, reused, unreviewed, or unattested ima
     group: "executor-image-g${{ inputs.generation }}",
     "cancel-in-progress": false,
   })
-  expect(jobs.promote?.if).toBe("inputs.promote == true")
-  expect(jobs.promote?.needs).toBe("review")
-  expect(jobs.promote?.environment).toBe("executor-production")
-  expect(jobs.promote?.permissions).toMatchObject({ packages: "write", "id-token": "write", attestations: "write" })
-
-  const credentials = named("promote", "Require promotion credentials")
-  expect(credentials?.env).toEqual({ E2B_API_KEY: "${{ secrets.E2B_API_KEY }}" })
-  expect(credentials?.run).toContain('test -n "$E2B_API_KEY"')
-  expect(position("promote", "Require promotion credentials")).toBeLessThan(
-    position("promote", "Require a fresh generation package"),
+  expect(jobs.review?.if).toBe("inputs.resume_run_id == ''")
+  expect(jobs.publish?.if).toBe("inputs.promote == true && inputs.resume_run_id == ''")
+  expect(jobs.publish?.needs).toBe("review")
+  expect(jobs.publish?.environment).toBe("executor-production")
+  expect(jobs.publish?.permissions).toMatchObject({ packages: "write", "id-token": "write", attestations: "write" })
+  expect(commands("publish")).not.toContain("E2B_API_KEY")
+  expect(position("publish", "Verify approved review evidence")).toBeLessThan(
+    position("publish", "Require a fresh generation package"),
   )
-  expect(position("promote", "Verify approved review evidence")).toBeLessThan(
-    position("promote", "Require a fresh generation package"),
+  expect(position("publish", "Require a fresh generation package")).toBeLessThan(
+    position("publish", "Authenticate to GHCR"),
   )
-  expect(position("promote", "Require a fresh generation package")).toBeLessThan(
-    position("promote", "Authenticate to GHCR"),
+  expect(position("publish", "Authenticate to GHCR")).toBeLessThan(
+    position("publish", "Upload immutable digest without a tag"),
   )
-  expect(position("promote", "Authenticate to GHCR")).toBeLessThan(
-    position("promote", "Upload immutable digest without a tag"),
+  expect(position("publish", "Upload immutable digest without a tag")).toBeLessThan(
+    position("publish", "Attest exact image provenance"),
   )
-  expect(position("promote", "Upload immutable digest without a tag")).toBeLessThan(
-    position("promote", "Attest exact image provenance"),
-  )
-  expect(position("promote", "Attest executor build identity")).toBeLessThan(
-    position("promote", "Verify image attestations before publication"),
-  )
-  expect(position("promote", "Verify image attestations before publication")).toBeLessThan(
-    position("promote", "Publish attested generation for E2B"),
-  )
-  expect(position("promote", "Publish attested generation for E2B")).toBeLessThan(
-    position("promote", "Create and smoke immutable E2B build"),
+  expect(position("publish", "Attest executor build identity")).toBeLessThan(
+    position("publish", "Verify published image attestations"),
   )
 
-  const promote = commands("promote")
-  expect(promote).toContain("rika-executor-g${{ inputs.generation }}")
-  expect(promote).toContain('"docker://$IMAGE@$digest"')
-  expect(promote).toContain("copy --preserve-digests")
-  expect(promote).not.toContain("docker push")
-  expect(promote).not.toMatch(/\$IMAGE:[^/]/)
-  expect(promote).toContain('subject="oci://$IMAGE@$digest"')
-  expect(promote).toContain('template_alias="rika-executor-v1-g${{ inputs.generation }}"')
-  expect(promote).not.toContain("template list")
-  expect(promote).toContain("Template created with ID: \\([^,]*\\), Build ID:")
-  expect(promote).toContain(
+  const publish = commands("publish")
+  expect(publish).toContain("rika-executor-g${{ inputs.generation }}")
+  expect(publish).toContain('"docker://$IMAGE@$digest"')
+  expect(publish).toContain("copy --preserve-digests")
+  expect(publish).not.toContain("docker push")
+  expect(publish).not.toMatch(/\$IMAGE:[^/]/)
+  expect(publish).toContain('subject="oci://$IMAGE@$digest"')
+  expect(publish).not.toContain("visibility=public")
+
+  expect(jobs.template?.needs).toEqual(["review", "publish", "resume"])
+  expect(jobs.template?.environment).toBe("executor-production")
+  expect(jobs.template?.permissions).toMatchObject({ packages: "read", "id-token": "write", attestations: "write" })
+  expect(jobs.template?.permissions?.packages).not.toBe("write")
+  expect(jobs.template?.if).toContain("needs.publish.result == 'success'")
+  expect(jobs.template?.if).toContain("needs.resume.result == 'success'")
+  const template = commands("template")
+  expect(template).toContain('template_alias="rika-executor-v1-g${{ inputs.generation }}"')
+  expect(template).toContain(
+    'bun run packages/e2b-executor/scripts/create-image-template.ts "$IMAGE@$digest" "$template_alias"',
+  )
+  expect(template).toContain(
     'bun run packages/e2b-executor/scripts/image-smoke.ts "$template_id" "$build_id" "$MANIFEST_SHA256"',
+  )
+  expect(position("template", "Require template credentials")).toBeLessThan(
+    position("template", "Create and smoke immutable E2B build"),
+  )
+})
+
+test("resumes only an exact failed promotion after verifying retained evidence and private image attestations", () => {
+  expect(workflow.on?.workflow_dispatch?.inputs?.resume_run_id).toMatchObject({
+    required: false,
+    default: "",
+    type: "string",
+  })
+  expect(jobs.resume?.if).toBe("inputs.promote == true && inputs.resume_run_id != ''")
+  expect(jobs.resume?.permissions).toEqual({
+    actions: "read",
+    attestations: "read",
+    contents: "read",
+    packages: "read",
+  })
+  const download = named("resume", "Download retained review evidence")
+  expect(download?.with).toMatchObject({
+    "run-id": "${{ inputs.resume_run_id }}",
+    "github-token": "${{ github.token }}",
+  })
+  const resume = commands("resume")
+  expect(resume).toContain('test "$(jq -er \'.path\' resume-run.json)" = ".github/workflows/executor-image.yml"')
+  expect(resume).toContain("test \"$(jq -er '.event' resume-run.json)\" = workflow_dispatch")
+  expect(resume).toContain("test \"$(jq -er '.head_branch' resume-run.json)\" = main")
+  expect(resume).toContain('test "$(jq -er \'.sourceCommit\' executor-build.json)" = "$SOURCE_COMMIT"')
+  expect(resume).toContain("gh attestation verify executor-build.json")
+  expect(resume).toContain('docker manifest inspect "$IMAGE@$digest"')
+  expect(resume).toContain('subject="oci://$IMAGE@$digest"')
+  expect(position("resume", "Verify retained review evidence")).toBeLessThan(
+    position("resume", "Verify exact published image and attestations"),
   )
 })
 
