@@ -690,8 +690,12 @@ it.effect("restores a verified replacement archive into a clean empty workspace 
       const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-workspace-replacement-" })
       const source = `${parent}/checkpoint`
       const root = `${parent}/workspace/repo`
+      const modified = Uint8Array.from([0, 255, 109, 111, 100, 105, 102, 105, 101, 100])
+      const untracked = Uint8Array.from([117, 110, 116, 114, 97, 99, 107, 101, 100, 0, 255])
       yield* fileSystem.makeDirectory(`${source}/.agents`, { recursive: true })
       yield* fileSystem.writeFileString(`${source}/state.txt`, "checkpoint state")
+      yield* fileSystem.writeFile(`${source}/tracked-modified.bin`, modified)
+      yield* fileSystem.writeFile(`${source}/untracked.bin`, untracked)
       yield* fileSystem.writeFileString(`${source}/.agents/setup`, "#!/bin/sh\nexit 17\n")
       yield* fileSystem.writeFileString(`${source}/.agents/resume`, `#!/bin/sh\nprintf x > "${root}/resumed"\n`)
       yield* fileSystem.chmod(`${source}/.agents/setup`, 0o700)
@@ -729,6 +733,8 @@ it.effect("restores a verified replacement archive into a clean empty workspace 
       expect(evidence.resume?.outcome).toBe("completed")
       expect(yield* fileSystem.readFileString(`${root}/state.txt`)).toBe("checkpoint state")
       expect(yield* fileSystem.readFileString(`${root}/resumed`)).toBe("x")
+      expect(Array.from(yield* fileSystem.readFile(`${root}/tracked-modified.bin`))).toEqual(Array.from(modified))
+      expect(Array.from(yield* fileSystem.readFile(`${root}/untracked.bin`))).toEqual(Array.from(untracked))
     }),
   ).pipe(provideLayer(platform)),
 )

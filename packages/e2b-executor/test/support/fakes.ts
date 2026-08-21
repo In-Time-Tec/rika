@@ -37,6 +37,7 @@ export interface Harness {
   readonly provider: FakeProviderState
   readonly checkpointInspections: Array<string>
   checkpointInspection: { readonly contentDigest: string; readonly sizeBytes: number }
+  checkpointLoadFailure: CheckpointError | null
   readonly checkoutRequests: Array<{
     readonly installationId: string
     readonly owner: string
@@ -127,6 +128,7 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     provider,
     checkpointInspections,
     checkpointInspection: { contentDigest: `sha256:${"a".repeat(64)}`, sizeBytes: 42 },
+    checkpointLoadFailure: null,
     checkoutRequests: [],
     layer: undefined as never,
   }
@@ -195,10 +197,12 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
         })
       },
       loadCheckpoint: (scope) =>
-        Option.match(Option.fromNullishOr(checkpoints.get(scope.checkpointId)), {
-          onNone: () => Effect.fail(CheckpointError.make({ kind: "missing", message: "checkpoint missing" })),
-          onSome: archive,
-        }),
+        harness.checkpointLoadFailure === null
+          ? Option.match(Option.fromNullishOr(checkpoints.get(scope.checkpointId)), {
+              onNone: () => Effect.fail(CheckpointError.make({ kind: "missing", message: "checkpoint missing" })),
+              onSome: archive,
+            })
+          : Effect.fail(harness.checkpointLoadFailure),
       storeSetupCache: (key, encoded) => {
         const objectKey = JSON.stringify(key)
         caches.set(objectKey, encoded)

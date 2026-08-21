@@ -3,6 +3,7 @@ import { ExecutorAssignments } from "@rika/product/executor-assignments"
 import type { Access } from "@rika/remote-execution/protocol"
 import { Effect, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
+import { CheckpointError } from "../src/checkpoint"
 import * as Controller from "../src/controller"
 import { assignmentInput, controller, createAssignment, makeHarness, readAssignment } from "./support/fakes"
 import { provideLayer } from "./support/layer"
@@ -365,6 +366,51 @@ describe("Controller", () => {
         sandboxId: "sandbox-2",
         timeoutMillis: Controller.IdleTimeoutMillis,
       })
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("rejects corrupt replacement state and cannot ready a mismatched checkpoint", () => {
+    const harness = makeHarness()
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* provision()
+      const first = yield* authenticate(harness, 1)
+      yield* service.checkpoint(first.access, {
+        version: 1,
+        checkpointId: "checkpoint-replacement",
+        archive,
+        cursor: { sequence: 0, value: "" },
+      })
+      harness.checkpointLoadFailure = CheckpointError.make({
+        kind: "corrupt",
+        message: "checkpoint authentication failed",
+      })
+      expect(
+        (yield* Effect.flip(service.replace({ assignmentId: "assignment-1", generation: 1 }, runtimeAuthorization)))
+          .kind,
+      ).toBe("checkpoint")
+      expect(yield* readAssignment()).toMatchObject({ generation: "1", lifecycle: { _tag: "Active" } })
+      expect(harness.provider.creates).toHaveLength(1)
+
+      harness.checkpointLoadFailure = null
+      yield* service.replace({ assignmentId: "assignment-1", generation: 1 }, runtimeAuthorization)
+      const second = yield* authenticate(harness, 2)
+      const proof = {
+        workspaceId: "workspace-1",
+        repositoryId: "repository-1",
+        baseCommit: "a".repeat(40),
+        headCommit: "b".repeat(40),
+        setupHookDigest: `sha256:${"c".repeat(64)}`,
+        environmentDigest,
+        templateBuildId: "template-build-v1-immutable",
+        restoredCheckpointId: "different-checkpoint",
+      }
+      expect((yield* Effect.flip(service.ready(second.access, proof, environmentDigest))).kind).toBe("checkpoint")
+      yield* service.ready(
+        second.access,
+        { ...proof, restoredCheckpointId: "checkpoint-replacement" },
+        environmentDigest,
+      )
     }).pipe(provideLayer(harness.layer))
   })
 
