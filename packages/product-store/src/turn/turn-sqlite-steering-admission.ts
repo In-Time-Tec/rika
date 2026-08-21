@@ -20,7 +20,7 @@ const Row = Schema.Struct({
   target_turn_id: Schema.String,
   source_turn_id: Schema.NullOr(Schema.String),
   admission_json: Schema.String,
-  source_withdrawn: Schema.Number,
+  source_withdrawn: Schema.Finite,
   status: Schema.Literals(["pending", "accepted", "rejected"]),
 })
 const equivalentTarget = Schema.toEquivalence(ExecutionLink)
