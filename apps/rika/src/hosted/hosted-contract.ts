@@ -1,5 +1,6 @@
 import { Context, Effect, Option, Redacted, Schema } from "effect"
 import type { ClientTicketResponse } from "@rika/product/client-protocol"
+import type { ExecutorKind } from "@rika/product/hosted-model"
 import type {
   LocalRunnerTarget,
   LocalRunnerPollResult,
@@ -154,7 +155,7 @@ export interface ThreadClientInterface {
     readonly commandId: string
     readonly owner: OwnerSelection
     readonly project?: string
-    readonly placement: "local" | "e2b"
+    readonly executorKind: ExecutorKind
     readonly localRunnerTarget?: LocalRunnerTarget
   }) => Effect.Effect<HostedThreadId, HostedError>
   readonly submit: (input: {

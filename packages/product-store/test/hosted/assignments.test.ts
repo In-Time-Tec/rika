@@ -93,6 +93,8 @@ it.layer(layer)("executor assignments", (test) => {
       yield* TestClock.setTime(Date.parse("2026-01-01T00:00:00.000Z"))
       const { assignments, bound, active, access } = yield* open("session")
 
+      expect(yield* assignments.getForThread(ThreadId.make("thread-session"))).toEqual(active)
+      expect(yield* assignments.getForThread(ThreadId.make("missing-thread"))).toBeUndefined()
       expect(active).not.toHaveProperty("bootstrapCredentialDigest")
       expect(active).not.toHaveProperty("sessionCredentialDigest")
       expect(active.lifecycle).toMatchObject({ _tag: "Active", leaseEpoch: "1" })

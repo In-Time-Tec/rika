@@ -104,7 +104,7 @@ export interface HostedProductService {
     readonly principal: AuthenticatedPrincipal
     readonly owner: OwnerSelection
     readonly projectId?: string
-    readonly placement: "local" | "e2b"
+    readonly executorKind: "local_device" | "e2b"
     readonly localRunnerTarget?: LocalRunnerTarget
     readonly threadId?: string
   }) => Effect.Effect<{ readonly threadId: string }, HostedProductError>
@@ -297,7 +297,7 @@ export const layer = (options: {
                     .pipe(Effect.mapError(() => forbidden()))
                 }
                 const checkout =
-                  input.placement === "e2b" && input.projectId !== undefined
+                  input.executorKind === "e2b" && input.projectId !== undefined
                     ? yield* repositories.resolve({ ownerId: authority.owner.id, projectId: input.projectId })
                     : null
                 const deviceId = yield* activateClient(input.principal, authority.userId)
@@ -324,11 +324,11 @@ export const layer = (options: {
                   now: timestamp,
                   expiresAt: DateTime.formatIso(DateTime.makeUnsafe(currentTime + 5 * 60 * 1000)),
                 })
-                const executorKind = input.placement === "e2b" ? "e2b" : "local_device"
-                if ((input.placement === "local") !== (input.localRunnerTarget !== undefined))
+                const executorKind = input.executorKind
+                if ((executorKind === "local_device") !== (input.localRunnerTarget !== undefined))
                   return yield* HostedProductError.make({
                     kind: "invalid",
-                    message: "Local runner target is required only for local placement",
+                    message: "Local runner target is required only for local_device execution",
                   })
                 const runner =
                   input.localRunnerTarget === undefined
@@ -380,7 +380,7 @@ export const layer = (options: {
                       message: "Thread identity was reused with incompatible input",
                     })
                   }
-                  return { threadId: String(threadId) }
+                  return { threadId: String(threadId), assignmentId: undefined, remote: false as const }
                 }
                 const workspaceId = WorkspaceId.make(
                   runner?.workspaceId ??
@@ -429,8 +429,9 @@ export const layer = (options: {
                     now: timestamp,
                   })
                 }
+                const assignmentId = ExecutorAssignmentId.make(yield* crypto.randomUUIDv4)
                 yield* assignments.create({
-                  id: ExecutorAssignmentId.make(thread.id),
+                  id: assignmentId,
                   ownerId: authority.owner.id,
                   threadId: thread.id,
                   workspaceId,
@@ -449,11 +450,16 @@ export const layer = (options: {
                         },
                   checkout,
                 })
-                return { threadId: String(thread.id), remote: executorKind === "e2b" }
+                return {
+                  threadId: String(thread.id),
+                  assignmentId: String(assignmentId),
+                  remote: executorKind === "e2b",
+                }
               }),
             )
             .pipe(Effect.mapError(storeFailure))
-          if (created.remote === true) yield* options.provision(created.threadId)
+          if (created.remote === true && created.assignmentId !== undefined)
+            yield* options.provision(created.assignmentId)
           return { threadId: created.threadId }
         },
       )

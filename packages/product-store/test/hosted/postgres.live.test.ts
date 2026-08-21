@@ -49,6 +49,7 @@ const applyMigrations = (url: string) =>
 const ids = {
   client: ClientId.make("client-live"),
   device: DeviceId.make("device-live"),
+  assignment: ExecutorAssignmentId.make("assignment-live"),
   executor: ExecutorInstanceId.make("executor-live"),
   member: BetterAuthMemberId.make("member-live"),
   organization: OrganizationId.make("organization-live"),
@@ -502,7 +503,7 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
             )
             const assignments = yield* ExecutorAssignments
             const created = yield* assignments.create({
-              id: ExecutorAssignmentId.make(ids.thread),
+              id: ids.assignment,
               ownerId: ids.organizationOwner,
               threadId: ids.thread,
               workspaceId: ids.workspace,
@@ -520,6 +521,8 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
                 gitIdentity: { name: "Rika Live", email: "rika-live@example.test" },
               },
             })
+            expect(created.id).not.toBe(created.threadId)
+            expect(yield* assignments.getForThread(ids.thread)).toEqual(created)
             const provisioning = yield* assignments.beginProvisioning({
               ...version(created),
               bootstrapCredentialDigest: Redacted.make("bootstrap"),

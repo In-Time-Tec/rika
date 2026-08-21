@@ -208,7 +208,7 @@ it.effect.skipIf(databaseUrl === undefined)(
               (id, owner_id, thread_id, workspace_id, executor_kind, placement, checkout, generation, revision,
                 last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
                 session_digest, lease_epoch, lease_expires_at)
-              VALUES ('thread-personal', 'owner-personal', 'thread-personal', 'workspace-personal', 'e2b',
+              VALUES ('assignment-personal', 'owner-personal', 'thread-personal', 'workspace-personal', 'e2b',
                 '{"_tag":"E2BPlacement","templateBuildId":"build-personal"}'::jsonb, $1::jsonb,
                 1, 1, 1, 'active', 'provider-personal', 'executor-personal', 'process-personal',
                 'session-personal', 1, now() + interval '5 minutes')`,
@@ -219,7 +219,7 @@ it.effect.skipIf(databaseUrl === undefined)(
           pool.query(`INSERT INTO rika_hosted_workspace_preparations
               (assignment_id, owner_id, workspace_id, generation, lease_epoch, attempt, state, phase,
                 evidence, started_at, updated_at)
-              VALUES ('thread-personal', 'owner-personal', 'workspace-personal', 1, 1, 1, 'ready',
+              VALUES ('assignment-personal', 'owner-personal', 'workspace-personal', 1, 1, 1, 'ready',
                 'capabilities', '{}'::jsonb, now(), now())`),
         )
         const publication = yield* service.approvePublication({
@@ -260,7 +260,7 @@ it.effect.skipIf(databaseUrl === undefined)(
           latest_checkpoint_id: null,
           authority: { ownerId: "owner-personal", sourceRef: "refs/heads/rika/thread-personal" },
           fence: {
-            assignmentId: "thread-personal",
+            assignmentId: "assignment-personal",
             authorizationCheckpointId: publication.id,
             authorizationDigest: publication.authorizationDigest,
           },

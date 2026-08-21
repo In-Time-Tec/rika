@@ -147,7 +147,7 @@ export const layer = Layer.effect(
                     ? { kind: "personal" }
                     : { kind: "organization", organizationId: input.owner.organizationId },
                 ...(input.project === undefined ? {} : { projectId: ProjectId.make(input.project) }),
-                placement: input.placement,
+                executorKind: input.executorKind,
                 ...(input.localRunnerTarget === undefined ? {} : { localRunnerTarget: input.localRunnerTarget }),
               }),
             )

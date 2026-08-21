@@ -200,7 +200,7 @@ export interface HostedInteractiveSession {
 
 export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.make")(function* (input: {
   readonly threadId: string
-  readonly placement: "local" | "e2b"
+  readonly executorKind: "local_device" | "e2b"
   readonly createThread: Effect.Effect<string, HostedError>
 }) {
   const profile = yield* selectedProfile()
@@ -315,7 +315,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         else if (active.some((turn) => turn.status === "running" || turn.status === "cancelling"))
           yield* setHostedStatus("executor-connected")
         else if (active.length > 0) yield* setHostedStatus("workspace-preparing")
-        else if (input.placement === "local") yield* setHostedStatus("executor-waiting")
+        else if (input.executorKind === "local_device") yield* setHostedStatus("executor-waiting")
         else yield* setHostedStatus("connected")
         yield* acknowledge(connection, threadId, String(payload.cursor))
         return
@@ -361,7 +361,10 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
                   status,
                   profile.owner.kind === "personal" ? "personal-owner" : "organization-owner",
                 )
-                yield* SubscriptionRef.set(status, input.placement === "local" ? "local-placement" : "e2b-placement")
+                yield* SubscriptionRef.set(
+                  status,
+                  input.executorKind === "local_device" ? "local-placement" : "e2b-placement",
+                )
                 yield* SubscriptionRef.set(status, latestHostedStatus)
                 const replay = Effect.sleep("500 millis").pipe(
                   Effect.andThen(physical.attach(selected, cursors.get(selected) ?? "0")),

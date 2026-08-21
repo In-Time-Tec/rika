@@ -7,6 +7,7 @@ import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import {
   ActorAttribution,
   CommandId,
+  ExecutorKind,
   IdempotencyKey,
   JsonObject,
   ProjectId,
@@ -112,15 +113,15 @@ const CreateThread = strict(
     ...mutating,
     owner: OwnerSelection,
     projectId: Schema.optionalKey(ProjectId),
-    placement: Schema.Literals(["local", "e2b"]),
+    executorKind: ExecutorKind,
     localRunnerTarget: Schema.optionalKey(LocalRunnerTarget),
     repositoryRef: Schema.optionalKey(RepositoryRef),
   }),
 ).check(
   Schema.makeFilter((command) =>
-    (command.placement === "local") === (command.localRunnerTarget !== undefined)
+    (command.executorKind === "local_device") === (command.localRunnerTarget !== undefined)
       ? []
-      : [{ path: ["localRunnerTarget"], issue: "local placement requires exactly one local runner target" }],
+      : [{ path: ["localRunnerTarget"], issue: "local_device requires exactly one local runner target" }],
   ),
 )
 

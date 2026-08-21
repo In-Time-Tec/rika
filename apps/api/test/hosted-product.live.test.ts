@@ -92,7 +92,7 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
       const connection = yield* product.createConnection({
         principal: principal("personal-user"),
         owner: personal("personal-user"),
-        placement: "e2b",
+        executorKind: "e2b",
       })
       const admissionInput = {
         principal: principal("personal-user"),
@@ -107,17 +107,20 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
       const facts = yield* query(
         pool,
         `SELECT owner_record.id AS owner_id, owner_record.user_id, thread.created_by_user_id,
+          assignment.id AS assignment_id,
           command.actor, command.turn_id, turn.status, turn.prompt,
           (SELECT count(*)::int FROM "member" WHERE user_id = $1) AS memberships,
           (SELECT count(*)::int FROM rika_turns WHERE thread_id = thread.id) AS turn_count,
           (SELECT queued_count FROM rika_thread_queue_state WHERE thread_id = thread.id) AS queued_count
         FROM rika_hosted_thread_commands command
         JOIN rika_hosted_threads thread ON thread.id = command.thread_id
+        JOIN rika_hosted_executor_assignments assignment ON assignment.thread_id = thread.id
         JOIN rika_hosted_owners owner_record ON owner_record.id = command.owner_id
         JOIN rika_turns turn ON turn.id = command.turn_id`,
         ["personal-user"],
       )
       expect(facts.rows).toHaveLength(1)
+      expect(facts.rows[0].assignment_id).not.toBe(connection.threadId)
       expect(facts.rows[0]).toMatchObject({
         user_id: "personal-user",
         created_by_user_id: "personal-user",
@@ -143,12 +146,12 @@ it.effect.skipIf(!live)("revokes organization admission immediately without affe
       const personalConnection = yield* product.createConnection({
         principal: principal("member-user"),
         owner: personal("member-user"),
-        placement: "e2b",
+        executorKind: "e2b",
       })
       const organizationConnection = yield* product.createConnection({
         principal: principal("member-user"),
         owner: organization("revoked-org"),
-        placement: "e2b",
+        executorKind: "e2b",
       })
       yield* product.admitRun({
         principal: principal("member-user"),
@@ -189,7 +192,7 @@ it.effect.skipIf(!live)("requires a direct grant for a non-creator organization 
       const connection = yield* product.createConnection({
         principal: principal("creator-user"),
         owner: organization("grant-org"),
-        placement: "e2b",
+        executorKind: "e2b",
       })
       const operate = product.admitRun({
         principal: principal("operator-user"),
@@ -233,7 +236,7 @@ it.effect.skipIf(!live)("fails closed for forged and cross-owner selections", ()
           product.createConnection({
             principal: principal("first-user"),
             owner: personal("second-user"),
-            placement: "e2b",
+            executorKind: "e2b",
           }),
         ),
       ).toBe("forbidden")
@@ -242,14 +245,14 @@ it.effect.skipIf(!live)("fails closed for forged and cross-owner selections", ()
           product.createConnection({
             principal: principal("first-user"),
             owner: organization("foreign-org"),
-            placement: "e2b",
+            executorKind: "e2b",
           }),
         ),
       ).toBe("forbidden")
       const secondConnection = yield* product.createConnection({
         principal: principal("second-user"),
         owner: personal("second-user"),
-        placement: "e2b",
+        executorKind: "e2b",
       })
       expect(
         yield* failureKind(
@@ -275,7 +278,7 @@ it.effect.skipIf(!live)("fails closed for forged and cross-owner selections", ()
             principal: principal("first-user"),
             owner: personal("first-user"),
             projectId: "foreign-project",
-            placement: "e2b",
+            executorKind: "e2b",
           }),
         ),
       ).toBe("not-found")

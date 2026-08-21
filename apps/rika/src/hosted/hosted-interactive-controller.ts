@@ -36,7 +36,7 @@ const run = Effect.fn("HostedInteractiveController.run")(function* (
       commandId,
       owner: profile.owner,
       ...(profile.project === undefined ? {} : { project: profile.project }),
-      placement: "local",
+      executorKind: "local_device",
       localRunnerTarget: {
         deviceId: prepared.checkout.registration.deviceId,
         checkoutFingerprint: prepared.checkout.registration.checkoutFingerprint,
@@ -54,7 +54,7 @@ const run = Effect.fn("HostedInteractiveController.run")(function* (
   const threadId = input.threadId ?? (yield* createThread)
   const hosted = yield* makeHostedInteractiveSession({
     threadId,
-    placement: "local",
+    executorKind: "local_device",
     createThread: createThread.pipe(Effect.map(String)),
   })
   yield* interactiveTui(options)(

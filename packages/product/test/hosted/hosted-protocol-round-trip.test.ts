@@ -76,7 +76,7 @@ describe("hosted Thread client protocol", () => {
         _tag: "CreateThread",
         ...mutation,
         owner: { kind: "personal" },
-        placement: "local",
+        executorKind: "local_device",
         localRunnerTarget: { deviceId: "device-1", checkoutFingerprint: "checkout-1" },
       }),
       envelope({
@@ -84,7 +84,7 @@ describe("hosted Thread client protocol", () => {
         ...mutation,
         owner: { kind: "organization", organizationId },
         projectId,
-        placement: "e2b",
+        executorKind: "e2b",
         repositoryRef: { repositoryId: "repository", ref: "refs/heads/main" },
       }),
       envelope({ _tag: "AttachThread", threadId, afterCursor: cursor }),
@@ -121,6 +121,27 @@ describe("hosted Thread client protocol", () => {
     expect(() => Schema.decodeUnknownSync(ClientMessage)({ ...base, protocolVersion: 2 })).toThrow()
     expect(() =>
       Schema.decodeUnknownSync(ClientMessage)(envelope({ _tag: "Cancel", ...mutation, extra: true })),
+    ).toThrow()
+    expect(() =>
+      Schema.decodeUnknownSync(ClientMessage)(
+        envelope({ _tag: "CreateThread", ...mutation, owner: { kind: "personal" }, placement: "local" }),
+      ),
+    ).toThrow()
+    expect(() =>
+      Schema.decodeUnknownSync(ClientMessage)(
+        envelope({ _tag: "CreateThread", ...mutation, owner: { kind: "personal" }, executorKind: "local_device" }),
+      ),
+    ).toThrow()
+    expect(() =>
+      Schema.decodeUnknownSync(ClientMessage)(
+        envelope({
+          _tag: "CreateThread",
+          ...mutation,
+          owner: { kind: "personal" },
+          executorKind: "e2b",
+          localRunnerTarget: { deviceId: "device-1", checkoutFingerprint: "checkout-1" },
+        }),
+      ),
     ).toThrow()
   })
 

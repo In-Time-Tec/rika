@@ -149,6 +149,10 @@ const make = Effect.gen(function* () {
         return succeed(assignment, saveCredentials(save(current, assignment), assignment.id, {}))
       }),
     get: (assignmentId) => Effect.map(Ref.get(state), (current) => load(current, assignmentId)),
+    getForThread: (threadId) =>
+      Effect.map(Ref.get(state), (current) =>
+        [...current.assignments.values()].find((assignment) => assignment.threadId === threadId),
+      ),
     beginProvisioning: (input) =>
       mutation((current, now) => {
         const assignment = load(current, input.assignmentId)

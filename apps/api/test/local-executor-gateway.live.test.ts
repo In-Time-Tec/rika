@@ -37,13 +37,14 @@ const bindings = {
 const sessionToken = "session-local-gateway"
 const sessionDigest = createHash("sha256").update(sessionToken).digest("hex")
 const deviceId = "11111111-1111-4111-8111-111111111111"
-const assignmentId = "thread-local-gateway"
+const assignmentId = "assignment-local-gateway"
+const threadId = "thread-local-gateway"
 const cellRequest = (operationKey: string) => ({
   assignmentId,
   operationKey,
   workspaceId: "workspace-local-gateway",
   sessionId: assignmentId,
-  threadId: assignmentId,
+  threadId,
   turnId: "turn-local-gateway",
   runId: "run-local-gateway",
   rootRunId: "run-local-gateway",
@@ -293,7 +294,7 @@ const seed = (
         last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
         session_digest, lease_epoch, lease_expires_at, last_active_at, created_at, updated_at, workspace_id,
         capability_generation, capability_snapshot)
-      VALUES ('thread-local-gateway', $4, 'thread-local-gateway', 'local_device',
+      VALUES ('assignment-local-gateway', $4, 'thread-local-gateway', 'local_device',
         '{"_tag":"LocalDevicePlacement","deviceId":"11111111-1111-4111-8111-111111111111"}'::jsonb, NULL, 1, 1, 1, 'active',
         $1, 'executor-local-gateway', 'process-local-gateway', $2, 1,
         CASE WHEN $3 = 'past' THEN now() - interval '1 second' ELSE now() + interval '5 minutes' END,
@@ -311,7 +312,7 @@ const seed = (
       `INSERT INTO rika_hosted_local_executor_admissions
       (id, assignment_id, owner_id, device_id, client_id, user_id, process_incarnation,
         generation, workspace_fingerprint, ticket_digest, expires_at, consumed_at)
-      VALUES ('admission-local-gateway', 'thread-local-gateway', $2, $1,
+      VALUES ('admission-local-gateway', 'assignment-local-gateway', $2, $1,
         'client-local-gateway', 'user-local-gateway', 'process-local-gateway',
         1, 'workspace-binding', 'ticket-digest', now() + interval '5 minutes', now())`,
       [deviceId, ownerId],
@@ -321,7 +322,7 @@ const seed = (
       `INSERT INTO rika_hosted_workspace_capability_admissions
       (thread_id, turn_id, assignment_id, workspace_id, assignment_generation,
         environment_digest, required_capabilities)
-      VALUES ('thread-local-gateway', 'turn-local-gateway', 'thread-local-gateway',
+      VALUES ('thread-local-gateway', 'turn-local-gateway', 'assignment-local-gateway',
         'workspace-local-gateway', 1, $1, '["filesystem","typescriptKernel","git","process","workspaceLifecycle"]')`,
       [environmentDigest],
     )
@@ -361,7 +362,7 @@ const seed = (
         `INSERT INTO rika_hosted_executor_operations
         (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
           turn_id, run_id, root_run_id, tool_call_id, code, attempt, replay_policy, state, updated_at)
-        VALUES ('thread-local-gateway', $4, $1, $2, 'workspace-local-gateway', 'thread-local-gateway',
+        VALUES ('assignment-local-gateway', $4, $1, $2, 'workspace-local-gateway', 'assignment-local-gateway',
           'thread-local-gateway', 'turn-local-gateway', 'run-local-gateway', 'run-local-gateway',
           'call-local-gateway', $3, 0, 'pure', 'accepted', now())`,
         [operationKey, digest, code, ownerId],
@@ -375,7 +376,7 @@ const seed = (
         turn_id, run_id, root_run_id, tool_call_id, code, attempt, state, dispatched_generation,
         replay_policy, dispatched_lease_epoch, dispatched_executor_instance_id, dispatched_process_incarnation,
         dispatch_deadline_at, updated_at)
-      VALUES ('thread-local-gateway', $6, $1, $2, 'workspace-local-gateway', 'thread-local-gateway',
+      VALUES ('assignment-local-gateway', $6, $1, $2, 'workspace-local-gateway', 'assignment-local-gateway',
         'thread-local-gateway', 'turn-local-gateway', 'run-local-gateway', 'run-local-gateway',
         'call-local-gateway', $3, 0, 'dispatched', 1, 'pure', $4,
         'executor-local-gateway', 'process-local-gateway',
@@ -874,7 +875,7 @@ it.effect.skipIf(!live)("closes a local PTY frame as malformed", () =>
         yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
         yield* gateway.receive(
           target,
-          '{"_tag":"PtyOpened","access":{"version":1,"fence":{"target":"local_device","assignmentId":"thread-local-gateway","assignmentGeneration":1,"instanceId":"11111111-1111-4111-8111-111111111111","executorId":"executor-local-gateway","processIncarnation":"process-local-gateway"},"leaseEpoch":1,"sessionToken":"session-local-gateway"},"pty":{"ptyId":"pty-1","command":"bash","cwd":"/tmp","cols":80,"rows":24}}',
+          '{"_tag":"PtyOpened","access":{"version":1,"fence":{"target":"local_device","assignmentId":"assignment-local-gateway","assignmentGeneration":1,"instanceId":"11111111-1111-4111-8111-111111111111","executorId":"executor-local-gateway","processIncarnation":"process-local-gateway"},"leaseEpoch":1,"sessionToken":"session-local-gateway"},"pty":{"ptyId":"pty-1","command":"bash","cwd":"/tmp","cols":80,"rows":24}}',
         )
         expect(target.closed).toEqual([[1007, "malformed"]])
         expect(

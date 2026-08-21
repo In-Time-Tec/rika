@@ -153,7 +153,7 @@ export const layer = Layer.effect(
               AND preparation.generation = assignment.generation
               AND preparation.lease_epoch = assignment.lease_epoch
               AND preparation.state = 'ready'
-            WHERE assignment.id = hosted_thread.id AND assignment.lifecycle = 'active'
+            WHERE assignment.thread_id = hosted_thread.id AND assignment.lifecycle = 'active'
               AND assignment.lease_expires_at > clock_timestamp()
           ))
           AND NOT EXISTS (
@@ -192,7 +192,7 @@ export const layer = Layer.effect(
               AND preparation.generation = assignment.generation
               AND preparation.lease_epoch = assignment.lease_epoch
               AND preparation.state = 'ready'
-            WHERE assignment.id = hosted_thread.id AND assignment.lifecycle = 'active'
+            WHERE assignment.thread_id = hosted_thread.id AND assignment.lifecycle = 'active'
               AND assignment.lease_expires_at > clock_timestamp()
           ))
           AND NOT EXISTS (

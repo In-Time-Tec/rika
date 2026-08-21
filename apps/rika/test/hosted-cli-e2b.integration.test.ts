@@ -284,7 +284,7 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
         const connection = yield* product.createConnection({
           principal: { userId: account.user.id, deviceId, clientId, dpopJkt: "dpop-thumbprint" },
           owner: { _tag: "PersonalOwner", userId: BetterAuthUserId.make(account.user.id) },
-          placement: "e2b",
+          executorKind: "e2b",
         })
         const environment = Context.get(yield* Layer.build(environmentLayer), HostedEnvironment)
         const environmentPrincipal = { userId: account.user.id, deviceId, clientId }

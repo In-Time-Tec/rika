@@ -9,6 +9,7 @@ import {
   ExecutorInstanceId,
   FencingGeneration,
   Sequence,
+  ThreadId,
 } from "@rika/product/hosted-model"
 import type { Access as ProtocolAccess, Heartbeat, LocalExecutorHelloWire } from "@rika/remote-execution/protocol"
 import type { AuthenticatedPrincipal } from "./hosted-product"
@@ -93,6 +94,13 @@ export const layer = Layer.effect(
     const load = Effect.fn("LocalExecutor.load")(function* (assignmentId: string) {
       const assignment = yield* assignments
         .get(ExecutorAssignmentId.make(assignmentId))
+        .pipe(Effect.mapError(assignmentFailure))
+      if (assignment === undefined) return yield* failure("assignment-missing", "Local assignment does not exist")
+      return assignment
+    })
+    const loadForThread = Effect.fn("LocalExecutor.loadForThread")(function* (threadId: string) {
+      const assignment = yield* assignments
+        .getForThread(ThreadId.make(threadId))
         .pipe(Effect.mapError(assignmentFailure))
       if (assignment === undefined) return yield* failure("assignment-missing", "Local assignment does not exist")
       return assignment
@@ -194,7 +202,7 @@ export const layer = Layer.effect(
       return yield* sql
         .withTransaction(
           Effect.gen(function* () {
-            const assignment = yield* load(input.threadId)
+            const assignment = yield* loadForThread(input.threadId)
             const placement = yield* local(assignment, input.principal)
             yield* verifyPrincipal(input.principal, assignment.ownerId)
             if (placement.checkoutFingerprint !== input.workspaceFingerprint)

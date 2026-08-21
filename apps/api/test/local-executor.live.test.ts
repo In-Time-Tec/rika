@@ -95,7 +95,7 @@ const localConnection = (
     const connection = yield* product.createConnection({
       principal: authenticated,
       owner,
-      placement: "local",
+      executorKind: "local_device",
       localRunnerTarget: {
         deviceId: authenticated.deviceId as never,
         checkoutFingerprint: fingerprint,
@@ -171,13 +171,13 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
       const connection = yield* localConnection(owner, personal(owner.userId), "personal-workspace")
       const product = yield* HostedProduct
       const threadAuthority = yield* product.authorizeThread(owner, connection.threadId, "thread:view")
-      expect(
-        yield* product.threadExecutionContext(threadAuthority.ownerId, ThreadId.make(connection.threadId)),
-      ).toMatchObject({
+      const context = yield* product.threadExecutionContext(threadAuthority.ownerId, ThreadId.make(connection.threadId))
+      expect(context).toMatchObject({
         repository: { identity: "repository-personal-workspace", branch: "main" },
         branch: "main",
-        executor: { assignmentId: connection.threadId, kind: "local_device", generation: "1", lifecycle: "pending" },
+        executor: { kind: "local_device", generation: "1", lifecycle: "pending" },
       })
+      expect(context.executor.assignmentId).not.toBe(connection.threadId)
       expect((yield* query(pool, `SELECT count(*)::int AS count FROM member`)).rows).toEqual([{ count: 0 }])
       const admission = yield* authority.admit({
         threadId: connection.threadId,

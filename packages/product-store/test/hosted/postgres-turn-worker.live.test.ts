@@ -82,7 +82,7 @@ it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers pre
             (id, owner_id, thread_id, workspace_id, executor_kind, placement, checkout, generation, revision,
               last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
               session_digest, lease_epoch, lease_expires_at)
-            VALUES ('thread-1', 'worker-owner', 'thread-1', 'workspace-1', 'e2b',
+            VALUES ('assignment-1', 'worker-owner', 'thread-1', 'workspace-1', 'e2b',
               '{"_tag":"E2BPlacement","templateBuildId":"build-1","providerScope":"test"}', NULL,
               1, 0, 1, 'active', 'sandbox-1', 'executor-1', 'process-1', 'session-1', 1,
               clock_timestamp() + interval '4 minutes')`),
@@ -95,7 +95,7 @@ it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers pre
         const preparations = Context.get(context, WorkspacePreparations)
         expect(yield* store.claimNext(request("waiting", "waiting-claim", 99))).toBeUndefined()
         const access: Access = {
-          assignmentId: ExecutorAssignmentId.make("thread-1"),
+          assignmentId: ExecutorAssignmentId.make("assignment-1"),
           assignmentGeneration: FencingGeneration.make("1"),
           providerInstanceId: "sandbox-1",
           executorInstanceId: ExecutorInstanceId.make("executor-1"),

@@ -283,7 +283,7 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
               AND admission.revoked_at IS NULL
             JOIN rika_hosted_workspace_capability_admissions capability_admission
               ON capability_admission.assignment_id = assignment.id
-              AND capability_admission.thread_id = ${input.session.access.fence.assignmentId}
+              AND capability_admission.thread_id = assignment.thread_id
               AND capability_admission.turn_id = (
                 SELECT operation.turn_id FROM rika_hosted_executor_operations operation
                 WHERE operation.assignment_id = ${input.session.access.fence.assignmentId}
@@ -605,7 +605,7 @@ export const makeLocalGateway = Effect.fn("LocalExecutorGateway.make")(function*
           if (updated[0] === undefined) return yield* failure("fenced", "Local executor result lost its fence")
           const commands = yield* sql<{ readonly sequence: string }>`SELECT sequence::text AS sequence
           FROM rika_hosted_thread_commands
-          WHERE thread_id = ${assignmentId} AND idempotency_key = ${input.operationKey}
+          WHERE thread_id = ${current.threadId} AND idempotency_key = ${input.operationKey}
           LIMIT 1`.pipe(Effect.mapError(() => failure("transport", "Local executor command is unavailable")))
           const command = commands[0]
           if (command === undefined) return yield* failure("transport", "Local executor command is unavailable")

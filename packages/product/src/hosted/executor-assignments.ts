@@ -124,6 +124,7 @@ export interface CommitCheckpointInput {
 export interface AssignmentsService {
   readonly create: (input: CreateInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
   readonly get: (assignmentId: ExecutorAssignmentId) => Effect.Effect<ExecutorAssignment | undefined, AssignmentError>
+  readonly getForThread: (threadId: ThreadId) => Effect.Effect<ExecutorAssignment | undefined, AssignmentError>
   readonly beginProvisioning: (input: BeginProvisioningInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
   readonly beginReplacement: (input: BeginReplacementInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
   readonly bindProviderInstance: (
