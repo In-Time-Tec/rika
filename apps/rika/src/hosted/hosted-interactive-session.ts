@@ -17,7 +17,7 @@ import {
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import { OperationUnavailable } from "@rika/product/product-operation"
-import type * as ServerInteractiveConnection from "@rika/product/server-interactive-connection"
+import type * as InteractiveConnection from "@rika/product/interactive-connection"
 import * as ThreadView from "@rika/product/thread-view"
 import { identityKey } from "@rika/transcript/transcript-unit-identity"
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
@@ -195,7 +195,7 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
 
 export interface HostedInteractiveSession {
   readonly session: InteractiveSession
-  readonly connection: ServerInteractiveConnection.Connection
+  readonly connection: InteractiveConnection.Connection
 }
 
 export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.make")(function* (input: {
@@ -213,20 +213,20 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     Effect.mapError(() => failure("Hosted Thread request identifier could not be created")),
   )
   const commandAdmission = yield* Semaphore.make(1)
-  const status = yield* SubscriptionRef.make<ServerInteractiveConnection.Status>("connecting")
+  const status = yield* SubscriptionRef.make<InteractiveConnection.Status>("connecting")
   const closed = yield* Deferred.make<void>()
   const versions = new Map<string, string>()
   const cursors = new Map<string, string>()
   const rendered = new Map<string, string>()
   const authorizations = new Map<string, HostedThreadSnapshot["pendingAuthorizations"][number]>()
-  let latestHostedStatus: ServerInteractiveConnection.Status = "connected"
+  let latestHostedStatus: InteractiveConnection.Status = "connected"
   let selected = input.threadId
   let dispatch: (event: InteractiveEvent) => void = () => undefined
   let consumerAttached = false
   let stopped = false
   let current: PhysicalConnection | undefined
   let connectionChanged = Deferred.makeUnsafe<void>()
-  const setHostedStatus = (value: ServerInteractiveConnection.Status) => {
+  const setHostedStatus = (value: InteractiveConnection.Status) => {
     latestHostedStatus = value
     return SubscriptionRef.set(status, value)
   }
@@ -257,7 +257,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
   const statusState = (payload: Extract<Payload, { readonly _tag: "ExecutorStatus" | "WorkspaceStatus" }>) => {
     const state = payload.status.state
     if (typeof state !== "string") return undefined
-    const states: Record<string, ServerInteractiveConnection.Status> = {
+    const states: Record<string, InteractiveConnection.Status> = {
       waiting: "executor-waiting",
       connecting: "executor-connecting",
       connected: "executor-connected",

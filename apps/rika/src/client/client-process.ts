@@ -1,18 +1,11 @@
 #!/usr/bin/env bun
 import * as ProductOperation from "@rika/product/product-operation"
 import * as Operation from "@rika/product/product-operation-service"
-import * as ServerHandshake from "@rika/product/server-service-handshake"
-import * as ServerService from "@rika/product/server-service"
-import { Config, Console, Context, Crypto, Effect, FileSystem, Layer, Option, Path, Schema, Stdio } from "effect"
+import { Config, Console, Context, Crypto, Effect, FileSystem, Layer, Path, Schema, Stdio } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { Command } from "effect/unstable/cli"
 import { command, version } from "../command/root/rika-command"
-import * as Logging from "../diagnostics/diagnostic-file-logging"
-import { layer as serverLayer } from "../transport/client/server-client-transport"
-import { spawn as spawnServer } from "../server/process/server-process-spawn"
-import * as DataRoot from "@rika/configuration/canonical-data-root"
-import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
 import { privateRuntime } from "./private-runtime-launch"
 import * as HostedCommand from "../command/root/hosted-command-dispatch"
 import * as LocalRunnerCommand from "../command/root/local-runner-command"
@@ -32,22 +25,6 @@ const provideLayerScoped =
         ),
       ),
     )
-
-const withClientWorkspace = (input: ProductOperation.Input, workspace: string): ProductOperation.Input => {
-  if (input._tag === "Interactive" || input._tag === "Run")
-    return { ...input, clientWorkspace: workspace, workspace: input.workspace ?? workspace }
-  if (
-    input._tag === "Skill" ||
-    input._tag === "Mcp" ||
-    input._tag === "Extension" ||
-    input._tag === "Config" ||
-    input._tag === "Auth" ||
-    input._tag === "Doctor" ||
-    input._tag === "Thread"
-  )
-    return { ...input, clientWorkspace: workspace }
-  return input
-}
 
 const operationFailure = (input: ProductOperation.Input, error: unknown) =>
   Schema.is(ProductOperation.OperationUnavailable)(error)
@@ -81,7 +58,6 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
   Layer.effect(
     Operation.Service,
     Effect.gen(function* () {
-      const server = yield* ServerService.Service
       const stdio = yield* Stdio.Stdio
       const platform = yield* Effect.context<
         Crypto.Crypto | FileSystem.FileSystem | Path.Path | Stdio.Stdio | ChildProcessSpawner.ChildProcessSpawner
@@ -90,12 +66,11 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
         run: Effect.fn("ClientMain.dispatch")(function* (input) {
           interactiveClientLaunch = clientSigintMode(input) === "child"
           return yield* Effect.gen(function* () {
-            const home = yield* Config.string("HOME").pipe(Config.withDefault(process.cwd()))
-            const paths = resolveProfileDataPaths({
-              home,
-              productDatabase: Option.getOrUndefined(yield* Config.option(Config.string("RIKA_DATABASE"))),
-            })
-            const dataRoot = yield* DataRoot.canonicalDataRoot(paths.database)
+            if (input._tag !== "Interactive")
+              return yield* ProductOperation.OperationUnavailable.make({
+                operation: input._tag,
+                message: `${input._tag} has no hosted command implementation`,
+              })
             const forwardedArguments = argv ?? (yield* stdio.args)
             return yield* Effect.scoped(
               Effect.gen(function* () {
@@ -131,32 +106,8 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                       "Rika closed unexpectedly. Run rika again. If it keeps happening, run rika diagnostics status.",
                   })
                 }
-                let clientKind: ServerHandshake.Handshake["clientKind"]
-                if (input._tag === "Thread") clientKind = "thread-continue"
-                else if (input._tag === "Run") clientKind = "run"
-                else clientKind = "product"
-                const serverRuntime = yield* privateRuntime("server")
-                const connected = yield* server.getOrCreate({
-                  profile: "default",
-                  dataRoot,
-                  clientKind,
-                  startHost: () =>
-                    spawnServer({
-                      executable: serverRuntime.executable,
-                      arguments: serverRuntime.prefixArguments,
-                      environment: {
-                        RIKA_INTERNAL_SERVER_HOST: "1",
-                        RIKA_INTERNAL_SERVER_PROFILE: "default",
-                        RIKA_INTERNAL_SERVER_DATA_ROOT: dataRoot,
-                      },
-                    }).pipe(Effect.tap(() => Effect.logInfo("server.spawned"))),
-                })
-                yield* connected.run(withClientWorkspace(input, process.cwd()), {
-                  stdout: (text) => Effect.sync(() => process.stdout.write(text)),
-                  stderr: (text) => Effect.sync(() => process.stderr.write(text)),
-                })
               }),
-            ).pipe(provideLayerScoped(Logging.layer({ dataRoot, role: "client", version })))
+            )
           }).pipe(
             Effect.provide(platform),
             Effect.mapError((error) => operationFailure(input, error)),
@@ -245,13 +196,7 @@ export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<s
     }),
   )
   return yield* program.pipe(
-    provideLayerScoped(
-      Layer.mergeAll(
-        dispatcherLayer(argv).pipe(Layer.provide(serverLayer)),
-        hostedCommandLayer,
-        localRunnerCommandLayer,
-      ),
-    ),
+    provideLayerScoped(Layer.mergeAll(dispatcherLayer(argv), hostedCommandLayer, localRunnerCommandLayer)),
   )
 })
 

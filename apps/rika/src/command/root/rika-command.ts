@@ -3,16 +3,10 @@ import { Console, Effect, FileSystem, Option, Stdio } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import type { ModeId } from "@rika/configuration/behavior-mode"
 import { authCommand } from "../product/auth-command"
-import { configurationCommand } from "../product/configuration-command"
 import { credentialCommand } from "../product/credential-command"
 import { diagnosticsCommand } from "../product/diagnostics-command"
-import { extensionCommand } from "../product/extension-command"
-import { mcpCommand } from "../product/mcp-command"
 import { organizationCommand } from "../product/organization-command"
-import { skillCommand } from "../product/skill-command"
 import { threadCommand } from "../product/thread-command"
-import { toolCatalogCommand } from "../product/tool-catalog-command"
-import { reviewCommand } from "../product/review-command"
 import { dispatch, type CliOperationService } from "./cli-operation-dispatch"
 import { executeRun, runCommand } from "./noninteractive-run-command"
 import * as LocalRunnerCommand from "./local-runner-command"
@@ -129,20 +123,11 @@ export const command = Command.make(
   Command.withDescription("Hosted durable coding agent"),
   Command.withSubcommands([
     runCommand,
-    reviewCommand,
     threadCommand,
-    Command.make("last", {}, () => dispatch({ _tag: "Thread", action: "last" })),
-    Command.make("top", {}, () => dispatch({ _tag: "Thread", action: "top" })),
-    configurationCommand,
     organizationCommand,
     authCommand,
     credentialCommand,
     diagnosticsCommand,
-    toolCatalogCommand,
-    skillCommand,
-    mcpCommand,
-    extensionCommand,
-    Command.make("doctor", {}, () => dispatch({ _tag: "Doctor" })),
     updateCommand,
     Command.make("version", {}, () => Console.log(version)),
   ]),

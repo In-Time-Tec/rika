@@ -8,7 +8,7 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Context, Effect, Layer } from "effect"
 import * as GoalRepository from "@rika/product/goal-repository"
-import * as ServerKernel from "../src/server/composition/server-kernel-layer"
+import * as Kernel from "./kernel-layer"
 
 export interface BackendOptions {
   readonly filename: string
@@ -23,7 +23,7 @@ const kernelOptions = (options: {
   readonly dataRoot: string
   readonly queryFactoryLayer: Layer.Layer<ThreadQuery.Factory>
   readonly toolRuntimeLayer: Layer.Layer<ToolRuntime.Service>
-}): ServerKernel.Options => ({
+}): Kernel.Options => ({
   workspace: options.workspace,
   home: options.dataRoot,
   dataRoot: options.dataRoot,
@@ -48,7 +48,7 @@ export const kernelPoolFor = (options: {
   readonly queryFactoryLayer: Layer.Layer<ThreadQuery.Factory>
   readonly toolRuntimeLayer: Layer.Layer<ToolRuntime.Service>
 }) =>
-  Layer.build(ServerKernel.layer(kernelOptions(options)).pipe(Layer.provide(BunServices.layer))).pipe(
+  Layer.build(Kernel.layer(kernelOptions(options)).pipe(Layer.provide(BunServices.layer))).pipe(
     Effect.map((context) => ({ forWorkspace: () => Effect.succeed(context), built: Effect.succeed([context]) })),
   )
 

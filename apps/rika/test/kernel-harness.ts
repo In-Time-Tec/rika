@@ -7,7 +7,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import * as HarnessStoreLocations from "@rika/kernel/harness-store-locations"
 import * as ScopePolicy from "@rika/kernel/harness-scope-policy"
 import { Crypto, Effect, Encoding, Function, Layer } from "effect"
-import type { Options } from "./server-kernel-options"
+import type { Options } from "./kernel-options"
 
 /**
  * The workspace identity a harness `workspace` scope is keyed by. It must be a single path-safe

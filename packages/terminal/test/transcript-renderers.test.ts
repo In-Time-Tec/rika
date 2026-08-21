@@ -44,6 +44,14 @@ describe("transcript renderers", () => {
     expect(rendered.split("\n").every((line) => stringWidth(line) <= 20)).toBe(true)
   })
 
+  test("preserves newline-delimited plain text without bypassing multiline Markdown", () => {
+    expect(renderMarkdown("alpha_beta\ngamma delta\n\nepsilon", 12)).toBe("alpha_beta\ngamma delta\n\nepsilon")
+    expect(renderMarkdown("plain\n- list item", 20)).toBe("plain\n- list item")
+
+    const styled = renderMarkdownStyled("alpha_beta\ngamma delta", 12)
+    expect(styled.chunks.map((chunk) => chunk.text).join("")).toBe("alpha_beta\ngamma delta")
+  })
+
   test("measures CJK, emoji, and combining marks by terminal cell width", () => {
     const source = "界界界 👩‍💻 e\u0301e\u0301e\u0301"
     const rendered = renderMarkdown(source, 4)

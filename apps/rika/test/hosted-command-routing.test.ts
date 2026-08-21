@@ -42,14 +42,10 @@ it.effect("routes hosted execution without calling the local server operation", 
       yield* invoke(["org", "use", "engineering"])
       yield* invoke(["org", "invite", "dev@example.test"])
       yield* invoke(["thread", "new"])
-      yield* invoke(["thread", "new", "--remote"])
       yield* invoke(["--execute", "hello", "--thread", "thread-1", "--mode", "low"])
       yield* invoke(["credential", "list", "openrouter"])
       yield* invoke(["credential", "revoke", "openrouter"])
-      expect(yield* Ref.get(productCalls)).toEqual([{ _tag: "Thread", action: "new" }])
-      expect(yield* Ref.get(productCalls)).not.toContainEqual(
-        expect.objectContaining({ _tag: "Run", threadId: "thread-1" }),
-      )
+      expect(yield* Ref.get(productCalls)).toEqual([])
       expect(yield* Ref.get(hostedCalls)).toEqual([
         { _tag: "Auth", action: "login", noOpen: false },
         { _tag: "Auth", action: "login", server: "https://hosted.example.test/base", noOpen: true },
@@ -69,7 +65,7 @@ it.effect("routes hosted execution without calling the local server operation", 
         { _tag: "Credential", action: "revoke", provider: "openrouter" },
       ])
       expect((yield* Effect.exit(invoke(["credential", "list", "--scope", "user"])))._tag).toBe("Failure")
-      expect(yield* Ref.get(productCalls)).toHaveLength(1)
+      expect(yield* Ref.get(productCalls)).toEqual([])
     }),
   ),
 )

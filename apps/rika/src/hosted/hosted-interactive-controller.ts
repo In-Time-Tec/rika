@@ -1,4 +1,4 @@
-import type * as InteractiveFeed from "@rika/product/server-interactive-feed"
+import type * as InteractiveFeed from "@rika/product/interactive-feed"
 import { Crypto, Effect, Schema } from "effect"
 import { OperationUnavailable } from "@rika/product/product-operation"
 import { CredentialStore, HostedError, ThreadClient, Http } from "./hosted-contract"

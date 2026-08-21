@@ -3,8 +3,8 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import type * as BunServices from "@effect/platform-bun/BunServices"
 import * as ProductOperation from "@rika/product/product-operation"
 import * as InteractiveSession from "@rika/product/interactive-session"
-import * as InteractiveFeed from "@rika/product/server-interactive-feed"
-import type * as ServerInteractiveConnection from "@rika/product/server-interactive-connection"
+import type * as InteractiveConnection from "@rika/product/interactive-connection"
+import * as InteractiveFeed from "@rika/product/interactive-feed"
 import * as Turn from "@rika/product/turn-record"
 import { create as createTui } from "@rika/terminal/opentui-surface"
 import { initial, withModeConfiguration, type ModeConfiguration } from "@rika/terminal/terminal-state"
@@ -27,14 +27,11 @@ export interface InteractiveTuiOptions {
   readonly writeTerminalTitle?: (sequence: string) => void
 }
 
-const connectionLabel = (status: ServerInteractiveConnection.Status): string | undefined => {
+const connectionLabel = (status: InteractiveConnection.Status): string | undefined => {
   if (status === "connected") return undefined
   if (status === "connecting") return "Connecting to hosted Rika"
   if (status === "reconnecting") return "Reconnecting to hosted Rika"
-  const labels: Record<
-    Exclude<ServerInteractiveConnection.Status, "connected" | "connecting" | "reconnecting">,
-    string
-  > = {
+  const labels: Record<Exclude<InteractiveConnection.Status, "connected" | "connecting" | "reconnecting">, string> = {
     authenticating: "Authenticating with hosted Rika",
     "personal-owner": "Owner: Personal",
     "organization-owner": "Owner: Organization",
@@ -61,7 +58,7 @@ export const interactiveTui =
   (
     input: InteractiveFeed.InteractiveInput,
     session: InteractiveSession.InteractiveSession,
-    connection: ServerInteractiveConnection.Connection,
+    connection: InteractiveConnection.Connection,
   ): Effect.Effect<void, ProductOperation.OperationUnavailable> =>
     Effect.gen(function* () {
       if (options.makeRenderer === undefined && (!process.stdin.isTTY || !process.stdout.isTTY)) return

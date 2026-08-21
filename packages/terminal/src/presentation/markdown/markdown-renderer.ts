@@ -299,7 +299,7 @@ const blockLines = (tokens: ReadonlyArray<Token>, depth: number, plain: boolean,
 }
 
 const isPlainLine = (source: string): boolean => {
-  if (source.includes("\n") || /[\\`*{}[\]<>()#+\-.!|>~:/@]/u.test(source)) return false
+  if (/[\\`*{}[\]<>()#+\-.!|>~:/@]/u.test(source)) return false
   for (let index = source.indexOf("_"); index >= 0; index = source.indexOf("_", index + 1)) {
     if (!/[\p{L}\p{N}]/u.test(source[index - 1] ?? "") || !/[\p{L}\p{N}]/u.test(source[index + 1] ?? "")) return false
   }
@@ -308,7 +308,7 @@ const isPlainLine = (source: string): boolean => {
 
 const renderLinesUncached = (source: string, plain: boolean, width: number): Lines => {
   const safeSource = terminalSafeText(source)
-  if (isPlainLine(safeSource)) return wrapChunks([fg(colors.text)(safeSource)], width)
+  if (safeSource.split("\n").every(isPlainLine)) return wrapChunks([fg(colors.text)(safeSource)], width)
   const tokens = Lexer.lex(safeSource, { gfm: true })
   const lines = blockLines(tokens, 0, plain, Math.max(1, Math.floor(width)))
   while (lines.length > 0 && lines[lines.length - 1]!.length === 0) lines.pop()
