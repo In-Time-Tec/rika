@@ -31,7 +31,7 @@ describe("E2B image source contract", () => {
       tools: Array<{ name: string; expect?: string }>
     }
 
-    expect(dockerfile.split("\n")[0]).toMatch(/^FROM debian:12\.11-slim@sha256:[a-f0-9]{64}$/)
+    expect(dockerfile.split("\n")[0]).toMatch(/^FROM debian:12\.15-slim@sha256:[a-f0-9]{64}$/)
     expect(dockerfile).toContain(manifest.debianSnapshot)
     for (const item of manifest.downloads) {
       expect(item.sha256).toMatch(/^[a-f0-9]{64}$/)

@@ -50,6 +50,9 @@
       "vitest": "4.1.11"
     }
   },
+  "overrides": {
+    "fast-xml-parser": "5.5.6"
+  },
   "scripts": {
     "bench": "bun run scripts/benchmark/benchmark-runner.ts",
     "ast-grep-check": "ast-grep scan --config sgconfig.yml --report-style short apps packages scripts test",

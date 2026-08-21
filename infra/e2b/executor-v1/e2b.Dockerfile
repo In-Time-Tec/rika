@@ -1,42 +1,57 @@
-FROM debian:12.11-slim@sha256:cea2634840f5a87503d8210e4df97b9f23a2acd67ff860a76c133d963032f866
+FROM debian:12.15-slim@sha256:362e64223cc0da95422b3b13c045186fc0a81250e765d31c025fbddf257f6143
 
 ARG BUN_VERSION=1.3.14
 ARG BUN_SHA256=951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f
-ARG NODE_VERSION=24.15.0
-ARG NODE_SHA256=472655581fb851559730c48763e0c9d3bc25975c59d518003fc0849d3e4ba0f6
-ARG YQ_VERSION=4.47.1
-ARG YQ_SHA256=0fb28c6680193c41b364193d0c0fc4a03177aecde51cfc04d506b1517158c2fb
+ARG CHROMIUM_VERSION=152.0.7977.54
+ARG CHROMIUM_SHA256=88af83664e1e5f79dc1c1378d0699b98dddd69690a748addf4ccbe322bfacedf
+ARG NODE_VERSION=24.19.0
+ARG NODE_SHA256=14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647
+ARG YQ_VERSION=4.53.6
+ARG YQ_SHA256=c5f056448f973ae7d39b5401949648a78f2dc1947d6a8eb65be60d5c504b9385
 ARG WEBSOCAT_VERSION=1.14.0
 ARG WEBSOCAT_SHA256=33a80fcbf2313e3c6e816ddafec333c1a04cc34464d4ba4970d938275775a12f
 ARG AGENT_BROWSER_VERSION=0.34.0
 ARG COREPACK_VERSION=0.35.0
+ARG NPM_VERSION=12.0.2
+ARG NPM_BRACE_EXPANSION_VERSION=5.0.9
+ARG NPM_IP_ADDRESS_VERSION=10.5.0
 ARG PNPM_VERSION=11.22.0
 ARG YARN_VERSION=1.22.22
-ARG PILLOW_VERSION=11.3.0
+ARG PILLOW_VERSION=12.3.0
+ARG SETUPTOOLS_VERSION=84.0.0
 
 USER root
 RUN export DEBIAN_FRONTEND=noninteractive \
-  && printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20250630T000000Z bookworm main\n' > /etc/apt/sources.list \
-  && printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20250630T000000Z bookworm-security main\n' >> /etc/apt/sources.list \
+  && printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260820T000000Z bookworm main\n' > /etc/apt/sources.list \
+  && printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260820T000000Z bookworm-security main\n' >> /etc/apt/sources.list \
   && rm -f /etc/apt/sources.list.d/debian.sources \
   && apt-get update \
   && apt-get install -y --no-install-recommends \
-    bash=5.2.15-2+b8 build-essential=12.9 ca-certificates=20230311 cmake=3.25.1-1 \
-    chromium=138.0.7204.49-1~deb12u1 curl=7.88.1-10+deb12u12 \
-    dnsutils=1:9.18.33-1~deb12u2 fd-find=8.6.0-3 \
-    ffmpeg=7:5.1.6-0+deb12u1 file=1:5.44-3 findutils=4.9.0-4 fzf=0.38.0-1+b1 \
+    bash=5.2.15-2+b13 build-essential=12.9 ca-certificates=20250419~deb12u1 cmake=3.25.1-1 \
+    curl=7.88.1-10+deb12u15 dnsutils=1:9.18.49-1~deb12u2 fd-find=8.6.0-3 \
+    ffmpeg=7:5.1.9-0+deb12u1 file=1:5.44-3 findutils=4.9.0-4 \
+    fonts-liberation=1:1.07.4-11 fzf=0.38.0-1+b1 \
     g++=4:12.2.0-3 gcc=4:12.2.0-3 gh=2.23.0+dfsg1-1 \
-    git=1:2.39.5-0+deb12u2 git-lfs=3.3.0-1+deb12u1 \
-    imagemagick=8:6.9.11.60+dfsg-1.6+deb12u3 iproute2=6.1.0-3 jq=1.6-2.1 \
-    less=590-2.1~deb12u2 locales=2.36-9+deb12u10 lsof=4.95.0-1 make=4.3-4.1 \
-    netcat-openbsd=1.219-1 ninja-build=1.11.1-2~deb12u1 openssh-client=1:9.2p1-2+deb12u6 \
+    git=1:2.39.5-0+deb12u3 git-lfs=3.3.0-1+deb12u1 \
+    imagemagick=8:6.9.11.60+dfsg-1.6+deb12u13 iproute2=6.1.0-3 jq=1.6-2.1+deb12u2 \
+    less=590-2.1~deb12u2 libasound2=1.2.8-1+b1 libatk-bridge2.0-0=2.46.0-5 \
+    libatk1.0-0=2.46.0-5 libatspi2.0-0=2.46.0-5 libc6=2.36-9+deb12u14 \
+    libcairo2=1.16.0-7 libcups2=2.4.2-3+deb12u9 libdbus-1-3=1.14.10-1~deb12u1 \
+    libexpat1=2.5.0-1+deb12u2 libgbm1=22.3.6-1+deb12u2 libglib2.0-0=2.74.6-2+deb12u9 \
+    libgtk-3-0=3.24.38-2~deb12u3 libnspr4=2:4.35-1 libnss3=2:3.87.1-1+deb12u4 \
+    libpango-1.0-0=1.50.12+ds-1 libudev1=252.39-1~deb12u2 libvulkan1=1.3.239.0-1 \
+    libx11-6=2:1.8.4-2+deb12u2 libxcb1=1.15-1 libxcomposite1=1:0.4.5-1 \
+    libxdamage1=1:1.1.6-1 libxext6=2:1.3.4-1+b1 libxfixes3=1:6.0.0-2 \
+    libxkbcommon0=1.5.0-1 libxrandr2=2:1.5.2-2+b1 \
+    locales=2.36-9+deb12u14 lsof=4.95.0-1 make=4.3-4.1 \
+    netcat-openbsd=1.219-1 ninja-build=1.11.1-2~deb12u1 openssh-client=1:9.2p1-2+deb12u10 \
     pkg-config=1.8.1-1 procps=2:4.0.2-3 psmisc=23.6-1 \
     python3=3.11.2-1+b1 python3-pip=23.0.1+dfsg-1 python3-venv=3.11.2-1+b1 \
-    redis-tools=5:7.0.15-1~deb12u4 ripgrep=13.0.0-4+b2 sqlite3=3.40.1-2+deb12u1 \
-    postgresql-client=15+248 sudo=1.9.13p3-1+deb12u1 tar=1.34+dfsg-1.2+deb12u1 \
-    tmux=3.3a-3 tree=2.1.0-1 tzdata=2025b-0+deb12u1 util-linux=2.38.1-5+deb12u3 \
-    vim=2:9.0.1378-2+deb12u2 unzip=6.0-28 wget=1.21.3-1+deb12u1 \
-    xz-utils=5.4.1-1 zip=3.0-13 zstd=1.5.4+dfsg2-5 \
+    redis-tools=5:7.0.15-1~deb12u9 ripgrep=13.0.0-4+b2 sqlite3=3.40.1-2+deb12u2 \
+    postgresql-client=15+248+deb12u1 sudo=1.9.13p3-1+deb12u4 tar=1.34+dfsg-1.2+deb12u1 \
+    tmux=3.3a-3 tree=2.1.0-1 tzdata=2026b-0+deb12u1 util-linux=2.38.1-5+deb12u3 \
+    vim=2:9.0.1378-2+deb12u2 unzip=6.0-28+deb12u1 wget=1.21.3-1+deb12u1 \
+    xdg-utils=1.1.3-4.1 xz-utils=5.4.1-1+deb12u1 zip=3.0-13 zstd=1.5.4+dfsg2-5 \
   && rm -rf /var/lib/apt/lists/* \
   && sed -i 's/^# en_US.UTF-8 UTF-8$/en_US.UTF-8 UTF-8/' /etc/locale.gen \
   && locale-gen \
@@ -44,11 +59,18 @@ RUN export DEBIAN_FRONTEND=noninteractive \
   && echo "${BUN_SHA256}  /tmp/bun.zip" | sha256sum -c - \
   && unzip -q /tmp/bun.zip -d /tmp/bun && install -m 0755 /tmp/bun/bun-linux-x64/bun /usr/local/bin/bun \
   && ln -s bun /usr/local/bin/bunx \
+  && curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /tmp/chromium.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROMIUM_VERSION}/linux64/chrome-linux64.zip" \
+  && echo "${CHROMIUM_SHA256}  /tmp/chromium.zip" | sha256sum -c - \
+  && unzip -q /tmp/chromium.zip -d /opt/chromium && ln -s /opt/chromium/chrome-linux64/chrome /usr/local/bin/chromium \
   && curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
   && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
   && tar -xJf /tmp/node.tar.xz --strip-components=1 -C /usr/local \
   && npm install --global "agent-browser@${AGENT_BROWSER_VERSION}" "corepack@${COREPACK_VERSION}" \
   && corepack enable && corepack prepare "pnpm@${PNPM_VERSION}" "yarn@${YARN_VERSION}" --activate \
+  && npm install --global "npm@${NPM_VERSION}" \
+  && npm install --global "brace-expansion@${NPM_BRACE_EXPANSION_VERSION}" "ip-address@${NPM_IP_ADDRESS_VERSION}" \
+  && rm -rf /usr/local/lib/node_modules/npm/node_modules/brace-expansion /usr/local/lib/node_modules/npm/node_modules/ip-address \
+  && mv /usr/local/lib/node_modules/brace-expansion /usr/local/lib/node_modules/ip-address /usr/local/lib/node_modules/npm/node_modules/ \
   && curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64" \
   && echo "${YQ_SHA256}  /usr/local/bin/yq" | sha256sum -c - \
   && chmod 0755 /usr/local/bin/yq \
@@ -56,7 +78,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
   && echo "${WEBSOCAT_SHA256}  /tmp/websocat" | sha256sum -c - \
   && install -m 0755 /tmp/websocat /usr/local/bin/websocat \
   && python3 -m venv /opt/rika-python \
-  && /opt/rika-python/bin/pip install --no-cache-dir "Pillow==${PILLOW_VERSION}" \
+  && /opt/rika-python/bin/pip install --no-cache-dir "Pillow==${PILLOW_VERSION}" "setuptools==${SETUPTOOLS_VERSION}" \
   && ln -s /opt/rika-python/bin/pip /usr/local/bin/pip \
   && ln -s /opt/rika-python/bin/python /usr/local/bin/python \
   && ln -s /usr/bin/fdfind /usr/local/bin/fd \
@@ -82,7 +104,8 @@ COPY apps ./apps
 RUN bun install --production --frozen-lockfile --ignore-scripts \
   && test -f node_modules/tenetkit/package.json \
   && test -f packages/kernel/src/executor-runtime.ts \
-  && bun -e 'import { workerModule } from "tenetkit/repl/bun"; if (!(await Bun.file(workerModule).exists())) process.exit(1)'
+  && bun -e 'import { workerModule } from "tenetkit/repl/bun"; if (!(await Bun.file(workerModule).exists())) process.exit(1)' \
+  && rm -rf node_modules/.bun/@typescript+typescript-* /root/.bun
 COPY infra/e2b/executor-v1/start.sh ./start.sh
 COPY infra/e2b/executor-v1/tool-manifest.json ./tool-manifest.json
 COPY infra/e2b/executor-v1/doctor.ts ./doctor.ts
