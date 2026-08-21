@@ -56,6 +56,8 @@ import {
   CellLifecycleFrame,
   CellResponse as CellResponseSchema,
   ExecutorBootstrapWire,
+  type ExecutorBootstrapIdentity,
+  type CheckpointRestore,
   type Fence,
   ExecutorMessage,
   SessionWire,
@@ -64,6 +66,7 @@ import {
   type CellResponse,
 } from "./protocol"
 import { inspectWorkspaceCapabilities } from "./workspace-capabilities"
+import { createArchive, encodeArchive } from "./workspace-archive"
 
 interface Config {
   readonly fence: Fence
@@ -76,21 +79,14 @@ interface Config {
   readonly restoredSession?: SessionWire
 }
 
-interface Identity {
-  readonly target: Target
-  readonly assignmentId: string
-  readonly assignmentGeneration: number
-  readonly instanceId: string
-  readonly executorId: string
-  readonly templateBuildId: string | null
-  readonly apiUrl: string
-  readonly workspaceId: string
+interface Identity extends ExecutorBootstrapIdentity {
   readonly stateDirectory: string
 }
 
 interface Bootstrap {
   readonly credential: Redacted.Redacted<string>
   readonly identity: Identity
+  readonly restore: CheckpointRestore | null
 }
 
 export class HostError extends Schema.TaggedError<HostError>()("HostError", {
@@ -143,20 +139,37 @@ const executorIdentity = Effect.gen(function* () {
       Effect.mapError(() => HostError.make({ message: "RIKA_EXECUTOR_TARGET is invalid" })),
     ),
   )
+  if (target !== "e2b") return yield* HostError.make({ message: "Hosted executor target must be e2b" })
   const assignmentId = yield* required("RIKA_EXECUTOR_ASSIGNMENT_ID")
   const generationText = yield* required("RIKA_EXECUTOR_GENERATION")
   const assignmentGeneration = Number(generationText)
   if (!Number.isSafeInteger(assignmentGeneration) || assignmentGeneration < 1)
     return yield* HostError.make({ message: "RIKA_EXECUTOR_GENERATION is invalid" })
+  const repositoryId = Bun.env.RIKA_EXECUTOR_REPOSITORY_ID
+  const repository =
+    repositoryId === undefined
+      ? null
+      : {
+          repositoryId,
+          owner: yield* required("RIKA_EXECUTOR_REPOSITORY_OWNER"),
+          name: yield* required("RIKA_EXECUTOR_REPOSITORY_NAME"),
+          commitSha: yield* required("RIKA_EXECUTOR_COMMIT_SHA"),
+        }
   return {
     target,
+    ownerId: yield* required("RIKA_EXECUTOR_OWNER_ID"),
+    threadId: yield* required("RIKA_EXECUTOR_THREAD_ID"),
     assignmentId,
     assignmentGeneration,
     instanceId: target === "e2b" ? yield* required("E2B_SANDBOX_ID") : yield* required("RIKA_EXECUTOR_INSTANCE_ID"),
     executorId: yield* required("RIKA_EXECUTOR_ID"),
-    templateBuildId: target === "e2b" ? yield* required("RIKA_EXECUTOR_TEMPLATE_BUILD_ID") : null,
+    templateBuildId: yield* required("RIKA_EXECUTOR_TEMPLATE_BUILD_ID"),
     apiUrl: yield* required("RIKA_EXECUTOR_API_URL"),
     workspaceId: yield* required("RIKA_EXECUTOR_WORKSPACE_ID"),
+    repository,
+    lifecycle: "resume",
+    environmentDigest: yield* required("RIKA_EXECUTOR_ENVIRONMENT_DIGEST"),
+    setupCache: Bun.env.RIKA_EXECUTOR_SETUP_CACHE === "1",
     stateDirectory: Bun.env.RIKA_EXECUTOR_STATE_DIRECTORY || executorStateDirectory,
   } satisfies Identity
 })
@@ -371,10 +384,18 @@ const prepare = (
   config: Config,
   kernelProfileDigest: string,
   bindingContractDigest: Ref.Ref<string | undefined>,
+  identity: Identity,
+  restore: CheckpointRestore | null,
   incoming: Queue.Queue<IncomingMessage>,
   credentials: Queue.Queue<Extract<IncomingMessage, { readonly _tag: "RepositoryCredential" }>>,
   writer: (chunk: string) => Effect.Effect<void, Socket.SocketError>,
   store: SessionStore,
+  grants: Ref.Ref<Map<string, PhaseGrant>>,
+  executionEnvironment: Record<string, string>,
+  appliedEnvironment: Ref.Ref<Map<string, string>>,
+  cells: HostedKernel.Interface,
+  environmentAccess: Semaphore.Semaphore,
+  redactedValues: Set<string>,
 ) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime
@@ -394,10 +415,30 @@ const prepare = (
             ),
           )
         }
+        if (message._tag === "PhaseEnvironmentGranted") {
+          if (
+            message.operationKey !== null ||
+            message.digest !== identity.environmentDigest ||
+            (message.phase !== "setup" && message.phase !== "runtime")
+          )
+            return yield* HostError.make({
+              message: "Workspace environment authorization does not match its bootstrap",
+            })
+          yield* applyPhaseGrant(
+            message,
+            grants,
+            executionEnvironment,
+            appliedEnvironment,
+            cells,
+            environmentAccess,
+            redactedValues,
+          )
+        }
         const accepted = accept(message)
         return accepted === undefined ? yield* receive(accept) : accepted
       })
     }
+    yield* receive((message) => (message._tag === "PhaseEnvironmentGranted" ? message : undefined))
     function runAttempt(
       attempt: number,
       retry: boolean,
@@ -413,7 +454,7 @@ const prepare = (
             access,
             workspaceId: config.workspaceId,
             wakeId: config.wakeId,
-            cold: config.restoredSession !== undefined,
+            cold: config.restoredSession !== undefined || identity.lifecycle === "resume",
             attempt,
             retry,
           }),
@@ -531,6 +572,42 @@ const prepare = (
               truncated,
             }),
         }
+        const setupCache =
+          identity.setupCache && assigned.checkout !== null
+            ? {
+                ownerId: identity.ownerId,
+                load: (key: import("./workspace-archive").SetupCacheKey) =>
+                  Effect.gen(function* () {
+                    const requestId = yield* crypto.randomUUIDv4.pipe(
+                      Effect.mapError(() => HostError.make({ message: "Setup cache lookup could not be identified" })),
+                    )
+                    yield* writer(encodeExecutorMessage({ _tag: "SetupCacheLookup", access, requestId, key })).pipe(
+                      Effect.mapError(() => HostError.make({ message: "Setup cache lookup could not be sent" })),
+                    )
+                    const response = yield* receive((message) =>
+                      message._tag === "SetupCacheResult" && message.requestId === requestId ? message : undefined,
+                    )
+                    return response.archive
+                  }).pipe(Effect.catchCause(() => Effect.succeed(null))),
+                store: (
+                  key: import("./workspace-archive").SetupCacheKey,
+                  archive: import("./protocol").EncodedArchive,
+                ) =>
+                  Effect.gen(function* () {
+                    const requestId = yield* crypto.randomUUIDv4.pipe(
+                      Effect.mapError(() =>
+                        HostError.make({ message: "Setup cache proposal could not be identified" }),
+                      ),
+                    )
+                    yield* writer(
+                      encodeExecutorMessage({ _tag: "SetupCacheProposed", access, requestId, key, archive }),
+                    ).pipe(Effect.mapError(() => HostError.make({ message: "Setup cache proposal could not be sent" })))
+                    yield* receive((message) =>
+                      message._tag === "SetupCacheAccepted" && message.requestId === requestId ? message : undefined,
+                    )
+                  }).pipe(Effect.ignoreCause),
+              }
+            : undefined
         yield* reporter.started("checkout")
         const outcome = yield* Effect.result(
           prepareWorkspace({
@@ -540,6 +617,11 @@ const prepare = (
             reporter,
             credential,
             revoke,
+            environment: executionEnvironment,
+            environmentDigest: identity.environmentDigest,
+            ...(restore === null ? {} : { restore }),
+            ...(setupCache === undefined ? {} : { setupCache }),
+            secretValues: redactedValues,
           }),
         )
         if (outcome._tag === "Success") {
@@ -551,6 +633,23 @@ const prepare = (
             attempt,
             evidence: outcome.success,
           })
+          yield* send({
+            _tag: "ExecutorWorkspaceReady",
+            access,
+            proof: {
+              workspaceId: outcome.success.workspaceId,
+              repositoryId: outcome.success.repositoryId,
+              baseCommit: outcome.success.commitSha,
+              headCommit: outcome.success.commitSha,
+              setupHookDigest: outcome.success.lifecycle.setupHookDigest,
+              environmentDigest: outcome.success.lifecycle.environmentDigest,
+              templateBuildId: outcome.success.lifecycle.templateBuildId,
+              restoredCheckpointId: outcome.success.lifecycle.restoredCheckpointId,
+            },
+          })
+          yield* receive((message) =>
+            message._tag === "WorkspaceAccepted" && sameFence(message.fence, access.fence) ? message : undefined,
+          )
           return
         }
         const error = outcome.failure
@@ -630,6 +729,8 @@ const redactOutput = (value: unknown, secrets: ReadonlyArray<string>) => {
     .replace(/\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]+\b/g, "REDACTED")
   return { text: text.slice(0, 16_384), truncated: text.length > 16_384 }
 }
+
+const workspaceFailure = (error: { readonly message: string }) => HostError.make({ message: error.message })
 
 const ptyCreate = (connection: PtyConnection) => ({
   ptyId: connection.ptyId,
@@ -739,7 +840,12 @@ const applyPhaseGrant = Effect.fn("Host.applyPhaseGrant")(function* (
   appliedEnvironment: Ref.Ref<Map<string, string>>,
   cells: HostedKernel.Interface,
   environmentAccess: Semaphore.Semaphore,
+  redactedValues: Set<string> = new Set(),
 ) {
+  for (const name of message.redactedNames) {
+    const value = message.values[name]
+    if (value !== undefined) redactedValues.add(value)
+  }
   if (message.operationKey !== null) {
     if (message.phase !== "runtime") return yield* HostError.make({ message: "Operation environment phase is invalid" })
     yield* Ref.update(grants, (current) => new Map(current).set(message.operationKey as string, message))
@@ -824,6 +930,7 @@ const consumeApi = (
   receipts: OperationReceiptStore,
   operations: Ref.Ref<Map<string, Fiber.Fiber<void, unknown>>>,
   frames: Ref.Ref<Map<string, ReadonlyArray<CellLifecycleFrame>>>,
+  quiesced: Ref.Ref<boolean>,
   lifecycle: Semaphore.Semaphore,
   cells: HostedKernel.Interface,
   machine: Machine["Service"],
@@ -832,9 +939,11 @@ const consumeApi = (
   executionEnvironment: Record<string, string>,
   appliedEnvironment: Ref.Ref<Map<string, string>>,
   environmentAccess: Semaphore.Semaphore,
+  redactedValues: Set<string>,
 ) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime
+    const crypto = yield* Crypto.Crypto
     const emit = (access: CellRequest["access"], frame: CellLifecycleFrame) =>
       lifecycle.withPermits(1)(
         Effect.gen(function* () {
@@ -904,9 +1013,19 @@ const consumeApi = (
       if (yield* dispatchPty(message, writer, ptyDelivery)) return
       if (yield* dispatchWorkspace(message, writer)) return
       if (message._tag === "PhaseEnvironmentGranted") {
-        yield* applyPhaseGrant(message, grants, executionEnvironment, appliedEnvironment, cells, environmentAccess)
+        yield* applyPhaseGrant(
+          message,
+          grants,
+          executionEnvironment,
+          appliedEnvironment,
+          cells,
+          environmentAccess,
+          redactedValues,
+        )
       }
       if (message._tag === "CellExecute") {
+        if (yield* Ref.get(quiesced))
+          return yield* HostError.make({ message: "Cell admission is closed while the executor is quiesced" })
         const access = yield* runtime.access.pipe(
           Effect.mapError((cause) => HostError.make({ message: cause.message })),
         )
@@ -1082,6 +1201,66 @@ const consumeApi = (
             }),
           )
       }
+      if (message._tag === "Quiesce") {
+        const access = yield* runtime.access.pipe(
+          Effect.mapError((cause) => HostError.make({ message: cause.message })),
+        )
+        if (
+          access.fence.assignmentId !== message.fence.assignmentId ||
+          access.fence.assignmentGeneration !== message.fence.assignmentGeneration ||
+          access.fence.instanceId !== message.fence.instanceId ||
+          access.fence.executorId !== message.fence.executorId
+        )
+          return yield* HostError.make({ message: "Quiesce request has a stale executor fence" })
+        yield* Ref.set(quiesced, true)
+        const active = yield* Ref.get(operations)
+        yield* Effect.forEach(active.values(), Fiber.interrupt, { discard: true })
+        const retained = yield* Ref.get(frames)
+        for (const operationFrames of retained.values()) {
+          if (operationFrames.some((frame) => frame._tag === "Terminal")) continue
+          const accepted = operationFrames.find((frame) => frame._tag === "Accepted")
+          if (accepted === undefined) continue
+          yield* emit(access, {
+            _tag: "Terminal",
+            attribution: accepted.attribution,
+            cursor: operationFrames.length + 1,
+            outcome: "unknown",
+            response: {
+              _tag: "DomainFailure",
+              failure: { kind: "unknown", message: "Cell operation outcome is unknown after quiesce" },
+            },
+          })
+        }
+        const completed = yield* Ref.get(frames)
+        const statuses = [...completed.values()].flatMap((operationFrames) => {
+          const terminal = operationFrames.find(
+            (frame): frame is Extract<CellLifecycleFrame, { readonly _tag: "Terminal" }> => frame._tag === "Terminal",
+          )
+          return terminal === undefined
+            ? []
+            : [{ operationKey: terminal.attribution.operationKey, outcome: terminal.outcome }]
+        })
+        const operationStatuses = [...new Map(statuses.map((status) => [status.operationKey, status])).values()]
+        const checkpointId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(workspaceFailure))
+        const archive = encodeArchive(
+          yield* createArchive(workspaceRoot, redactedValues).pipe(Effect.mapError(workspaceFailure)),
+        )
+        const cursor = yield* runtime.cursor.pipe(Effect.mapError(workspaceFailure))
+        yield* writer(
+          encodeExecutorMessage({
+            _tag: "ExecutorQuiesced",
+            access,
+            requestId: message.requestId,
+            operations: operationStatuses,
+            checkpoint: {
+              version: 1,
+              checkpointId,
+              archive,
+              cursor,
+            },
+          }),
+        ).pipe(Effect.mapError(workspaceFailure))
+      }
     })
     return yield* loop.pipe(Effect.forever)
   })
@@ -1090,10 +1269,13 @@ const connect = Effect.fn("Host.connect")(function* (
   config: Config,
   kernelProfileDigest: string,
   bindingContractDigest: Ref.Ref<string | undefined>,
+  identity: Identity,
+  restore: CheckpointRestore | null,
   store: SessionStore,
   receipts: OperationReceiptStore,
   operations: Ref.Ref<Map<string, Fiber.Fiber<void, unknown>>>,
   frames: Ref.Ref<Map<string, ReadonlyArray<CellLifecycleFrame>>>,
+  quiesced: Ref.Ref<boolean>,
   lifecycle: Semaphore.Semaphore,
   cells: HostedKernel.Interface,
   makeMachine: Effect.Effect<Machine["Service"], never, import("effect").Scope.Scope>,
@@ -1103,6 +1285,7 @@ const connect = Effect.fn("Host.connect")(function* (
   executionEnvironment: Record<string, string>,
   appliedEnvironment: Ref.Ref<Map<string, string>>,
   environmentAccess: Semaphore.Semaphore,
+  redactedValues: Set<string>,
   connected: Effect.Effect<void> = Effect.void,
 ) {
   const runtime = yield* Runtime
@@ -1122,10 +1305,37 @@ const connect = Effect.fn("Host.connect")(function* (
     )
     .pipe(Effect.forkScoped)
   const opening = !(yield* runtime.hasSession)
-    ? { _tag: "ExecutorHello" as const, hello: yield* runtime.hello }
+    ? {
+        _tag: "ExecutorHello" as const,
+        hello: yield* runtime.hello,
+        lifecycle: identity.lifecycle,
+        environmentDigest: identity.environmentDigest,
+      }
     : { _tag: "ExecutorReconnect" as const, access: yield* runtime.reconnect }
   yield* writer(encodeExecutorMessage(opening))
   yield* waitForWelcome(incoming, store)
+  yield* prepare(
+    config,
+    kernelProfileDigest,
+    bindingContractDigest,
+    identity,
+    restore,
+    incoming,
+    credentials,
+    writer,
+    store,
+    grants,
+    executionEnvironment,
+    appliedEnvironment,
+    cells,
+    environmentAccess,
+    redactedValues,
+  )
+  yield* RepositoryServices.pipe(
+    Effect.flatMap((services) => services.resume),
+    Effect.mapError((error) => HostError.make({ message: error.message })),
+  )
+  const machine = yield* makeMachine
   yield* runtime.access.pipe(
     Effect.flatMap(cells.replayBindings),
     Effect.mapError((error) => HostError.make({ message: error.message })),
@@ -1144,12 +1354,6 @@ const connect = Effect.fn("Host.connect")(function* (
     Effect.forkScoped,
   )
   yield* heartbeat
-  yield* prepare(config, kernelProfileDigest, bindingContractDigest, incoming, credentials, writer, store)
-  yield* RepositoryServices.pipe(
-    Effect.flatMap((services) => services.resume),
-    Effect.mapError((error) => HostError.make({ message: error.message })),
-  )
-  const machine = yield* makeMachine
   const connectedSession = Effect.raceFirst(
     Effect.raceFirst(
       Fiber.join(reader).pipe(
@@ -1162,6 +1366,7 @@ const connect = Effect.fn("Host.connect")(function* (
         receipts,
         operations,
         frames,
+        quiesced,
         lifecycle,
         cells,
         machine,
@@ -1170,6 +1375,7 @@ const connect = Effect.fn("Host.connect")(function* (
         executionEnvironment,
         appliedEnvironment,
         environmentAccess,
+        redactedValues,
       ),
     ),
     consumePtyEvents(writer, ptyDelivery),
@@ -1230,6 +1436,7 @@ const receiveBootstrap = Effect.callback<Bootstrap, HostError>((resume) => {
                     Effect.succeed({
                       credential: Redacted.make(body.credential, { label: "executor-bootstrap" }),
                       identity,
+                      restore: body.restore,
                     }),
                   ),
                 ),
@@ -1338,6 +1545,7 @@ const host = Effect.scoped(
       identity: Identity,
       bootstrapToken: Redacted.Redacted<string>,
       restoredSession: SessionWire | undefined,
+      restore: CheckpointRestore | null,
       connected: Effect.Effect<void> = Effect.void,
     ) =>
       Effect.gen(function* () {
@@ -1450,20 +1658,25 @@ const host = Effect.scoped(
         ).pipe(Effect.map((context) => Context.get(context, Machine)))
         const operations = yield* Ref.make(new Map<string, Fiber.Fiber<void, unknown>>())
         const frames = yield* Ref.make(yield* receipts.load)
+        const quiesced = yield* Ref.make(false)
         const lifecycle = yield* Semaphore.make(1)
         const ptyDelivery = yield* Semaphore.make(1)
         const grants = yield* Ref.make(new Map<string, PhaseGrant>())
         const appliedEnvironment = yield* Ref.make(new Map<string, string>())
         const environmentAccess = yield* Semaphore.make(1)
+        const redactedValues = new Set<string>()
         return yield* Effect.scoped(
           connect(
             config,
             kernelProfileDigest,
             bindingContractDigest,
+            identity,
+            restore,
             store,
             receipts,
             operations,
             frames,
+            quiesced,
             lifecycle,
             cells,
             makeMachine,
@@ -1473,6 +1686,7 @@ const host = Effect.scoped(
             executionEnvironment,
             appliedEnvironment,
             environmentAccess,
+            redactedValues,
             connected,
           ),
         ).pipe(
@@ -1501,6 +1715,7 @@ const host = Effect.scoped(
             replacement.identity,
             replacement.credential,
             undefined,
+            replacement.restore,
             Deferred.succeed(admitted, undefined).pipe(Effect.asVoid),
           ),
         )
@@ -1516,6 +1731,7 @@ const host = Effect.scoped(
       identity: Identity,
       bootstrapToken: Redacted.Redacted<string>,
       restoredSession: SessionWire | undefined,
+      restore: CheckpointRestore | null,
     ): Effect.Effect<
       never,
       HostError,
@@ -1527,12 +1743,12 @@ const host = Effect.scoped(
       | import("effect").Scope.Scope
     > =>
       Effect.gen(function* () {
-        const running = yield* Effect.forkScoped(run(identity, bootstrapToken, restoredSession))
+        const running = yield* Effect.forkScoped(run(identity, bootstrapToken, restoredSession, restore))
         return yield* monitor(running)
       })
     if (matchingSession === undefined) {
       const bootstrap = yield* Effect.scoped(receiveBootstrap)
-      return yield* supervise(bootstrap.identity, bootstrap.credential, undefined)
+      return yield* supervise(bootstrap.identity, bootstrap.credential, undefined, bootstrap.restore)
     }
     const selected = yield* Deferred.make<"bootstrap" | "reconnect">()
     const fresh = yield* Effect.forkScoped(
@@ -1542,6 +1758,7 @@ const host = Effect.scoped(
             bootstrap.identity,
             bootstrap.credential,
             undefined,
+            bootstrap.restore,
             Deferred.succeed(selected, "bootstrap").pipe(Effect.asVoid),
           ),
         ),
@@ -1552,6 +1769,7 @@ const host = Effect.scoped(
         environmentIdentity,
         Redacted.make("", { label: "executor-bootstrap-not-required" }),
         matchingSession,
+        null,
         Deferred.succeed(selected, "reconnect").pipe(Effect.asVoid),
       ),
     )

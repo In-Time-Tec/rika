@@ -168,6 +168,7 @@
       "name": "@rika/e2b-executor",
       "version": "0.0.0",
       "dependencies": {
+        "@aws-sdk/client-s3": "3.1094.0",
         "@rika/product": "workspace:*",
         "@rika/remote-execution": "workspace:*",
         "e2b": "2.41.0",

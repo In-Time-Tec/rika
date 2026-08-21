@@ -9,6 +9,9 @@ const environment = {
   E2B_TEMPLATE_ID: "ar7-template-alias",
   E2B_TEMPLATE_BUILD_ID: "7d0-build-receipt",
   RIKA_EXECUTOR_API_URL: "wss://api.example.test/api/v1/executors",
+  RIKA_WORKSPACE_CHECKPOINT_BUCKET: "rika-checkpoints",
+  RIKA_WORKSPACE_CHECKPOINT_REGION: "us-east-1",
+  RIKA_WORKSPACE_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 }
 
 describe("executor configuration", () => {
@@ -22,6 +25,7 @@ describe("executor configuration", () => {
         controlEgress: ["api.example.test"],
       })
       expect(Redacted.value(configured.apiKey)).toBe("e2b-api-key")
+      expect(Redacted.value(configured.checkpointKey)).toBe("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
       const templateError = yield* loadConfig({ ...environment, E2B_TEMPLATE_ID: "" }).pipe(Effect.flip)
       const apiError = yield* loadConfig({ ...environment, RIKA_EXECUTOR_API_URL: "" }).pipe(Effect.flip)
       expect(Schema.is(ExecutorConfigError)(templateError)).toBe(true)

@@ -16,6 +16,7 @@
     "./pty": "./src/pty.ts",
     "./repository-services": "./src/repository-services.ts",
     "./workspace-files": "./src/workspace-files.ts",
+    "./workspace-archive": "./src/workspace-archive.ts",
     "./foreground": "./src/foreground.ts"
   },
   "dependencies": {

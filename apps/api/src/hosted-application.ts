@@ -190,7 +190,10 @@ export const layer = (options: {
           provision: (assignmentId) =>
             environment
               .usePhase({ assignmentId, phase: "setup" }, (resolved) =>
-                executor.controller.provision(assignmentId, resolved.egress),
+                executor.controller.provision(assignmentId, {
+                  egress: resolved.egress,
+                  environmentDigest: resolved.manifest.digest,
+                }),
               )
               .pipe(
                 Effect.asVoid,

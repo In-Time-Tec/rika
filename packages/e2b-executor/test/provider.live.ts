@@ -48,6 +48,8 @@ const program = Effect.gen(function* () {
           credential: Redacted.make("live-validation-bootstrap"),
           identity: {
             target: "e2b",
+            ownerId: "live-owner",
+            threadId: "live-thread",
             assignmentId: "live-validation",
             assignmentGeneration: 1,
             instanceId: sandbox.sandboxId,
@@ -55,7 +57,12 @@ const program = Effect.gen(function* () {
             templateBuildId,
             apiUrl: "wss://api.invalid/executors",
             workspaceId: "live-validation-workspace",
+            repository: null,
+            lifecycle: "fresh",
+            environmentDigest: `sha256:${"a".repeat(64)}`,
+            setupCache: false,
           },
+          restore: null,
         })
         yield* provider.touch(sandbox.sandboxId, 900_000)
         yield* provider.pauseFilesystem(sandbox.sandboxId)

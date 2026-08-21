@@ -11,14 +11,20 @@ import {
 } from "@rika/product/hosted-model"
 import {
   type Access as ProtocolAccess,
+  type CheckpointProposal,
+  type CheckpointRestore,
   type Cursor,
+  type EncodedArchive,
   type Fence,
   type FilesystemCheckpoint,
   type Heartbeat,
   type Hello,
+  type QuiescedOperation,
+  type WorkspaceProof,
 } from "@rika/remote-execution/protocol"
-import { Context, Crypto, DateTime, Effect, Encoding, Layer, Redacted, Schema } from "effect"
-import { Inspector } from "./checkpoint"
+import { encodeArchive, type SetupCacheKey } from "@rika/remote-execution/workspace-archive"
+import { Context, Crypto, DateTime, Effect, Encoding, Layer, Option, Redacted, Schema } from "effect"
+import { StoredArchive, Vault } from "./checkpoint"
 import { Credentials, type Credential, type CredentialPurpose } from "./checkout"
 import { Provider, type CreateRequest, type ProviderError } from "./provider"
 
@@ -44,6 +50,17 @@ export interface VerifiedCheckpoint {
   readonly sandboxId: string
   readonly checkpoint: FilesystemCheckpoint
   readonly verifiedAt: number
+}
+
+export interface Quiescence {
+  readonly access: ProtocolAccess
+  readonly operations: ReadonlyArray<QuiescedOperation>
+  readonly checkpoint: CheckpointProposal
+}
+
+export interface WorkspaceAuthorization {
+  readonly egress: PhaseEgressPolicy
+  readonly environmentDigest: string
 }
 
 export interface Welcome {
@@ -105,13 +122,23 @@ export interface Options {
   readonly heartbeatIntervalMillis?: number
   readonly leaseLifetimeMillis?: number
   readonly bootstrapLifetimeMillis?: number
+  readonly setupCache?: boolean
 }
 
 export interface Interface {
-  readonly provision: (assignmentId: string, egress: PhaseEgressPolicy) => Effect.Effect<Assignment, ControllerError>
-  readonly replace: (key: AssignmentKey, egress: PhaseEgressPolicy) => Effect.Effect<Assignment, ControllerError>
-  readonly resume: (key: AssignmentKey, egress: PhaseEgressPolicy) => Effect.Effect<Assignment, ControllerError>
-  readonly pause: (key: AssignmentKey) => Effect.Effect<Assignment, ControllerError>
+  readonly provision: (
+    assignmentId: string,
+    authorization: WorkspaceAuthorization,
+  ) => Effect.Effect<Assignment, ControllerError>
+  readonly replace: (
+    key: AssignmentKey,
+    authorization: WorkspaceAuthorization,
+  ) => Effect.Effect<Assignment, ControllerError>
+  readonly resume: (
+    key: AssignmentKey,
+    authorization: WorkspaceAuthorization,
+  ) => Effect.Effect<Assignment, ControllerError>
+  readonly pause: (key: AssignmentKey, quiescence?: Quiescence) => Effect.Effect<Assignment, ControllerError>
   readonly kill: (key: AssignmentKey) => Effect.Effect<Assignment, ControllerError>
   readonly hello: (hello: Hello) => Effect.Effect<Welcome, ControllerError>
   readonly reconnect: (access: ProtocolAccess) => Effect.Effect<ReconnectWelcome, ControllerError>
@@ -119,7 +146,7 @@ export interface Interface {
   readonly heartbeat: (heartbeat: Heartbeat) => Effect.Effect<Receipt, ControllerError>
   readonly checkpoint: (
     access: ProtocolAccess,
-    checkpoint: FilesystemCheckpoint,
+    checkpoint: CheckpointProposal,
   ) => Effect.Effect<VerifiedCheckpoint, ControllerError>
   readonly credential: (
     access: ProtocolAccess,
@@ -146,6 +173,22 @@ export interface Interface {
     },
   ) => Effect.Effect<void, ControllerError>
   readonly workspace: (access: ProtocolAccess) => Effect.Effect<ExecutorAssignment, ControllerError>
+  readonly ready: (
+    access: ProtocolAccess,
+    proof: WorkspaceProof,
+    environmentDigest: string,
+  ) => Effect.Effect<void, ControllerError>
+  readonly loadSetupCache: (
+    access: ProtocolAccess,
+    key: SetupCacheKey,
+    environmentDigest: string,
+  ) => Effect.Effect<ReturnType<typeof encodeArchive> | null, ControllerError>
+  readonly storeSetupCache: (
+    access: ProtocolAccess,
+    key: SetupCacheKey,
+    archive: EncodedArchive,
+    environmentDigest: string,
+  ) => Effect.Effect<void, ControllerError>
   readonly activatePhase: (access: ProtocolAccess, egress: PhaseEgressPolicy) => Effect.Effect<void, ControllerError>
   readonly cleanupOrphans: Effect.Effect<ReadonlyArray<string>, ControllerError>
 }
@@ -214,7 +257,7 @@ const version = (assignment: ExecutorAssignment) => ({
 
 export const layer = (
   options: Options,
-): Layer.Layer<Controller, ControllerError, Inspector | Credentials | Crypto.Crypto | Provider | ExecutorAssignments> =>
+): Layer.Layer<Controller, ControllerError, Vault | Credentials | Crypto.Crypto | Provider | ExecutorAssignments> =>
   Layer.effect(
     Controller,
     Effect.gen(function* () {
@@ -224,7 +267,7 @@ export const layer = (
       const assignments = yield* ExecutorAssignments
       const provider = yield* Provider
       const crypto = yield* Crypto.Crypto
-      const checkpointInspector = yield* Inspector
+      const vault = yield* Vault
       const checkoutBroker = yield* Credentials
       const idleTimeoutMillis = options.idleTimeoutMillis ?? IdleTimeoutMillis
       const heartbeatIntervalMillis = options.heartbeatIntervalMillis ?? DefaultHeartbeatIntervalMillis
@@ -242,6 +285,15 @@ export const layer = (
           ? Effect.fail(failure("protocol", "Egress allowlist must be constrained"))
           : Effect.succeed(resolved.allow)
       }
+
+      const authorizeWorkspace = Effect.fn("Controller.authorizeWorkspace")(function* (
+        authorization: WorkspaceAuthorization,
+        requiredPhase: EnvironmentPhase,
+      ) {
+        if (!/^sha256:[a-f0-9]{64}$/.test(authorization.environmentDigest))
+          return yield* failure("protocol", "Workspace environment digest is invalid")
+        return yield* allowedEgress(authorization.egress, requiredPhase)
+      })
 
       const digest = Effect.fn("Controller.digest")(function* (secret: Redacted.Redacted<string>) {
         const bytes = yield* crypto
@@ -284,7 +336,7 @@ export const layer = (
 
       const createRequest = Effect.fn("Controller.createRequest")(function* (
         assignment: ExecutorAssignment,
-        egress: PhaseEgressPolicy,
+        authorization: WorkspaceAuthorization,
       ) {
         const placement = yield* approvedPlacement(assignment)
         const request: CreateRequest = {
@@ -296,7 +348,7 @@ export const layer = (
           threadId: assignment.threadId,
           generation: number(assignment.generation),
           idleTimeoutMillis,
-          allowedEgress: yield* allowedEgress(egress),
+          allowedEgress: yield* allowedEgress(authorization.egress),
           environment: {
             RIKA_EXECUTOR_TARGET: "e2b",
             RIKA_EXECUTOR_ASSIGNMENT_ID: assignment.id,
@@ -305,6 +357,18 @@ export const layer = (
             RIKA_EXECUTOR_TEMPLATE_BUILD_ID: placement.templateBuildId,
             RIKA_EXECUTOR_API_URL: options.apiUrl,
             RIKA_EXECUTOR_WORKSPACE_ID: assignment.workspaceId,
+            RIKA_EXECUTOR_OWNER_ID: assignment.ownerId,
+            RIKA_EXECUTOR_THREAD_ID: assignment.threadId,
+            RIKA_EXECUTOR_ENVIRONMENT_DIGEST: authorization.environmentDigest,
+            RIKA_EXECUTOR_SETUP_CACHE: options.setupCache === true ? "1" : "0",
+            ...(assignment.checkout === null
+              ? {}
+              : {
+                  RIKA_EXECUTOR_REPOSITORY_ID: assignment.checkout.repositoryId,
+                  RIKA_EXECUTOR_REPOSITORY_OWNER: assignment.checkout.owner,
+                  RIKA_EXECUTOR_REPOSITORY_NAME: assignment.checkout.name,
+                  RIKA_EXECUTOR_COMMIT_SHA: assignment.checkout.commitSha,
+                }),
             RIKA_CHECKPOINT_OBJECT_PREFIX: `assignments/${assignment.id}/g${assignment.generation}/`,
           },
         }
@@ -314,10 +378,14 @@ export const layer = (
       const bootstrapIdentity = Effect.fn("Controller.bootstrapIdentity")(function* (
         assignment: ExecutorAssignment,
         instanceId: string,
+        lifecycle: "fresh" | "resume" | "replacement",
+        environmentDigest: string,
       ) {
         const placement = yield* approvedPlacement(assignment)
         return {
           target: "e2b" as const,
+          ownerId: assignment.ownerId,
+          threadId: assignment.threadId,
           assignmentId: assignment.id,
           assignmentGeneration: number(assignment.generation),
           instanceId,
@@ -325,7 +393,51 @@ export const layer = (
           templateBuildId: placement.templateBuildId,
           apiUrl: options.apiUrl,
           workspaceId: assignment.workspaceId,
+          repository:
+            assignment.checkout === null
+              ? null
+              : {
+                  repositoryId: assignment.checkout.repositoryId,
+                  owner: assignment.checkout.owner,
+                  name: assignment.checkout.name,
+                  commitSha: assignment.checkout.commitSha,
+                },
+          lifecycle,
+          environmentDigest,
+          setupCache: options.setupCache === true,
         }
+      })
+
+      const checkpointScope = (input: {
+        readonly ownerId: string
+        readonly threadId: string
+        readonly assignmentId: string
+        readonly generation: number
+        readonly checkpointId: string
+      }) => input
+
+      const restoreCheckpoint = Effect.fn("Controller.restoreCheckpoint")(function* (assignment: ExecutorAssignment) {
+        const manifest = yield* assignments.latestCheckpoint(assignment.id).pipe(Effect.mapError(assignmentFailure))
+        if (manifest === undefined) return null
+        const stored = yield* Schema.decodeUnknownEffect(StoredArchive)({
+          objectKey: manifest.objectKey,
+          contentDigest: manifest.contentDigest,
+          sizeBytes: manifest.sizeBytes,
+          ...manifest.metadata,
+        }).pipe(Effect.mapError(() => failure("checkpoint", "Checkpoint manifest metadata is invalid")))
+        const archive = yield* vault
+          .loadCheckpoint(
+            checkpointScope({
+              ownerId: manifest.ownerId,
+              threadId: manifest.threadId,
+              assignmentId: manifest.assignmentId,
+              generation: number(manifest.assignmentGeneration),
+              checkpointId: manifest.id,
+            }),
+            stored,
+          )
+          .pipe(Effect.mapError((error) => failure("checkpoint", error.message)))
+        return { checkpointId: manifest.id, archive: encodeArchive(archive) } satisfies CheckpointRestore
       })
 
       const matchesGeneration = (
@@ -360,7 +472,9 @@ export const layer = (
       const createAndBootstrap = Effect.fn("Controller.createAndBootstrap")(function* (
         provisioning: ExecutorAssignment,
         credential: Redacted.Redacted<string>,
-        egress: PhaseEgressPolicy,
+        authorization: WorkspaceAuthorization,
+        lifecycle: "fresh" | "resume" | "replacement",
+        restore: CheckpointRestore | null,
       ) {
         if (provisioning.lifecycle._tag !== "Provisioning")
           return yield* failure("assignment-conflict", "Assignment is not provisioning")
@@ -368,7 +482,7 @@ export const layer = (
         const sandbox =
           existingProviderId === null
             ? yield* provider
-                .create(yield* createRequest(provisioning, egress))
+                .create(yield* createRequest(provisioning, authorization))
                 .pipe(Effect.catch(() => reconcileCreate(provisioning)))
             : yield* provider.connect(existingProviderId, idleTimeoutMillis).pipe(Effect.mapError(providerFailure))
         const bound = yield* assignments
@@ -386,7 +500,13 @@ export const layer = (
           .bootstrap({
             sandboxId: sandbox.sandboxId,
             credential,
-            identity: yield* bootstrapIdentity(provisioning, sandbox.sandboxId),
+            identity: yield* bootstrapIdentity(
+              provisioning,
+              sandbox.sandboxId,
+              lifecycle,
+              authorization.environmentDigest,
+            ),
+            restore,
           })
           .pipe(Effect.mapError(providerFailure))
         return publicAssignment(bound)
@@ -394,10 +514,17 @@ export const layer = (
 
       const beginProvisioning = Effect.fn("Controller.beginProvisioning")(function* (
         assignment: ExecutorAssignment,
-        egress: PhaseEgressPolicy,
+        authorization: WorkspaceAuthorization,
       ) {
-        yield* allowedEgress(egress, "setup")
+        const latest = yield* assignments.latestCheckpoint(assignment.id).pipe(Effect.mapError(assignmentFailure))
+        const replacement = latest !== undefined && latest.assignmentGeneration !== assignment.generation
+        const resume =
+          latest !== undefined &&
+          latest.assignmentGeneration === assignment.generation &&
+          providerInstanceId(assignment) !== undefined
+        yield* authorizeWorkspace(authorization, replacement || resume ? "runtime" : "setup")
         const credential = yield* issueSecret("executor-bootstrap")
+        const restore = replacement ? yield* restoreCheckpoint(assignment) : null
         const provisioning = yield* assignments
           .beginProvisioning({
             ...version(assignment),
@@ -405,14 +532,17 @@ export const layer = (
             bootstrapLifetimeMillis,
           })
           .pipe(Effect.mapError(assignmentFailure))
-        return yield* createAndBootstrap(provisioning, credential, egress)
+        let lifecycle: "fresh" | "replacement" | "resume" = "fresh"
+        if (replacement) lifecycle = "replacement"
+        else if (resume) lifecycle = "resume"
+        return yield* createAndBootstrap(provisioning, credential, authorization, lifecycle, restore)
       })
 
       const resumeAssignment = Effect.fn("Controller.resumeAssignment")(function* (
         assignment: ExecutorAssignment,
-        egress: PhaseEgressPolicy,
+        authorization: WorkspaceAuthorization,
       ) {
-        yield* allowedEgress(egress, "runtime")
+        yield* authorizeWorkspace(authorization, "runtime")
         const credential = yield* issueSecret("executor-bootstrap")
         const provisioning = yield* assignments
           .resume({
@@ -421,10 +551,13 @@ export const layer = (
             bootstrapLifetimeMillis,
           })
           .pipe(Effect.mapError(assignmentFailure))
-        return yield* createAndBootstrap(provisioning, credential, egress)
+        return yield* createAndBootstrap(provisioning, credential, authorization, "resume", null)
       })
 
-      const provision = Effect.fn("Controller.provision")(function* (assignmentId: string, egress: PhaseEgressPolicy) {
+      const provision = Effect.fn("Controller.provision")(function* (
+        assignmentId: string,
+        authorization: WorkspaceAuthorization,
+      ) {
         const assignment = yield* load(assignmentId)
         yield* approvedPlacement(assignment)
         if (assignment.lifecycle._tag === "Active") {
@@ -433,19 +566,23 @@ export const layer = (
             .pipe(Effect.mapError(providerFailure))
           return publicAssignment(assignment)
         }
-        if (assignment.lifecycle._tag === "Paused") return yield* resumeAssignment(assignment, egress)
+        if (assignment.lifecycle._tag === "Paused") return yield* resumeAssignment(assignment, authorization)
         if (assignment.lifecycle._tag === "Terminated")
           return yield* failure("fenced", `Assignment ${assignmentId} is terminated`)
-        return yield* beginProvisioning(assignment, egress)
+        return yield* beginProvisioning(assignment, authorization)
       })
 
-      const replace = Effect.fn("Controller.replace")(function* (key: AssignmentKey, egress: PhaseEgressPolicy) {
-        yield* allowedEgress(egress, "runtime")
+      const replace = Effect.fn("Controller.replace")(function* (
+        key: AssignmentKey,
+        authorization: WorkspaceAuthorization,
+      ) {
+        yield* authorizeWorkspace(authorization, "runtime")
         const previous = yield* current(key)
         yield* approvedPlacement(previous)
         if (previous.lifecycle._tag !== "Active")
           return yield* failure("assignment-conflict", "Only an active assignment can be replaced")
         const retiringProviderId = providerInstanceId(previous)
+        const restore = yield* restoreCheckpoint(previous)
         const identity = yield* issueSecret("executor-bootstrap")
         const replacing = yield* assignments
           .beginReplacement({
@@ -454,21 +591,24 @@ export const layer = (
             bootstrapLifetimeMillis,
           })
           .pipe(Effect.mapError(assignmentFailure))
-        const replacement = yield* createAndBootstrap(replacing, identity, egress)
+        const replacement = yield* createAndBootstrap(replacing, identity, authorization, "replacement", restore)
         if (retiringProviderId !== undefined) yield* provider.kill(retiringProviderId).pipe(Effect.ignore)
         return replacement
       })
 
-      const resume = Effect.fn("Controller.resume")(function* (key: AssignmentKey, egress: PhaseEgressPolicy) {
+      const resume = Effect.fn("Controller.resume")(function* (
+        key: AssignmentKey,
+        authorization: WorkspaceAuthorization,
+      ) {
         const assignment = yield* current(key)
         yield* approvedPlacement(assignment)
         if (assignment.lifecycle._tag === "Active") return publicAssignment(assignment)
         if (assignment.lifecycle._tag !== "Paused")
           return yield* failure("assignment-conflict", "Assignment is not paused")
-        return yield* resumeAssignment(assignment, egress)
+        return yield* resumeAssignment(assignment, authorization)
       })
 
-      const pause = Effect.fn("Controller.pause")(function* (key: AssignmentKey) {
+      const pause = Effect.fn("Controller.pause")(function* (key: AssignmentKey, quiescence?: Quiescence) {
         const assignment = yield* current(key)
         if (assignment.lifecycle._tag === "Paused") {
           yield* provider
@@ -478,8 +618,24 @@ export const layer = (
         }
         if (assignment.lifecycle._tag !== "Active")
           return yield* failure("assignment-conflict", "Only an active assignment can pause")
-        const paused = yield* assignments.pause(version(assignment)).pipe(Effect.mapError(assignmentFailure))
-        yield* provider.pauseFilesystem(assignment.lifecycle.providerInstanceId).pipe(Effect.mapError(providerFailure))
+        if (quiescence === undefined)
+          return yield* failure("assignment-conflict", "An active assignment must quiesce before it can pause")
+        if (
+          quiescence.access.fence.assignmentId !== assignment.id ||
+          quiescence.access.fence.assignmentGeneration !== number(assignment.generation)
+        )
+          return yield* failure("fenced", "Quiescence belongs to a stale assignment")
+        const operationKeys = new Set(quiescence.operations.map((operation) => operation.operationKey))
+        if (operationKeys.size !== quiescence.operations.length)
+          return yield* failure("protocol", "Quiescence contains duplicate operation outcomes")
+        yield* checkpoint(quiescence.access, quiescence.checkpoint)
+        const checkpointed = yield* load(assignment.id)
+        if (checkpointed.lifecycle._tag !== "Active")
+          return yield* failure("assignment-conflict", "Assignment changed while its checkpoint was committed")
+        const paused = yield* assignments.pause(version(checkpointed)).pipe(Effect.mapError(assignmentFailure))
+        yield* provider
+          .pauseFilesystem(checkpointed.lifecycle.providerInstanceId)
+          .pipe(Effect.mapError(providerFailure))
         return publicAssignment(paused)
       })
 
@@ -622,23 +778,68 @@ export const layer = (
 
       const checkpoint = Effect.fn("Controller.checkpoint")(function* (
         executorAccess: ProtocolAccess,
-        staged: FilesystemCheckpoint,
+        proposal: CheckpointProposal,
       ) {
         const access = yield* assignmentAccess(executorAccess)
         const assignment = yield* assignments.authenticate(access).pipe(Effect.mapError(assignmentFailure))
-        const expectedPrefix = `assignments/${assignment.id}/g${assignment.generation}/`
-        if (!staged.objectKey.startsWith(expectedPrefix))
-          return yield* failure("checkpoint", "Checkpoint object is outside the assignment prefix")
         if (
-          staged.cursor.sequence !== number(assignment.cursor.sequence) ||
-          staged.cursor.value !== assignment.cursor.value
+          proposal.cursor.sequence !== number(assignment.cursor.sequence) ||
+          proposal.cursor.value !== assignment.cursor.value
         )
           return yield* failure("checkpoint", "Checkpoint cursor is not the acknowledged executor cursor")
-        const inspected = yield* checkpointInspector
-          .inspect(staged.objectKey)
-          .pipe(Effect.mapError((cause) => failure("checkpoint", cause.message)))
-        if (inspected.contentDigest !== staged.contentDigest || inspected.sizeBytes !== staged.sizeBytes)
-          return yield* failure("checkpoint", "Checkpoint object digest or byte length did not verify")
+        const known = yield* assignments.latestCheckpoint(assignment.id).pipe(Effect.mapError(assignmentFailure))
+        if (known?.id === proposal.checkpointId) {
+          const stored = yield* Schema.decodeUnknownEffect(StoredArchive)({
+            objectKey: known.objectKey,
+            contentDigest: known.contentDigest,
+            sizeBytes: known.sizeBytes,
+            ...known.metadata,
+          }).pipe(Effect.mapError(() => failure("checkpoint", "Checkpoint manifest metadata is invalid")))
+          if (
+            known.assignmentGeneration !== assignment.generation ||
+            known.cursor.sequence !== assignment.cursor.sequence ||
+            known.cursor.value !== assignment.cursor.value ||
+            stored.archiveDigest !== proposal.archive.contentDigest ||
+            stored.archiveSizeBytes !== proposal.archive.sizeBytes
+          )
+            return yield* failure("checkpoint", "Checkpoint identity has different content")
+          return {
+            assignmentId: known.assignmentId,
+            generation: number(known.assignmentGeneration),
+            sandboxId: executorAccess.fence.instanceId,
+            checkpoint: {
+              version: 1 as const,
+              checkpointId: known.id,
+              objectKey: known.objectKey,
+              contentDigest: known.contentDigest,
+              sizeBytes: known.sizeBytes,
+              format: "tar.zst" as const,
+              cursor: proposal.cursor,
+            },
+            verifiedAt: epochMillis(known.verifiedAt),
+          }
+        }
+        const stored = yield* vault
+          .storeCheckpoint(
+            checkpointScope({
+              ownerId: assignment.ownerId,
+              threadId: assignment.threadId,
+              assignmentId: assignment.id,
+              generation: number(assignment.generation),
+              checkpointId: proposal.checkpointId,
+            }),
+            proposal.archive,
+          )
+          .pipe(Effect.mapError((error) => failure("checkpoint", error.message)))
+        const staged: FilesystemCheckpoint = {
+          version: 1,
+          checkpointId: proposal.checkpointId,
+          objectKey: stored.objectKey,
+          contentDigest: stored.contentDigest,
+          sizeBytes: stored.sizeBytes,
+          format: "tar.zst",
+          cursor: proposal.cursor,
+        }
         const manifest = yield* assignments
           .commitCheckpoint({
             access,
@@ -648,7 +849,11 @@ export const layer = (
             sizeBytes: staged.sizeBytes,
             format: staged.format,
             cursor: { sequence: Sequence.make(String(staged.cursor.sequence)), value: staged.cursor.value },
-            metadata: {},
+            metadata: {
+              archiveDigest: stored.archiveDigest,
+              archiveSizeBytes: stored.archiveSizeBytes,
+              encryption: stored.encryption,
+            },
           })
           .pipe(Effect.mapError(assignmentFailure))
         return {
@@ -658,6 +863,88 @@ export const layer = (
           checkpoint: staged,
           verifiedAt: epochMillis(manifest.verifiedAt),
         }
+      })
+
+      const ready = Effect.fn("Controller.ready")(function* (
+        input: ProtocolAccess,
+        proof: WorkspaceProof,
+        environmentDigest: string,
+      ) {
+        const assignment = yield* assignments
+          .authenticate(yield* assignmentAccess(input))
+          .pipe(Effect.mapError(assignmentFailure))
+        const placement = yield* approvedPlacement(assignment)
+        if (
+          proof.workspaceId !== assignment.workspaceId ||
+          proof.templateBuildId !== placement.templateBuildId ||
+          proof.environmentDigest !== environmentDigest
+        )
+          return yield* failure("fenced", "Workspace proof does not match its assignment")
+        if (assignment.checkout === null) {
+          if (proof.repositoryId !== null || proof.baseCommit !== null || proof.headCommit !== null)
+            return yield* failure("repository", "Workspace proof has an unexpected repository")
+        } else if (
+          proof.repositoryId !== assignment.checkout.repositoryId ||
+          proof.baseCommit?.toLowerCase() !== assignment.checkout.commitSha.toLowerCase() ||
+          proof.headCommit === null
+        )
+          return yield* failure("repository", "Workspace repository proof does not match its assignment")
+        const latest = yield* assignments.latestCheckpoint(assignment.id).pipe(Effect.mapError(assignmentFailure))
+        if (
+          latest !== undefined &&
+          number(latest.assignmentGeneration) < number(assignment.generation) &&
+          proof.restoredCheckpointId !== latest.id
+        )
+          return yield* failure("checkpoint", "Replacement did not restore the latest verified checkpoint")
+      })
+
+      const validateCacheKey = Effect.fn("Controller.validateCacheKey")(function* (
+        assignment: ExecutorAssignment,
+        key: SetupCacheKey,
+        environmentDigest: string,
+      ) {
+        const placement = yield* approvedPlacement(assignment)
+        if (
+          assignment.checkout === null ||
+          key.ownerId !== assignment.ownerId ||
+          key.repository.repositoryId !== assignment.checkout.repositoryId ||
+          key.repository.owner !== assignment.checkout.owner ||
+          key.repository.name !== assignment.checkout.name ||
+          key.repository.commitSha.toLowerCase() !== assignment.checkout.commitSha.toLowerCase() ||
+          key.templateBuildId !== placement.templateBuildId ||
+          key.environmentDigest !== environmentDigest
+        )
+          return yield* failure("fenced", "Setup cache key does not match its assignment")
+      })
+
+      const loadSetupCache = Effect.fn("Controller.loadSetupCache")(function* (
+        input: ProtocolAccess,
+        key: SetupCacheKey,
+        environmentDigest: string,
+      ) {
+        const assignment = yield* assignments
+          .authenticate(yield* assignmentAccess(input))
+          .pipe(Effect.mapError(assignmentFailure))
+        yield* validateCacheKey(assignment, key, environmentDigest)
+        const archive = yield* vault
+          .loadSetupCache(key)
+          .pipe(Effect.mapError((error) => failure("checkpoint", error.message)))
+        return Option.isNone(archive) ? null : encodeArchive(archive.value)
+      })
+
+      const storeSetupCache = Effect.fn("Controller.storeSetupCache")(function* (
+        input: ProtocolAccess,
+        key: SetupCacheKey,
+        encoded: EncodedArchive,
+        environmentDigest: string,
+      ) {
+        const assignment = yield* assignments
+          .authenticate(yield* assignmentAccess(input))
+          .pipe(Effect.mapError(assignmentFailure))
+        yield* validateCacheKey(assignment, key, environmentDigest)
+        yield* vault
+          .storeSetupCache(key, encoded)
+          .pipe(Effect.mapError((error) => failure("checkpoint", error.message)))
       })
 
       const workspace = Effect.fn("Controller.workspace")(function* (input: ProtocolAccess) {
@@ -751,12 +1038,20 @@ export const layer = (
           }),
         )
         const inventory = yield* provider.inventory.pipe(Effect.mapError(providerFailure))
+        const preserved = (sandbox: (typeof inventory)[number]) =>
+          active.has(sandbox.sandboxId) ||
+          durable.some(
+            (assignment) =>
+              assignment.lifecycle._tag !== "Terminated" &&
+              (assignment.lifecycle._tag === "Provisioning" || assignment.lifecycle._tag === "AwaitingBootstrap") &&
+              matchesGeneration(assignment, sandbox.templateId, sandbox.templateBuildId, sandbox.metadata),
+          )
         const orphans = inventory
           .filter(
             (sandbox) =>
               sandbox.metadata["rika.app-id"] === options.appId &&
               sandbox.metadata["rika.deployment-id"] === options.deploymentId &&
-              !active.has(sandbox.sandboxId),
+              !preserved(sandbox),
           )
           .map((sandbox) => sandbox.sandboxId)
         yield* Effect.forEach(orphans, (sandboxId) => provider.kill(sandboxId).pipe(Effect.mapError(providerFailure)), {
@@ -779,6 +1074,9 @@ export const layer = (
         credential,
         revokeCredential,
         workspace,
+        ready,
+        loadSetupCache,
+        storeSetupCache,
         activatePhase,
         cleanupOrphans,
       })

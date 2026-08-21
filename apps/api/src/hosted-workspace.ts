@@ -44,7 +44,10 @@ export const layer = Layer.effect(
         assignment.lifecycle._tag === "Paused" || assignment.lifecycle._tag === "Active" ? "runtime" : "setup"
       yield* environment
         .usePhase({ assignmentId: threadId, phase }, (resolved) =>
-          executor.controller.provision(threadId, resolved.egress),
+          executor.controller.provision(threadId, {
+            egress: resolved.egress,
+            environmentDigest: resolved.manifest.digest,
+          }),
         )
         .pipe(
           Effect.mapError(() =>

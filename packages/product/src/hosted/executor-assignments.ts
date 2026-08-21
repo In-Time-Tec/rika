@@ -141,6 +141,9 @@ export interface AssignmentsService {
   readonly commitCheckpoint: (
     input: CommitCheckpointInput,
   ) => Effect.Effect<WorkspaceCheckpointManifest, AssignmentError>
+  readonly latestCheckpoint: (
+    assignmentId: ExecutorAssignmentId,
+  ) => Effect.Effect<WorkspaceCheckpointManifest | undefined, AssignmentError>
   readonly listManaged: Effect.Effect<ReadonlyArray<ExecutorAssignment>, AssignmentError>
 }
 

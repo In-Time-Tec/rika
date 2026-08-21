@@ -23,11 +23,29 @@ const workspaceCapabilities = {
   services: { _tag: "Ready" as const, detail: "supervised repository services available" },
   workspaceLifecycle: { _tag: "Ready" as const, detail: "workspace lifecycle ready" },
 }
+const setupAuthorization = { egress: setupEgress, environmentDigest }
+const runtimeAuthorization = { egress: runtimeEgress, environmentDigest }
+const archive = {
+  content: btoa("x".repeat(42)),
+  contentDigest: `sha256:${"a".repeat(64)}`,
+  sizeBytes: 42,
+}
+
+const quiescence = (access: Access) => ({
+  access,
+  operations: [],
+  checkpoint: {
+    version: 1 as const,
+    checkpointId: "checkpoint-pause",
+    archive,
+    cursor: { sequence: 0, value: "" },
+  },
+})
 
 const provision = Effect.fn("test.provision")(function* () {
   const service = yield* controller
   const assignment = yield* createAssignment()
-  return yield* service.provision(assignment.id, setupEgress)
+  return yield* service.provision(assignment.id, setupAuthorization)
 })
 
 const authenticate = Effect.fn("test.authenticate")(function* (
@@ -70,8 +88,8 @@ describe("Controller", () => {
     return Effect.gen(function* () {
       const service = yield* controller
       yield* createAssignment()
-      const first = yield* service.provision(assignmentInput.id, setupEgress)
-      const second = yield* service.provision(assignmentInput.id, setupEgress)
+      const first = yield* service.provision(assignmentInput.id, setupAuthorization)
+      const second = yield* service.provision(assignmentInput.id, setupAuthorization)
       expect(first).toEqual(second)
       expect(first).toMatchObject({
         assignmentId: "assignment-1",
@@ -100,15 +118,25 @@ describe("Controller", () => {
         "RIKA_CHECKPOINT_OBJECT_PREFIX",
         "RIKA_EXECUTOR_API_URL",
         "RIKA_EXECUTOR_ASSIGNMENT_ID",
+        "RIKA_EXECUTOR_COMMIT_SHA",
+        "RIKA_EXECUTOR_ENVIRONMENT_DIGEST",
         "RIKA_EXECUTOR_GENERATION",
         "RIKA_EXECUTOR_ID",
+        "RIKA_EXECUTOR_OWNER_ID",
+        "RIKA_EXECUTOR_REPOSITORY_ID",
+        "RIKA_EXECUTOR_REPOSITORY_NAME",
+        "RIKA_EXECUTOR_REPOSITORY_OWNER",
+        "RIKA_EXECUTOR_SETUP_CACHE",
         "RIKA_EXECUTOR_TARGET",
         "RIKA_EXECUTOR_TEMPLATE_BUILD_ID",
+        "RIKA_EXECUTOR_THREAD_ID",
         "RIKA_EXECUTOR_WORKSPACE_ID",
       ])
       const bootstrapRequest = harness.provider.bootstraps[0]!
       expect(bootstrapRequest.identity).toEqual({
         target: "e2b",
+        ownerId: "owner-1",
+        threadId: "thread-1",
         assignmentId: "assignment-1",
         assignmentGeneration: 1,
         instanceId: "sandbox-1",
@@ -116,7 +144,17 @@ describe("Controller", () => {
         templateBuildId: "template-build-v1-immutable",
         apiUrl: "wss://api.example.test/executors",
         workspaceId: "workspace-1",
+        repository: {
+          repositoryId: "repository-1",
+          owner: "In-Time-Tec",
+          name: "rika",
+          commitSha: "a".repeat(40),
+        },
+        lifecycle: "fresh",
+        environmentDigest,
+        setupCache: false,
       })
+      expect(bootstrapRequest.restore).toBeNull()
       const bootstrap = bootstrapRequest.credential
       expect(String(bootstrap)).toBe("<redacted:executor-bootstrap>")
       expect(json(first)).not.toContain(Redacted.value(bootstrap))
@@ -130,7 +168,7 @@ describe("Controller", () => {
     return Effect.gen(function* () {
       const service = yield* controller
       yield* createAssignment()
-      expect(yield* Effect.flip(service.provision(assignmentInput.id, setupEgress))).toMatchObject({
+      expect(yield* Effect.flip(service.provision(assignmentInput.id, setupAuthorization))).toMatchObject({
         kind: "provider",
         message: "Assignment template build is not approved",
       })
@@ -145,9 +183,11 @@ describe("Controller", () => {
       const service = yield* controller
       yield* provision()
       const first = yield* authenticate(harness, 1)
-      expect((yield* service.provision("assignment-1", runtimeEgress)).state).toBe("running")
-      expect((yield* service.pause({ assignmentId: "assignment-1", generation: 1 })).state).toBe("paused")
-      expect((yield* service.provision("assignment-1", runtimeEgress)).state).toBe("provisioning")
+      expect((yield* service.provision("assignment-1", runtimeAuthorization)).state).toBe("running")
+      expect(
+        (yield* service.pause({ assignmentId: "assignment-1", generation: 1 }, quiescence(first.access))).state,
+      ).toBe("paused")
+      expect((yield* service.provision("assignment-1", runtimeAuthorization)).state).toBe("provisioning")
       expect(
         (yield* Effect.flip(
           service.heartbeat({ version: 1, access: first.access, cursor: { sequence: 1, value: "stale" } }),
@@ -198,14 +238,23 @@ describe("Controller", () => {
     return Effect.gen(function* () {
       const service = yield* controller
       yield* provision()
-      yield* authenticate(harness, 1)
+      const first = yield* authenticate(harness, 1)
+      expect((yield* Effect.flip(service.pause({ assignmentId: "assignment-1", generation: 1 }))).kind).toBe(
+        "assignment-conflict",
+      )
       harness.provider.pauseFailure = true
-      expect((yield* Effect.flip(service.pause({ assignmentId: "assignment-1", generation: 1 }))).kind).toBe("provider")
+      expect(
+        (yield* Effect.flip(service.pause({ assignmentId: "assignment-1", generation: 1 }, quiescence(first.access))))
+          .kind,
+      ).toBe("provider")
       expect((yield* readAssignment()).lifecycle._tag).toBe("Paused")
+      expect((yield* Effect.flip(service.validateAccess(first.access))).kind).toBe("fenced")
       harness.provider.pauseFailure = false
-      expect((yield* service.pause({ assignmentId: "assignment-1", generation: 1 })).state).toBe("paused")
+      expect(
+        (yield* service.pause({ assignmentId: "assignment-1", generation: 1 }, quiescence(first.access))).state,
+      ).toBe("paused")
       expect(harness.provider.pauses).toEqual(["sandbox-1", "sandbox-1"])
-      expect((yield* service.provision("assignment-1", runtimeEgress)).state).toBe("provisioning")
+      expect((yield* service.provision("assignment-1", runtimeAuthorization)).state).toBe("provisioning")
     }).pipe(provideLayer(harness.layer))
   })
 
@@ -279,11 +328,66 @@ describe("Controller", () => {
       expect(reconnected.cursor).toEqual({ sequence: 4, value: "executor:4" })
       expect(reconnected.leaseEpoch).toBe(first.access.leaseEpoch + 1)
       expect((yield* Effect.flip(service.reconnect(first.access))).kind).toBe("fenced")
-      const replacement = yield* service.replace({ assignmentId: "assignment-1", generation: 1 }, runtimeEgress)
+      const replacement = yield* service.replace({ assignmentId: "assignment-1", generation: 1 }, runtimeAuthorization)
       expect(replacement).toMatchObject({ generation: 2, sandboxId: "sandbox-2", state: "provisioning" })
       expect(harness.provider.kills).toContain("sandbox-1")
       expect((yield* Effect.flip(service.reconnect(first.access))).kind).toBe("fenced")
       expect((yield* authenticate(harness, 2)).welcome.cursor).toEqual({ sequence: 4, value: "executor:4" })
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("restores the latest verified checkpoint on replacement and after a bootstrap fault", () => {
+    const harness = makeHarness()
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* provision()
+      const first = yield* authenticate(harness, 1)
+      yield* service.checkpoint(first.access, {
+        version: 1,
+        checkpointId: "checkpoint-replacement",
+        archive,
+        cursor: { sequence: 0, value: "" },
+      })
+      harness.provider.bootstrapFailure = true
+      expect(
+        (yield* Effect.flip(service.replace({ assignmentId: "assignment-1", generation: 1 }, runtimeAuthorization)))
+          .kind,
+      ).toBe("provider")
+      expect(yield* readAssignment()).toMatchObject({ generation: "2", lifecycle: { _tag: "AwaitingBootstrap" } })
+      expect(harness.provider.kills).toEqual([])
+      harness.provider.bootstrapFailure = false
+      yield* service.provision("assignment-1", runtimeAuthorization)
+      const retried = harness.provider.bootstraps.at(-1)!
+      expect(retried.identity).toMatchObject({ assignmentGeneration: 2, lifecycle: "replacement" })
+      expect(retried.restore).toMatchObject({ checkpointId: "checkpoint-replacement", archive })
+      expect(harness.provider.creates).toHaveLength(2)
+      expect(harness.provider.connects.at(-1)).toEqual({
+        sandboxId: "sandbox-2",
+        timeoutMillis: Controller.IdleTimeoutMillis,
+      })
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("retries a failed cold wake as resume without replacing the persistent Workspace", () => {
+    const harness = makeHarness()
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* provision()
+      const first = yield* authenticate(harness, 1)
+      yield* service.pause({ assignmentId: "assignment-1", generation: 1 }, quiescence(first.access))
+      harness.provider.connectFailure = true
+      expect(
+        (yield* Effect.flip(service.resume({ assignmentId: "assignment-1", generation: 1 }, runtimeAuthorization)))
+          .kind,
+      ).toBe("provider")
+      harness.provider.connectFailure = false
+      yield* service.provision("assignment-1", runtimeAuthorization)
+      expect(harness.provider.bootstraps.at(-1)).toMatchObject({
+        sandboxId: "sandbox-1",
+        identity: { assignmentGeneration: 1, lifecycle: "resume" },
+        restore: null,
+      })
+      expect(harness.provider.creates).toHaveLength(1)
     }).pipe(provideLayer(harness.layer))
   })
 
@@ -301,21 +405,16 @@ describe("Controller", () => {
       const staged = {
         version: 1 as const,
         checkpointId: "checkpoint-1",
-        objectKey: "assignments/assignment-1/g1/checkpoint-1.tar.zst",
-        contentDigest: `sha256:${"a".repeat(64)}`,
-        sizeBytes: 42,
-        format: "tar.zst" as const,
+        archive,
         cursor: { sequence: 2, value: "executor:2" },
       }
       const verified = yield* service.checkpoint(access, staged)
       expect(yield* service.checkpoint(access, staged)).toEqual(verified)
-      expect(harness.checkpointInspections).toEqual([staged.objectKey, staged.objectKey])
+      expect(harness.checkpointInspections).toEqual([staged.checkpointId])
       harness.checkpointInspection = { ...harness.checkpointInspection, sizeBytes: 41 }
-      expect(
-        (yield* Effect.flip(
-          service.checkpoint(access, { ...staged, checkpointId: "checkpoint-2", objectKey: `${staged.objectKey}.2` }),
-        )).kind,
-      ).toBe("checkpoint")
+      expect((yield* Effect.flip(service.checkpoint(access, { ...staged, checkpointId: "checkpoint-2" }))).kind).toBe(
+        "checkpoint",
+      )
       const credential = yield* service.credential(access, {
         ownerId: "owner-1",
         assignmentId: "assignment-1",
@@ -367,13 +466,56 @@ describe("Controller", () => {
     }).pipe(provideLayer(harness.layer))
   })
 
+  it.effect("binds Workspace readiness and setup cache objects to the authorized environment", () => {
+    const harness = makeHarness()
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* provision()
+      const { access } = yield* authenticate(harness, 1)
+      const proof = {
+        workspaceId: "workspace-1",
+        repositoryId: "repository-1",
+        baseCommit: "a".repeat(40),
+        headCommit: "b".repeat(40),
+        setupHookDigest: `sha256:${"c".repeat(64)}`,
+        environmentDigest,
+        templateBuildId: "template-build-v1-immutable",
+        restoredCheckpointId: null,
+      }
+      expect((yield* Effect.flip(service.ready(access, proof, `sha256:${"f".repeat(64)}`))).kind).toBe("fenced")
+      yield* service.ready(access, proof, environmentDigest)
+      const key = {
+        ownerId: "owner-1",
+        repository: {
+          repositoryId: "repository-1",
+          owner: "In-Time-Tec",
+          name: "rika",
+          commitSha: "a".repeat(40),
+        },
+        setupHookDigest: proof.setupHookDigest,
+        templateBuildId: proof.templateBuildId,
+        environmentDigest,
+      }
+      expect((yield* Effect.flip(service.storeSetupCache(access, key, archive, `sha256:${"f".repeat(64)}`))).kind).toBe(
+        "fenced",
+      )
+      yield* service.storeSetupCache(access, key, archive, environmentDigest)
+      expect(yield* service.loadSetupCache(access, key, environmentDigest)).toEqual(archive)
+    }).pipe(provideLayer(harness.layer))
+  })
+
   it.effect("reports checkout as unavailable when the assignment has no repository", () => {
     const harness = makeHarness()
     return Effect.gen(function* () {
       const service = yield* controller
       const assignments = yield* ExecutorAssignments
       yield* assignments.create({ ...assignmentInput, checkout: null })
-      yield* service.provision(assignmentInput.id, setupEgress)
+      yield* service.provision(assignmentInput.id, setupAuthorization)
+      expect(harness.provider.creates[0]!.environment).not.toHaveProperty("RIKA_EXECUTOR_REPOSITORY_ID")
+      expect(harness.provider.creates[0]!.environment).not.toHaveProperty("RIKA_EXECUTOR_REPOSITORY_OWNER")
+      expect(harness.provider.creates[0]!.environment).not.toHaveProperty("RIKA_EXECUTOR_REPOSITORY_NAME")
+      expect(harness.provider.creates[0]!.environment).not.toHaveProperty("RIKA_EXECUTOR_COMMIT_SHA")
+      expect(harness.provider.bootstraps[0]!.identity.repository).toBeNull()
       const { access } = yield* authenticate(harness, 1)
 
       expect(
@@ -425,7 +567,7 @@ describe("Controller", () => {
     return Effect.gen(function* () {
       const service = yield* controller
       yield* createAssignment()
-      expect(yield* service.provision("assignment-1", setupEgress)).toMatchObject({
+      expect(yield* service.provision("assignment-1", setupAuthorization)).toMatchObject({
         sandboxId: "sandbox-a-adopt",
         state: "provisioning",
       })
@@ -456,7 +598,7 @@ describe("Controller", () => {
     return Effect.gen(function* () {
       const service = yield* controller
       yield* createAssignment()
-      expect((yield* Effect.flip(service.provision("assignment-1", setupEgress))).kind).toBe("provider")
+      expect((yield* Effect.flip(service.provision("assignment-1", setupAuthorization))).kind).toBe("provider")
       expect(harness.provider.bootstraps).toEqual([])
       expect(harness.provider.kills).toEqual([])
     }).pipe(provideLayer(harness.layer))
@@ -483,7 +625,7 @@ describe("Controller", () => {
     return Effect.gen(function* () {
       const service = yield* controller
       yield* createAssignment()
-      expect((yield* Effect.flip(service.provision("assignment-1", setupEgress))).kind).toBe("provider")
+      expect((yield* Effect.flip(service.provision("assignment-1", setupAuthorization))).kind).toBe("provider")
       expect(harness.provider.bootstraps).toEqual([])
       expect(harness.provider.kills).toEqual([])
     }).pipe(provideLayer(harness.layer))
@@ -515,6 +657,66 @@ describe("Controller", () => {
     }).pipe(provideLayer(harness.layer))
   })
 
+  it.effect("preserves active and paused sandboxes and reaps terminal inventory", () => {
+    const harness = makeHarness()
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* provision()
+      const { access } = yield* authenticate(harness, 1)
+      harness.provider.inventory = [
+        {
+          sandboxId: "sandbox-1",
+          state: "running",
+          templateId: "ar7-template-alias",
+          templateBuildId: "template-build-v1-immutable",
+          metadata: { "rika.app-id": "rika", "rika.deployment-id": "test" },
+        },
+      ]
+      expect(yield* service.cleanupOrphans).toEqual([])
+
+      yield* service.pause({ assignmentId: "assignment-1", generation: 1 }, quiescence(access))
+      harness.provider.inventory = [{ ...harness.provider.inventory[0]!, state: "paused" }]
+      expect(yield* service.cleanupOrphans).toEqual([])
+
+      yield* service.kill({ assignmentId: "assignment-1", generation: 1 })
+      harness.provider.kills.length = 0
+      expect(yield* service.cleanupOrphans).toEqual(["sandbox-1"])
+      expect(harness.provider.kills).toEqual(["sandbox-1"])
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("preserves an unbound provisioning sandbox with the exact durable generation identity", () => {
+    const harness = makeHarness()
+    harness.provider.inventory = [
+      {
+        sandboxId: "sandbox-provisioning",
+        state: "running",
+        templateId: "ar7-template-alias",
+        templateBuildId: "template-build-v1-immutable",
+        metadata: {
+          "rika.app-id": "rika",
+          "rika.deployment-id": "test",
+          "rika.assignment-id": "assignment-1",
+          "rika.generation": "1",
+        },
+      },
+    ]
+    return Effect.gen(function* () {
+      const assignments = yield* ExecutorAssignments
+      const assignment = yield* createAssignment()
+      yield* assignments.beginProvisioning({
+        assignmentId: assignment.id,
+        generation: assignment.generation,
+        revision: assignment.revision,
+        bootstrapCredentialDigest: Redacted.make("bootstrap-digest"),
+        bootstrapLifetimeMillis: 60_000,
+      })
+      const service = yield* controller
+      expect(yield* service.cleanupOrphans).toEqual([])
+      expect(harness.provider.kills).toEqual([])
+    }).pipe(provideLayer(harness.layer))
+  })
+
   it.effect("rejects a cell dispatch access after its lease expires or is replaced", () => {
     const harness = makeHarness()
     return Effect.gen(function* () {
@@ -527,7 +729,7 @@ describe("Controller", () => {
       const reconnected = yield* service.reconnect(access)
       const renewed = { ...access, leaseEpoch: reconnected.leaseEpoch }
       yield* service.validateAccess(renewed)
-      yield* service.replace({ assignmentId: "assignment-1", generation: 1 }, runtimeEgress)
+      yield* service.replace({ assignmentId: "assignment-1", generation: 1 }, runtimeAuthorization)
       expect((yield* Effect.flip(service.validateAccess(renewed))).kind).toBe("fenced")
     }).pipe(provideLayer(harness.layer))
   })

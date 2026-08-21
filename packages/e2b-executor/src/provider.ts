@@ -10,7 +10,7 @@ import {
   type SandboxNetworkUpdate,
 } from "e2b"
 import { Context, Effect, Layer, Redacted, Schema } from "effect"
-import type { ExecutorBootstrapIdentity } from "@rika/remote-execution/protocol"
+import type { CheckpointRestore, ExecutorBootstrapIdentity } from "@rika/remote-execution/protocol"
 
 export interface CreateRequest {
   readonly appId: string
@@ -29,6 +29,7 @@ export interface BootstrapRequest {
   readonly sandboxId: string
   readonly credential: Redacted.Redacted<string>
   readonly identity: ExecutorBootstrapIdentity
+  readonly restore: CheckpointRestore | null
 }
 
 export interface Handle {
@@ -296,7 +297,7 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
       sdk.bootstrap({
         sandboxId: request.sandboxId,
         connection,
-        body: JSON.stringify({ credential, identity: request.identity }),
+        body: JSON.stringify({ credential, identity: request.identity, restore: request.restore }),
         url: bootstrapUrl(request.sandboxId, options.domain),
       }),
     )

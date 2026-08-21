@@ -15,7 +15,7 @@ import { migrations as productMigrations } from "../../../packages/product-store
 import * as ExecutionPostgres from "../../../packages/execution/src/postgres"
 import { layer as controllerLayer } from "../../../packages/e2b-executor/src/controller"
 import { Credentials, CredentialError } from "../../../packages/e2b-executor/src/checkout"
-import { Inspector, InspectionError } from "../../../packages/e2b-executor/src/checkpoint"
+import { ObjectStore, memoryObjectStore, vaultLayer } from "../../../packages/e2b-executor/src/checkpoint"
 import { Provider, type BootstrapRequest, type CreateRequest } from "../../../packages/e2b-executor/src/provider"
 import { type Gateway, type Socket } from "../../api/src/executor-gateway"
 import { Executor, service as executorService } from "../../api/src/executor"
@@ -61,6 +61,7 @@ const workspaceCapabilities = {
 } as const
 const deviceId = "device-cli-e2b"
 const clientId = "client-cli-e2b"
+const workspaceEncryptionKey = Redacted.make(btoa(String.fromCharCode(...new Uint8Array(32).fill(7))))
 
 const account: Account = {
   user: {
@@ -183,6 +184,8 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
                     socket,
                     encodeExecutorMessage({
                       _tag: "ExecutorHello",
+                      lifecycle: request.identity.lifecycle,
+                      environmentDigest: request.identity.environmentDigest,
                       hello: {
                         minimumVersion: 1,
                         maximumVersion: 1,
@@ -225,9 +228,9 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
             Layer.mergeAll(
               provider,
               BunCrypto.layer,
-              Layer.succeed(
-                Inspector,
-                Inspector.of({ inspect: () => Effect.fail(InspectionError.make({ message: "unused" })) }),
+              vaultLayer(workspaceEncryptionKey).pipe(
+                Layer.provide(Layer.succeed(ObjectStore, memoryObjectStore())),
+                Layer.provide(BunServices.layer),
               ),
               Layer.succeed(
                 Credentials,

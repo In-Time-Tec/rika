@@ -1,9 +1,9 @@
-import { Crypto, Effect, Layer, Redacted } from "effect"
+import { Crypto, Effect, Layer, Option, Redacted } from "effect"
 import { type ExecutorAssignment } from "@rika/product/executor-assignment"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
 import { CheckpointId, ExecutorAssignmentId, OwnerId, ThreadId, WorkspaceId } from "@rika/product/hosted-model"
 import { layer as assignmentLayer } from "@rika/product-store/memory-assignments"
-import { Inspector } from "../../src/checkpoint"
+import { CheckpointError, Vault } from "../../src/checkpoint"
 import { Credentials } from "../../src/checkout"
 import { Controller, type ControllerError, type Options, layer as controllerLayer } from "../../src/controller"
 import {
@@ -26,7 +26,10 @@ export interface FakeProviderState {
   readonly touches: Array<{ readonly sandboxId: string; readonly timeoutMillis: number }>
   readonly bootstraps: Array<BootstrapRequest>
   createFailure: boolean
+  bootstrapFailure: boolean
+  connectFailure: boolean
   pauseFailure: boolean
+  killFailure: boolean
   inventory: Array<InventoryEntry>
 }
 
@@ -58,11 +61,15 @@ const providerLayer = (state: FakeProviderState) =>
       },
       bootstrap: (request) => {
         state.bootstraps.push(request)
-        return Effect.void
+        return state.bootstrapFailure
+          ? Effect.fail(ProviderError.make({ operation: "bootstrap", message: "bootstrap failed" }))
+          : Effect.void
       },
       connect: (sandboxId, timeoutMillis) => {
         state.connects.push({ sandboxId, timeoutMillis })
-        return Effect.succeed({ sandboxId, state: "running" })
+        return state.connectFailure
+          ? Effect.fail(ProviderError.make({ operation: "connect", message: "cold wake failed" }))
+          : Effect.succeed({ sandboxId, state: "running" })
       },
       updateNetwork: (sandboxId, allowedEgress) => {
         state.networks.push({ sandboxId, allowedEgress })
@@ -76,7 +83,9 @@ const providerLayer = (state: FakeProviderState) =>
       },
       kill: (sandboxId) => {
         state.kills.push(sandboxId)
-        return Effect.succeed(true)
+        return state.killFailure
+          ? Effect.fail(ProviderError.make({ operation: "kill", message: "kill failed" }))
+          : Effect.succeed(true)
       },
       touch: (sandboxId, timeoutMillis) => {
         state.touches.push({ sandboxId, timeoutMillis })
@@ -107,7 +116,10 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     touches: [],
     bootstraps: [],
     createFailure: false,
+    bootstrapFailure: false,
+    connectFailure: false,
     pauseFailure: false,
+    killFailure: false,
     inventory: [],
   }
   const checkpointInspections: Array<string> = []
@@ -144,16 +156,69 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
       revoke: () => Effect.void,
     }),
   )
-  const inspector = Layer.succeed(
-    Inspector,
-    Inspector.of({
-      inspect: (objectKey) => {
-        checkpointInspections.push(objectKey)
-        return Effect.succeed(harness.checkpointInspection)
+  const checkpoints = new Map<
+    string,
+    { readonly content: string; readonly contentDigest: string; readonly sizeBytes: number }
+  >()
+  const caches = new Map<
+    string,
+    { readonly content: string; readonly contentDigest: string; readonly sizeBytes: number }
+  >()
+  const archive = (encoded: { readonly content: string; readonly contentDigest: string; readonly sizeBytes: number }) =>
+    Effect.try({
+      try: () => ({
+        bytes: new Uint8Array(Buffer.from(encoded.content, "base64")),
+        contentDigest: encoded.contentDigest,
+        sizeBytes: encoded.sizeBytes,
+      }),
+      catch: () => CheckpointError.make({ kind: "corrupt", message: "invalid archive" }),
+    })
+  const vault = Layer.succeed(
+    Vault,
+    Vault.of({
+      storeCheckpoint: (scope, encoded) => {
+        checkpointInspections.push(scope.checkpointId)
+        if (
+          harness.checkpointInspection.contentDigest !== encoded.contentDigest ||
+          harness.checkpointInspection.sizeBytes !== encoded.sizeBytes
+        )
+          return Effect.fail(CheckpointError.make({ kind: "corrupt", message: "archive metadata mismatch" }))
+        const objectKey = `owners/owner/threads/thread/assignments/${scope.assignmentId}/g${scope.generation}/${scope.checkpointId}.tar.zst.aes`
+        checkpoints.set(scope.checkpointId, encoded)
+        return Effect.succeed({
+          objectKey,
+          contentDigest: encoded.contentDigest,
+          sizeBytes: encoded.sizeBytes,
+          archiveDigest: encoded.contentDigest,
+          archiveSizeBytes: encoded.sizeBytes,
+          encryption: "aes-256-gcm" as const,
+        })
       },
+      loadCheckpoint: (scope) =>
+        Option.match(Option.fromNullishOr(checkpoints.get(scope.checkpointId)), {
+          onNone: () => Effect.fail(CheckpointError.make({ kind: "missing", message: "checkpoint missing" })),
+          onSome: archive,
+        }),
+      storeSetupCache: (key, encoded) => {
+        const objectKey = JSON.stringify(key)
+        caches.set(objectKey, encoded)
+        return Effect.succeed({
+          objectKey,
+          contentDigest: encoded.contentDigest,
+          sizeBytes: encoded.sizeBytes,
+          archiveDigest: encoded.contentDigest,
+          archiveSizeBytes: encoded.sizeBytes,
+          encryption: "aes-256-gcm" as const,
+        })
+      },
+      loadSetupCache: (key) =>
+        Option.match(Option.fromNullishOr(caches.get(JSON.stringify(key))), {
+          onNone: () => Effect.succeedNone,
+          onSome: (encoded) => archive(encoded).pipe(Effect.map(Option.some)),
+        }),
     }),
   )
-  const dependencies = Layer.mergeAll(providerLayer(provider), cryptoLayer(), broker, inspector)
+  const dependencies = Layer.mergeAll(providerLayer(provider), cryptoLayer(), broker, vault)
   const controller = controllerLayer({
     appId: "rika",
     deploymentId: "test",

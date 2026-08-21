@@ -615,6 +615,24 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
     return row === undefined ? undefined : yield* decodeAssignment(row)
   })
 
+  const latestCheckpoint: AssignmentsService["latestCheckpoint"] = Effect.fn("PostgresAssignments.latestCheckpoint")(
+    function* (assignmentId) {
+      const rows = yield* query(sql<CheckpointRow>`SELECT checkpoint.id, checkpoint.owner_id AS "ownerId",
+      checkpoint.thread_id AS "threadId", checkpoint.assignment_id AS "assignmentId",
+      checkpoint.executor_instance_id AS "executorInstanceId",
+      checkpoint.assignment_generation::text AS "assignmentGeneration",
+      checkpoint.lease_epoch::text AS "leaseEpoch", checkpoint.object_key AS "objectKey",
+      checkpoint.content_digest AS "contentDigest", checkpoint.size_bytes::float8 AS "sizeBytes",
+      checkpoint.format, checkpoint.cursor_sequence::text AS "cursorSequence",
+      checkpoint.cursor_value AS "cursorValue", checkpoint.metadata,
+      to_char(checkpoint.verified_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "verifiedAt"
+      FROM rika_hosted_executor_assignments assignment
+      JOIN rika_hosted_checkpoints checkpoint ON checkpoint.id = assignment.latest_checkpoint_id
+      WHERE assignment.id = ${assignmentId}`)
+      return rows[0] === undefined ? undefined : yield* decodeCheckpoint(rows[0])
+    },
+  )
+
   const listManaged: AssignmentsService["listManaged"] = query(
     sql<AssignmentRow>`SELECT id, owner_id AS "ownerId", thread_id AS "threadId",
         workspace_id AS "workspaceId", executor_kind AS "executorKind", placement, checkout,
@@ -654,6 +672,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
     resume,
     terminate,
     commitCheckpoint,
+    latestCheckpoint,
     listManaged,
   })
 })

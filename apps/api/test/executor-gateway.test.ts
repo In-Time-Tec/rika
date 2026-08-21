@@ -10,6 +10,7 @@ import {
   GatewayError,
   makeGateway as makeGatewayService,
   type BindingAuthority,
+  type Gateway,
   type LifecycleStore,
   type PreparationStore,
   type Socket,
@@ -114,6 +115,7 @@ const readyPreparation: PreparationStore = {
   retry: () => Effect.succeed(2),
   ready: () => Effect.void,
 }
+const environmentDigest = `sha256:${"0".repeat(64)}`
 const makeGateway = (
   service: Controller,
   append: LifecycleStore["append"] = () => Effect.void,
@@ -124,12 +126,17 @@ const makeGateway = (
     service,
     lifecycleStore(append, load),
     {
-      activate: (_access, _phase, use) => use({ digest: `sha256:${"0".repeat(64)}`, values: {}, redactedNames: [] }),
+      activate: (_access, _phase, use) => use({ digest: environmentDigest, values: {}, redactedNames: [] }),
       replace: (key) =>
-        service.replace(key, { phase: "runtime", allow: ["api.example.test"] }).pipe(
-          Effect.asVoid,
-          Effect.mapError((error) => GatewayError.make({ kind: "fenced", message: error.message })),
-        ),
+        service
+          .replace(key, {
+            egress: { phase: "runtime", allow: ["api.example.test"] },
+            environmentDigest,
+          })
+          .pipe(
+            Effect.asVoid,
+            Effect.mapError((error) => GatewayError.make({ kind: "fenced", message: error.message })),
+          ),
     },
     preparation,
     () => Effect.succeed("a".repeat(64)),
@@ -229,10 +236,36 @@ const controller = (overrides: Partial<Controller> = {}): Controller =>
     credential: () => Effect.die("unused"),
     revokeCredential: () => Effect.die("unused"),
     workspace: () => Effect.die("unused"),
+    ready: () => Effect.void,
+    loadSetupCache: () => Effect.succeed(null),
+    storeSetupCache: () => Effect.void,
     activatePhase: () => Effect.die("unused"),
     cleanupOrphans: Effect.die("unused"),
     ...overrides,
   }) as Controller
+
+const workspaceReady = (gateway: Gateway, target: ReturnType<typeof socket>, current = access) => {
+  const retained = target.sent.length
+  return gateway
+    .receive(
+      target,
+      encode({
+        _tag: "ExecutorWorkspaceReady",
+        access: current,
+        proof: {
+          workspaceId: "workspace-1",
+          repositoryId: null,
+          baseCommit: null,
+          headCommit: null,
+          setupHookDigest: `sha256:${"a".repeat(64)}`,
+          environmentDigest,
+          templateBuildId: "build-1",
+          restoredCheckpointId: null,
+        },
+      }),
+    )
+    .pipe(Effect.tap(() => Effect.sync(() => target.sent.splice(retained, 1))))
+}
 
 describe("executor gateway", () => {
   it.effect("decodes hello and writes the controller welcome", () =>
@@ -243,6 +276,8 @@ describe("executor gateway", () => {
         target,
         encode({
           _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
           hello: {
             minimumVersion: 1,
             maximumVersion: 1,
@@ -272,6 +307,8 @@ describe("executor gateway", () => {
         target,
         encode({
           _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
           hello: {
             minimumVersion: 1,
             maximumVersion: 1,
@@ -285,6 +322,7 @@ describe("executor gateway", () => {
           },
         }),
       )
+      yield* workspaceReady(gateway, target)
       for (const request of [
         {
           _tag: "PtyCreate" as const,
@@ -354,6 +392,8 @@ describe("executor gateway", () => {
         target,
         encode({
           _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
           hello: {
             minimumVersion: 1,
             maximumVersion: 1,
@@ -394,6 +434,8 @@ describe("executor gateway", () => {
         first,
         encode({
           _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
           hello: {
             minimumVersion: 1,
             maximumVersion: 1,
@@ -407,6 +449,7 @@ describe("executor gateway", () => {
           },
         }),
       )
+      yield* workspaceReady(gateway, first)
       const request = {
         _tag: "WorkspaceFileInspect" as const,
         requestId: "inspect-1",
@@ -415,12 +458,21 @@ describe("executor gateway", () => {
       }
       const pending = yield* Effect.forkChild(gateway.workspace("assignment-1", request))
       yield* Effect.yieldNow
-      expect(decode(first.sent.at(-1)!)).toEqual({ _tag: "WorkspaceRequest", fence, request })
+      expect(first.sent.map((message) => decode(message)).find((message) => message._tag === "WorkspaceRequest")).toEqual({
+        _tag: "WorkspaceRequest",
+        fence,
+        request,
+      })
 
       yield* gateway.disconnected(first)
       yield* gateway.receive(resumed, encode({ _tag: "ExecutorReconnect", access }))
       const resumedAccess = { ...access, leaseEpoch: 2 }
-      expect(decode(resumed.sent.at(-1)!)).toEqual({ _tag: "WorkspaceRequest", fence, request })
+      yield* workspaceReady(gateway, resumed, resumedAccess)
+      expect(resumed.sent.map((message) => decode(message)).find((message) => message._tag === "WorkspaceRequest")).toEqual({
+        _tag: "WorkspaceRequest",
+        fence,
+        request,
+      })
       const response = {
         _tag: "WorkspaceFileContent" as const,
         requestId: "inspect-1",
@@ -440,6 +492,8 @@ describe("executor gateway", () => {
       const gateway = yield* makeGateway(controller())
       const hello = encode({
         _tag: "ExecutorHello",
+        lifecycle: "fresh",
+        environmentDigest,
         hello: {
           minimumVersion: 1,
           maximumVersion: 1,
@@ -526,6 +580,8 @@ describe("executor gateway", () => {
         target,
         encode({
           _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
           hello: {
             minimumVersion: 1,
             maximumVersion: 1,
@@ -539,6 +595,7 @@ describe("executor gateway", () => {
           },
         }),
       )
+      yield* workspaceReady(gateway, target)
       const running = yield* Effect.forkChild(
         gateway.execute({
           assignmentId: "assignment-1",
@@ -655,6 +712,8 @@ describe("executor gateway", () => {
         target,
         encode({
           _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
           hello: {
             minimumVersion: 1,
             maximumVersion: 1,
@@ -668,6 +727,7 @@ describe("executor gateway", () => {
           },
         }),
       )
+      yield* workspaceReady(gateway, target)
       const running = yield* Effect.forkChild(
         gateway.execute({
           assignmentId: "assignment-1",
@@ -756,6 +816,8 @@ describe("executor gateway", () => {
         target,
         encode({
           _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
           hello: {
             minimumVersion: 1,
             maximumVersion: 1,
@@ -769,6 +831,7 @@ describe("executor gateway", () => {
           },
         }),
       )
+      yield* workspaceReady(gateway, target)
       yield* Effect.flip(
         gateway.execute({
           assignmentId: "assignment-1",
@@ -795,6 +858,8 @@ describe("executor gateway", () => {
         target,
         encode({
           _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
           hello: {
             minimumVersion: 1,
             maximumVersion: 1,
@@ -808,6 +873,7 @@ describe("executor gateway", () => {
           },
         }),
       )
+      yield* workspaceReady(gateway, target)
       const running = yield* Effect.forkChild(
         gateway.execute({
           assignmentId: "assignment-1",
@@ -867,6 +933,8 @@ describe("executor gateway", () => {
         target,
         encode({
           _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
           hello: {
             minimumVersion: 1,
             maximumVersion: 1,
@@ -937,6 +1005,8 @@ describe("executor gateway", () => {
         target,
         encode({
           _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
           hello: {
             minimumVersion: 1,
             maximumVersion: 1,
@@ -950,6 +1020,7 @@ describe("executor gateway", () => {
           },
         }),
       )
+      yield* workspaceReady(gateway, target)
       const running = yield* Effect.forkChild(
         gateway.execute({
           assignmentId: "assignment-1",
@@ -976,6 +1047,8 @@ describe("executor gateway", () => {
         target,
         encode({
           _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
           hello: {
             minimumVersion: 1,
             maximumVersion: 1,
@@ -989,6 +1062,7 @@ describe("executor gateway", () => {
           },
         }),
       )
+      yield* workspaceReady(gateway, target)
       const running = yield* Effect.forkChild(
         gateway.execute({
           assignmentId: "assignment-1",
@@ -1039,6 +1113,8 @@ describe("executor gateway", () => {
         target,
         encode({
           _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
           hello: {
             minimumVersion: 1,
             maximumVersion: 1,
@@ -1052,6 +1128,7 @@ describe("executor gateway", () => {
           },
         }),
       )
+      yield* workspaceReady(gateway, target)
       const running = yield* Effect.forkChild(
         gateway.execute({
           assignmentId: "assignment-1",
@@ -1071,6 +1148,202 @@ describe("executor gateway", () => {
         attempt: 0,
       })
       yield* Fiber.interrupt(running)
+    }),
+  )
+
+  it.effect("fences admission while quiescing and accepts only a matching operation barrier", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      const gateway = yield* makeGateway(controller())
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: true, pty: false },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      yield* workspaceReady(gateway, target)
+      const running = yield* Effect.forkChild(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-quiesced",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "await never",
+        }),
+      )
+      yield* Effect.yieldNow
+      const barrier = yield* Effect.forkChild(gateway.quiesce("assignment-1"))
+      yield* Effect.yieldNow
+      const request = decode(target.sent.at(-1)!)
+      expect(request).toMatchObject({ _tag: "Quiesce", fence })
+      const rejected = yield* Effect.flip(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-after-quiesce",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "echo forbidden",
+        }),
+      )
+      expect(rejected).toMatchObject({ kind: "fenced" })
+      if (request._tag !== "Quiesce") return yield* Effect.die("quiesce request missing")
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorQuiesced",
+          access,
+          requestId: request.requestId,
+          operations: [{ operationKey: "operation-quiesced", outcome: "unknown" }],
+          checkpoint: {
+            version: 1,
+            checkpointId: "checkpoint-quiesced",
+            archive: { content: "eA==", contentDigest: `sha256:${"c".repeat(64)}`, sizeBytes: 1 },
+            cursor: { sequence: 0, value: "" },
+          },
+        }),
+      )
+      expect(yield* Fiber.join(barrier)).toMatchObject({
+        operations: [{ operationKey: "operation-quiesced", outcome: "unknown" }],
+      })
+      yield* Fiber.interrupt(running)
+    }),
+  )
+
+  it.effect("rejects a quiesce barrier that omits active work and fails it when the socket disconnects", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      const gateway = yield* makeGateway(controller())
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: true, pty: false },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      yield* workspaceReady(gateway, target)
+      const running = yield* Effect.forkChild(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-omitted",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "await never",
+        }),
+      )
+      yield* Effect.yieldNow
+      const barrier = yield* Effect.forkChild(gateway.quiesce("assignment-1"))
+      yield* Effect.yieldNow
+      const request = decode(target.sent.at(-1)!)
+      if (request._tag !== "Quiesce") return yield* Effect.die("quiesce request missing")
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorQuiesced",
+          access,
+          requestId: request.requestId,
+          operations: [],
+          checkpoint: {
+            version: 1,
+            checkpointId: "checkpoint-omitted",
+            archive: { content: "eA==", contentDigest: `sha256:${"c".repeat(64)}`, sizeBytes: 1 },
+            cursor: { sequence: 0, value: "" },
+          },
+        }),
+      )
+      expect(target.closed).toEqual([[1008, "fenced"]])
+      yield* gateway.disconnected(target)
+      expect(yield* Effect.flip(Fiber.join(barrier))).toMatchObject({ kind: "disconnected" })
+      yield* Fiber.interrupt(running)
+    }),
+  )
+
+  it.effect("treats setup cache storage faults as a safe miss without fencing the executor", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      const cacheFailure = ControllerError.make({ kind: "checkpoint", message: "cache unavailable" })
+      const gateway = yield* makeGateway(
+        controller({
+          loadSetupCache: () => Effect.fail(cacheFailure),
+          storeSetupCache: () => Effect.fail(cacheFailure),
+        }),
+      )
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: true, pty: false },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      const key = {
+        ownerId: "owner-1",
+        repository: {
+          repositoryId: "repository-1",
+          owner: "In-Time-Tec",
+          name: "rika",
+          commitSha: "a".repeat(40),
+        },
+        setupHookDigest: `sha256:${"b".repeat(64)}`,
+        templateBuildId: "build-1",
+        environmentDigest,
+      }
+      yield* gateway.receive(target, encode({ _tag: "SetupCacheLookup", access, requestId: "cache-lookup", key }))
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "SetupCacheProposed",
+          access,
+          requestId: "cache-store",
+          key,
+          archive: { content: "eA==", contentDigest: `sha256:${"c".repeat(64)}`, sizeBytes: 1 },
+        }),
+      )
+      expect(decode(target.sent.at(-2)!)).toEqual({
+        _tag: "SetupCacheResult",
+        requestId: "cache-lookup",
+        archive: null,
+      })
+      expect(decode(target.sent.at(-1)!)).toEqual({ _tag: "SetupCacheAccepted", requestId: "cache-store" })
+      expect(target.closed).toEqual([])
     }),
   )
 
@@ -1137,6 +1410,8 @@ describe("executor gateway", () => {
         target,
         encode({
           _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
           hello: {
             minimumVersion: 1,
             maximumVersion: 1,
@@ -1150,6 +1425,7 @@ describe("executor gateway", () => {
           },
         }),
       )
+      yield* workspaceReady(gateway, target)
       const error = yield* Effect.flip(
         gateway.execute({
           assignmentId: "assignment-1",
@@ -1188,6 +1464,8 @@ describe("executor gateway", () => {
         firstSocket,
         encode({
           _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
           hello: {
             minimumVersion: 1,
             maximumVersion: 1,
@@ -1201,6 +1479,7 @@ describe("executor gateway", () => {
           },
         }),
       )
+      yield* workspaceReady(gateway, firstSocket)
       const running = yield* Effect.forkChild(
         gateway.execute({
           assignmentId: "assignment-1",
@@ -1215,6 +1494,7 @@ describe("executor gateway", () => {
       yield* gateway.receive(replacementSocket, encode({ _tag: "ExecutorReconnect", access }))
       expect(firstSocket.closed).toEqual([[1008, "fenced"]])
       const replacementAccess = { ...access, leaseEpoch: 2 }
+      yield* workspaceReady(gateway, replacementSocket, replacementAccess)
       expect(
         replacementSocket.sent.map((message) => decode(message)).find((message) => message._tag === "CellReplay"),
       ).toEqual({

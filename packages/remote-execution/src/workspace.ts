@@ -1,10 +1,19 @@
 import { Clock, Crypto, Effect, Encoding, Exit, Fiber, FileSystem, Option, Redacted, Schema } from "effect"
 import type {
   AccessWire,
+  EncodedArchive,
   RepositoryCheckoutWire,
   WorkspacePreparationEvidenceWire,
   WorkspacePreparationPhase,
 } from "./protocol"
+import {
+  createArchive,
+  decodeArchive,
+  encodeArchive,
+  hookDigest as readHookDigest,
+  restoreArchive,
+  type SetupCacheKey,
+} from "./workspace-archive"
 
 export const RemoteRepositoryRoot = "/home/rika-workspace/workspace/repo"
 export const EphemeralCredentialRoot = "/run/rika"
@@ -61,6 +70,15 @@ export interface Options {
   readonly reporter: Reporter
   readonly credential: (purpose: "git-read" | "github-read") => Effect.Effect<Credential, WorkspaceError>
   readonly revoke: (purpose: "git-read" | "github-read") => Effect.Effect<void, WorkspaceError>
+  readonly environment?: Readonly<Record<string, string>>
+  readonly environmentDigest?: string
+  readonly restore?: { readonly checkpointId: string; readonly archive: EncodedArchive }
+  readonly setupCache?: {
+    readonly ownerId: string
+    readonly load: (key: SetupCacheKey) => Effect.Effect<EncodedArchive | null>
+    readonly store: (key: SetupCacheKey, archive: EncodedArchive) => Effect.Effect<void>
+  }
+  readonly secretValues?: ReadonlySet<string>
 }
 
 const HookEvidence = Schema.Struct({
@@ -198,6 +216,7 @@ const make = (options: Options) =>
     const credentialRoot = options.credentialRoot ?? EphemeralCredentialRoot
     const workspaceParent = root.slice(0, root.lastIndexOf("/"))
     const workspaceEnvironment = {
+      ...options.environment,
       PATH: `${credentialRoot}/bin:${Bun.env.PATH ?? "/usr/local/bin:/usr/bin:/bin"}`,
       GH_CONFIG_DIR: `${credentialRoot}/gh`,
     }
@@ -237,6 +256,7 @@ const make = (options: Options) =>
         }),
       ),
     )
+    const authorizedEnvironmentDigest = options.environmentDigest ?? environmentDigest
     const redact = (value: string) => {
       let text = value
         .replace(/(token|password|secret|authorization)["']?\s*[:=]\s*["']?[^\s"']+/gi, "$1=REDACTED")
@@ -607,6 +627,40 @@ const make = (options: Options) =>
       return assignment.checkout === null ? ["bun"] : ["git", "gh"]
     })
 
+    const archiveFailure = (message: string) => WorkspaceError.make({ phase: "checkout", message, retryable: false })
+
+    const restore = Effect.fn("Workspace.restore")(function* (archive: EncodedArchive) {
+      const decoded = yield* decodeArchive(archive).pipe(
+        Effect.mapError(() => archiveFailure("Workspace archive verification failed")),
+      )
+      yield* restoreArchive(root, decoded, workspaceCommandPrefix).pipe(
+        Effect.mapError(() => archiveFailure("Workspace archive restoration failed")),
+      )
+    })
+
+    const resetCheckout = Effect.fn("Workspace.resetCheckout")(function* (checkout: RepositoryCheckoutWire) {
+      const result = yield* commandAdapter(
+        [
+          ...workspaceCommandPrefix,
+          "bash",
+          "-ceu",
+          'find "$1" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf -- {} +; git -C "$1" reset --hard "$2"; git -C "$1" clean -ffdx',
+          "rika-cache-reset",
+          root,
+          checkout.commitSha,
+        ],
+        root,
+        workspaceEnvironment,
+        report("checkout"),
+      )
+      if (result.code !== 0)
+        return yield* WorkspaceError.make({
+          phase: "checkout",
+          message: "Workspace could not recover from an invalid setup cache",
+          retryable: true,
+        })
+    })
+
     yield* fileSystem.makeDirectory(markerDirectory, { recursive: true, mode: 0o700 })
     const known = yield* readMarker()
     yield* options.reporter.started("checkout")
@@ -770,6 +824,62 @@ const make = (options: Options) =>
       yield* startRefresh("github-read", credential)
     }
 
+    let setupHookDigest = yield* readHookDigest(root, "setup").pipe(
+      Effect.mapError(() => archiveFailure("Workspace setup hook could not be verified")),
+    )
+    const cacheKey: SetupCacheKey | undefined =
+      options.setupCache === undefined || assignment.checkout === null
+        ? undefined
+        : {
+            ownerId: options.setupCache.ownerId,
+            repository: {
+              repositoryId: assignment.checkout.repositoryId,
+              owner: assignment.checkout.owner,
+              name: assignment.checkout.name,
+              commitSha: assignment.checkout.commitSha,
+            },
+            setupHookDigest,
+            templateBuildId: assignment.templateBuildId,
+            environmentDigest: authorizedEnvironmentDigest,
+          }
+    let restoredCheckpointId: string | null = null
+    let restoredCache = false
+    if (options.restore !== undefined) {
+      yield* restore(options.restore.archive)
+      yield* verify(marker)
+      restoredCheckpointId = options.restore.checkpointId
+    } else if (cacheKey !== undefined && marker.setupState !== "completed" && !assignment.retry) {
+      const cached = yield* options.setupCache!.load(cacheKey).pipe(Effect.catchCause(() => Effect.succeed(null)))
+      if (cached !== null) {
+        restoredCache = yield* restore(cached).pipe(
+          Effect.andThen(verify(marker)),
+          Effect.as(true),
+          Effect.catch(() => resetCheckout(assignment.checkout!).pipe(Effect.as(false))),
+        )
+      }
+    }
+
+    if (restoredCheckpointId !== null || restoredCache) {
+      setupHookDigest = yield* readHookDigest(root, "setup").pipe(
+        Effect.mapError(() => archiveFailure("Restored setup hook could not be verified")),
+      )
+      const restoredAt = yield* Clock.currentTimeMillis
+      marker = {
+        ...marker,
+        setupState: "completed",
+        setup: {
+          digest: setupHookDigest,
+          commitSha: assignment.checkout?.commitSha ?? null,
+          buildDigest,
+          environmentDigest,
+          startedAt: restoredAt,
+          finishedAt: restoredAt,
+          outcome: "completed",
+        },
+      }
+      yield* writeMarker(marker)
+    }
+
     if (marker.setupState !== "completed" || assignment.retry) {
       const setup = yield* hook(
         "setup",
@@ -778,9 +888,22 @@ const make = (options: Options) =>
       ).pipe(Effect.tapError(() => writeMarker({ ...marker, setupState: "failed" })))
       marker = { ...marker, setupState: "completed", setup }
       yield* writeMarker(marker)
+      if (cacheKey !== undefined) {
+        const archiveSecrets = new Set(options.secretValues ?? [])
+        for (const secret of secrets) archiveSecrets.add(secret)
+        yield* createArchive(root, archiveSecrets).pipe(
+          Effect.map(encodeArchive),
+          Effect.flatMap((archive) => options.setupCache!.store(cacheKey, archive)),
+          Effect.ignoreCause,
+        )
+      }
     }
 
-    if (assignment.cold && marker.lastWakeId !== assignment.wakeId) {
+    if (
+      restoredCheckpointId !== null ||
+      restoredCache ||
+      (assignment.cold && marker.lastWakeId !== assignment.wakeId)
+    ) {
       const resume = yield* hook(
         "resume",
         assignment.checkout?.commitSha ?? null,
@@ -801,6 +924,12 @@ const make = (options: Options) =>
       setup: marker.setup,
       resume: marker.resume,
       capabilities: available,
+      lifecycle: {
+        environmentDigest: authorizedEnvironmentDigest,
+        templateBuildId: assignment.templateBuildId,
+        setupHookDigest,
+        restoredCheckpointId,
+      },
     }
     return evidence
   })

@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest"
 import { Clock, Effect, FileSystem, Layer, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { prepare, testing, WorkspaceError } from "../src/workspace"
+import { createArchive, encodeArchive } from "../src/workspace-archive"
 import { provideLayer } from "./support/layer"
 
 const platform = Layer.merge(BunCrypto.layer, BunFileSystem.layer)
@@ -569,6 +570,56 @@ it.effect("rejects stale cold kernel identity and generation without changing wo
       )
       expect(error).toMatchObject({ phase: "checkout", retryable: false })
       expect(yield* fileSystem.readFileString(`${root}/untracked`)).toBe("keep")
+    }),
+  ).pipe(provideLayer(platform)),
+)
+
+it.effect("restores a verified replacement archive into a clean empty workspace and resumes it", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-workspace-replacement-" })
+      const source = `${parent}/checkpoint`
+      const root = `${parent}/workspace/repo`
+      yield* fileSystem.makeDirectory(`${source}/.agents`, { recursive: true })
+      yield* fileSystem.writeFileString(`${source}/state.txt`, "checkpoint state")
+      yield* fileSystem.writeFileString(`${source}/.agents/setup`, "#!/bin/sh\nexit 17\n")
+      yield* fileSystem.writeFileString(`${source}/.agents/resume`, `#!/bin/sh\nprintf x > "${root}/resumed"\n`)
+      yield* fileSystem.chmod(`${source}/.agents/setup`, 0o700)
+      yield* fileSystem.chmod(`${source}/.agents/resume`, 0o700)
+      const archive = encodeArchive(yield* createArchive(source))
+      const evidence = yield* prepare({
+        root,
+        workspaceCommandPrefix: [],
+        stateDirectory: `${parent}/state`,
+        kernel,
+        environmentDigest: `sha256:${"3".repeat(64)}`,
+        reporter: { started: () => Effect.void, output: () => Effect.void },
+        credential: () =>
+          Effect.fail(WorkspaceError.make({ phase: "checkout", message: "unexpected credential", retryable: false })),
+        revoke: () => Effect.void,
+        assignment: {
+          access: {
+            ...access,
+            fence: { ...access.fence, assignmentGeneration: 2, instanceId: "sandbox-2" },
+          },
+          workspaceId: "workspace-1",
+          wakeId: "wake-replacement",
+          cold: false,
+          attempt: 1,
+          retry: false,
+          templateBuildId: "build-1",
+          checkout: null,
+        },
+        restore: { checkpointId: "checkpoint-1", archive },
+      })
+      expect(evidence.lifecycle).toMatchObject({
+        restoredCheckpointId: "checkpoint-1",
+        environmentDigest: `sha256:${"3".repeat(64)}`,
+      })
+      expect(evidence.resume?.outcome).toBe("completed")
+      expect(yield* fileSystem.readFileString(`${root}/state.txt`)).toBe("checkpoint state")
+      expect(yield* fileSystem.readFileString(`${root}/resumed`)).toBe("x")
     }),
   ).pipe(provideLayer(platform)),
 )

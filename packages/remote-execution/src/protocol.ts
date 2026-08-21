@@ -13,6 +13,7 @@ import {
   WorkspaceResponse,
 } from "@rika/product/workspace-capability"
 import { Crypto, Effect, Encoding, Redacted, Schema } from "effect"
+import { MaximumArchiveBytes, RepositoryIdentity, SetupCacheKey } from "./workspace-archive"
 
 const Identifier = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
 const Generation = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
@@ -27,6 +28,10 @@ const RequestDigest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
 const PtyData = Schema.String.check(Schema.isMaxLength(16_384))
 const EnvironmentName = Schema.String.check(Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/))
 const EnvironmentDigest = Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/))
+const EncodedArchiveContent = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(Math.ceil(MaximumArchiveBytes / 3) * 4),
+)
 
 export const ProtocolVersion = Schema.Literal(1)
 export type ProtocolVersion = typeof ProtocolVersion.Type
@@ -36,6 +41,8 @@ export type Target = typeof Target.Type
 
 export const ExecutorBootstrapIdentity = Schema.Struct({
   target: Schema.Literal("e2b"),
+  ownerId: Identifier,
+  threadId: Identifier,
   assignmentId: Identifier,
   assignmentGeneration: Generation,
   instanceId: Identifier,
@@ -43,12 +50,30 @@ export const ExecutorBootstrapIdentity = Schema.Struct({
   templateBuildId: Identifier,
   apiUrl: Identifier,
   workspaceId: Identifier,
+  repository: Schema.NullOr(RepositoryIdentity),
+  lifecycle: Schema.Literals(["fresh", "resume", "replacement"]),
+  environmentDigest: Sha256,
+  setupCache: Schema.Boolean,
 })
 export type ExecutorBootstrapIdentity = typeof ExecutorBootstrapIdentity.Type
+
+export const EncodedArchive = Schema.Struct({
+  content: EncodedArchiveContent,
+  contentDigest: Sha256,
+  sizeBytes: ByteLength,
+})
+export type EncodedArchive = typeof EncodedArchive.Type
+
+export const CheckpointRestore = Schema.Struct({
+  checkpointId: Identifier,
+  archive: EncodedArchive,
+})
+export type CheckpointRestore = typeof CheckpointRestore.Type
 
 export const ExecutorBootstrapWire = Schema.Struct({
   credential: Identifier,
   identity: ExecutorBootstrapIdentity,
+  restore: Schema.NullOr(CheckpointRestore),
 })
 export type ExecutorBootstrapWire = typeof ExecutorBootstrapWire.Type
 
@@ -370,6 +395,32 @@ export const FilesystemCheckpoint = Schema.Struct({
 })
 export type FilesystemCheckpoint = typeof FilesystemCheckpoint.Type
 
+export const CheckpointProposal = Schema.Struct({
+  version: ProtocolVersion,
+  checkpointId: Identifier,
+  archive: EncodedArchive,
+  cursor: Cursor,
+})
+export type CheckpointProposal = typeof CheckpointProposal.Type
+
+export const QuiescedOperation = Schema.Struct({
+  operationKey: Identifier,
+  outcome: CellTerminalOutcome,
+})
+export type QuiescedOperation = typeof QuiescedOperation.Type
+
+export const WorkspaceProof = Schema.Struct({
+  workspaceId: Identifier,
+  repositoryId: Schema.NullOr(Identifier),
+  baseCommit: Schema.NullOr(Identifier),
+  headCommit: Schema.NullOr(Identifier),
+  setupHookDigest: Sha256,
+  environmentDigest: Sha256,
+  templateBuildId: Identifier,
+  restoredCheckpointId: Schema.NullOr(Identifier),
+})
+export type WorkspaceProof = typeof WorkspaceProof.Type
+
 export const PtyCreate = Schema.Struct({
   ptyId: Identifier,
   command: Schema.NonEmptyString,
@@ -485,6 +536,12 @@ export const WorkspacePreparationEvidenceWire = Schema.Struct({
   setup: HookEvidenceWire,
   resume: Schema.NullOr(HookEvidenceWire),
   capabilities: Schema.Array(Identifier).check(Schema.isMaxLength(32)),
+  lifecycle: Schema.Struct({
+    environmentDigest: Sha256,
+    templateBuildId: Identifier,
+    setupHookDigest: Sha256,
+    restoredCheckpointId: Schema.NullOr(Identifier),
+  }),
 })
 export type WorkspacePreparationEvidenceWire = typeof WorkspacePreparationEvidenceWire.Type
 
@@ -531,10 +588,13 @@ export const LocalExecutorMessage = Schema.Union([
 export type LocalExecutorMessage = typeof LocalExecutorMessage.Type
 
 export const ExecutorMessage = Schema.Union([
-  Schema.TaggedStruct("ExecutorHello", { hello: HelloWire }),
+  Schema.TaggedStruct("ExecutorHello", {
+    hello: HelloWire,
+    lifecycle: Schema.Literals(["fresh", "resume", "replacement"]),
+    environmentDigest: EnvironmentDigest,
+  }),
   Schema.TaggedStruct("ExecutorReconnect", { access: AccessWire }),
   Schema.TaggedStruct("ExecutorHeartbeat", { heartbeat: HeartbeatWire }),
-  Schema.TaggedStruct("CheckpointStaged", { access: AccessWire, checkpoint: FilesystemCheckpoint }),
   Schema.TaggedStruct("CredentialRequested", {
     requestId: Identifier,
     access: AccessWire,
@@ -595,6 +655,27 @@ export const ExecutorMessage = Schema.Union([
     message: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048)),
     retryable: Schema.Boolean,
   }),
+  Schema.TaggedStruct("ExecutorWorkspaceReady", {
+    access: AccessWire,
+    proof: WorkspaceProof,
+  }),
+  Schema.TaggedStruct("ExecutorQuiesced", {
+    access: AccessWire,
+    requestId: Identifier,
+    operations: Schema.Array(QuiescedOperation),
+    checkpoint: CheckpointProposal,
+  }),
+  Schema.TaggedStruct("SetupCacheLookup", {
+    access: AccessWire,
+    requestId: Identifier,
+    key: SetupCacheKey,
+  }),
+  Schema.TaggedStruct("SetupCacheProposed", {
+    access: AccessWire,
+    requestId: Identifier,
+    key: SetupCacheKey,
+    archive: EncodedArchive,
+  }),
   Schema.TaggedStruct("PtyOpened", { access: AccessWire, pty: PtyCreate }),
   Schema.TaggedStruct("PtyOutput", { access: AccessWire, ptyId: Identifier, chunk: PtyTranscriptChunk }),
   Schema.TaggedStruct("PtyReplayGap", { access: AccessWire, ptyId: Identifier, gap: PtyGap }),
@@ -653,6 +734,13 @@ export const ApiMessage = Schema.Union([
     checkout: Schema.NullOr(RepositoryCheckoutWire),
   }),
   Schema.TaggedStruct("WorkspacePreparationRetry", { fence: Fence, attempt: Generation }),
+  Schema.TaggedStruct("WorkspaceAccepted", { fence: Fence }),
+  Schema.TaggedStruct("Quiesce", { fence: Fence, requestId: Identifier }),
+  Schema.TaggedStruct("SetupCacheResult", {
+    requestId: Identifier,
+    archive: Schema.NullOr(EncodedArchive),
+  }),
+  Schema.TaggedStruct("SetupCacheAccepted", { requestId: Identifier }),
   Schema.TaggedStruct("PtyCreate", { fence: Fence, request: PtyCreate }),
   Schema.TaggedStruct("PtyInput", { fence: Fence, request: PtyInput }),
   Schema.TaggedStruct("PtyResize", { fence: Fence, request: PtyResize }),

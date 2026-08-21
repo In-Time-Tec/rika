@@ -84,6 +84,9 @@ const executor: Executor = {
   admitLocal: () => Effect.die("unused"),
   admitRun: () => Effect.die("unused"),
   run: () => Effect.die("unused"),
+  pause: () => Effect.die("unused"),
+  resume: () => Effect.die("unused"),
+  replace: () => Effect.die("unused"),
   ready: Effect.void,
 }
 

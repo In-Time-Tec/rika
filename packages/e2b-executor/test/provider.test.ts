@@ -24,6 +24,8 @@ const request = {
 
 const bootstrapIdentity = (sandboxId: string) => ({
   target: "e2b" as const,
+  ownerId: "owner-1",
+  threadId: "thread-1",
   assignmentId: "assignment-1",
   assignmentGeneration: 3,
   instanceId: sandboxId,
@@ -31,6 +33,10 @@ const bootstrapIdentity = (sandboxId: string) => ({
   templateBuildId: request.templateBuildId,
   apiUrl: "wss://api.example.test/api/v1/executors",
   workspaceId: "workspace-1",
+  repository: null,
+  lifecycle: "fresh" as const,
+  environmentDigest: `sha256:${"a".repeat(64)}`,
+  setupCache: false,
 })
 
 const sandboxInfo = (sandboxId: string, state: "running" | "paused"): SandboxInfo =>
@@ -260,12 +266,14 @@ describe("Provider", () => {
         sandboxId: "sandbox",
         credential: Redacted.make("bootstrap-secret"),
         identity: bootstrapIdentity("sandbox"),
+        restore: null,
       })
       expect(bootstrapUrl).toBe("https://7070-sandbox.e2b.app/.rika/bootstrap")
       expect(bootstrapApiKey).toBe("e2b-controller-secret")
       expect(decodeJson(bootstrapBody)).toEqual({
         credential: "bootstrap-secret",
         identity: bootstrapIdentity("sandbox"),
+        restore: null,
       })
       expect(testing.bootstrapHeaders("sandbox-traffic-secret")).toEqual({
         "content-type": "application/json",

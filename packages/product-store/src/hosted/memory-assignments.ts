@@ -413,6 +413,11 @@ const make = Effect.gen(function* () {
           checkpoints: new Map(current.checkpoints).set(input.id, checkpoint),
         })
       }),
+    latestCheckpoint: (assignmentId) =>
+      Effect.map(Ref.get(state), (current) => {
+        const checkpointId = current.assignments.get(assignmentId)?.latestCheckpointId
+        return checkpointId === null || checkpointId === undefined ? undefined : current.checkpoints.get(checkpointId)
+      }),
     listManaged: Effect.map(Ref.get(state), (current) => [...current.assignments.values()]),
   } satisfies AssignmentsService)
 })

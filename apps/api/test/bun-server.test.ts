@@ -74,6 +74,7 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
         sendPty: () => Effect.die("unused"),
         ptyEvents: () => Stream.empty,
         retryPreparation: () => Effect.void,
+        quiesce: () => Effect.die("unused"),
       },
       localGateway: {
         receive: () => Effect.void,
@@ -86,6 +87,9 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
       admitLocal: () => Effect.die("unused"),
       admitRun: () => Effect.die("unused"),
       run: () => Effect.die("unused"),
+      pause: () => Effect.die("unused"),
+      resume: () => Effect.die("unused"),
+      replace: () => Effect.die("unused"),
       ready: Effect.void,
     }
     const dependencies: HttpDependencies = {
@@ -196,6 +200,7 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
           sendPty: () => Effect.die("unused"),
           ptyEvents: () => Stream.empty,
           retryPreparation: () => Effect.void,
+          quiesce: () => Effect.die("unused"),
         },
         localGateway: {
           receive: () => Effect.void,
@@ -208,6 +213,9 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
         admitLocal: () => Effect.die("unused"),
         admitRun: () => Effect.die("unused"),
         run: () => Effect.die("unused"),
+        pause: () => Effect.die("unused"),
+        resume: () => Effect.die("unused"),
+        replace: () => Effect.die("unused"),
         ready: Effect.void,
       },
       recovery,
@@ -320,6 +328,7 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
           sendPty: () => Effect.die("unused"),
           ptyEvents: () => Stream.empty,
           retryPreparation: () => Effect.void,
+          quiesce: () => Effect.die("unused"),
         },
         localGateway: {
           receive: () => Effect.void,
@@ -332,6 +341,9 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
         admitLocal: () => Effect.die("unused"),
         admitRun: () => Effect.die("unused"),
         run: () => Effect.die("unused"),
+        pause: () => Effect.die("unused"),
+        resume: () => Effect.die("unused"),
+        replace: () => Effect.die("unused"),
         ready: Effect.void,
       },
       recovery,

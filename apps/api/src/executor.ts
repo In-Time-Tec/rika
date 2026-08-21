@@ -1,10 +1,12 @@
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import {
   Controller,
   ControllerError,
   layer as controllerLayer,
+  type AssignmentKey,
   type Interface as ControllerService,
 } from "@rika/e2b-executor/controller"
-import { Inspector, InspectionError } from "@rika/e2b-executor/checkpoint"
+import { s3ObjectStoreLayer, vaultLayer } from "@rika/e2b-executor/checkpoint"
 import { CredentialError, Credentials } from "@rika/e2b-executor/checkout"
 import { layer as providerLayer } from "@rika/e2b-executor/provider"
 import * as BindingModules from "@rika/kernel/binding-modules"
@@ -72,6 +74,13 @@ export const loadConfig = Effect.fn("ExecutorConfig.load")(function* (environmen
     apiUrl,
     controlEgress: [new URL(apiUrl).hostname],
     apiKey: Redacted.make(yield* required(environment, "E2B_API_KEY"), { label: "e2b-api-key" }),
+    checkpointBucket: yield* required(environment, "RIKA_WORKSPACE_CHECKPOINT_BUCKET"),
+    checkpointRegion: yield* required(environment, "RIKA_WORKSPACE_CHECKPOINT_REGION"),
+    checkpointEndpoint: environment.RIKA_WORKSPACE_CHECKPOINT_ENDPOINT?.trim() || undefined,
+    checkpointKey: Redacted.make(yield* required(environment, "RIKA_WORKSPACE_ENCRYPTION_KEY"), {
+      label: "workspace-encryption-key",
+    }),
+    setupCache: environment.RIKA_WORKSPACE_SETUP_CACHE === "true",
   }
 })
 
@@ -81,9 +90,15 @@ export const layer = (options: ExecutorConfig) =>
   controllerLayer(options).pipe(
     Layer.provide(providerLayer({ apiKey: options.apiKey })),
     Layer.provide(
-      Layer.succeed(
-        Inspector,
-        Inspector.of({ inspect: () => Effect.fail(InspectionError.make({ message: "Checkpoints are unavailable" })) }),
+      vaultLayer(options.checkpointKey).pipe(
+        Layer.provide(
+          s3ObjectStoreLayer({
+            bucket: options.checkpointBucket,
+            region: options.checkpointRegion,
+            ...(options.checkpointEndpoint === undefined ? {} : { endpoint: options.checkpointEndpoint }),
+          }),
+        ),
+        Layer.provide(BunFileSystem.layer),
       ),
     ),
     Layer.provide(
@@ -152,6 +167,9 @@ export interface Runtime {
     ControllerError | GatewayError
   >
   readonly ready: Effect.Effect<void, ControllerError>
+  readonly pause: (key: AssignmentKey) => Effect.Effect<void, ControllerError | GatewayError>
+  readonly resume: (key: AssignmentKey) => Effect.Effect<void, ControllerError>
+  readonly replace: (key: AssignmentKey) => Effect.Effect<void, ControllerError>
 }
 
 export class Executor extends Context.Service<Executor, Runtime>()("@rika/api/executor") {}
@@ -605,7 +623,9 @@ export const service = Layer.effect(
         replace: (key) =>
           environment
             .usePhase({ assignmentId: key.assignmentId, phase: "runtime" }, (resolved) =>
-              controller.replace(key, resolved.egress).pipe(Effect.asVoid),
+              controller
+                .replace(key, { egress: resolved.egress, environmentDigest: resolved.manifest.digest })
+                .pipe(Effect.asVoid),
             )
             .pipe(
               Effect.mapError(() =>
@@ -719,7 +739,10 @@ export const service = Layer.effect(
           const phase = initial.lifecycle._tag === "Paused" || initial.lifecycle._tag === "Active" ? "runtime" : "setup"
           yield* environment
             .usePhase({ assignmentId: input.threadId, phase }, (resolved) =>
-              controller.provision(input.threadId, resolved.egress),
+              controller.provision(input.threadId, {
+                egress: resolved.egress,
+                environmentDigest: resolved.manifest.digest,
+              }),
             )
             .pipe(
               Effect.mapError((error) =>
@@ -855,11 +878,22 @@ export const service = Layer.effect(
               }),
             )
         }
+        const latestCheckpoint = yield* assignments
+          .latestCheckpoint(assignment.id)
+          .pipe(Effect.mapError((cause) => ControllerError.make({ kind: "repository", message: cause.message })))
         const phase =
-          assignment.lifecycle._tag === "Paused" || assignment.lifecycle._tag === "Active" ? "runtime" : "setup"
+          assignment.lifecycle._tag === "Paused" ||
+          assignment.lifecycle._tag === "Active" ||
+          Number(assignment.generation) > 1 ||
+          latestCheckpoint !== undefined
+            ? "runtime"
+            : "setup"
         yield* environment
           .usePhase({ assignmentId: input.threadId, phase }, (resolved) =>
-            controller.provision(input.threadId, resolved.egress),
+            controller.provision(input.threadId, {
+              egress: resolved.egress,
+              environmentDigest: resolved.manifest.digest,
+            }),
           )
           .pipe(
             Effect.mapError((error) =>
@@ -876,9 +910,49 @@ export const service = Layer.effect(
         })
         return { ...result, eventPersisted: false as const }
       }),
-      ready: assignments.listManaged.pipe(
+      pause: (key) =>
+        gateway.quiesce(key.assignmentId).pipe(
+          Effect.flatMap((barrier) => controller.pause(key, barrier)),
+          Effect.catch((error) => (error.kind === "disconnected" ? controller.pause(key) : Effect.fail(error))),
+          Effect.asVoid,
+        ),
+      resume: (key) =>
+        environment
+          .usePhase({ assignmentId: key.assignmentId, phase: "runtime" }, (resolved) =>
+            controller
+              .resume(key, { egress: resolved.egress, environmentDigest: resolved.manifest.digest })
+              .pipe(Effect.asVoid),
+          )
+          .pipe(
+            Effect.mapError((error) =>
+              Schema.is(ControllerError)(error)
+                ? error
+                : ControllerError.make({ kind: "repository", message: "Executor phase authorization was rejected" }),
+            ),
+          ),
+      replace: (key) =>
+        environment
+          .usePhase({ assignmentId: key.assignmentId, phase: "runtime" }, (resolved) =>
+            controller
+              .replace(key, { egress: resolved.egress, environmentDigest: resolved.manifest.digest })
+              .pipe(Effect.asVoid),
+          )
+          .pipe(
+            Effect.mapError((error) =>
+              Schema.is(ControllerError)(error)
+                ? error
+                : ControllerError.make({ kind: "repository", message: "Executor phase authorization was rejected" }),
+            ),
+          ),
+      ready: controller.cleanupOrphans.pipe(
+        Effect.andThen(
+          Effect.sleep("5 minutes").pipe(
+            Effect.andThen(controller.cleanupOrphans),
+            Effect.forever,
+            Effect.forkIn(scope),
+          ),
+        ),
         Effect.asVoid,
-        Effect.mapError((cause) => ControllerError.make({ kind: "repository", message: cause.message })),
       ),
     }
   }),

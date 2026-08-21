@@ -24,25 +24,31 @@ describe("executor protocol v1", () => {
     Effect.gen(function* () {
       const decode = Schema.decodeUnknownEffect(ExecutorMessage)
       for (const target of ["local_device", "e2b"] as const) {
-        const message = yield* decode({
-          _tag: "ExecutorHello",
-          hello: {
-            minimumVersion: 1,
-            maximumVersion: 1,
-            fence: { ...fence, target },
-            templateBuildId: target === "e2b" ? "build-1" : null,
-            capabilities: { cells: true, checkpoints: true, pty: true },
-            workspaceCapabilities,
-            cursors: { command: 0, event: 0, pty: 0 },
-            latestCheckpointId: null,
-            bootstrapToken: "bootstrap",
-          },
-        })
-        expect(message._tag).toBe("ExecutorHello")
+        for (const lifecycle of ["fresh", "resume", "replacement"] as const) {
+          const message = yield* decode({
+            _tag: "ExecutorHello",
+            lifecycle,
+            environmentDigest: `sha256:${"0".repeat(64)}`,
+            hello: {
+              minimumVersion: 1,
+              maximumVersion: 1,
+              fence: { ...fence, target },
+              templateBuildId: target === "e2b" ? "build-1" : null,
+              capabilities: { cells: true, checkpoints: true, pty: true },
+              workspaceCapabilities,
+              cursors: { command: 0, event: 0, pty: 0 },
+              latestCheckpointId: null,
+              bootstrapToken: "bootstrap",
+            },
+          })
+          expect(message).toMatchObject({ _tag: "ExecutorHello", lifecycle })
+        }
       }
       const rejected = yield* Effect.flip(
         decode({
           _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest: `sha256:${"0".repeat(64)}`,
           hello: {
             minimumVersion: 1,
             maximumVersion: 2,

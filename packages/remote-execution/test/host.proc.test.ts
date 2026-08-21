@@ -36,6 +36,8 @@ const valid = (credential) => ({
     credential,
     identity: {
       target: "e2b",
+      ownerId: "owner-1",
+      threadId: "thread-1",
       assignmentId: "assignment-1",
       assignmentGeneration: 1,
       instanceId: sandboxId,
@@ -43,7 +45,12 @@ const valid = (credential) => ({
       templateBuildId: "build-1",
       apiUrl: "wss://api.example.test/api/v1/executors",
       workspaceId: "workspace-1",
+      repository: null,
+      lifecycle: "fresh",
+      environmentDigest: "sha256:${"a".repeat(64)}",
+      setupCache: false,
     },
+    restore: null,
   }),
 })
 const responses = await Promise.all([
@@ -63,6 +70,7 @@ console.log(
     body,
     credential,
     identity: bootstrap.identity,
+    restore: bootstrap.restore,
   }),
 )
 `
@@ -94,6 +102,10 @@ const host = Bun.spawn(["bun", "run", "./src/host.ts"], {
     RIKA_EXECUTOR_TEMPLATE_BUILD_ID: "template-readiness",
     RIKA_EXECUTOR_API_URL: "ws://127.0.0.1:1",
     RIKA_EXECUTOR_WORKSPACE_ID: "workspace-readiness",
+    RIKA_EXECUTOR_OWNER_ID: "template-owner",
+    RIKA_EXECUTOR_THREAD_ID: "template-thread",
+    RIKA_EXECUTOR_ENVIRONMENT_DIGEST: "sha256:${"a".repeat(64)}",
+    RIKA_EXECUTOR_SETUP_CACHE: "0",
     RIKA_EXECUTOR_STATE_DIRECTORY: stateDirectory,
   },
   stdout: "ignore",
@@ -114,6 +126,8 @@ try {
       credential: "one-time-bootstrap",
       identity: {
         target: "e2b",
+        ownerId: "owner-from-bootstrap",
+        threadId: "thread-from-bootstrap",
         assignmentId: "assignment-from-bootstrap",
         assignmentGeneration: 7,
         instanceId: sandboxId,
@@ -121,7 +135,12 @@ try {
         templateBuildId: "build-from-bootstrap",
         apiUrl: "ws://127.0.0.1:" + server.port + "/executors",
         workspaceId: "workspace-from-bootstrap",
+        repository: null,
+        lifecycle: "fresh",
+        environmentDigest: "sha256:${"b".repeat(64)}",
+        setupCache: false,
       },
+      restore: null,
     }),
   })
   let timeout
@@ -205,6 +224,8 @@ describe.sequential("executor host process", () => {
                 credential: expect.stringMatching(/^bootstrap-[ab]$/),
                 identity: {
                   target: "e2b",
+                  ownerId: "owner-1",
+                  threadId: "thread-1",
                   assignmentId: "assignment-1",
                   assignmentGeneration: 1,
                   instanceId: expect.any(String),
@@ -212,8 +233,13 @@ describe.sequential("executor host process", () => {
                   templateBuildId: "build-1",
                   apiUrl: "wss://api.example.test/api/v1/executors",
                   workspaceId: "workspace-1",
+                  repository: null,
+                  lifecycle: "fresh",
+                  environmentDigest: `sha256:${"a".repeat(64)}`,
+                  setupCache: false,
                   stateDirectory: "/var/lib/rika-executor",
                 },
+                restore: null,
               })
             }),
           ),

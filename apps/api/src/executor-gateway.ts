@@ -1,4 +1,4 @@
-import type { ControllerError, Interface as Controller } from "@rika/e2b-executor/controller"
+import type { ControllerError, Interface as Controller, Quiescence } from "@rika/e2b-executor/controller"
 import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import type * as MachineBindings from "@rika/kernel/machine-bindings"
 import { HostBindingRegistry } from "tenetkit/repl"
@@ -57,6 +57,8 @@ interface Session {
   readonly socket: Socket
   readonly access: AccessWire
   readonly leaseExpiresAt: number
+  readonly ready: boolean
+  readonly environmentDigest: string | null
 }
 
 export interface ExecutionResult {
@@ -168,6 +170,7 @@ export interface Gateway {
     assignmentId: string,
     request: WorkspaceRequestValue,
   ) => Effect.Effect<WorkspaceResponse, GatewayError>
+  readonly quiesce: (assignmentId: string) => Effect.Effect<Quiescence, GatewayError>
 }
 
 export interface LifecycleStore {
@@ -311,7 +314,6 @@ const fenceOf = (message: ExecutorMessageValue): Fence | undefined => {
       return message.access.fence
     case "ExecutorHeartbeat":
       return message.heartbeat.access.fence
-    case "CheckpointStaged":
     case "CredentialRequested":
     case "CredentialRevocationRequested":
     case "WorkspacePreparationRequested":
@@ -319,6 +321,10 @@ const fenceOf = (message: ExecutorMessageValue): Fence | undefined => {
     case "WorkspacePreparationOutput":
     case "WorkspacePreparationReady":
     case "WorkspacePreparationFailed":
+    case "ExecutorWorkspaceReady":
+    case "ExecutorQuiesced":
+    case "SetupCacheLookup":
+    case "SetupCacheProposed":
     case "PtyOpened":
     case "PtyOutput":
     case "PtyReplayGap":
@@ -358,6 +364,18 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   const workspaceCalls = yield* Ref.make(new Map<string, WorkspaceCall>())
   const frames = yield* Ref.make(new Map<string, ReadonlyArray<CellLifecycleFrame>>())
   const terminals = yield* Ref.make(new Map<string, Extract<CellLifecycleFrame, { readonly _tag: "Terminal" }>>())
+  const quiescing = yield* Ref.make(new Set<string>())
+  const quiescence = yield* Ref.make(
+    new Map<
+      string,
+      {
+        readonly access: AccessWire
+        readonly requestId: string
+        readonly expected: ReadonlySet<string>
+        readonly result: Deferred.Deferred<Quiescence, GatewayError>
+      }
+    >(),
+  )
   const admission = yield* Semaphore.make(1)
   const ptyFrames = yield* PubSub.sliding<PtyEvent>(256)
   const crypto = yield* Crypto.Crypto
@@ -375,24 +393,41 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     session: Session,
     phase: EnvironmentPhase,
     operationKey: string | null,
+    expectedEnvironmentDigest?: string,
   ): Effect.Effect<void, GatewayError> =>
     phases.activate(session.access, phase, (environment) =>
-      Effect.try({
-        try: () => {
-          session.socket.send(
-            encode({
-              _tag: "PhaseEnvironmentGranted",
-              phase,
-              digest: environment.digest,
-              operationKey,
-              values: Object.fromEntries(
-                Object.entries(environment.values).map(([name, value]) => [name, Redacted.value(value)]),
-              ),
-              redactedNames: environment.redactedNames,
-            }),
-          )
-        },
-        catch: () => GatewayError.make({ kind: "transport", message: "Could not authorize executor phase" }),
+      Effect.gen(function* () {
+        if (expectedEnvironmentDigest !== undefined && environment.digest !== expectedEnvironmentDigest)
+          return yield* GatewayError.make({
+            kind: "fenced",
+            message: "Workspace environment authorization does not match its bootstrap",
+          })
+        if (operationKey === null)
+          yield* Ref.update(sessions, (active) => {
+            const current = active.get(session.access.fence.assignmentId)
+            if (current?.socket !== session.socket || !sameAccess(current.access, session.access)) return active
+            return new Map(active).set(session.access.fence.assignmentId, {
+              ...current,
+              environmentDigest: environment.digest,
+            })
+          })
+        yield* Effect.try({
+          try: () => {
+            session.socket.send(
+              encode({
+                _tag: "PhaseEnvironmentGranted",
+                phase,
+                digest: environment.digest,
+                operationKey,
+                values: Object.fromEntries(
+                  Object.entries(environment.values).map(([name, value]) => [name, Redacted.value(value)]),
+                ),
+                redactedNames: environment.redactedNames,
+              }),
+            )
+          },
+          catch: () => GatewayError.make({ kind: "transport", message: "Could not authorize executor phase" }),
+        })
       }),
     )
 
@@ -626,6 +661,21 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
             next.delete(assignmentId)
             return next
           })
+        if (assignmentId !== undefined) {
+          const waiting = yield* Ref.modify(quiescence, (current) => {
+            const known = current.get(assignmentId)
+            if (known === undefined || known.access.fence.assignmentId !== assignmentId)
+              return [undefined, current] as const
+            const next = new Map(current)
+            next.delete(assignmentId)
+            return [known, next] as const
+          })
+          if (waiting !== undefined)
+            yield* Deferred.fail(
+              waiting.result,
+              GatewayError.make({ kind: "disconnected", message: "Executor disconnected while quiescing" }),
+            )
+        }
       }),
     )
   })
@@ -931,15 +981,19 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
             sessionToken,
           },
           leaseExpiresAt: welcome.leaseExpiresAt,
+          ready: false,
+          environmentDigest: null,
         })
         if (registered) {
           const session = {
             socket,
             access: { version: 1 as const, fence: welcome.fence, leaseEpoch: welcome.leaseEpoch, sessionToken },
             leaseExpiresAt: welcome.leaseExpiresAt,
+            ready: false,
+            environmentDigest: null,
           }
           socket.send(encode({ _tag: "ExecutorWelcome", welcome: { ...welcome, sessionToken } }))
-          yield* grant(session, "setup", null)
+          yield* grant(session, message.lifecycle === "fresh" ? "setup" : "runtime", null, message.environmentDigest)
         }
         return
       }
@@ -949,38 +1003,125 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           socket,
           access: { ...message.access, leaseEpoch: welcome.leaseEpoch },
           leaseExpiresAt: welcome.leaseExpiresAt,
+          ready: false,
+          environmentDigest: null,
         })
         if (registered) {
           const session = {
             socket,
             access: { ...message.access, leaseEpoch: welcome.leaseEpoch },
             leaseExpiresAt: welcome.leaseExpiresAt,
+            ready: false,
+            environmentDigest: null,
           }
           socket.send(encode({ _tag: "ExecutorReconnected", welcome }))
           yield* grant(session, "runtime", null)
-          yield* replayPending(session)
         }
         return
       }
       case "ExecutorHeartbeat": {
         const receipt = yield* controller.heartbeat(redactHeartbeat(message.heartbeat))
+        const ready = yield* Ref.get(sessions).pipe(
+          Effect.map(
+            (active) =>
+              active.get(message.heartbeat.access.fence.assignmentId)?.socket === socket &&
+              active.get(message.heartbeat.access.fence.assignmentId)?.ready === true,
+          ),
+        )
+        const environmentDigest = yield* Ref.get(sessions).pipe(
+          Effect.map((active) => active.get(message.heartbeat.access.fence.assignmentId)?.environmentDigest ?? null),
+        )
         const registered = yield* register({
           socket,
           access: { ...message.heartbeat.access, leaseEpoch: receipt.leaseEpoch },
           leaseExpiresAt: receipt.leaseExpiresAt,
+          ready,
+          environmentDigest,
         })
         if (registered) socket.send(encode({ _tag: "LeaseReceipt", receipt }))
         return
       }
-      case "CheckpointStaged": {
-        const checkpoint = yield* controller.checkpoint(redactAccess(message.access), message.checkpoint)
-        socket.send(
-          encode({
-            _tag: "CheckpointAccepted",
-            checkpointId: checkpoint.checkpoint.checkpointId,
-            contentDigest: checkpoint.checkpoint.contentDigest,
-          }),
+      case "ExecutorWorkspaceReady": {
+        const workspaceSession = (yield* Ref.get(sessions)).get(message.access.fence.assignmentId)
+        if (
+          workspaceSession === undefined ||
+          workspaceSession.socket !== socket ||
+          !sameAccess(workspaceSession.access, message.access) ||
+          workspaceSession.environmentDigest === null
         )
+          return yield* GatewayError.make({ kind: "fenced", message: "Workspace proof is stale" })
+        yield* controller.ready(redactAccess(message.access), message.proof, workspaceSession.environmentDigest)
+        const session = yield* Ref.modify(sessions, (active) => {
+          const current = active.get(message.access.fence.assignmentId)
+          if (current === undefined || current.socket !== socket || !sameAccess(current.access, message.access)) {
+            return [undefined, active] as const
+          }
+          const ready = { ...current, ready: true }
+          const next = new Map(active)
+          next.set(message.access.fence.assignmentId, ready)
+          return [ready, next] as const
+        })
+        if (session === undefined)
+          return yield* GatewayError.make({ kind: "fenced", message: "Workspace proof is stale" })
+        yield* Ref.update(quiescing, (current) => {
+          const next = new Set(current)
+          next.delete(message.access.fence.assignmentId)
+          return next
+        })
+        socket.send(encode({ _tag: "WorkspaceAccepted", fence: message.access.fence }))
+        yield* replayPending(session)
+        return
+      }
+      case "ExecutorQuiesced": {
+        const waiting = yield* Ref.get(quiescence).pipe(
+          Effect.map((current) => current.get(message.access.fence.assignmentId)),
+        )
+        if (
+          waiting === undefined ||
+          waiting.requestId !== message.requestId ||
+          !sameAccess(waiting.access, message.access)
+        ) {
+          return yield* GatewayError.make({ kind: "fenced", message: "Quiesce response is stale" })
+        }
+        const outcomes = new Map(message.operations.map((operation) => [operation.operationKey, operation.outcome]))
+        if ([...waiting.expected].some((operationKey) => !outcomes.has(operationKey))) {
+          return yield* GatewayError.make({ kind: "fenced", message: "Quiesce omitted an active operation" })
+        }
+        yield* Deferred.succeed(waiting.result, {
+          access: redactAccess(message.access),
+          operations: message.operations,
+          checkpoint: message.checkpoint,
+        })
+        return
+      }
+      case "SetupCacheLookup": {
+        const current = (yield* Ref.get(sessions)).get(message.access.fence.assignmentId)
+        if (
+          current === undefined ||
+          current.socket !== socket ||
+          !sameAccess(current.access, message.access) ||
+          current.environmentDigest === null
+        )
+          return yield* GatewayError.make({ kind: "fenced", message: "Setup cache request is stale" })
+        const archive = yield* controller
+          .loadSetupCache(redactAccess(message.access), message.key, current.environmentDigest)
+          .pipe(Effect.catch((error) => (error.kind === "checkpoint" ? Effect.succeed(null) : Effect.fail(error))))
+        socket.send(encode({ _tag: "SetupCacheResult", requestId: message.requestId, archive }))
+        return
+      }
+      case "SetupCacheProposed": {
+        const current = (yield* Ref.get(sessions)).get(message.access.fence.assignmentId)
+        if (
+          current === undefined ||
+          current.socket !== socket ||
+          !sameAccess(current.access, message.access) ||
+          current.environmentDigest === null
+        )
+          return yield* GatewayError.make({ kind: "fenced", message: "Setup cache proposal is stale" })
+        yield* controller
+          .storeSetupCache(redactAccess(message.access), message.key, message.archive, current.environmentDigest)
+          .pipe(Effect.catch((error) => (error.kind === "checkpoint" ? Effect.void : Effect.fail(error))))
+        socket.send(encode({ _tag: "SetupCacheAccepted", requestId: message.requestId }))
         return
       }
       case "CredentialRequested": {
@@ -1108,7 +1249,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
       Ref.get(sessions).pipe(
         Effect.flatMap((current) => {
           const session = current.get(assignmentId)
-          return session === undefined
+          return session === undefined || !session.ready
             ? Effect.sleep("100 millis").pipe(Effect.andThen(awaitSession(assignmentId)))
             : Effect.succeed(session)
         }),
@@ -1267,11 +1408,13 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     const operation = yield* admission.withPermits(1)(
       Effect.gen(function* () {
         const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(input.assignmentId)))
-        if (session === undefined)
+        if (session === undefined || !session.ready)
           return yield* GatewayError.make({
             kind: "disconnected",
-            message: "Executor disconnected before work could be sent",
+            message: "Executor workspace is not ready",
           })
+        if ((yield* Ref.get(quiescing)).has(input.assignmentId))
+          return yield* GatewayError.make({ kind: "fenced", message: "Executor is quiescing" })
         if ((yield* Clock.currentTimeMillis) >= session.leaseExpiresAt) return yield* expired()
         yield* controller.validateAccess(redactAccess(session.access)).pipe(Effect.mapError(accessFailure))
         yield* preparation.ready(session.access)
@@ -1552,6 +1695,55 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
       )
     })
 
+  const quiesce = Effect.fn("ExecutorGateway.quiesce")(function* (assignmentId: string) {
+    const command = yield* admission.withPermits(1)(
+      Effect.gen(function* () {
+        const session = (yield* Ref.get(sessions)).get(assignmentId)
+        if (session === undefined || !session.ready)
+          return yield* GatewayError.make({ kind: "disconnected", message: "Executor workspace is not ready" })
+        yield* controller.validateAccess(redactAccess(session.access)).pipe(Effect.mapError(accessFailure))
+        const expected = new Set(
+          [...(yield* Ref.get(pending)).values()]
+            .filter((operation) => operation.assignmentId === assignmentId && operation.socket === session.socket)
+            .map((operation) => operation.operationKey),
+        )
+        const result = yield* Deferred.make<Quiescence, GatewayError>()
+        const requestId = yield* crypto.randomUUIDv4.pipe(
+          Effect.mapError(() =>
+            GatewayError.make({ kind: "transport", message: "Could not identify quiesce request" }),
+          ),
+        )
+        yield* Ref.update(quiescing, (current) => new Set(current).add(assignmentId))
+        yield* Ref.update(quiescence, (current) => {
+          const next = new Map(current)
+          next.set(assignmentId, { access: session.access, requestId, expected, result })
+          return next
+        })
+        yield* Effect.try({
+          try: () => session.socket.send(encode({ _tag: "Quiesce", fence: session.access.fence, requestId })),
+          catch: () => GatewayError.make({ kind: "transport", message: "Could not quiesce executor" }),
+        })
+        return result
+      }),
+    )
+    return yield* Deferred.await(command).pipe(
+      Effect.timeoutOption("60 seconds"),
+      Effect.flatMap((completed) =>
+        Option.isNone(completed)
+          ? GatewayError.make({ kind: "timeout", message: "Executor did not quiesce in time" })
+          : Effect.succeed(completed.value),
+      ),
+      Effect.ensuring(
+        Ref.update(quiescence, (current) => {
+          if (current.get(assignmentId)?.result !== command) return current
+          const next = new Map(current)
+          next.delete(assignmentId)
+          return next
+        }),
+      ),
+    )
+  })
+
   return {
     receive,
     disconnected,
@@ -1563,5 +1755,6 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     ptyEvents,
     retryPreparation,
     workspace,
+    quiesce,
   } satisfies Gateway
 })

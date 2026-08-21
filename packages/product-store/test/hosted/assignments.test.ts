@@ -151,6 +151,7 @@ it.layer(layer)("executor assignments", (test) => {
       })
 
       expect(replay).toEqual(checkpoint)
+      expect(yield* assignments.latestCheckpoint(active.id)).toEqual(checkpoint)
       expect((yield* assignments.get(active.id))?.latestCheckpointId).toBe(ids.checkpoint)
       expect(
         yield* Effect.result(
