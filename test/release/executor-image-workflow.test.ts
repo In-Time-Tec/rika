@@ -4,6 +4,7 @@ type Step = {
   readonly name?: string
   readonly uses?: string
   readonly run?: string
+  readonly env?: Readonly<Record<string, string>>
   readonly with?: Readonly<Record<string, unknown>>
   readonly if?: string
   readonly id?: string
@@ -119,6 +120,12 @@ test("cannot publish or promote a mutable, reused, unreviewed, or unattested ima
   expect(jobs.promote?.environment).toBe("executor-production")
   expect(jobs.promote?.permissions).toMatchObject({ packages: "write", "id-token": "write", attestations: "write" })
 
+  const credentials = named("promote", "Require promotion credentials")
+  expect(credentials?.env).toEqual({ E2B_API_KEY: "${{ secrets.E2B_API_KEY }}" })
+  expect(credentials?.run).toContain('test -n "$E2B_API_KEY"')
+  expect(position("promote", "Require promotion credentials")).toBeLessThan(
+    position("promote", "Require a fresh generation package"),
+  )
   expect(position("promote", "Verify approved review evidence")).toBeLessThan(
     position("promote", "Require a fresh generation package"),
   )
