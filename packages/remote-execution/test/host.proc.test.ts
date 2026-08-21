@@ -160,7 +160,7 @@ describe.sequential("executor host process", () => {
           }
           const frames = new Map([
             [
-              "operation-1",
+              "operation-1\u00000",
               [
                 { _tag: "Accepted" as const, attribution: identity, cursor: 1 },
                 { _tag: "Started" as const, attribution: identity, cursor: 2 },

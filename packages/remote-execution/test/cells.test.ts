@@ -25,6 +25,7 @@ const request = (operationKey: string, attempt?: number) =>
     toolCallId: "call-1",
     code: "1 + 1",
     attempt: attempt ?? 0,
+    replayPolicy: "pure",
     admittedAt: null,
     deadline: null,
     bindings: { digest: "bindings", descriptors: [] },
@@ -44,7 +45,7 @@ const stored = () => {
 }
 
 describe("Cells", () => {
-  it.effect("deduplicates a stable operation key for the executor process", () =>
+  it.effect("deduplicates one attempt and executes an explicit higher attempt", () =>
     Effect.gen(function* () {
       const calls = yield* Ref.make(0)
       const cells = layer({
@@ -69,9 +70,9 @@ describe("Cells", () => {
       )
       expect(responses).toEqual([
         { _tag: "Success", result: 1 },
-        { _tag: "Success", result: 1 },
+        { _tag: "Success", result: 2 },
       ])
-      expect(yield* Ref.get(calls)).toBe(1)
+      expect(yield* Ref.get(calls)).toBe(2)
     }),
   )
 
@@ -130,7 +131,7 @@ describe("Cells", () => {
     Effect.gen(function* () {
       const calls = yield* Ref.make(0)
       const state = stored()
-      state.values.set("operation-1", { _tag: "Running", attempt: 0 })
+      state.values.set("operation-1\u00000", { _tag: "Running", attempt: 0 })
       const response = yield* run(
         Effect.flatMap(Cells, (cells) => cells.execute(request("operation-1"))),
         layer({

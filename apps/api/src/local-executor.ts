@@ -10,7 +10,7 @@ import {
   FencingGeneration,
   Sequence,
 } from "@rika/product/hosted-model"
-import type { Access as ProtocolAccess, Heartbeat } from "@rika/remote-execution/protocol"
+import type { Access as ProtocolAccess, Heartbeat, LocalExecutorHelloWire } from "@rika/remote-execution/protocol"
 import type { AuthenticatedPrincipal } from "./hosted-product"
 
 const leaseLifetimeMillis = 60_000
@@ -32,11 +32,7 @@ export interface LocalExecutorAuthority {
     readonly principal: AuthenticatedPrincipal
     readonly executorUrl: string
   }) => Effect.Effect<LocalAdmission, ControllerError>
-  readonly hello: (input: {
-    readonly admissionId: string
-    readonly ticket: string
-    readonly processIncarnation: string
-  }) => Effect.Effect<Welcome, ControllerError>
+  readonly hello: (input: LocalExecutorHelloWire) => Effect.Effect<Welcome, ControllerError>
   readonly reconnect: (access: ProtocolAccess) => Effect.Effect<ReconnectWelcome, ControllerError>
   readonly validateAccess: (access: ProtocolAccess) => Effect.Effect<void, ControllerError>
   readonly workspaceIdentity: (access: ProtocolAccess) => Effect.Effect<string, ControllerError>
@@ -333,6 +329,7 @@ export const layer = Layer.effect(
                 processIncarnation: input.processIncarnation,
                 presentedBootstrapCredentialDigest: presented,
                 sessionCredentialDigest: yield* digest(Redacted.value(session)),
+                capabilities: input.workspaceCapabilities,
                 leaseLifetimeMillis,
               })
               .pipe(Effect.mapError(assignmentFailure))

@@ -7,8 +7,7 @@ export const remoteCell = remoteCells({
   cells: RemoteCells.layer({
     execute: () => RemoteCells.Unavailable.make({ message: "test remote cells are unavailable" }),
   }),
-  maxRetries: 0,
-  retryDelayMillis: 1,
+  admit: () => Effect.void,
 })
 
 export const configure = (options: Omit<ConfigureOptions, "cell">): ReturnType<typeof configureRoute> =>
@@ -21,6 +20,5 @@ export const successfulRemoteCell = (result: unknown) =>
     cells: RemoteCells.layer({
       execute: () => Effect.succeed({ _tag: "Success", result }),
     }),
-    maxRetries: 0,
-    retryDelayMillis: 1,
+    admit: () => Effect.void,
   })

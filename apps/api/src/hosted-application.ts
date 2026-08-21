@@ -1,6 +1,7 @@
 import { BunCrypto } from "@effect/platform-bun"
 import type * as PgClient from "@effect/sql-pg/PgClient"
 import { Context, Effect, Layer, Redacted } from "effect"
+import { Runtime as TenetRuntime } from "tenetkit/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import { ProviderCredentialStore } from "@rika/product/provider-credential-store"
@@ -23,6 +24,7 @@ import {
   storeLayer as providerCredentialStoreLayer,
 } from "./hosted-provider-credentials"
 import { HostedProjectionWorker, layer as hostedProjectionWorkerLayer } from "./hosted-projection-worker"
+import { HostedRecovery, type HostedRecoveryService, layer as hostedRecoveryLayer } from "./hosted-recovery"
 import { HostedTurnWorker, layer as hostedTurnWorkerLayer } from "./hosted-turn-worker"
 import { layer as localExecutorLayer } from "./local-executor"
 
@@ -34,6 +36,7 @@ export interface HostedApplicationService {
   readonly environment: HostedEnvironment["Service"]
   readonly models: HostedModelRegistry["Service"]
   readonly executor: Executor["Service"]
+  readonly recovery: HostedRecoveryService
   readonly projectionWorker: HostedProjectionWorker["Service"]
   readonly turnWorker: HostedTurnWorker["Service"]
   readonly execution: {
@@ -94,12 +97,18 @@ export const layer = (options: {
             cells: RemoteCells.layer({
               execute: (request, authority) =>
                 executor.run({ ...request, authority }).pipe(
-                  Effect.map((result) => result.response),
                   Effect.mapError((error) => RemoteCells.Unavailable.make({ message: error.message })),
+                  Effect.flatMap((result) =>
+                    result.outcome === "unknown"
+                      ? RemoteCells.UnknownOutcome.make({ message: "Remote operation outcome is unknown" })
+                      : Effect.succeed(result.response),
+                  ),
                 ),
             }),
-            maxRetries: 3,
-            retryDelayMillis: 250,
+            admit: (input) =>
+              executor
+                .admitRun(input)
+                .pipe(Effect.mapError((error) => RemoteCells.AdmissionFailure.make({ message: error.message }))),
           }),
           postgres: {
             url: Redacted.value(options.databaseUrl),
@@ -118,6 +127,12 @@ export const layer = (options: {
       const hostedContext = Context.merge(
         Context.merge(Context.merge(data, executionContext), environmentContext),
         Context.merge(credentialContext, modelContext),
+      )
+      const recoveryContext = yield* Layer.build(
+        hostedRecoveryLayer.pipe(
+          Layer.provide(Layer.succeed(TenetRuntime.Runtime, Context.get(executionContext, TenetRuntime.Runtime))),
+          Layer.provide(retainedData),
+        ),
       )
       const projectionWorkerContext = yield* Layer.build(
         hostedProjectionWorkerLayer({ concurrency: 32, pollIntervalMillis: 250 }).pipe(
@@ -158,6 +173,7 @@ export const layer = (options: {
         environment: Context.get(environmentContext, HostedEnvironment),
         models: Context.get(modelContext, HostedModelRegistry),
         executor,
+        recovery: Context.get(recoveryContext, HostedRecovery),
         projectionWorker,
         turnWorker,
         execution: {

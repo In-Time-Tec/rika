@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest"
 import { ControllerError } from "@rika/e2b-executor/controller"
 import { identityMigrations, runMigration } from "@rika/identity"
 import { ActorAttribution } from "@rika/product/hosted-model"
+import { WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as HostedPostgres from "@rika/product-store/postgres-layer"
 import { ApiMessage, LocalExecutorMessage, type AccessWire } from "@rika/remote-execution/protocol"
@@ -19,6 +20,7 @@ const live = databaseUrl !== undefined
 const encode = Schema.encodeSync(Schema.fromJsonString(LocalExecutorMessage))
 const decode = Schema.decodeSync(Schema.fromJsonString(ApiMessage))
 const encodeActor = Schema.encodeUnknownSync(Schema.fromJsonString(ActorAttribution))
+const encodeWorkspaceCapabilities = Schema.encodeUnknownSync(Schema.fromJsonString(WorkspaceCapabilitySnapshot))
 const code = 'printf "restart"'
 const bindings = {
   registry: HostBindingRegistry.HostBindingRegistry.of({
@@ -45,6 +47,7 @@ const cellRequest = (operationKey: string) => ({
   toolCallId: "call-local-gateway",
   code,
   attempt: 0,
+  replayPolicy: "pure" as const,
   admittedAt: null,
   deadline: null,
   bindings,
@@ -62,6 +65,7 @@ const digest = createHash("sha256")
       toolCallId: request.toolCallId,
       code: request.code,
       attempt: request.attempt,
+      replayPolicy: request.replayPolicy,
       admittedAt: request.admittedAt,
       deadline: request.deadline,
     }),
@@ -85,6 +89,18 @@ const access: AccessWire = {
 const response = {
   _tag: "Success" as const,
   result: { stdout: "restart", stderr: "", exitCode: 0 },
+}
+const environmentDigest = `sha256:${"0".repeat(64)}`
+const workspaceCapabilities = {
+  environmentDigest,
+  capturedAt: "2026-08-21T00:00:00.000Z",
+  filesystem: { _tag: "Ready", detail: "filesystem ready" },
+  typescriptKernel: { _tag: "Ready", detail: "TypeScript kernel ready" },
+  git: { _tag: "Ready", detail: "Git ready" },
+  process: { _tag: "Ready", detail: "process ready" },
+  pty: { _tag: "Ready", detail: "PTY ready" },
+  browser: { _tag: "Ready", detail: "browser ready" },
+  workspaceLifecycle: { _tag: "Ready", detail: "workspace lifecycle ready" },
 }
 
 const persistTerminal = (
@@ -271,13 +287,20 @@ const seed = (
       `INSERT INTO rika_hosted_executor_assignments
       (id, owner_id, thread_id, executor_kind, placement, checkout, generation, revision,
         last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
-        session_digest, lease_epoch, lease_expires_at, last_active_at, created_at, updated_at, workspace_id)
+        session_digest, lease_epoch, lease_expires_at, last_active_at, created_at, updated_at, workspace_id,
+        capability_generation, capability_snapshot)
       VALUES ('thread-local-gateway', $4, 'thread-local-gateway', 'local_device',
         '{"_tag":"LocalDevicePlacement","deviceId":"11111111-1111-4111-8111-111111111111"}'::jsonb, NULL, 1, 1, 1, 'active',
         $1, 'executor-local-gateway', 'process-local-gateway', $2, 1,
         CASE WHEN $3 = 'past' THEN now() - interval '1 second' ELSE now() + interval '5 minutes' END,
-        now(), now(), now(), 'workspace-local-gateway')`,
-      [deviceId, sessionDigest, options?.leaseExpires ?? "future", ownerId],
+        now(), now(), now(), 'workspace-local-gateway', 1, $5::jsonb)`,
+      [
+        deviceId,
+        sessionDigest,
+        options?.leaseExpires ?? "future",
+        ownerId,
+        encodeWorkspaceCapabilities(workspaceCapabilities),
+      ],
     )
     yield* query(
       pool,
@@ -288,6 +311,15 @@ const seed = (
         'client-local-gateway', 'user-local-gateway', 'process-local-gateway',
         1, 'workspace-binding', 'ticket-digest', now() + interval '5 minutes', now())`,
       [deviceId, ownerId],
+    )
+    yield* query(
+      pool,
+      `INSERT INTO rika_hosted_workspace_capability_admissions
+      (thread_id, turn_id, assignment_id, workspace_id, assignment_generation,
+        environment_digest, required_capabilities)
+      VALUES ('thread-local-gateway', 'turn-local-gateway', 'thread-local-gateway',
+        'workspace-local-gateway', 1, $1, '["filesystem","typescriptKernel","git","process","workspaceLifecycle"]')`,
+      [environmentDigest],
     )
     yield* query(
       pool,
@@ -324,10 +356,10 @@ const seed = (
         pool,
         `INSERT INTO rika_hosted_executor_operations
         (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
-          turn_id, run_id, root_run_id, tool_call_id, code, attempt, state, updated_at)
+          turn_id, run_id, root_run_id, tool_call_id, code, attempt, replay_policy, state, updated_at)
         VALUES ('thread-local-gateway', $4, $1, $2, 'workspace-local-gateway', 'thread-local-gateway',
           'thread-local-gateway', 'turn-local-gateway', 'run-local-gateway', 'run-local-gateway',
-          'call-local-gateway', $3, 0, 'accepted', now())`,
+          'call-local-gateway', $3, 0, 'pure', 'accepted', now())`,
         [operationKey, digest, code, ownerId],
       )
       return
@@ -337,11 +369,11 @@ const seed = (
       `INSERT INTO rika_hosted_executor_operations
       (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
         turn_id, run_id, root_run_id, tool_call_id, code, attempt, state, dispatched_generation,
-        dispatched_lease_epoch, dispatched_executor_instance_id, dispatched_process_incarnation,
+        replay_policy, dispatched_lease_epoch, dispatched_executor_instance_id, dispatched_process_incarnation,
         dispatch_deadline_at, updated_at)
       VALUES ('thread-local-gateway', $6, $1, $2, 'workspace-local-gateway', 'thread-local-gateway',
         'thread-local-gateway', 'turn-local-gateway', 'run-local-gateway', 'run-local-gateway',
-        'call-local-gateway', $3, 0, 'dispatched', 1, $4,
+        'call-local-gateway', $3, 0, 'dispatched', 1, 'pure', $4,
         'executor-local-gateway', 'process-local-gateway',
         CASE WHEN $5 = 'past' THEN now() - interval '1 second' ELSE now() + interval '5 minutes' END, now())`,
       [operationKey, digest, code, options?.leaseEpoch ?? 1, options?.deadline ?? "future", ownerId],
@@ -530,6 +562,36 @@ it.effect.skipIf(!live)("durably revokes a local executor immediately after devi
             generation: 2,
             runnerRegistered: false,
           },
+        ])
+      }),
+    ),
+  ),
+)
+
+it.effect.skipIf(!live)("rejects dispatch after the admitted workspace environment digest changes", () =>
+  isolated(({ url, pool }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* seed(pool, "operation-environment-changed", { state: "accepted" })
+        yield* query(
+          pool,
+          `UPDATE rika_hosted_executor_assignments
+            SET capability_snapshot = jsonb_set(capability_snapshot, '{environmentDigest}', to_jsonb($1::text))
+            WHERE id = $2`,
+          [`sha256:${"1".repeat(64)}`, assignmentId],
+        )
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        const gateway = yield* makeLocalGateway(authority()).pipe(Effect.provide(context))
+        const target = socket()
+        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        expect(yield* gateway.execute(cellRequest("operation-environment-changed")).pipe(Effect.flip)).toMatchObject({
+          kind: "fenced",
+          message: "Local executor fence is no longer current",
+        })
+        expect((yield* operationState(pool, "operation-environment-changed")).rows).toEqual([
+          { state: "accepted", events: 0 },
         ])
       }),
     ),

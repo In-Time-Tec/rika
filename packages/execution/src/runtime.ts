@@ -261,6 +261,8 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
         Effect.gen(function* () {
           const resolver = resolveCells(options.cells)
           const cell = resolver === undefined ? undefined : yield* resolveCellRoute(resolver, input.workspaceId)
+          if (cell?._tag === "Remote")
+            yield* cell.admit({ threadId: input.threadId, turnId: input.turnId, workspaceId: input.workspaceId })
           const turnCapabilities =
             options.capabilities === undefined ? undefined : yield* options.capabilities(input.workspaceId)
           const configured = yield* configure({
@@ -554,7 +556,7 @@ const resolverFor = (options: CommonOptions, credentialStore: ProviderCredential
 export const layerHosted = (
   options: HostedOptions,
 ): Layer.Layer<
-  ExecutionGateway.Service | ExecutionSessionLifecycle.Service | Postgres.Readiness,
+  ExecutionGateway.Service | ExecutionSessionLifecycle.Service | Postgres.Readiness | Runtime.Runtime,
   ExecutionGateway.StartTurnFailure
 > =>
   Layer.unwrap(
@@ -575,7 +577,10 @@ export const layerHosted = (
       const readiness = Layer.effect(Postgres.Readiness, Effect.map(Postgres.Readiness, Postgres.Readiness.of)).pipe(
         Layer.provide(apiPostgres),
       )
-      return Layer.merge(execution, readiness).pipe(
+      const runtime = Layer.effect(Runtime.Runtime, Effect.map(Runtime.Runtime, Runtime.Runtime.of)).pipe(
+        Layer.provide(apiPostgres),
+      )
+      return Layer.mergeAll(execution, readiness, runtime).pipe(
         Layer.catchCause((cause) =>
           Layer.effectContext(
             Effect.fail(ExecutionGateway.StartTurnFailure.make({ message: message(Cause.squash(cause)) })),

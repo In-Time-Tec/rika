@@ -22,10 +22,12 @@ it.effect("binds opaque, distinct checkout identities to the authenticated devic
       const firstPath = `${root}/first`
       const secondPath = `${root}/second`
       yield* Effect.forEach([firstPath, secondPath], (path) =>
-        fileSystem.makeDirectory(path).pipe(
-          Effect.andThen(git(path, ["init", "--quiet"])),
-          Effect.andThen(git(path, ["remote", "add", "origin", "https://user:secret@example.test/owner/repo.git"])),
-        ),
+        fileSystem
+          .makeDirectory(path)
+          .pipe(
+            Effect.andThen(git(path, ["init", "--quiet"])),
+            Effect.andThen(git(path, ["remote", "add", "origin", "https://user:secret@example.test/owner/repo.git"])),
+          ),
       )
       const first = yield* inspectLocalCheckout({
         deviceId: "device-1",

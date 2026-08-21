@@ -72,11 +72,17 @@ const product: HostedProductService = {
   admitRun: () => Effect.die("unused"),
 }
 
+const recovery: HttpDependencies["recovery"] = {
+  inspect: () => Effect.die("unused"),
+  resolve: () => Effect.die("unused"),
+}
+
 const executor: Executor = {
   controller: undefined as never,
   gateway: undefined as never,
   localGateway: undefined as never,
   admitLocal: () => Effect.die("unused"),
+  admitRun: () => Effect.die("unused"),
   run: () => Effect.die("unused"),
   ready: Effect.void,
 }
@@ -99,6 +105,7 @@ const dependencies = (
   },
   devices,
   product,
+  recovery,
   executor,
   execution,
   production: true,
@@ -152,6 +159,7 @@ describe("api HTTP", () => {
         },
         devices,
         product: { ...product, ready: Effect.fail(HostedProductError.make({ message: "product readiness" })) },
+        recovery,
         executor,
         execution,
         production: true,

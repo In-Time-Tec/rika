@@ -31,6 +31,8 @@ interface AssignmentRow {
   readonly revision: string
   readonly lastLeaseEpoch: string
   readonly lifecycle: AssignmentLifecycle
+  readonly capabilityGeneration: string | null
+  readonly capabilities: unknown | null
   readonly providerInstanceId: string | null
   readonly bootstrapCredentialDigest: string | null
   readonly bootstrapExpiresAt: string | null
@@ -124,6 +126,8 @@ const decodeAssignment = (row: AssignmentRow) =>
     revision: row.revision,
     lastLeaseEpoch: row.lastLeaseEpoch,
     lifecycle: lifecycle(row),
+    capabilityGeneration: row.capabilityGeneration,
+    capabilities: row.capabilities,
     cursor: { sequence: row.cursorSequence, value: row.cursorValue },
     latestCheckpointId: row.latestCheckpointId,
     lastActiveAt: row.lastActiveAt,
@@ -184,6 +188,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
       workspace_id AS "workspaceId", executor_kind AS "executorKind", placement, checkout,
       generation::text AS generation,
       revision::text AS revision, last_lease_epoch::text AS "lastLeaseEpoch", lifecycle,
+      capability_generation::text AS "capabilityGeneration", capability_snapshot AS capabilities,
       provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",
       CASE WHEN bootstrap_expires_at IS NULL THEN NULL
         ELSE to_char(bootstrap_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS "bootstrapExpiresAt",
@@ -206,6 +211,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
           workspace_id AS "workspaceId", executor_kind AS "executorKind", placement, checkout,
           generation::text AS generation,
           revision::text AS revision, last_lease_epoch::text AS "lastLeaseEpoch", lifecycle,
+          capability_generation::text AS "capabilityGeneration", capability_snapshot AS capabilities,
           provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",
           CASE WHEN bootstrap_expires_at IS NULL THEN NULL
             ELSE to_char(bootstrap_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS "bootstrapExpiresAt",
@@ -225,6 +231,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
           workspace_id AS "workspaceId", executor_kind AS "executorKind", placement, checkout,
           generation::text AS generation,
           revision::text AS revision, last_lease_epoch::text AS "lastLeaseEpoch", lifecycle,
+          capability_generation::text AS "capabilityGeneration", capability_snapshot AS capabilities,
           provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",
           CASE WHEN bootstrap_expires_at IS NULL THEN NULL
             ELSE to_char(bootstrap_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS "bootstrapExpiresAt",
@@ -328,6 +335,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
             sql`UPDATE rika_hosted_executor_assignments SET
         generation = generation + 1, revision = revision + 1, last_lease_epoch = 0,
         lifecycle = 'provisioning', provider_instance_id = NULL,
+        capability_generation = NULL, capability_snapshot = NULL,
         bootstrap_digest = ${Redacted.value(input.bootstrapCredentialDigest)},
         bootstrap_expires_at = transaction_timestamp() + (${input.bootstrapLifetimeMillis} * interval '1 millisecond'),
         executor_instance_id = NULL, process_incarnation = NULL, session_digest = NULL,
@@ -382,6 +390,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
         bootstrap_digest = NULL, bootstrap_expires_at = NULL,
         executor_instance_id = ${input.executorInstanceId}, process_incarnation = ${input.processIncarnation},
         session_digest = ${Redacted.value(input.sessionCredentialDigest)}, lease_epoch = last_lease_epoch + 1,
+        capability_generation = generation, capability_snapshot = ${sql.json(input.capabilities)},
         lease_expires_at = transaction_timestamp() + (${input.leaseLifetimeMillis} * interval '1 millisecond'),
         last_active_at = transaction_timestamp(), updated_at = transaction_timestamp()
         WHERE id = ${input.assignmentId} AND generation = ${input.generation}::bigint
@@ -611,6 +620,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
         workspace_id AS "workspaceId", executor_kind AS "executorKind", placement, checkout,
         generation::text AS generation,
         revision::text AS revision, last_lease_epoch::text AS "lastLeaseEpoch", lifecycle,
+        capability_generation::text AS "capabilityGeneration", capability_snapshot AS capabilities,
         provider_instance_id AS "providerInstanceId", bootstrap_digest AS "bootstrapCredentialDigest",
         CASE WHEN bootstrap_expires_at IS NULL THEN NULL
           ELSE to_char(bootstrap_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS "bootstrapExpiresAt",

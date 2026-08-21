@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Redacted } from "effect"
 import { Runtime, layer } from "../src/runtime"
 import type { Fence, ProtocolError, SessionWire } from "../src/protocol"
+import { workspaceCapabilities } from "./support/workspace-capabilities"
 
 const fence: Fence = {
   target: "e2b",
@@ -12,12 +13,16 @@ const fence: Fence = {
   processIncarnation: "process-3",
 }
 
-const options = { templateBuildId: "build-3", capabilities: { cells: true, checkpoints: true, pty: true }, cursors: { command: 0, event: 0, pty: 0 }, latestCheckpointId: null }
+const options = {
+  templateBuildId: "build-3",
+  capabilities: { cells: true, checkpoints: true, pty: true },
+  workspaceCapabilities,
+  cursors: { command: 0, event: 0, pty: 0 },
+  latestCheckpointId: null,
+}
 
-const run = <A, E>(
-  effect: Effect.Effect<A, E, Runtime>,
-  runtime: Layer.Layer<Runtime, ProtocolError>,
-) => Effect.scoped(Effect.flatMap(Layer.build(runtime), (context) => Effect.provide(effect, context)))
+const run = <A, E>(effect: Effect.Effect<A, E, Runtime>, runtime: Layer.Layer<Runtime, ProtocolError>) =>
+  Effect.scoped(Effect.flatMap(Layer.build(runtime), (context) => Effect.provide(effect, context)))
 
 describe("Runtime", () => {
   it.effect("persists a resumable session and replays only from the controller-acknowledged cursor", () => {

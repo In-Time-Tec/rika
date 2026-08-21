@@ -57,10 +57,11 @@ export const layer = (options: Options): Layer.Layer<Cells> =>
         if (request.workspaceId !== options.workspaceId)
           return yield* CellError.make({ kind: "workspace", message: "Cell workspace does not match this executor" })
         const attempt = request.attempt ?? 0
+        const executionKey = `${request.operationKey}\u0000${attempt}`
         const result = yield* Deferred.make<CellResponseValue, CellError>()
         const entry = yield* Ref.modify(entries, (current) => {
           const known = current.get(request.operationKey)
-          if (known !== undefined) return [known, current] as const
+          if (known !== undefined && attempt <= known.attempt) return [known, current] as const
           const next = new Map(current)
           const fresh = { attempt, result }
           next.set(request.operationKey, fresh)
@@ -70,13 +71,13 @@ export const layer = (options: Options): Layer.Layer<Cells> =>
           return yield* CellError.make({ kind: "fenced", message: "Cell operation attempt is stale" })
         if (entry.result === result) {
           const operation = Effect.gen(function* () {
-            const stored = yield* options.read(request.operationKey)
+            const stored = yield* options.read(executionKey)
             if (stored !== undefined) {
               if (attempt < stored.attempt)
                 return yield* CellError.make({ kind: "fenced", message: "Cell operation attempt is stale" })
               return stored._tag === "Completed" ? stored.response : unknown
             }
-            yield* options.write(request.operationKey, { _tag: "Running", attempt })
+            yield* options.write(executionKey, { _tag: "Running", attempt })
             const response = yield* options.execute(request, output).pipe(
               Effect.catchCause((cause) =>
                 Cause.hasInterruptsOnly(cause)
@@ -87,7 +88,7 @@ export const layer = (options: Options): Layer.Layer<Cells> =>
                     }),
               ),
             )
-            yield* options.write(request.operationKey, { _tag: "Completed", attempt, response })
+            yield* options.write(executionKey, { _tag: "Completed", attempt, response })
             return response
           })
           yield* operation.pipe(

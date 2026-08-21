@@ -19,6 +19,7 @@ export interface Options {
   readonly bootstrapToken: Redacted.Redacted<string>
   readonly templateBuildId: string | null
   readonly capabilities: Capabilities
+  readonly workspaceCapabilities: HelloWire["workspaceCapabilities"]
   readonly cursors: ResumeCursors
   readonly latestCheckpointId: string | null
   readonly restoredSession?: SessionWire
@@ -104,6 +105,7 @@ export const layer = (options: Options): Layer.Layer<Runtime, ProtocolError> =>
           fence: options.fence,
           templateBuildId: options.templateBuildId,
           capabilities: options.capabilities,
+          workspaceCapabilities: options.workspaceCapabilities,
           cursors: options.cursors,
           latestCheckpointId: options.latestCheckpointId,
           bootstrapToken: Redacted.value(options.bootstrapToken),

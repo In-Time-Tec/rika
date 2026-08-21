@@ -18,10 +18,9 @@ const runGit = Effect.fn("LocalCheckout.git")(function* (workspace: string, argu
   const child = yield* spawner
     .spawn(ChildProcess.make("git", ["-C", workspace, ...arguments_], { stdout: "pipe", stderr: "ignore" }))
     .pipe(Effect.mapError(() => LocalRunnerError.make({ message: "Could not inspect the local checkout" })))
-  const [text, exitCode] = yield* Effect.all(
-    [Stream.mkString(Stream.decodeText(child.stdout)), child.exitCode],
-    { concurrency: 2 },
-  ).pipe(Effect.mapError(() => LocalRunnerError.make({ message: "Could not inspect the local checkout" })))
+  const [text, exitCode] = yield* Effect.all([Stream.mkString(Stream.decodeText(child.stdout)), child.exitCode], {
+    concurrency: 2,
+  }).pipe(Effect.mapError(() => LocalRunnerError.make({ message: "Could not inspect the local checkout" })))
   const trimmed = text.trim()
   return Number(exitCode) === 0 && trimmed.length > 0 ? trimmed : undefined
 })

@@ -8,6 +8,7 @@ import {
   ExecutorMessage,
   LocalExecutorMessage,
 } from "../src/protocol"
+import { workspaceCapabilities } from "./support/workspace-capabilities"
 
 const fence = {
   target: "e2b" as const,
@@ -31,6 +32,7 @@ describe("executor protocol v1", () => {
             fence: { ...fence, target },
             templateBuildId: target === "e2b" ? "build-1" : null,
             capabilities: { cells: true, checkpoints: true, pty: true },
+            workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,
             bootstrapToken: "bootstrap",
@@ -47,6 +49,7 @@ describe("executor protocol v1", () => {
             fence,
             templateBuildId: "build-1",
             capabilities: { cells: true, checkpoints: true, pty: true },
+            workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,
             bootstrapToken: "bootstrap",
@@ -91,6 +94,7 @@ describe("executor protocol v1", () => {
         toolCallId: "call-1",
         code: "console.log('hello')",
         attempt: 0,
+        replayPolicy: "pure",
         admittedAt: null,
         deadline: null,
         bindings: { digest: "bindings", descriptors: [] },
@@ -126,6 +130,7 @@ describe("executor protocol v1", () => {
           ticket: "one-use-ticket",
           processIncarnation: "process-1",
           capabilities: { cells: true, checkpoints: false, pty: false },
+          workspaceCapabilities,
           cursors: { command: 0, event: 0, pty: 0 },
         },
       })

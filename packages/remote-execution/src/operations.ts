@@ -11,7 +11,9 @@ export interface Interface {
   readonly quiesce: Effect.Effect<ReadonlyArray<{ readonly operationKey: string; readonly outcome: TerminalOutcome }>>
 }
 
-export class Supervisor extends Context.Service<Supervisor, Interface>()("@rika/remote-execution/operations/Supervisor") {}
+export class Supervisor extends Context.Service<Supervisor, Interface>()(
+  "@rika/remote-execution/operations/Supervisor",
+) {}
 
 export const layer: Layer.Layer<Supervisor> = Layer.effect(
   Supervisor,

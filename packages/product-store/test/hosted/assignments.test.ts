@@ -1,7 +1,11 @@
 import { expect, it } from "@effect/vitest"
 import { Effect, Redacted } from "effect"
 import { TestClock } from "effect/testing"
-import { AssignmentRevision, type ExecutorAssignment } from "@rika/product/executor-assignment"
+import {
+  AssignmentRevision,
+  type ExecutorAssignment,
+  type WorkspaceCapabilitySnapshot,
+} from "@rika/product/executor-assignment"
 import { ExecutorAssignments, type Access, type Version } from "@rika/product/executor-assignments"
 import {
   CheckpointId,
@@ -10,6 +14,7 @@ import {
   OwnerId,
   Sequence,
   ThreadId,
+  Timestamp,
   WorkspaceId,
 } from "@rika/product/hosted-model"
 import { layer } from "../../src/hosted/memory-assignments"
@@ -24,6 +29,18 @@ const version = (assignment: ExecutorAssignment): Version => ({
   assignmentId: assignment.id,
   generation: assignment.generation,
   revision: assignment.revision,
+})
+
+const capabilities = (digestCharacter: string): WorkspaceCapabilitySnapshot => ({
+  environmentDigest: `sha256:${digestCharacter.repeat(64)}`,
+  capturedAt: Timestamp.make("2026-01-01T00:00:00.000Z"),
+  filesystem: { _tag: "Ready", detail: "workspace filesystem" },
+  typescriptKernel: { _tag: "Ready", detail: "TypeScript kernel" },
+  git: { _tag: "Ready", detail: "git" },
+  process: { _tag: "Ready", detail: "process execution" },
+  pty: { _tag: "Ready", detail: "PTY" },
+  browser: { _tag: "Unavailable", reason: "browser not installed" },
+  workspaceLifecycle: { _tag: "Ready", detail: "workspace lifecycle" },
 })
 
 const open = (suffix: string) =>
@@ -51,6 +68,7 @@ const open = (suffix: string) =>
       providerInstanceId: "sandbox",
       executorInstanceId: ids.executor,
       processIncarnation: "process",
+      capabilities: capabilities("a"),
       presentedBootstrapCredentialDigest: Redacted.make("bootstrap"),
       sessionCredentialDigest: Redacted.make("session"),
       leaseLifetimeMillis: 60_000,
@@ -84,6 +102,7 @@ it.layer(layer)("executor assignments", (test) => {
           providerInstanceId: "sandbox",
           executorInstanceId: ids.executor,
           processIncarnation: "process",
+          capabilities: capabilities("b"),
           presentedBootstrapCredentialDigest: Redacted.make("bootstrap"),
           sessionCredentialDigest: Redacted.make("another-session"),
           leaseLifetimeMillis: 60_000,
@@ -156,10 +175,47 @@ it.layer(layer)("executor assignments", (test) => {
 
       expect(replacement.generation).toBe("2")
       expect(replacement.lifecycle).toMatchObject({ _tag: "Provisioning", providerInstanceId: null })
+      expect(replacement).toMatchObject({ capabilityGeneration: null, capabilities: null })
       expect(yield* Effect.result(assignments.authenticate(access))).toMatchObject({
         _tag: "Failure",
         failure: { reason: "stale-fence" },
       })
+    }),
+  )
+
+  test.effect("preserves capabilities through same-generation transitions and replaces them for the successor", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-01-01T00:00:00.000Z"))
+      const { assignments, active } = yield* open("capabilities")
+
+      expect(active.capabilityGeneration).toBe(active.generation)
+      expect(active.capabilities?.environmentDigest).toBe(`sha256:${"a".repeat(64)}`)
+      const paused = yield* assignments.pause(version(active))
+      expect(paused.capabilities).toEqual(active.capabilities)
+      const replacement = yield* assignments.beginReplacement({
+        ...version(paused),
+        bootstrapCredentialDigest: Redacted.make("replacement-capabilities"),
+        bootstrapLifetimeMillis: 60_000,
+      })
+      expect(replacement).toMatchObject({ capabilityGeneration: null, capabilities: null })
+      const bound = yield* assignments.bindProviderInstance({
+        ...version(replacement),
+        providerInstanceId: "sandbox-successor",
+      })
+      const successorCapabilities = capabilities("b")
+      const successor = yield* assignments.openSession({
+        ...version(bound),
+        providerInstanceId: "sandbox-successor",
+        executorInstanceId: ids.executor,
+        processIncarnation: "process-successor",
+        capabilities: successorCapabilities,
+        presentedBootstrapCredentialDigest: Redacted.make("replacement-capabilities"),
+        sessionCredentialDigest: Redacted.make("successor-session"),
+        leaseLifetimeMillis: 60_000,
+      })
+      expect(successor.capabilityGeneration).toBe(successor.generation)
+      expect(successor.capabilities).toEqual(successorCapabilities)
+      expect(successor.capabilities?.environmentDigest).toBe(`sha256:${"b".repeat(64)}`)
     }),
   )
 

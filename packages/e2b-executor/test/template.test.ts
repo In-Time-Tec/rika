@@ -28,7 +28,8 @@ describe("E2B template", () => {
       expect(host).toContain('hostname: "0.0.0.0"')
       expect(host).toContain("decodeBootstrap(input)")
       expect(host).toContain("const capabilities = yield* liveCapabilities(workspaceUser)")
-      expect(host).toContain('pty: config.fence.target === "e2b" && capabilities.pty')
+      expect(host).toContain('const ptyReady = config.fence.target === "e2b" && capabilities.pty')
+      expect(host).toContain("capabilities: { ...capabilities, pty: ptyReady }")
       expect(host).toContain('Bun.env.RIKA_EXECUTOR_WORKSPACE_ROOT || "/workspace"')
       expect(host).toContain("HostedKernel.make({")
     }),

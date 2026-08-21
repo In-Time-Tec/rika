@@ -1,5 +1,7 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
+import { BunFileSystem } from "@effect/platform-bun"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
+import type { WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
 import {
   Cause,
   Clock,
@@ -9,6 +11,7 @@ import {
   Effect,
   Fiber,
   FiberSet,
+  FileSystem,
   Layer,
   Queue,
   Ref,
@@ -35,6 +38,7 @@ import {
   type ResumeCursors,
   type WelcomeWire,
 } from "./protocol"
+import { inspectWorkspaceCapabilities } from "./workspace-capabilities"
 
 /** A local filesystem root. This value is never serialized or sent on the wire. */
 export interface ForegroundLocalExecutorOptions {
@@ -123,6 +127,8 @@ const attribution = (request: CellRequest): CellAttribution => ({
   toolCallId: request.toolCallId,
   attempt: request.attempt,
 })
+
+const executionKey = (operationKey: string, attempt: number) => `${operationKey}\u0000${attempt}`
 
 const redactOutput = (text: string) => {
   const redacted = text
@@ -359,17 +365,18 @@ const consumeApi = (
       const current = yield* Ref.get(session)
       if (current === undefined) return yield* failure("Local executor session is unavailable")
       if (!sameAccess(access(current), message.access)) return yield* failure("Local executor result receipt is stale")
+      const key = executionKey(message.operationKey, message.attempt)
       yield* Ref.update(receipts, (values) => {
-        const pending = values.get(message.operationKey)
+        const pending = values.get(key)
         if (pending === undefined || pending.attempt !== message.attempt) return values
         const next = new Map(values)
-        next.delete(message.operationKey)
+        next.delete(key)
         return next
       })
       yield* persist()
     }
     if (message._tag === "CellTerminalReceipt") {
-      const receipt = (yield* Ref.get(receipts)).get(message.operationKey)
+      const receipt = (yield* Ref.get(receipts)).get(executionKey(message.operationKey, message.attempt))
       const terminal = receipt?.frames.find(
         (frame): frame is Extract<CellLifecycleFrame, { readonly _tag: "Terminal" }> =>
           frame._tag === "Terminal" && frame.cursor === message.cursor && frame.attribution.attempt === message.attempt,
@@ -389,7 +396,7 @@ const consumeApi = (
       }
     }
     if (message._tag === "CellReplay") {
-      const receipt = (yield* Ref.get(receipts)).get(message.operationKey)
+      const receipt = (yield* Ref.get(receipts)).get(executionKey(message.operationKey, message.attempt))
       const current = yield* Ref.get(session)
       if (current === undefined || !sameAccess(access(current), message.access))
         return yield* failure("Local executor replay has a stale session")
@@ -404,19 +411,20 @@ const consumeApi = (
       const current = yield* Ref.get(session)
       if (current === undefined || !sameAccess(access(current), message.access))
         return yield* failure("Local executor cancellation has a stale session")
-      const receipt = (yield* Ref.get(receipts)).get(message.operationKey)
+      const key = executionKey(message.operationKey, message.attempt)
+      const receipt = (yield* Ref.get(receipts)).get(key)
       if (receipt === undefined || receipt.attempt !== message.attempt)
         return yield* failure("Local executor cancellation has a stale attempt")
-      const operation = (yield* Ref.get(liveOperations)).get(message.operationKey)
+      const operation = (yield* Ref.get(liveOperations)).get(key)
       if (operation !== undefined) yield* Fiber.interrupt(operation)
-      const interrupted = (yield* Ref.get(receipts)).get(message.operationKey)
+      const interrupted = (yield* Ref.get(receipts)).get(key)
       if (interrupted !== undefined && !interrupted.frames.some((frame) => frame._tag === "Terminal")) {
         const response: CellResponse = {
           _tag: "DomainFailure",
           failure: { kind: "cancelled", message: "Cell operation cancelled" },
         }
         yield* append(
-          message.operationKey,
+          key,
           {
             _tag: "Terminal",
             attribution: interrupted.attribution,
@@ -475,13 +483,14 @@ const consumeApi = (
       if (current === undefined) return yield* failure("Local executor session is unavailable")
       const operationKey = message.request.operationKey
       const attempt = message.request.attempt
-      const known = (yield* Ref.get(receipts)).get(operationKey)
+      const key = executionKey(operationKey, attempt)
+      const known = (yield* Ref.get(receipts)).get(key)
       if (known !== undefined && attempt < known.attempt) return
       if (known !== undefined) {
-        if (known.state === "running" && !(yield* Ref.get(liveOperations)).has(operationKey)) {
+        if (known.state === "running" && !(yield* Ref.get(liveOperations)).has(key)) {
           const response = unknownResponse
           yield* append(
-            operationKey,
+            key,
             {
               _tag: "Terminal",
               attribution: known.attribution,
@@ -497,7 +506,7 @@ const consumeApi = (
       const identity = attribution(message.request)
       const accepted: CellLifecycleFrame = { _tag: "Accepted", attribution: identity, cursor: 1 }
       yield* Ref.update(receipts, (values) =>
-        new Map(values).set(operationKey, {
+        new Map(values).set(key, {
           operationKey,
           attempt,
           attribution: identity,
@@ -509,18 +518,18 @@ const consumeApi = (
       yield* writeLifecycle(accepted)
       const operation = Effect.gen(function* () {
         const started: CellLifecycleFrame = { _tag: "Started", attribution: identity, cursor: 2 }
-        yield* append(operationKey, started)
+        yield* append(key, started)
         const response = yield* resolveCellResponse({
           current,
           request: message.request,
           cells,
           output: (chunk) =>
             Effect.gen(function* () {
-              const receipt = (yield* Ref.get(receipts)).get(operationKey)
+              const receipt = (yield* Ref.get(receipts)).get(key)
               if (receipt === undefined || receipt.frames.filter((frame) => frame._tag === "Output").length >= 16)
                 return
               const output = redactOutput(chunk.text)
-              yield* append(operationKey, {
+              yield* append(key, {
                 _tag: "Output",
                 attribution: identity,
                 cursor: receipt.frames.length + 1,
@@ -531,10 +540,10 @@ const consumeApi = (
               }).pipe(Effect.ignore)
             }),
         })
-        const receipt = (yield* Ref.get(receipts)).get(operationKey)
+        const receipt = (yield* Ref.get(receipts)).get(key)
         if (receipt === undefined) return
         yield* append(
-          operationKey,
+          key,
           {
             _tag: "Terminal",
             attribution: identity,
@@ -548,14 +557,14 @@ const consumeApi = (
         Effect.ensuring(
           Ref.update(liveOperations, (values) => {
             const next = new Map(values)
-            next.delete(operationKey)
+            next.delete(key)
             return next
           }),
         ),
       )
       const gate = yield* Deferred.make<void>()
       const fiber = yield* Effect.sync(() => runWorker(Deferred.await(gate).pipe(Effect.andThen(operation))))
-      yield* Ref.update(liveOperations, (values) => new Map(values).set(operationKey, fiber))
+      yield* Ref.update(liveOperations, (values) => new Map(values).set(key, fiber))
       yield* Deferred.succeed(gate, undefined)
     }
   }).pipe(Effect.forever)
@@ -564,6 +573,7 @@ const connected = (
   options: ForegroundLocalExecutorOptions,
   url: string,
   processIncarnation: string,
+  workspaceCapabilities: WorkspaceCapabilitySnapshot,
   sessions: Ref.Ref<LocalSession | undefined>,
   receipts: Ref.Ref<Map<string, PendingResult>>,
   liveOperations: Ref.Ref<Map<string, Fiber.Fiber<void, ForegroundLocalExecutorError>>>,
@@ -600,6 +610,7 @@ const connected = (
             ticket: admission.ticket,
             processIncarnation,
             capabilities: localCapabilities,
+            workspaceCapabilities,
             cursors: initialCursors,
           },
         }),
@@ -680,11 +691,19 @@ const connected = (
  * scope. It opens one outbound WSS connection, reconnects with the persisted
  * in-process session, and keeps local execution state out of the controller.
  */
-export const foregroundLocalExecutorLayer = Layer.merge(BunSocket.layerWebSocketConstructor, BunCrypto.layer)
+export const foregroundLocalExecutorLayer = Layer.mergeAll(
+  BunSocket.layerWebSocketConstructor,
+  BunCrypto.layer,
+  BunFileSystem.layer,
+)
 
 export const runForegroundLocalExecutor = (
   options: ForegroundLocalExecutorOptions,
-): Effect.Effect<void, ForegroundLocalExecutorError, Crypto.Crypto | Socket.WebSocketConstructor> =>
+): Effect.Effect<
+  void,
+  ForegroundLocalExecutorError,
+  Crypto.Crypto | FileSystem.FileSystem | Socket.WebSocketConstructor
+> =>
   Effect.scoped(
     Effect.gen(function* () {
       const source = options.resume?.executorUrl ?? options.admission?.executorUrl
@@ -713,7 +732,10 @@ export const runForegroundLocalExecutor = (
             }
       const sessions = yield* Ref.make<LocalSession | undefined>(initialSession)
       const initialReceipts = new Map<string, PendingResult>(
-        (options.resume?.receipts ?? []).map((receipt) => [receipt.operationKey, receipt]),
+        (options.resume?.receipts ?? []).map((receipt) => [
+          executionKey(receipt.operationKey, receipt.attempt),
+          receipt,
+        ]),
       )
       const receipts = yield* Ref.make(initialReceipts)
       const machineStates = yield* Ref.make(
@@ -776,12 +798,19 @@ export const runForegroundLocalExecutor = (
         }),
       )
       const machine = Context.get(machineContext, Machine)
+      const workspaceCapabilities = yield* inspectWorkspaceCapabilities({
+        target: "local_device",
+        workspacePath: options.workspacePath,
+        typescriptKernel: true,
+        pty: false,
+      })
       const workers = yield* FiberSet.make<void, ForegroundLocalExecutorError>()
       const runWorker = yield* FiberSet.runtime(workers)<never>()
       const connection = connected(
         options,
         url,
         processIncarnation,
+        workspaceCapabilities,
         sessions,
         receipts,
         liveOperations,

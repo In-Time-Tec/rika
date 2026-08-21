@@ -85,4 +85,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "057e350b553c3deaab26ae860cff5841de39544a698fbcc426b6a8e1328dc085",
     url: new URL("../../migrations/postgres/0016-authority-revocation.sql", import.meta.url),
   },
+  {
+    id: "product/0017_executor_recovery_capabilities",
+    checksum: "7dda258e69b81e87662ebe8aeed01769bf456c829f50589e5b77d953e0d3b549",
+    url: new URL("../../migrations/postgres/0017-executor-recovery-capabilities.sql", import.meta.url),
+  },
 ]

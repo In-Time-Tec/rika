@@ -12,6 +12,8 @@ const base = {
   revision: "0",
   lastLeaseEpoch: "0",
   lifecycle: { _tag: "Pending" },
+  capabilityGeneration: null,
+  capabilities: null,
   cursor: { sequence: "0", value: "" },
   latestCheckpointId: null,
   lastActiveAt: "2026-01-01T00:00:00.000Z",

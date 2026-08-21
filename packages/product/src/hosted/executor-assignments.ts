@@ -5,6 +5,7 @@ import type {
   ExecutorCursor,
   ExecutorPlacement,
   RepositoryCheckout,
+  WorkspaceCapabilitySnapshot,
   WorkspaceCheckpointManifest,
 } from "./executor-assignment"
 import type {
@@ -68,6 +69,7 @@ export interface OpenSessionInput extends Version {
   readonly providerInstanceId: string
   readonly executorInstanceId: ExecutorInstanceId
   readonly processIncarnation: string
+  readonly capabilities: WorkspaceCapabilitySnapshot
   readonly presentedBootstrapCredentialDigest: Redacted.Redacted<string>
   readonly sessionCredentialDigest: Redacted.Redacted<string>
   readonly leaseLifetimeMillis: number

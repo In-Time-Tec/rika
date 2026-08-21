@@ -129,6 +129,10 @@ describe.sequential("foreground local executor", () => {
                 ticket: "one-use-ticket",
                 processIncarnation: expect.any(String),
                 capabilities: { cells: true, checkpoints: false, pty: false },
+                workspaceCapabilities: expect.objectContaining({
+                  environmentDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+                  typescriptKernel: { _tag: "Ready", detail: "persistent Bun TypeScript kernel available" },
+                }),
                 cursors: { command: 0, event: 0, pty: 0 },
               },
             })
@@ -171,6 +175,7 @@ describe.sequential("foreground local executor", () => {
                 toolCallId: "call-mismatch",
                 code: 'printf "must-not-run"',
                 attempt: 0,
+                replayPolicy: "never",
                 admittedAt: null,
                 deadline: null,
                 bindings,
@@ -200,6 +205,7 @@ describe.sequential("foreground local executor", () => {
               toolCallId: "call-1",
               code: "const answer: number = 42; answer",
               attempt: 0,
+              replayPolicy: "pure" as const,
               admittedAt: null,
               deadline: null,
               bindings,
@@ -237,6 +243,18 @@ describe.sequential("foreground local executor", () => {
                 response: first.response,
               },
             ])
+            const lifecycleReplays = socket.sent
+              .filter(
+                (message: any) =>
+                  message._tag === "CellLifecycle" && message.frame.attribution.operationKey === "operation-1",
+              )
+              .map((message: any) => message.frame)
+            const terminalIndex = lifecycleReplays.findIndex((frame: any) => frame._tag === "Terminal")
+            const firstLifecycle = lifecycleReplays.slice(0, terminalIndex + 1)
+            expect(firstLifecycle.map((frame: any) => frame.cursor)).toEqual(
+              firstLifecycle.map((_: unknown, index: number) => index + 1),
+            )
+            expect(lifecycleReplays.slice(terminalIndex + 1)).toEqual(firstLifecycle)
             const outputRequest = {
               ...request,
               operationKey: "operation-output",
@@ -365,26 +383,26 @@ describe.sequential("foreground local executor", () => {
               },
             })
             yield* Deferred.await(ready)
-            socket.message({
-              _tag: "CellExecute",
-              request: {
-                access,
-                operationKey: "operation-reconnect",
-                workspaceId: "workspace-binding-1",
-                sessionId: "session-1",
-                threadId: "thread-1",
-                turnId: "turn-1",
-                runId: "run-1",
-                rootRunId: "run-1",
-                toolCallId: "call-1",
-                code: 'printf "reconnect"',
-                attempt: 0,
-                admittedAt: null,
-                deadline: null,
-                bindings,
-              },
-            })
-            yield* terminal(socket, "operation-reconnect")
+            const reconnectRequest = {
+              access,
+              operationKey: "operation-reconnect",
+              workspaceId: "workspace-binding-1",
+              sessionId: "session-1",
+              threadId: "thread-1",
+              turnId: "turn-1",
+              runId: "run-1",
+              rootRunId: "run-1",
+              toolCallId: "call-1",
+              code: "globalThis.__rikaReconnectIdentity = (globalThis.__rikaReconnectIdentity ?? 0) + 1",
+              attempt: 0,
+              replayPolicy: "pure",
+              admittedAt: null,
+              deadline: null,
+              bindings,
+            }
+            socket.message({ _tag: "CellExecute", request: reconnectRequest })
+            const initialTerminal = yield* terminal(socket, "operation-reconnect")
+            expect(initialTerminal.frame.response).toMatchObject({ _tag: "Success" })
             socket.close()
             for (let index = 0; index < 10; index += 1) {
               yield* Effect.yieldNow
@@ -411,6 +429,7 @@ describe.sequential("foreground local executor", () => {
               _tag: "CellReplay",
               access: renewed,
               operationKey: "operation-reconnect",
+              attempt: 0,
               afterCursor: 0,
             })
             yield* acknowledgeTerminal(reconnectedSocket, renewed, "operation-reconnect")
@@ -427,6 +446,28 @@ describe.sequential("foreground local executor", () => {
               access: renewed,
               operationKey: "operation-reconnect",
               attempt: 0,
+            })
+            reconnectedSocket.message({
+              _tag: "CellExecute",
+              request: {
+                ...reconnectRequest,
+                access: renewed,
+                operationKey: "operation-after-reconnect",
+                toolCallId: "call-after-reconnect",
+                code: "globalThis.__rikaReconnectIdentity",
+              },
+            })
+            yield* acknowledgeTerminal(reconnectedSocket, renewed, "operation-after-reconnect")
+            const afterReconnect = yield* eventually(
+              () =>
+                reconnectedSocket.sent.find(
+                  (message: any) =>
+                    message._tag === "LocalCellResult" && message.operationKey === "operation-after-reconnect",
+                ) as any,
+            )
+            expect(afterReconnect.response).toMatchObject({
+              _tag: "Success",
+              result: { value: initialTerminal.frame.response.result.value },
             })
             yield* Fiber.interrupt(runner)
           }),
@@ -540,6 +581,7 @@ describe.sequential("foreground local executor", () => {
                 toolCallId: "tool-call-resume",
                 code: "mustNotRun()",
                 attempt: 0,
+                replayPolicy: "never",
                 admittedAt: null,
                 deadline: null,
                 bindings,
@@ -653,6 +695,7 @@ describe.sequential("foreground local executor", () => {
                 toolCallId: "call-1",
                 code: 'printf "goodbye"',
                 attempt: 0,
+                replayPolicy: "pure",
                 admittedAt: null,
                 deadline: null,
                 bindings,
@@ -702,6 +745,7 @@ describe.sequential("foreground local executor", () => {
               _tag: "CellReplay",
               access,
               operationKey: "operation-goodbye",
+              attempt: 0,
               afterCursor: 0,
             })
             yield* acknowledgeTerminal(reconnectedSocket, access, "operation-goodbye")

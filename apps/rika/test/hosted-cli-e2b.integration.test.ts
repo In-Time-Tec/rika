@@ -46,6 +46,17 @@ import { BetterAuthUserId, OrganizationId } from "@rika/product/hosted-model"
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined
 const encodeExecutorMessage = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
+const workspaceCapabilities = {
+  environmentDigest: `sha256:${"1".repeat(64)}`,
+  capturedAt: "2026-01-01T00:00:00.000Z",
+  filesystem: { _tag: "Ready", detail: "available" },
+  typescriptKernel: { _tag: "Ready", detail: "available" },
+  git: { _tag: "Ready", detail: "available" },
+  process: { _tag: "Ready", detail: "available" },
+  pty: { _tag: "Unavailable", reason: "not required" },
+  browser: { _tag: "Unavailable", reason: "not required" },
+  workspaceLifecycle: { _tag: "Ready", detail: "available" },
+} as const
 const deviceId = "device-cli-e2b"
 const clientId = "client-cli-e2b"
 
@@ -183,6 +194,7 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
                         },
                         templateBuildId: creates[0]!.templateBuildId,
                         capabilities: { cells: true, checkpoints: false, pty: false },
+                        workspaceCapabilities,
                         cursors: { command: 0, event: 0, pty: 0 },
                         latestCheckpointId: null,
                         bootstrapToken: Redacted.value(request.credential),
@@ -318,6 +330,10 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
             issueTicket: () =>
               Effect.succeed({ ticket: "thread-ticket", expiresAt: "2026-08-21T07:00:00.000Z" as never }),
             connect: () => Effect.die("The test Thread client handles the canonical command boundary"),
+          },
+          recovery: {
+            inspect: () => Effect.succeed([]),
+            resolve: () => Effect.die("unused"),
           },
           executor,
           execution: { check: Effect.die("unused") },

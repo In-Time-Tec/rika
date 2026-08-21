@@ -113,9 +113,7 @@ it.effect("executes a valid account route through the Codex endpoint without an 
           )
         }),
       )
-      const context = yield* Layer.build(
-        Models.layer({ candidate, openAiAccountAuth: auth, httpClientLayer }),
-      )
+      const context = yield* Layer.build(Models.layer({ candidate, openAiAccountAuth: auth, httpClientLayer }))
       const model = yield* ModelRegistry.operate(
         {
           provider: candidate.providerConnection.provider,

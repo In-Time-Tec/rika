@@ -2,7 +2,7 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { describe, expect, it } from "@effect/vitest"
 import { ControllerError, type Interface as Controller } from "@rika/e2b-executor/controller"
 import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
-import { ApiMessage, BindingRequest, ExecutorMessage } from "@rika/remote-execution/protocol"
+import { ApiMessage, BindingRequest, ExecutorMessage, type CellResponse } from "@rika/remote-execution/protocol"
 import { NestedOperation, ToolContext } from "tenetkit"
 import { HostBindingRegistry } from "tenetkit/repl"
 import { Context, Crypto, Effect, Fiber, Layer, Option, Redacted, Schema, Stream } from "effect"
@@ -19,23 +19,104 @@ const decode = Schema.decodeSync(Schema.fromJsonString(ApiMessage))
 const encodeBindingRequest = Schema.encodeSync(Schema.fromJsonString(BindingRequest))
 const bindingRequestDigest = (request: BindingRequest) =>
   new Bun.CryptoHasher("sha256").update(encodeBindingRequest(request)).digest("hex")
+const ready = (detail: string) => ({ _tag: "Ready" as const, detail })
+const workspaceCapabilities = {
+  environmentDigest: `sha256:${"0".repeat(64)}`,
+  capturedAt: "2026-08-21T00:00:00.000Z",
+  filesystem: ready("filesystem ready"),
+  typescriptKernel: ready("TypeScript kernel ready"),
+  git: ready("Git ready"),
+  process: ready("process ready"),
+  pty: ready("PTY ready"),
+  browser: ready("browser ready"),
+  workspaceLifecycle: ready("workspace lifecycle ready"),
+}
+
+const lifecycleStore = (
+  append: LifecycleStore["append"] = () => Effect.void,
+  load: LifecycleStore["load"] = () => Effect.succeed([]),
+): LifecycleStore => {
+  const operations = new Map<
+    string,
+    {
+      state: "accepted" | "dispatched" | "completed" | "unknown"
+      started: boolean
+      response?: CellResponse
+      dispatchedGeneration?: number
+      dispatchedExecutorInstanceId?: string
+      dispatchedProcessIncarnation?: string
+    }
+  >()
+  const operation = (input: {
+    readonly assignmentId: string
+    readonly operationKey: string
+    readonly attempt: number
+  }) => `${input.assignmentId}\u0000${input.operationKey}\u0000${input.attempt}`
+  return {
+    append: (assignmentId, frame) =>
+      append(assignmentId, frame).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            const operationKey = `${assignmentId}\u0000${frame.attribution.operationKey}\u0000${frame.attribution.attempt}`
+            const current = operations.get(operationKey)
+            if (current === undefined) return
+            if (frame._tag === "Started") operations.set(operationKey, { ...current, started: true })
+            if (frame._tag === "Terminal")
+              operations.set(operationKey, {
+                ...current,
+                state: "completed",
+                response: frame.response,
+              })
+          }),
+        ),
+      ),
+    load,
+    prepare: (input) =>
+      load(input.assignmentId, input.operationKey, input.attempt).pipe(
+        Effect.tap((frames) =>
+          Effect.sync(() => {
+            const terminal = frames.find((frame) => frame._tag === "Terminal")
+            operations.set(
+              operation(input),
+              terminal?._tag === "Terminal"
+                ? { state: "completed", started: true, response: terminal.response }
+                : { state: "accepted", started: frames.some((frame) => frame._tag === "Started") },
+            )
+          }),
+        ),
+        Effect.asVoid,
+      ),
+    inspect: (input) => Effect.sync(() => operations.get(operation(input)) ?? { state: "accepted", started: false }),
+    dispatch: (input, access) =>
+      Effect.sync(
+        () =>
+          void operations.set(operation(input), {
+            state: "dispatched",
+            started: false,
+            dispatchedGeneration: access.fence.assignmentGeneration,
+            dispatchedExecutorInstanceId: access.fence.executorId,
+            dispatchedProcessIncarnation: access.fence.processIncarnation,
+          }),
+      ),
+    reassign: (input) =>
+      Effect.sync(() => void operations.set(operation(input), { state: "accepted", started: false })),
+    markUnknown: (input) =>
+      Effect.sync(() => void operations.set(operation(input), { state: "unknown", started: true })),
+  }
+}
 const makeGateway = (
   service: Controller,
   append: LifecycleStore["append"] = () => Effect.void,
   load: LifecycleStore["load"] = () => Effect.succeed([]),
 ) =>
-  makeGatewayService(
-    service,
-    { append, load, prepare: () => Effect.void },
-    {
-      activate: (_access, _phase, use) => use({ digest: `sha256:${"0".repeat(64)}`, values: {}, redactedNames: [] }),
-      replace: (key) =>
-        service.replace(key, { phase: "runtime", allow: ["api.example.test"] }).pipe(
-          Effect.asVoid,
-          Effect.mapError((error) => GatewayError.make({ kind: "fenced", message: error.message })),
-        ),
-    },
-  ).pipe(
+  makeGatewayService(service, lifecycleStore(append, load), {
+    activate: (_access, _phase, use) => use({ digest: `sha256:${"0".repeat(64)}`, values: {}, redactedNames: [] }),
+    replace: (key) =>
+      service.replace(key, { phase: "runtime", allow: ["api.example.test"] }).pipe(
+        Effect.asVoid,
+        Effect.mapError((error) => GatewayError.make({ kind: "fenced", message: error.message })),
+      ),
+  }).pipe(
     Effect.provideServiceEffect(
       Crypto.Crypto,
       Effect.scoped(Layer.build(BunCrypto.layer)).pipe(Effect.map((context) => Context.get(context, Crypto.Crypto))),
@@ -69,6 +150,7 @@ const cellIdentity = {
   rootRunId: "run-1",
   toolCallId: "call-1",
   attempt: 0,
+  replayPolicy: "pure",
   admittedAt: null,
   deadline: null,
   bindings,
@@ -148,6 +230,7 @@ describe("executor gateway", () => {
             fence,
             templateBuildId: "build-1",
             capabilities: { cells: true, checkpoints: true, pty: true },
+            workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,
             bootstrapToken: "bootstrap-token",
@@ -176,6 +259,7 @@ describe("executor gateway", () => {
             fence,
             templateBuildId: "build-1",
             capabilities: { cells: true, checkpoints: false, pty: true },
+            workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,
             bootstrapToken: "bootstrap-token",
@@ -257,6 +341,7 @@ describe("executor gateway", () => {
             fence,
             templateBuildId: "build-1",
             capabilities: { cells: true, checkpoints: false, pty: true },
+            workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,
             bootstrapToken: "bootstrap-token",
@@ -282,6 +367,7 @@ describe("executor gateway", () => {
           fence,
           templateBuildId: "build-1",
           capabilities: { cells: true, checkpoints: false, pty: false },
+          workspaceCapabilities,
           cursors: { command: 0, event: 0, pty: 0 },
           latestCheckpointId: null,
           bootstrapToken: "bootstrap-token",
@@ -367,6 +453,7 @@ describe("executor gateway", () => {
             fence,
             templateBuildId: "build-1",
             capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,
             bootstrapToken: "bootstrap-token",
@@ -439,6 +526,7 @@ describe("executor gateway", () => {
       expect(yield* Fiber.join(running)).toEqual({
         access,
         response,
+        outcome: "completed",
       })
     }),
   )
@@ -494,6 +582,7 @@ describe("executor gateway", () => {
             fence,
             templateBuildId: "build-1",
             capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,
             bootstrapToken: "bootstrap-token",
@@ -589,6 +678,7 @@ describe("executor gateway", () => {
             fence,
             templateBuildId: "build-1",
             capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,
             bootstrapToken: "bootstrap-token",
@@ -643,6 +733,59 @@ describe("executor gateway", () => {
     }),
   )
 
+  it.effect("rejects an out-of-order lifecycle frame before persisting it", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      const persisted: Array<string> = []
+      const gateway = yield* makeGateway(controller(), (_assignmentId, frame) =>
+        Effect.sync(() => persisted.push(`${frame.cursor}:${frame._tag}`)).pipe(Effect.asVoid),
+      )
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      const running = yield* Effect.forkChild(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-out-of-order",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "42",
+        }),
+      )
+      yield* Effect.yieldNow
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "CellLifecycle",
+          access,
+          frame: {
+            _tag: "Started",
+            attribution: attribution("operation-out-of-order"),
+            cursor: 2,
+          },
+        }),
+      )
+      expect(persisted).toEqual([])
+      expect(target.closed).toEqual([[1008, "fenced"]])
+      yield* Fiber.interrupt(running)
+    }),
+  )
+
   it.effect("hydrates a durable terminal after API replacement", () =>
     Effect.gen(function* () {
       const target = socket()
@@ -677,6 +820,7 @@ describe("executor gateway", () => {
             fence,
             templateBuildId: "build-1",
             capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,
             bootstrapToken: "bootstrap-token",
@@ -694,19 +838,10 @@ describe("executor gateway", () => {
         }),
       )
       yield* Effect.yieldNow
-      yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame: retained[3]! }))
-      expect(decode(target.sent.at(-1)!)).toEqual({
-        _tag: "CellTerminalReceipt",
-        access,
-        operationKey: "operation-restored",
-        attempt: 0,
-        cursor: 4,
-      })
-      yield* gateway.receive(
-        target,
-        encode({ _tag: "CellResult", access, operationKey: "operation-restored", attempt: 0, response }),
+      expect(target.sent.map((message) => decode(message)).filter((message) => message._tag === "CellExecute")).toEqual(
+        [],
       )
-      expect(yield* Fiber.join(running)).toEqual({ access, response })
+      expect(yield* Fiber.join(running)).toEqual({ access, response, outcome: "completed" })
     }),
   )
 
@@ -724,6 +859,7 @@ describe("executor gateway", () => {
             fence,
             templateBuildId: "build-1",
             capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,
             bootstrapToken: "bootstrap-token",
@@ -786,6 +922,7 @@ describe("executor gateway", () => {
             fence,
             templateBuildId: "build-1",
             capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,
             bootstrapToken: "bootstrap-token",
@@ -883,6 +1020,7 @@ describe("executor gateway", () => {
             fence,
             templateBuildId: "build-1",
             capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,
             bootstrapToken: "bootstrap-token",
@@ -933,6 +1071,7 @@ describe("executor gateway", () => {
             fence,
             templateBuildId: "build-1",
             capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,
             bootstrapToken: "bootstrap-token",
@@ -959,6 +1098,7 @@ describe("executor gateway", () => {
         _tag: "CellReplay",
         access: replacementAccess,
         operationKey: "replacement-operation",
+        attempt: 0,
         afterCursor: 0,
       })
       yield* gateway.receive(
@@ -1001,7 +1141,7 @@ describe("executor gateway", () => {
           response,
         }),
       )
-      expect(yield* Fiber.join(running)).toEqual({ access: replacementAccess, response })
+      expect(yield* Fiber.join(running)).toEqual({ access: replacementAccess, response, outcome: "completed" })
     }),
   )
 })

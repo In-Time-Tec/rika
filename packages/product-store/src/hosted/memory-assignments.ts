@@ -138,6 +138,8 @@ const make = Effect.gen(function* () {
           revision: AssignmentRevision.make("0"),
           lastLeaseEpoch: Sequence.make("0"),
           lifecycle: { _tag: "Pending" },
+          capabilityGeneration: null,
+          capabilities: null,
           cursor: { sequence: Sequence.make("0"), value: "" },
           latestCheckpointId: null,
           lastActiveAt: now,
@@ -184,6 +186,8 @@ const make = Effect.gen(function* () {
         const next = revised(assignment!, now, {
           generation: FencingGeneration.make(increment(assignment!.generation)),
           lastLeaseEpoch: Sequence.make("0"),
+          capabilityGeneration: null,
+          capabilities: null,
           lifecycle: {
             _tag: "Provisioning",
             providerInstanceId: null,
@@ -241,6 +245,8 @@ const make = Effect.gen(function* () {
             leaseEpoch,
             leaseExpiresAt: timestamp(DateTime.toEpochMillis(DateTime.makeUnsafe(now)) + input.leaseLifetimeMillis),
           },
+          capabilityGeneration: assignment!.generation,
+          capabilities: input.capabilities,
           lastActiveAt: now,
         })
         return succeed(next, saveCredentials(save(current, next), next.id, { session: input.sessionCredentialDigest }))

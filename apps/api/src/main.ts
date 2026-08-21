@@ -67,6 +67,7 @@ const program = Effect.scoped(
         credentials: application.credentials,
         environment: application.environment,
         models: application.models,
+        recovery: application.recovery,
         executor: application.executor,
         execution: application.execution.readiness,
         production: config.production,

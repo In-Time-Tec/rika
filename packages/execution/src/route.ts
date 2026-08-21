@@ -21,7 +21,7 @@ import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registra
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 import type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
-import { Context, Effect, Function, Layer, Schedule, Schema, Stream } from "effect"
+import { Context, Effect, Function, Layer, Schema, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import { profileInstructions } from "./agent-instructions"
 import * as Models from "./models"
@@ -48,8 +48,11 @@ export interface LocalCellRoute {
 export interface RemoteCellRoute {
   readonly _tag: "Remote"
   readonly cells: Layer.Layer<RemoteCells.Service>
-  readonly maxRetries: number
-  readonly retryDelayMillis: number
+  readonly admit: (input: {
+    readonly threadId: string
+    readonly turnId: string
+    readonly workspaceId: string
+  }) => Effect.Effect<void, RemoteCells.AdmissionFailure>
 }
 
 export type CellRoute = LocalCellRoute | RemoteCellRoute
@@ -417,10 +420,6 @@ const remoteCellExecutor = (
             const remote = ToolExecutor.remote({
               toolkit: CellTool.toolkit,
               tools: [CellTool.name],
-              idempotent: true,
-              operationKey: () => operationKey,
-              maxRetries: route.maxRetries,
-              schedule: Schedule.exponential(route.retryDelayMillis),
               execute: (placement) =>
                 Effect.gen(function* () {
                   const parameters = yield* Schema.decodeUnknownEffect(CellTool.Parameters)(placement.call.params).pipe(
@@ -434,7 +433,7 @@ const remoteCellExecutor = (
                   )
                   const response = yield* cells.execute(
                     RemoteCells.Request.make({
-                      operationKey: placement.operationKey,
+                      operationKey,
                       workspaceId: workspace,
                       sessionId: placement.sessionId,
                       threadId: identity.threadId,
@@ -444,6 +443,7 @@ const remoteCellExecutor = (
                       toolCallId: context.toolCallId ?? placement.call.id,
                       code: parameters.code,
                       attempt: context.attempt ?? 0,
+                      replayPolicy: "never",
                       admittedAt: context.admittedAt ?? null,
                       deadline: context.deadline ?? null,
                     }),

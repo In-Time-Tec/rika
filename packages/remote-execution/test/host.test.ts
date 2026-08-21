@@ -6,6 +6,7 @@ import { Manager as PtyManager } from "../src/pty"
 import { Runtime, layer as runtimeLayer } from "../src/runtime"
 import type { Fence, SessionWire } from "../src/protocol"
 import { provideLayer } from "./support/layer"
+import { workspaceCapabilities } from "./support/workspace-capabilities"
 
 const fence: Fence = {
   target: "e2b",
@@ -37,6 +38,7 @@ const withRuntime = <A, E>(effect: Effect.Effect<A, E, Runtime>) =>
           bootstrapToken: Redacted.make("bootstrap"),
           templateBuildId: "build-1",
           capabilities: { cells: true, checkpoints: true, pty: true },
+          workspaceCapabilities,
           cursors: { command: 0, event: 0, pty: 0 },
           latestCheckpointId: null,
           restoredSession: session,
@@ -91,6 +93,7 @@ describe("executor host session state", () => {
       bootstrapToken: Redacted.make("consumed"),
       templateBuildId: "build-1",
       capabilities: { cells: true, checkpoints: false, pty: true },
+      workspaceCapabilities,
       cursors: { command: 0, event: 0, pty: 0 },
       latestCheckpointId: null,
       restoredSession: session,

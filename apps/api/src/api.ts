@@ -26,6 +26,7 @@ import {
 import { accountAccess, type AccountAccess, type HttpDependencies } from "./http"
 import { HostedEnvironmentError } from "./hosted-environment"
 import { HostedModelProvider, HostedProviderCredentialError } from "./hosted-provider-credentials"
+import { RecoveryOperation, type RecoveryResolution } from "./hosted-recovery"
 
 const Message = { message: Schema.String }
 
@@ -83,6 +84,17 @@ const LocalExecutorAdmissionResponse = Schema.Struct({
   executorUrl: Schema.String,
   workspaceIdentity: Schema.String,
 }).pipe(HttpApiSchema.status(201))
+const OperationKey = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
+)
+const RecoveryOperationsResponse = Schema.Struct({ operations: Schema.Array(RecoveryOperation) })
+const RecoveryResolutionRequest = strict(
+  Schema.Union([
+    Schema.Struct({ action: Schema.Literal("retry") }),
+    Schema.Struct({ action: Schema.Literal("accept"), value: Schema.Unknown }),
+    Schema.Struct({ action: Schema.Literal("abort"), reason: Schema.NonEmptyString }),
+  ]),
+)
 const ModelsResponse = Schema.Struct({ modes: Schema.Array(Schema.String) })
 const ProviderCredentialRequest = strict(
   Schema.Struct({
@@ -208,6 +220,18 @@ class ProductGroup extends HttpApiGroup.make("product", { topLevel: true })
       params: { checkoutFingerprint: CheckoutFingerprint },
       success: LocalRunnerPollResult,
       error: [Forbidden, Conflict, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.get("inspectRecovery", "/api/v1/threads/:threadId/runs/:runId/recovery", {
+      params: { threadId: ThreadId, runId: Schema.NonEmptyString },
+      success: RecoveryOperationsResponse,
+      error: [Forbidden, NotFound, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.post("resolveRecovery", "/api/v1/threads/:threadId/runs/:runId/recovery/:operationId", {
+      params: { threadId: ThreadId, runId: Schema.NonEmptyString, operationId: Schema.NonEmptyString },
+      headers: { "idempotency-key": OperationKey },
+      payload: RecoveryResolutionRequest,
+      success: RecoveryOperation,
+      error: [Forbidden, NotFound, Conflict, Unprocessable, ServiceUnavailable],
     }),
     HttpApiEndpoint.get("models", "/api/v1/models", {
       success: ModelsResponse,
@@ -485,6 +509,54 @@ const productHandlers = (dependencies: HttpDependencies) =>
             .pipe(Effect.mapError(() => Conflict.make({ message: "Local runner admission is unavailable" })))
           return { _tag: "Admitted" as const, ...admission }
         }),
+      inspectRecovery: ({ params }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          const operations = yield* dependencies.recovery
+            .inspect({
+              principal: authenticatedPrincipal(access),
+              threadId: params.threadId,
+              runId: params.runId,
+            })
+            .pipe(
+              Effect.mapError((error) => {
+                if (error.kind === "not-found") return NotFound.make({ message: error.message })
+                if (error.kind === "forbidden") return Forbidden.make({ message: error.message })
+                return ServiceUnavailable.make({ message: error.message })
+              }),
+            )
+          return { operations }
+        }),
+      resolveRecovery: ({ headers, params, payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          let resolution: RecoveryResolution
+          if (payload.action === "retry") resolution = { _tag: "Retry" }
+          else if (payload.action === "accept") resolution = { _tag: "Accept", value: payload.value }
+          else resolution = { _tag: "Abort", reason: payload.reason }
+          return yield* dependencies.recovery
+            .resolve({
+              principal: authenticatedPrincipal(access),
+              threadId: params.threadId,
+              runId: params.runId,
+              operationId: params.operationId,
+              idempotencyKey: headers["idempotency-key"],
+              resolution,
+            })
+            .pipe(
+              Effect.mapError((error) => {
+                if (error.kind === "not-found") return NotFound.make({ message: error.message })
+                if (error.kind === "forbidden") return Forbidden.make({ message: error.message })
+                if (error.kind === "conflict") return Conflict.make({ message: error.message })
+                if (error.kind === "invalid") return Unprocessable.make({ message: error.message })
+                return ServiceUnavailable.make({ message: error.message })
+              }),
+            )
+        }),
       models: () =>
         dependencies.models === undefined
           ? Effect.fail(ServiceUnavailable.make({ message: "Model registry unavailable" }))
@@ -663,7 +735,8 @@ export const isRikaApiPath = (pathname: string) =>
   /^\/api\/v1\/(environment|egress)\/[^/]+$/.test(pathname) ||
   /^\/api\/v1\/provider-credentials\/[^/]+$/.test(pathname) ||
   /^\/api\/v1\/local-runners\/[^/]+(?:\/remote-thread-creation|\/admissions)?$/.test(pathname) ||
-  /^\/api\/v1\/threads\/[^/]+\/local-executor-admissions$/.test(pathname)
+  /^\/api\/v1\/threads\/[^/]+\/local-executor-admissions$/.test(pathname) ||
+  /^\/api\/v1\/threads\/[^/]+\/runs\/[^/]+\/recovery(?:\/[^/]+)?$/.test(pathname)
 
 export const makeRikaApiHandler = (dependencies: HttpDependencies) =>
   HttpRouter.toWebHandler(

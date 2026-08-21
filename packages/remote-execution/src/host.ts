@@ -54,6 +54,7 @@ import {
   type CellRequest,
   type CellResponse,
 } from "./protocol"
+import { inspectWorkspaceCapabilities } from "./workspace-capabilities"
 
 interface Config {
   readonly fence: Fence
@@ -273,7 +274,15 @@ const operationReceiptStore = (
               ),
               Effect.map(
                 (snapshot) =>
-                  new Map(snapshot.receipts.map((receipt) => [receipt.operationKey, receipt.frames] as const)),
+                  new Map(
+                    snapshot.receipts.map(
+                      (receipt) =>
+                        [
+                          `${receipt.operationKey}\u0000${receipt.frames[0]!.attribution.attempt}`,
+                          receipt.frames,
+                        ] as const,
+                    ),
+                  ),
               ),
             )
           : Effect.succeed(new Map()),
@@ -285,7 +294,10 @@ const operationReceiptStore = (
       const temporary = `${filename}.tmp-${process.pid}`
       const text = yield* encodeOperationReceipts({
         version: 1,
-        receipts: [...frames].map(([operationKey, retained]) => ({ operationKey, frames: retained })),
+        receipts: [...frames.values()].map((retained) => ({
+          operationKey: retained[0]!.attribution.operationKey,
+          frames: retained,
+        })),
       }).pipe(Effect.mapError(() => HostError.make({ message: "Could not encode executor operation receipts" })))
       yield* restrictDirectory
       yield* fileSystem.writeFileString(temporary, text, { mode: fileMode }).pipe(
@@ -369,6 +381,8 @@ const sameAttribution = (left: ReturnType<typeof attribution>, right: ReturnType
   left.rootRunId === right.rootRunId &&
   left.toolCallId === right.toolCallId &&
   left.attempt === right.attempt
+
+const executionKey = (operationKey: string, attempt: number) => `${operationKey}\u0000${attempt}`
 
 const redactText = (value: string, secrets: ReadonlyArray<string>) =>
   secrets.reduce((text, secret) => (secret.length === 0 ? text : text.split(secret).join("REDACTED")), value)
@@ -541,10 +555,11 @@ const consumeApi = (
       lifecycle.withPermits(1)(
         Effect.gen(function* () {
           const current = yield* Ref.get(frames)
-          const retained = current.get(frame.attribution.operationKey) ?? []
+          const key = executionKey(frame.attribution.operationKey, frame.attribution.attempt)
+          const retained = current.get(key) ?? []
           if (retained.some((known) => known._tag === "Terminal") || frame.cursor !== retained.length + 1) return false
           const next = new Map(current)
-          next.set(frame.attribution.operationKey, [...retained, frame])
+          next.set(key, [...retained, frame])
           yield* Ref.set(frames, next)
           yield* receipts.save(next)
           yield* writer(encodeExecutorMessage({ _tag: "CellLifecycle", access, frame })).pipe(
@@ -620,15 +635,13 @@ const consumeApi = (
           return next
         })
         const identity = attribution(message.request)
-        const retained = (yield* Ref.get(frames)).get(message.request.operationKey)
+        const key = executionKey(message.request.operationKey, message.request.attempt)
+        const retained = (yield* Ref.get(frames)).get(key)
         if (retained !== undefined) {
           const accepted = retained.find((frame) => frame._tag === "Accepted")
           if (accepted === undefined || !sameAttribution(accepted.attribution, identity))
             return yield* HostError.make({ message: "Cell operation identity conflicts with retained execution" })
-          if (
-            !retained.some((frame) => frame._tag === "Terminal") &&
-            !(yield* Ref.get(operations)).has(message.request.operationKey)
-          ) {
+          if (!retained.some((frame) => frame._tag === "Terminal") && !(yield* Ref.get(operations)).has(key)) {
             const response = {
               _tag: "DomainFailure" as const,
               failure: { kind: "unknown", message: "Cell operation outcome is unknown after executor restart" },
@@ -670,7 +683,7 @@ const consumeApi = (
                 const result = yield* cells.execute(message.request, (chunk) =>
                   Effect.gen(function* () {
                     const output = redactOutput(chunk.text, secrets)
-                    const outputFrames = (yield* Ref.get(frames)).get(message.request.operationKey) ?? []
+                    const outputFrames = (yield* Ref.get(frames)).get(key) ?? []
                     if (outputFrames.filter((frame) => frame._tag === "Output").length >= 16) return
                     yield* emit(message.request.access, {
                       _tag: "Output",
@@ -696,7 +709,7 @@ const consumeApi = (
                     }),
               ),
             )
-          const completedFrames = (yield* Ref.get(frames)).get(message.request.operationKey) ?? []
+          const completedFrames = (yield* Ref.get(frames)).get(key) ?? []
           yield* emit(message.request.access, {
             _tag: "Terminal",
             attribution: accepted.attribution,
@@ -708,21 +721,22 @@ const consumeApi = (
           Effect.ensuring(
             Ref.update(operations, (values) => {
               const next = new Map(values)
-              next.delete(message.request.operationKey)
+              next.delete(key)
               return next
             }),
           ),
         )
         const gate = yield* Deferred.make<void>()
         const fiber = yield* Effect.forkScoped(Deferred.await(gate).pipe(Effect.andThen(operation)))
-        yield* Ref.update(operations, (values) => new Map(values).set(message.request.operationKey, fiber))
+        yield* Ref.update(operations, (values) => new Map(values).set(key, fiber))
         yield* Deferred.succeed(gate, undefined)
       }
       if (message._tag === "CellCancel") {
         const access = yield* runtime.access.pipe(
           Effect.mapError((cause) => HostError.make({ message: cause.message })),
         )
-        const known = (yield* Ref.get(frames)).get(message.operationKey)
+        const key = executionKey(message.operationKey, message.attempt)
+        const known = (yield* Ref.get(frames)).get(key)
         const started = known?.find((frame) => frame._tag === "Started")
         if (
           !sameAccess(access, message.access) ||
@@ -731,9 +745,9 @@ const consumeApi = (
           started.attribution.attempt !== message.attempt
         )
           return yield* HostError.make({ message: "Cell cancellation has a stale executor fence" })
-        const fiber = (yield* Ref.get(operations)).get(message.operationKey)
+        const fiber = (yield* Ref.get(operations)).get(key)
         if (fiber !== undefined) yield* Fiber.interrupt(fiber)
-        const interrupted = (yield* Ref.get(frames)).get(message.operationKey)
+        const interrupted = (yield* Ref.get(frames)).get(key)
         if (interrupted !== undefined && !interrupted.some((frame) => frame._tag === "Terminal")) {
           const response = {
             _tag: "DomainFailure" as const,
@@ -752,7 +766,7 @@ const consumeApi = (
         const access = yield* runtime.access.pipe(
           Effect.mapError((cause) => HostError.make({ message: cause.message })),
         )
-        const known = (yield* Ref.get(frames)).get(message.operationKey) ?? []
+        const known = (yield* Ref.get(frames)).get(executionKey(message.operationKey, message.attempt)) ?? []
         if (!sameAccess(access, message.access))
           return yield* HostError.make({ message: "Cell replay has a stale executor fence" })
         yield* Effect.forEach(
@@ -765,7 +779,7 @@ const consumeApi = (
         const access = yield* runtime.access.pipe(
           Effect.mapError((cause) => HostError.make({ message: cause.message })),
         )
-        const known = (yield* Ref.get(frames)).get(message.operationKey) ?? []
+        const known = (yield* Ref.get(frames)).get(executionKey(message.operationKey, message.attempt)) ?? []
         const terminal = known.find(
           (frame): frame is Extract<CellLifecycleFrame, { readonly _tag: "Terminal" }> =>
             frame._tag === "Terminal" &&
@@ -1057,11 +1071,19 @@ const host = Effect.scoped(
         const pty = Context.get(ptyContext, PtyManager)
         yield* pty.disconnectAll.pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
         const ptyCursor = yield* pty.cursor.pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
+        const ptyReady = config.fence.target === "e2b" && capabilities.pty
+        const workspaceCapabilities = yield* inspectWorkspaceCapabilities({
+          target: config.fence.target,
+          workspacePath: workspaceRoot,
+          typescriptKernel: true,
+          pty: ptyReady,
+        })
         const runtime = runtimeLayer({
           fence: config.fence,
           bootstrapToken: config.bootstrapToken,
           templateBuildId: config.templateBuildId,
-          capabilities: { ...capabilities, pty: config.fence.target === "e2b" && capabilities.pty },
+          capabilities: { ...capabilities, pty: ptyReady },
+          workspaceCapabilities,
           cursors: { command: 0, event: 0, pty: ptyCursor },
           latestCheckpointId: null,
           ...(config.restoredSession === undefined ? {} : { restoredSession: config.restoredSession }),

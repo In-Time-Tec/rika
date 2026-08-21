@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { AssignmentRevision } from "@rika/product/executor-assignment"
+import { AssignmentRevision, type WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
 import { ExecutorAssignments, type Access, type Version } from "@rika/product/executor-assignments"
 import {
   BetterAuthMemberId,
@@ -33,6 +33,17 @@ import * as HostedPostgres from "../../src/hosted/postgres-layer"
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined
 const at = (second: number) => Timestamp.make(`2099-01-01T00:00:${String(second).padStart(2, "0")}.000Z`)
+const capabilities: WorkspaceCapabilitySnapshot = {
+  environmentDigest: `sha256:${"a".repeat(64)}`,
+  capturedAt: at(0),
+  filesystem: { _tag: "Ready", detail: "workspace filesystem" },
+  typescriptKernel: { _tag: "Ready", detail: "TypeScript kernel" },
+  git: { _tag: "Ready", detail: "git" },
+  process: { _tag: "Ready", detail: "process execution" },
+  pty: { _tag: "Ready", detail: "PTY" },
+  browser: { _tag: "Unavailable", reason: "browser not installed" },
+  workspaceLifecycle: { _tag: "Ready", detail: "workspace lifecycle" },
+}
 const unknownEvent = {
   _tag: "CellResult",
   operationKey: "operation-recovered",
@@ -316,6 +327,7 @@ it.effect.skipIf(!live)(
                 providerInstanceId: ids.device,
                 executorInstanceId: ids.executor,
                 processIncarnation: "process-recovery",
+                capabilities,
                 presentedBootstrapCredentialDigest: Redacted.make("bootstrap"),
                 sessionCredentialDigest: Redacted.make("session"),
                 leaseLifetimeMillis: 60_000,

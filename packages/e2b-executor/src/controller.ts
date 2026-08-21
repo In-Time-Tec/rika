@@ -491,6 +491,8 @@ export const layer = (
 
       const hello = Effect.fn("Controller.hello")(function* (input: Hello) {
         if (input.fence.target !== "e2b") return yield* failure("fenced", "Executor target is not E2B")
+        if (!input.capabilities.cells)
+          return yield* failure("protocol", "Executor transport does not support cell execution")
         const assignment = yield* current({
           assignmentId: input.fence.assignmentId,
           generation: input.fence.assignmentGeneration,
@@ -530,6 +532,7 @@ export const layer = (
               providerInstanceId: input.fence.instanceId,
               executorInstanceId: ExecutorInstanceId.make(input.fence.executorId),
               processIncarnation: input.fence.processIncarnation,
+              capabilities: input.workspaceCapabilities,
               presentedBootstrapCredentialDigest: yield* digest(sessionToken),
               sessionCredentialDigest: yield* digest(sessionToken),
               leaseLifetimeMillis,

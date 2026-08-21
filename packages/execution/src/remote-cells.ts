@@ -3,6 +3,7 @@ import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 
 const NonEmptyString = Schema.String.check(Schema.isNonEmpty())
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+const ReplayPolicy = Schema.Literals(["pure", "provider-idempotent", "never"])
 
 export const Request = Schema.Struct({
   operationKey: NonEmptyString,
@@ -15,6 +16,7 @@ export const Request = Schema.Struct({
   toolCallId: NonEmptyString,
   code: Schema.String,
   attempt: NonNegativeInt,
+  replayPolicy: ReplayPolicy,
   admittedAt: Schema.NullOr(NonEmptyString),
   deadline: Schema.NullOr(NonEmptyString),
 })
@@ -33,11 +35,21 @@ export class Unavailable extends Schema.TaggedError<Unavailable>()("@rika/execut
   message: Schema.String,
 }) {}
 
+export class UnknownOutcome extends Schema.TaggedError<UnknownOutcome>()(
+  "@rika/execution/remote-cells/UnknownOutcome",
+  { message: Schema.String },
+) {}
+
+export class AdmissionFailure extends Schema.TaggedError<AdmissionFailure>()(
+  "@rika/execution/remote-cells/AdmissionFailure",
+  { message: Schema.String },
+) {}
+
 export interface Interface {
   readonly execute: (
     request: Request,
     authority: Context.Context<ExecutorRuntime.CellServices>,
-  ) => Effect.Effect<unknown, Unavailable>
+  ) => Effect.Effect<unknown, Unavailable | UnknownOutcome>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/execution/remote-cells/Service") {}

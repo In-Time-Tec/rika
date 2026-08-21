@@ -23,6 +23,11 @@ const config: IdentityConfig = {
   databaseSsl: "disable",
 }
 
+const recovery: HttpDependencies["recovery"] = {
+  inspect: () => Effect.die("unused"),
+  resolve: () => Effect.die("unused"),
+}
+
 it.effect("stops accepting work but lets an in-flight request drain", () =>
   Effect.gen(function* () {
     const entered = yield* Deferred.make<void>()
@@ -77,6 +82,7 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
         machine: () => Effect.die("unused"),
       },
       admitLocal: () => Effect.die("unused"),
+      admitRun: () => Effect.die("unused"),
       run: () => Effect.die("unused"),
       ready: Effect.void,
     }
@@ -85,6 +91,7 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
       directory,
       devices,
       product,
+      recovery,
       executor,
       execution: {
         check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }),
@@ -195,9 +202,11 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
           machine: () => Effect.die("unused"),
         },
         admitLocal: () => Effect.die("unused"),
+        admitRun: () => Effect.die("unused"),
         run: () => Effect.die("unused"),
         ready: Effect.void,
       },
+      recovery,
       execution: { check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }) },
       production: true,
     }
@@ -315,9 +324,11 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
           machine: () => Effect.die("unused"),
         },
         admitLocal: () => Effect.die("unused"),
+        admitRun: () => Effect.die("unused"),
         run: () => Effect.die("unused"),
         ready: Effect.void,
       },
+      recovery,
       execution: { check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }) },
       production: false,
     }

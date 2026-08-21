@@ -22,7 +22,7 @@ import {
   Timestamp,
   WorkspaceId,
 } from "@rika/product/hosted-model"
-import { AssignmentRevision } from "@rika/product/executor-assignment"
+import { AssignmentRevision, type WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
 import { ExecutorAssignments, type Access, type Version } from "@rika/product/executor-assignments"
 import { HostedStore } from "@rika/product/hosted-store"
 import { EnvironmentStore } from "@rika/product/environment-store"
@@ -70,6 +70,18 @@ const version = (assignment: {
   assignmentId: ExecutorAssignmentId.make(assignment.id),
   generation: FencingGeneration.make(assignment.generation),
   revision: AssignmentRevision.make(assignment.revision),
+})
+
+const capabilities = (digestCharacter: string): WorkspaceCapabilitySnapshot => ({
+  environmentDigest: `sha256:${digestCharacter.repeat(64)}`,
+  capturedAt: at(0),
+  filesystem: { _tag: "Ready", detail: "workspace filesystem" },
+  typescriptKernel: { _tag: "Ready", detail: "TypeScript kernel" },
+  git: { _tag: "Ready", detail: "git" },
+  process: { _tag: "Ready", detail: "process execution" },
+  pty: { _tag: "Ready", detail: "PTY" },
+  browser: { _tag: "Unavailable", reason: "browser not installed" },
+  workspaceLifecycle: { _tag: "Ready", detail: "workspace lifecycle" },
 })
 
 it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurrency, and migration idempotence", () =>
@@ -500,12 +512,15 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               providerInstanceId: "sandbox",
               executorInstanceId: ids.executor,
               processIncarnation: "process",
+              capabilities: capabilities("a"),
               presentedBootstrapCredentialDigest: Redacted.make("bootstrap"),
               sessionCredentialDigest: Redacted.make("session"),
               leaseLifetimeMillis: 60_000,
             })
             if (active.lifecycle._tag !== "Active")
               return yield* Effect.die(new Error("assignment did not become active"))
+            expect(active.capabilityGeneration).toBe(active.generation)
+            expect(active.capabilities?.environmentDigest).toBe(`sha256:${"a".repeat(64)}`)
             const access: Access = {
               assignmentId: active.id,
               assignmentGeneration: active.generation,
@@ -522,6 +537,7 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
             })
             expect((yield* Effect.result(assignments.authenticate(access)))._tag).toBe("Failure")
             expect(replacement.generation).toBe("2")
+            expect(replacement).toMatchObject({ capabilityGeneration: null, capabilities: null })
             const reprovisioned = yield* assignments.bindProviderInstance({
               ...version(
                 yield* assignments.beginProvisioning({
@@ -537,12 +553,15 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               providerInstanceId: "sandbox-2",
               executorInstanceId: ids.executor,
               processIncarnation: "process-2",
+              capabilities: capabilities("b"),
               presentedBootstrapCredentialDigest: Redacted.make("replacement"),
               sessionCredentialDigest: Redacted.make("session-2"),
               leaseLifetimeMillis: 60_000,
             })
             if (reopened.lifecycle._tag !== "Active")
               return yield* Effect.die(new Error("replacement did not become active"))
+            expect(reopened.capabilityGeneration).toBe(reopened.generation)
+            expect(reopened.capabilities?.environmentDigest).toBe(`sha256:${"b".repeat(64)}`)
             const replacementAccess: Access = {
               assignmentId: reopened.id,
               assignmentGeneration: reopened.generation,

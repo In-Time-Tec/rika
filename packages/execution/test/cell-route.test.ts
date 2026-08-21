@@ -1,9 +1,8 @@
 import { expect, it } from "@effect/vitest"
-import { DurableDriver, ToolContext, ToolExecutor } from "tenetkit"
+import { ToolContext, ToolExecutor } from "tenetkit"
 import { Cell, CellTool, KernelProfile, TestKernel } from "tenetkit/repl"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
-import { Context, Effect, Fiber, Layer } from "effect"
-import { TestClock } from "effect/testing"
+import { Context, Effect, Layer } from "effect"
 import { Response } from "effect/unstable/ai"
 import { configure } from "../src/route"
 import * as ExecutorRuntime from "@rika/kernel/executor-runtime"
@@ -173,8 +172,7 @@ it.effect("routes a cell through the explicit remote adapter without a kernel po
             return Effect.succeed({ _tag: "Success", result: result(input.operationKey) })
           },
         }),
-        maxRetries: 0,
-        retryDelayMillis: 1,
+        admit: () => Effect.void,
       },
     })
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
@@ -195,6 +193,7 @@ it.effect("routes a cell through the explicit remote adapter without a kernel po
         toolCallId: "call-session-a",
         attempt: 0,
         code: "1",
+        replayPolicy: "never",
       }),
     ])
   }).pipe(Effect.scoped),
@@ -212,8 +211,7 @@ it.effect("rejects an invalid remote cell response at the schema boundary", () =
         cells: RemoteCells.layer({
           execute: () => Effect.succeed({ _tag: "Success", result: { value: 2 } }),
         }),
-        maxRetries: 0,
-        retryDelayMillis: 1,
+        admit: () => Effect.void,
       },
     })
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
@@ -231,9 +229,9 @@ it.effect("rejects an invalid remote cell response at the schema boundary", () =
   }).pipe(Effect.scoped),
 )
 
-it.effect("keeps TenetKit's operation key stable across a remote retry", () =>
+it.effect("does not blindly retry a remote cell whose outcome is unknown", () =>
   Effect.gen(function* () {
-    const operationKeys: Array<string> = []
+    const dispatched: Array<RemoteCells.Request> = []
     const configured = yield* configure({
       executionRoute: testExecutionRoute(),
       workspace: "/workspace",
@@ -243,25 +241,29 @@ it.effect("keeps TenetKit's operation key stable across a remote retry", () =>
         _tag: "Remote",
         cells: RemoteCells.layer({
           execute: (input) => {
-            operationKeys.push(input.operationKey)
-            return operationKeys.length === 1
-              ? RemoteCells.Unavailable.make({ message: "retry" })
-              : Effect.succeed({ _tag: "Success", result: result(input.operationKey) })
+            dispatched.push(input)
+            return RemoteCells.UnknownOutcome.make({ message: "dispatch acknowledgement was lost" })
           },
         }),
-        maxRetries: 1,
-        retryDelayMillis: 1,
+        admit: () => Effect.void,
       },
     })
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
     const executor = Context.get(context, ToolExecutor.ToolExecutor)
-    const execution = yield* executor
-      .execute(request("1 + 1", "session-retry"))
-      .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-retry")), Effect.forkChild)
-    yield* TestClock.adjust("1 millis")
-    const outcome = yield* Fiber.join(execution)
-    expect(outcome._tag).toBe("Success")
-    expect(operationKeys).toEqual(["operation-session-retry", "operation-session-retry"])
+    const failure = yield* Effect.flip(
+      executor
+        .execute(request("1 + 1", "session-unknown"))
+        .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-unknown"))),
+    )
+    expect(failure).toMatchObject({
+      _tag: "tenetkit/core/FrameworkFailure",
+      message: "dispatch acknowledgement was lost",
+    })
+    expect(dispatched).toHaveLength(1)
+    expect(dispatched[0]).toMatchObject({
+      operationKey: "operation-session-unknown",
+      replayPolicy: "never",
+    })
   }).pipe(Effect.scoped),
 )
 
@@ -286,8 +288,7 @@ it.effect("accepts the same deduplicated remote result after recovered dispatch"
             return Effect.succeed(response)
           },
         }),
-        maxRetries: 0,
-        retryDelayMillis: 1,
+        admit: () => Effect.void,
       },
     })
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
@@ -300,28 +301,6 @@ it.effect("accepts the same deduplicated remote result after recovered dispatch"
     expect(recovered).toEqual(first)
     expect(executions).toBe(1)
   }).pipe(Effect.scoped),
-)
-
-it.effect("turns an unknown outcome for replayPolicy never into TenetKit's replay guard", () =>
-  Effect.gen(function* () {
-    const operation = DurableDriver.makeOperation({
-      key: "run-1:tool:0:call-1:typescript",
-      kind: "tool",
-      input: { turn: 0, callId: "call-1", name: "typescript" },
-      replayPolicy: "never",
-    })
-    const failure = yield* Effect.flip(
-      DurableDriver.guardUnknownNeverReplay(operation, {
-        _tag: "Unknown",
-        operationId: operation.key,
-      }),
-    )
-    expect(failure).toMatchObject({
-      _tag: "tenetkit/core/DriverUnknownReplay",
-      operationKey: operation.key,
-      operationId: operation.key,
-    })
-  }),
 )
 
 it.effect("refuses any tool name other than the one advertised cell tool", () =>

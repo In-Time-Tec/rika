@@ -6,7 +6,7 @@ import { CheckoutFingerprint } from "@rika/product/local-runner-registration"
 import { BetterAuthUserId, OrganizationId, ThreadId } from "@rika/product/hosted-model"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { layer as productPostgres } from "@rika/product-store/postgres-layer"
-import type { Access } from "@rika/remote-execution/protocol"
+import type { Access, LocalExecutorHelloWire } from "@rika/remote-execution/protocol"
 import { Effect, Layer, Random, Redacted } from "effect"
 import { Pool } from "pg"
 import { testLayer as hostedModelRegistryTestLayer } from "../src/hosted-model-registry"
@@ -15,6 +15,21 @@ import { LocalExecutor, layer as localExecutorLayer } from "../src/local-executo
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined
+const helloReadiness = {
+  capabilities: { cells: true, checkpoints: false, pty: true },
+  workspaceCapabilities: {
+    environmentDigest: `sha256:${"0".repeat(64)}`,
+    capturedAt: "2026-08-21T00:00:00.000Z",
+    filesystem: { _tag: "Ready", detail: "filesystem ready" },
+    typescriptKernel: { _tag: "Ready", detail: "TypeScript kernel ready" },
+    git: { _tag: "Ready", detail: "Git ready" },
+    process: { _tag: "Ready", detail: "process ready" },
+    pty: { _tag: "Ready", detail: "PTY ready" },
+    browser: { _tag: "Ready", detail: "browser ready" },
+    workspaceLifecycle: { _tag: "Ready", detail: "workspace lifecycle ready" },
+  },
+  cursors: { command: 0, event: 0, pty: 0 },
+} satisfies Omit<LocalExecutorHelloWire, "admissionId" | "ticket" | "processIncarnation">
 
 const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
   Effect.promise(() => pool.query(text, [...values]))
@@ -167,6 +182,7 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
         admissionId: admission.admissionId,
         ticket: admission.ticket,
         processIncarnation: "personal-process",
+        ...helloReadiness,
       })
       const access = accessFrom(welcome)
       yield* authority.validateAccess(access)
@@ -214,6 +230,7 @@ it.effect.skipIf(!live)("fences organization access immediately while preserving
             admissionId: admission.admissionId,
             ticket: admission.ticket,
             processIncarnation: `${label}-process`,
+            ...helloReadiness,
           })
         })
       const personalWelcome = yield* open(personalConnection, "personal")

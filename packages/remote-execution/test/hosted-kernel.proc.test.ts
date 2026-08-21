@@ -46,6 +46,7 @@ const request = (
   toolCallId,
   code,
   attempt: 0,
+  replayPolicy: "never",
   admittedAt: null,
   deadline: null,
   bindings: manifest,

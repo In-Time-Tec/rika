@@ -28,6 +28,25 @@ export type ExecutorCursor = typeof ExecutorCursor.Type
 
 export const EmptyExecutorCursor: ExecutorCursor = { sequence: Sequence.make("0"), value: "" }
 
+export const WorkspaceCapability = Schema.Union([
+  Schema.TaggedStruct("Ready", { detail: Schema.NonEmptyString }),
+  Schema.TaggedStruct("Unavailable", { reason: Schema.NonEmptyString }),
+])
+export type WorkspaceCapability = typeof WorkspaceCapability.Type
+
+export const WorkspaceCapabilitySnapshot = Schema.Struct({
+  environmentDigest: Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/)),
+  capturedAt: Timestamp,
+  filesystem: WorkspaceCapability,
+  typescriptKernel: WorkspaceCapability,
+  git: WorkspaceCapability,
+  process: WorkspaceCapability,
+  pty: WorkspaceCapability,
+  browser: WorkspaceCapability,
+  workspaceLifecycle: WorkspaceCapability,
+})
+export type WorkspaceCapabilitySnapshot = typeof WorkspaceCapabilitySnapshot.Type
+
 export const RepositoryCheckout = Schema.Struct({
   repositoryId: OpaqueId,
   installationId: OpaqueId,
@@ -107,6 +126,8 @@ const ExecutorAssignmentStruct = Schema.Struct({
   revision: AssignmentRevision,
   lastLeaseEpoch: Sequence,
   lifecycle: AssignmentLifecycle,
+  capabilityGeneration: Schema.NullOr(FencingGeneration),
+  capabilities: Schema.NullOr(WorkspaceCapabilitySnapshot),
   cursor: ExecutorCursor,
   latestCheckpointId: Schema.NullOr(CheckpointId),
   lastActiveAt: Timestamp,
@@ -119,6 +140,12 @@ export const ExecutorAssignment = ExecutorAssignmentStruct.check(
     (assignment.executorKind === "local_device" && assignment.placement._tag === "LocalDevicePlacement")
       ? []
       : [{ path: ["placement"], issue: "placement must match executor kind" }],
+  ),
+  Schema.makeFilter((assignment) =>
+    (assignment.capabilityGeneration === null && assignment.capabilities === null) ||
+    (assignment.capabilityGeneration === assignment.generation && assignment.capabilities !== null)
+      ? []
+      : [{ path: ["capabilities"], issue: "capability snapshot must match the assignment generation" }],
   ),
 )
 export type ExecutorAssignment = typeof ExecutorAssignment.Type

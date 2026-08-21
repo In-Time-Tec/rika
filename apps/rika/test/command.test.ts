@@ -285,15 +285,9 @@ it.effect("routes headless runner mode and keeps remote Thread creation opt in",
     expect(yield* capture(["--no-tui", "--workspace", ".", "--allow-remote-thread-creation"])).toEqual([
       { workspace, remoteThreadCreation: "allowed" },
     ])
-    expect(yield* capture(["--no-tui", "--deny-remote-thread-creation"])).toEqual([
-      { remoteThreadCreation: "denied" },
-    ])
+    expect(yield* capture(["--no-tui", "--deny-remote-thread-creation"])).toEqual([{ remoteThreadCreation: "denied" }])
     yield* failsWithoutDispatch(["--allow-remote-thread-creation"])
-    yield* failsWithoutDispatch([
-      "--no-tui",
-      "--allow-remote-thread-creation",
-      "--deny-remote-thread-creation",
-    ])
+    yield* failsWithoutDispatch(["--no-tui", "--allow-remote-thread-creation", "--deny-remote-thread-creation"])
   }),
 )
 
