@@ -6,7 +6,7 @@ import { decodeAgent } from "./turn-row-codec"
 import { missing, repositoryError } from "./turn-memory-errors"
 export const makeTurnSqliteState = (
   sql: SqlClient,
-): Pick<Interface, "setStatus" | "startAccepted" | "cancelAccepted"> => ({
+): Pick<Interface, "setStatus" | "startAccepted" | "cancelUnlinked"> => ({
   setStatus: Effect.fn("TurnRepository.setStatus")(function* (id, status, now) {
     if (status === "queued")
       return yield* RepositoryError.make({
@@ -38,9 +38,10 @@ export const makeTurnSqliteState = (
       RETURNING id`.pipe(Effect.mapError(repositoryError))
     return rows[0] !== undefined
   }),
-  cancelAccepted: Effect.fn("TurnRepository.cancelAccepted")(function* (id, now) {
+  cancelUnlinked: Effect.fn("TurnRepository.cancelUnlinked")(function* (id, now) {
     const rows = yield* sql`UPDATE rika_turns SET status = 'cancelled', updated_at = ${now}
-      WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status = 'accepted'
+      WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status IN ('accepted', 'running')
+        AND execution_link_json IS NULL
       RETURNING id`.pipe(Effect.mapError(repositoryError))
     return rows[0] !== undefined
   }),

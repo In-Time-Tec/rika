@@ -116,7 +116,7 @@ export interface Interface {
     now: number,
   ) => Effect.Effect<AgentExecutionTurn, RepositoryError>
   readonly startAccepted: (id: TurnId, now: number) => Effect.Effect<boolean, RepositoryError>
-  readonly cancelAccepted: (id: TurnId, now: number) => Effect.Effect<boolean, RepositoryError>
+  readonly cancelUnlinked: (id: TurnId, now: number) => Effect.Effect<boolean, RepositoryError>
 }
 
 export class Service extends Context.Service<Service, Interface>()(

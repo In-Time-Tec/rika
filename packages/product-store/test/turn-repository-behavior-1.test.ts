@@ -98,12 +98,13 @@ it.effect("memory turns attach one canonical execution link without allowing rep
       executionLink: link,
       updatedAt: 2,
     })
+    expect(yield* repository.cancelUnlinked(created.id, 4)).toBe(false)
     expect(
       yield* Effect.result(
         repository.attachExecutionLink(
           created.id,
           { runId: "run-2", turnId: created.id, threadId: created.threadId },
-          4,
+          5,
         ),
       ),
     ).toMatchObject({ _tag: "Failure", failure: { _tag: "TurnRepositoryError" } })
@@ -242,7 +243,7 @@ it.effect("memory terminal status is immutable against every stale lifecycle upd
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
-it.effect("memory accepted start and cancellation claims are mutually exclusive", () =>
+it.effect("memory cancellation claims accepted and running turns until their execution link is attached", () =>
   Effect.gen(function* () {
     const repository = yield* TurnRepository.Service
     const started = yield* create(repository, {
@@ -252,9 +253,9 @@ it.effect("memory accepted start and cancellation claims are mutually exclusive"
       now: 1,
     })
     expect(yield* repository.startAccepted(started.id, 2)).toBe(true)
-    expect(yield* repository.cancelAccepted(started.id, 3)).toBe(false)
+    expect(yield* repository.cancelUnlinked(started.id, 3)).toBe(true)
     expect(yield* repository.startAccepted(started.id, 4)).toBe(false)
-    expect(yield* repository.get(started.id)).toMatchObject({ status: "running", updatedAt: 2 })
+    expect(yield* repository.get(started.id)).toMatchObject({ status: "cancelled", updatedAt: 3 })
 
     const cancelled = yield* create(repository, {
       id: Turn.TurnId.make("cancel-wins"),
@@ -262,9 +263,9 @@ it.effect("memory accepted start and cancellation claims are mutually exclusive"
       prompt: "cancel",
       now: 5,
     })
-    expect(yield* repository.cancelAccepted(cancelled.id, 6)).toBe(true)
+    expect(yield* repository.cancelUnlinked(cancelled.id, 6)).toBe(true)
     expect(yield* repository.startAccepted(cancelled.id, 7)).toBe(false)
-    expect(yield* repository.cancelAccepted(cancelled.id, 8)).toBe(false)
+    expect(yield* repository.cancelUnlinked(cancelled.id, 8)).toBe(false)
     expect(yield* repository.get(cancelled.id)).toMatchObject({ status: "cancelled", updatedAt: 6 })
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )

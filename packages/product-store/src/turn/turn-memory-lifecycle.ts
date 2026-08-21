@@ -11,7 +11,7 @@ import type { TurnMemoryContext } from "./turn-memory-state-operations"
 
 export const makeTurnMemoryLifecycle = ({
   modifyState,
-}: TurnMemoryContext): Pick<Interface, "setStatus" | "startAccepted" | "cancelAccepted"> => ({
+}: TurnMemoryContext): Pick<Interface, "setStatus" | "startAccepted" | "cancelUnlinked"> => ({
   setStatus: Effect.fn("TurnRepository.setStatus")(function* (id, status, now) {
     const updated = yield* modifyState(
       (
@@ -57,10 +57,15 @@ export const makeTurnMemoryLifecycle = ({
       return [true, { ...currentState, turns: new Map(currentState.turns).set(id, next) }]
     })
   }),
-  cancelAccepted: Effect.fn("TurnRepository.cancelAccepted")(function* (id, now) {
+  cancelUnlinked: Effect.fn("TurnRepository.cancelUnlinked")(function* (id, now) {
     return yield* modifyState((currentState) => {
       const current = currentState.turns.get(id)
-      if (current === undefined || !TurnResult.isAgentExecution(current) || current.status !== "accepted")
+      if (
+        current === undefined ||
+        !TurnResult.isAgentExecution(current) ||
+        (current.status !== "accepted" && current.status !== "running") ||
+        current.executionLink !== undefined
+      )
         return [false, currentState]
       const next: AgentExecutionTurn = { ...current, status: "cancelled", updatedAt: now }
       return [true, { ...currentState, turns: new Map(currentState.turns).set(id, next) }]

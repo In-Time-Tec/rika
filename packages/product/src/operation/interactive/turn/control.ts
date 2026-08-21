@@ -220,8 +220,8 @@ export const makeInteractiveSessionControls = (
         if (pending.status !== "queued") return yield* operationError("Pending turn was not queued")
         if (pending.queue !== undefined) emit(sessionDispatch, queueMutationEvent(pending.queue))
         const cancelledAt = yield* Clock.currentTimeMillis
-        const cancelledBeforeStart = turn.status === "accepted" && (yield* turns.cancelAccepted(turn.id, cancelledAt))
-        if (cancelledBeforeStart) {
+        const cancelledBeforeLink = turn.executionLink === undefined && (yield* turns.cancelUnlinked(turn.id, cancelledAt))
+        if (cancelledBeforeLink) {
           const cancelled = yield* turns.get(turn.id)
           yield* notifyThreadSummaries
           if (cancelled !== undefined) {
@@ -229,9 +229,10 @@ export const makeInteractiveSessionControls = (
             yield* publishTurnSettled?.(cancelled, false) ?? Effect.void
           }
         } else {
-          if (turn.executionLink === undefined)
+          const linked = turn.executionLink === undefined ? yield* turns.get(turn.id) : turn
+          if (linked === undefined || linked._tag !== "AgentExecution" || linked.executionLink === undefined)
             return yield* operationError(`Turn ${turn.id} has no persisted execution link`)
-          yield* backend.cancelTurn(turn.executionLink, userCancellationReason)
+          yield* backend.cancelTurn(linked.executionLink, userCancellationReason)
         }
         yield* drainQueued(thread, sessionDispatch)
       }),
@@ -248,12 +249,13 @@ export const makeInteractiveSessionControls = (
         return sessionDispatch({ _tag: "ExecutionControlled", selectionEpoch: 0, action: "cancelled" })
       const backend = yield* ExecutionGateway.Service
       const now = yield* Clock.currentTimeMillis
-      const beforeStart = turn.status === "accepted" && (yield* turns.cancelAccepted(turn.id, now))
+      const beforeLink = turn.executionLink === undefined && (yield* turns.cancelUnlinked(turn.id, now))
       let cancellation: Effect.Effect<void, OperationError | ExecutionGateway.CancelTurnFailure> = Effect.void
-      if (!beforeStart) {
-        if (turn.executionLink === undefined)
+      if (!beforeLink) {
+        const linked = turn.executionLink === undefined ? yield* turns.get(turn.id) : turn
+        if (linked === undefined || linked._tag !== "AgentExecution" || linked.executionLink === undefined)
           cancellation = operationError(`Turn ${turn.id} has no persisted execution link`)
-        else cancellation = backend.cancelTurn(turn.executionLink, userCancellationReason)
+        else cancellation = backend.cancelTurn(linked.executionLink, userCancellationReason)
       }
       const outcome = yield* Effect.exit(cancellation)
       if (outcome._tag === "Failure")
@@ -265,7 +267,7 @@ export const makeInteractiveSessionControls = (
           action: "cancel",
           failure: makeFailure(Cause.squash(outcome.cause)),
         })
-      if (beforeStart) {
+      if (beforeLink) {
         const cancelled = yield* turns.get(turn.id)
         yield* notifyThreadSummaries
         if (cancelled !== undefined) {

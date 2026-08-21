@@ -201,7 +201,11 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
     if (quiesced.has(input.threadId))
       return yield* ExecutionGateway.StartTurnFailure.make({ message: `Thread ${input.threadId} is being deleted` })
     const link = yield* backend.startTurn(input)
-    yield* turns.attachExecutionLink(Turn.TurnId.make(input.turnId), link, yield* Clock.currentTimeMillis)
+    const turn = yield* turns.attachExecutionLink(Turn.TurnId.make(input.turnId), link, yield* Clock.currentTimeMillis)
+    if (turn.status === "cancelled")
+      yield* backend
+        .cancelTurn(link, "Cancelled before execution link attached")
+        .pipe(Effect.mapError((failure) => ExecutionGateway.StartTurnFailure.make({ message: failure.message })))
     return link
   })
   const isSteeringFailure = Schema.is(ExecutionGateway.SteeringFailure)

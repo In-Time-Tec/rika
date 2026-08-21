@@ -138,9 +138,9 @@ test(
 
         app.pressKey("c", { ctrl: true })
         yield* app.waitFrame("Ctrl+N Archive and new thread")
-        yield* app.submit("Start work outside the keyboard handler.")
-        yield* app.waitModelRequests(1)
+        yield* Effect.forkChild(app.submit("Start work outside the keyboard handler."))
         yield* app.waitGone("Ctrl+N Archive and new thread")
+        yield* app.waitFrame("Waiting")
 
         app.pressKey("c", { ctrl: true })
         yield* app.waitTranscript(

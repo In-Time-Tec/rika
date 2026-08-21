@@ -416,6 +416,34 @@ it.effect("persists the execution link before accepting interruption", () =>
   }),
 )
 
+it.effect("cancels an execution attached after its turn was cancelled", () =>
+  Effect.gen(function* () {
+    const cancellations: Array<readonly [ExecutionGateway.ExecutionLink, string]> = []
+    const owner = yield* make(
+      {
+        prepareExecutionAdmission: (input) => Effect.succeed(input),
+        attachExecutionLink: () => Effect.succeed({ ...turn, status: "cancelled" }),
+      } as TurnRepository.Interface,
+      {} as TranscriptRepository.Interface,
+      {
+        startTurn: () => Effect.succeed(link),
+        cancelTurn: (target, reason) => Effect.sync(() => cancellations.push([target, reason])),
+      } as ExecutionGateway.Interface,
+    )
+
+    expect(
+      yield* owner.startTurn({
+        threadId: "thread",
+        turnId: "turn",
+        workspaceId: "/workspace",
+        prompt: "work",
+        executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
+      }),
+    ).toEqual(link)
+    expect(cancellations).toEqual([[link, "Cancelled before execution link attached"]])
+  }),
+)
+
 it.effect("recovers every dual-database admission crash window into one idempotent TenetKit Run", () =>
   Effect.gen(function* () {
     const input: ExecutionGateway.StartTurn = {

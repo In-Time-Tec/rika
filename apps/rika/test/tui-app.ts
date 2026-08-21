@@ -136,14 +136,15 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   }
   const lanes = options.lanes ?? [{ steps: options.script ?? [] }]
   const laneModels = yield* makeLaneModels(lanes)
-  const awaitModelRequests = (count: number): Effect.Effect<void> =>
-    laneModels
-      .requestCountFor("Root")
-      .pipe(
-        Effect.flatMap((requests) =>
-          requests >= count ? Effect.void : Effect.sleep("5 millis").pipe(Effect.andThen(awaitModelRequests(count))),
-        ),
-      )
+  const awaitModelRequests = (count: number, started = currentWallTime()): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const requests = yield* laneModels.requestCountFor("Root")
+      if (requests >= count) return
+      if (currentWallTime() - started >= 10_000)
+        return yield* Effect.die(`tui-app timed out waiting for ${count} model requests; observed ${requests}`)
+      yield* Effect.sleep("5 millis")
+      return yield* awaitModelRequests(count, started)
+    })
   const {
     repositoryLayer,
     turnRepositoryLayer,
@@ -280,11 +281,22 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   )
   yield* Effect.addFinalizer(() => Fiber.interrupt(operationFiber).pipe(Effect.asVoid))
   const frame = () => setup.captureCharFrame()
+  const renderOnce = Effect.tryPromise(() => setup.renderOnce()).pipe(
+    Effect.orDie,
+    Effect.timeoutOrElse({
+      duration: "1 second",
+      orElse: () => Effect.die("tui-app renderer did not complete a fallback frame"),
+    }),
+  )
+  const flushRenderer = Effect.tryPromise(() => setup.flush()).pipe(
+    Effect.catch(() => renderOnce),
+    Effect.timeoutOrElse({ duration: "1 second", orElse: () => renderOnce }),
+  )
   const waitFor = (predicate: (frame: string) => boolean, timeoutMillis: number) =>
     Effect.gen(function* () {
       const started = currentWallTime()
       for (;;) {
-        yield* Effect.promise(() => setup.flush().catch(() => setup.renderOnce()))
+        yield* flushRenderer
         const captured = frame()
         if (predicate(captured)) return captured
         if (currentWallTime() - started >= timeoutMillis) {

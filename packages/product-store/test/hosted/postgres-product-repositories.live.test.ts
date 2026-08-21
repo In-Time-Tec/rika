@@ -208,9 +208,26 @@ it.effect.skipIf(databaseUrl === undefined)(
               ),
             ).toBeUndefined()
 
-            yield* threads.requestDeletion(threadId, 31)
+            const cancellationThreadId = Thread.ThreadId.make("product-cancellation-thread")
+            yield* threads.create({
+              id: cancellationThreadId,
+              workspace: "/work/product-cancellation",
+              title: "Cancellation",
+              now: 30,
+            })
+            const cancelledBeforeLink = yield* createTurn(turns, {
+              id: "product-cancel-before-link",
+              threadId: cancellationThreadId,
+              prompt: "cancel before link",
+              now: 31,
+            })
+            yield* turns.setStatus(cancelledBeforeLink.id, "running", 32)
+            expect(yield* turns.cancelUnlinked(cancelledBeforeLink.id, 33)).toBe(true)
+            expect(yield* turns.get(cancelledBeforeLink.id)).toMatchObject({ status: "cancelled", updatedAt: 33 })
+
+            yield* threads.requestDeletion(threadId, 34)
             expect(yield* threads.get(threadId)).toBeUndefined()
-            expect(yield* threads.pendingDeletions).toEqual([{ threadId, requestedAt: 31 }])
+            expect(yield* threads.pendingDeletions).toEqual([{ threadId, requestedAt: 34 }])
             yield* threads.completeDeletion(threadId)
             expect(yield* sql`SELECT id FROM rika_turns WHERE thread_id = ${threadId}`).toEqual([])
             expect(yield* sql`SELECT thread_id FROM rika_goals WHERE thread_id = ${threadId}`).toEqual([])
