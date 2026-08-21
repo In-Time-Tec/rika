@@ -1,0 +1,8 @@
+ALTER TABLE rika_hosted_executor_assignments
+  DROP CONSTRAINT rika_hosted_executor_assignments_id_thread_id;
+
+ALTER TABLE rika_hosted_thread_events
+  DROP CONSTRAINT rika_hosted_thread_events_assignment_thread_id;
+
+ALTER TABLE rika_hosted_checkpoints
+  DROP CONSTRAINT rika_hosted_checkpoints_assignment_thread_id;

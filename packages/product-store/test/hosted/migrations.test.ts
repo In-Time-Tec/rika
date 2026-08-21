@@ -26,10 +26,22 @@ it.effect("keeps hosted PostgreSQL migration identities and checksums exact", ()
       "product/0018_workspace_preparation",
       "product/0019_approved_repository_publication",
       "product/0020_tool_policy_audit",
+      "product/0021_independent_assignment_identity",
     ])
     for (const migration of migrations) {
       const sql = yield* Effect.promise(() => Bun.file(migration.url).arrayBuffer())
       expect(migration.checksum).toBe(createHash("sha256").update(Buffer.from(sql)).digest("hex"))
     }
+  }),
+)
+
+it.effect("removes obsolete assignment and Thread identity constraints", () =>
+  Effect.gen(function* () {
+    const migration = migrations.find(({ id }) => id === "product/0021_independent_assignment_identity")
+    expect(migration).toBeDefined()
+    const sql = yield* Effect.promise(() => Bun.file(migration!.url).text())
+    expect(sql).toContain("DROP CONSTRAINT rika_hosted_executor_assignments_id_thread_id")
+    expect(sql).toContain("DROP CONSTRAINT rika_hosted_thread_events_assignment_thread_id")
+    expect(sql).toContain("DROP CONSTRAINT rika_hosted_checkpoints_assignment_thread_id")
   }),
 )

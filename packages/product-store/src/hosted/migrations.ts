@@ -105,4 +105,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "bc29391d7b468ab7500ebea279ef917da2e42259879041231aba3aea0a86d3f1",
     url: new URL("../../migrations/postgres/0020-tool-policy-audit.sql", import.meta.url),
   },
+  {
+    id: "product/0021_independent_assignment_identity",
+    checksum: "e41396ab9b388fe0120f76c798cc59313684c7b7481b6fe7269802438bf3dc98",
+    url: new URL("../../migrations/postgres/0021-independent-assignment-identity.sql", import.meta.url),
+  },
 ]

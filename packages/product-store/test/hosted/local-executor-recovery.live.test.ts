@@ -165,7 +165,7 @@ it.effect.skipIf(!live)("applies local executor migrations idempotently and insp
 it.effect.skipIf(!live)("fails closed when a dispatched operation has no reconstructable fence", () =>
   isolated(({ pool }) =>
     Effect.gen(function* () {
-      yield* apply(pool, [...identityMigrations, ...migrations.slice(0, 4)])
+      yield* apply(pool, [...identityMigrations, ...migrations])
       yield* seedIdentity(pool)
       yield* Effect.promise(() =>
         pool.query(`INSERT INTO rika_hosted_owners (id, kind, organization_id, created_at)
@@ -188,9 +188,10 @@ it.effect.skipIf(!live)("fails closed when a dispatched operation has no reconst
       )
       yield* Effect.promise(() =>
         pool.query(`INSERT INTO rika_hosted_executor_assignments
-          (id, owner_id, thread_id, executor_kind, placement, generation, revision, last_lease_epoch, lifecycle,
-            provider_instance_id, executor_instance_id, process_incarnation, session_digest, lease_epoch, lease_expires_at)
-          VALUES ('assignment-recovery', 'owner-recovery', 'thread-recovery', 'local_device',
+          (id, owner_id, thread_id, workspace_id, executor_kind, placement, generation, revision, last_lease_epoch,
+            lifecycle, provider_instance_id, executor_instance_id, process_incarnation, session_digest, lease_epoch,
+            lease_expires_at)
+          VALUES ('assignment-recovery', 'owner-recovery', 'thread-recovery', 'workspace-recovery', 'local_device',
             '{"_tag":"LocalDevicePlacement","deviceId":"device-recovery"}', 2, 1, 2, 'active',
             'device-recovery', 'executor-recovery', 'process-recovery', 'session-digest', 2, now() + interval '5 minutes')`),
       )

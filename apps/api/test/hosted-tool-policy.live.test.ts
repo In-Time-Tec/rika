@@ -103,12 +103,12 @@ const seed = (pool: Pool) =>
       ('personal-assignment', 'personal-owner', 'personal-thread', 'personal-workspace', 'e2b',
        '{"_tag":"E2BPlacement","templateBuildId":"build","providerScope":"scope"}',
        '{"ownerId":"personal-owner","projectId":"personal-project","repositoryId":"repository-personal","installationId":"installation","owner":"owner","name":"repo","ref":"main","commitSha":"1111111111111111111111111111111111111111","private":true,"gitIdentity":{"name":"Personal User","email":"personal@example.test"}}',
-       1, 0, 1, 'active', 'personal-instance', 'personal-thread-executor', 'personal-thread-process',
+       1, 0, 1, 'active', 'personal-instance', 'personal-assignment-executor', 'personal-assignment-process',
        'personal-session-digest', 1, now() + interval '4 minutes'),
       ('organization-assignment', 'organization-owner', 'organization-thread', 'organization-workspace', 'e2b',
        '{"_tag":"E2BPlacement","templateBuildId":"build","providerScope":"scope"}',
        '{"ownerId":"organization-owner","projectId":"organization-project","repositoryId":"repository-organization","installationId":"installation","owner":"owner","name":"repo","ref":"main","commitSha":"2222222222222222222222222222222222222222","private":true,"gitIdentity":{"name":"Organization User","email":"organization@example.test"}}',
-       1, 0, 1, 'active', 'organization-instance', 'organization-thread-executor', 'organization-thread-process',
+       1, 0, 1, 'active', 'organization-instance', 'organization-assignment-executor', 'organization-assignment-process',
        'organization-session-digest', 1, now() + interval '4 minutes');
      INSERT INTO rika_hosted_thread_protocol_state (owner_id, thread_id) VALUES
       ('personal-owner', 'personal-thread'),
