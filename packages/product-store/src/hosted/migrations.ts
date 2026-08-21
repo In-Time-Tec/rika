@@ -75,4 +75,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "c3b4774eafa26939c91cd00822e82373964e9d373309ae63c7df4ee5dd95f175",
     url: new URL("../../migrations/postgres/0014-local-runner-registration.sql", import.meta.url),
   },
+  {
+    id: "product/0015_environment_and_egress",
+    checksum: "1d4c818cce92dcd01b5b020cb05bb4cad95a95eb624e0bca1563577bb655d0a2",
+    url: new URL("../../migrations/postgres/0015-environment-and-egress.sql", import.meta.url),
+  },
 ]

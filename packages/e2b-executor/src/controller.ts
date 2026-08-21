@@ -1,5 +1,6 @@
 import { type ExecutorAssignment, type E2BPlacement } from "@rika/product/executor-assignment"
 import { AssignmentError, ExecutorAssignments, type Access } from "@rika/product/executor-assignments"
+import { resolveEgressPolicy, type EnvironmentPhase, type PhaseEgressPolicy } from "@rika/product/environment-policy"
 import {
   AssignmentLeaseEpoch,
   CheckpointId,
@@ -99,7 +100,7 @@ export interface Options {
   readonly templateId: string
   readonly templateBuildId: string
   readonly apiUrl: string
-  readonly allowedEgress: ReadonlyArray<string>
+  readonly controlEgress: ReadonlyArray<string>
   readonly idleTimeoutMillis?: number
   readonly heartbeatIntervalMillis?: number
   readonly leaseLifetimeMillis?: number
@@ -107,9 +108,9 @@ export interface Options {
 }
 
 export interface Interface {
-  readonly provision: (assignmentId: string) => Effect.Effect<Assignment, ControllerError>
-  readonly replace: (key: AssignmentKey) => Effect.Effect<Assignment, ControllerError>
-  readonly resume: (key: AssignmentKey) => Effect.Effect<Assignment, ControllerError>
+  readonly provision: (assignmentId: string, egress: PhaseEgressPolicy) => Effect.Effect<Assignment, ControllerError>
+  readonly replace: (key: AssignmentKey, egress: PhaseEgressPolicy) => Effect.Effect<Assignment, ControllerError>
+  readonly resume: (key: AssignmentKey, egress: PhaseEgressPolicy) => Effect.Effect<Assignment, ControllerError>
   readonly pause: (key: AssignmentKey) => Effect.Effect<Assignment, ControllerError>
   readonly kill: (key: AssignmentKey) => Effect.Effect<Assignment, ControllerError>
   readonly hello: (hello: Hello) => Effect.Effect<Welcome, ControllerError>
@@ -121,6 +122,7 @@ export interface Interface {
     checkpoint: FilesystemCheckpoint,
   ) => Effect.Effect<VerifiedCheckpoint, ControllerError>
   readonly checkout: (access: ProtocolAccess) => Effect.Effect<Credential, ControllerError>
+  readonly activatePhase: (access: ProtocolAccess, egress: PhaseEgressPolicy) => Effect.Effect<void, ControllerError>
   readonly cleanupOrphans: Effect.Effect<ReadonlyArray<string>, ControllerError>
 }
 
@@ -194,11 +196,7 @@ export const layer = (
     Effect.gen(function* () {
       if (options.templateId.length === 0) return yield* failure("protocol", "Template ID is required")
       if (options.templateBuildId.length === 0) return yield* failure("protocol", "Template build ID is required")
-      if (
-        options.allowedEgress.length === 0 ||
-        options.allowedEgress.some((entry) => entry === "*" || entry === "0.0.0.0/0")
-      )
-        return yield* failure("protocol", "Egress allowlist must be constrained")
+      if (options.controlEgress.length === 0) return yield* failure("protocol", "Executor control egress is required")
       const assignments = yield* ExecutorAssignments
       const provider = yield* Provider
       const crypto = yield* Crypto.Crypto
@@ -208,6 +206,18 @@ export const layer = (
       const heartbeatIntervalMillis = options.heartbeatIntervalMillis ?? DefaultHeartbeatIntervalMillis
       const leaseLifetimeMillis = options.leaseLifetimeMillis ?? DefaultLeaseLifetimeMillis
       const bootstrapLifetimeMillis = options.bootstrapLifetimeMillis ?? DefaultBootstrapLifetimeMillis
+
+      const allowedEgress = (policy: PhaseEgressPolicy, requiredPhase?: EnvironmentPhase) => {
+        if (requiredPhase !== undefined && policy.phase !== requiredPhase)
+          return Effect.fail(failure("protocol", `${requiredPhase} egress policy is required`))
+        const resolved = resolveEgressPolicy({
+          phase: policy.phase,
+          approved: [...options.controlEgress, ...policy.allow],
+        })
+        return resolved === undefined
+          ? Effect.fail(failure("protocol", "Egress allowlist must be constrained"))
+          : Effect.succeed(resolved.allow)
+      }
 
       const digest = Effect.fn("Controller.digest")(function* (secret: Redacted.Redacted<string>) {
         const bytes = yield* crypto
@@ -248,7 +258,10 @@ export const layer = (
         return placement
       })
 
-      const createRequest = Effect.fn("Controller.createRequest")(function* (assignment: ExecutorAssignment) {
+      const createRequest = Effect.fn("Controller.createRequest")(function* (
+        assignment: ExecutorAssignment,
+        egress: PhaseEgressPolicy,
+      ) {
         const placement = yield* approvedPlacement(assignment)
         const request: CreateRequest = {
           appId: options.appId,
@@ -259,7 +272,7 @@ export const layer = (
           threadId: assignment.threadId,
           generation: number(assignment.generation),
           idleTimeoutMillis,
-          allowedEgress: options.allowedEgress,
+          allowedEgress: yield* allowedEgress(egress),
           environment: {
             RIKA_EXECUTOR_TARGET: "e2b",
             RIKA_EXECUTOR_ASSIGNMENT_ID: assignment.id,
@@ -323,6 +336,7 @@ export const layer = (
       const createAndBootstrap = Effect.fn("Controller.createAndBootstrap")(function* (
         provisioning: ExecutorAssignment,
         credential: Redacted.Redacted<string>,
+        egress: PhaseEgressPolicy,
       ) {
         if (provisioning.lifecycle._tag !== "Provisioning")
           return yield* failure("assignment-conflict", "Assignment is not provisioning")
@@ -330,7 +344,7 @@ export const layer = (
         const sandbox =
           existingProviderId === null
             ? yield* provider
-                .create(yield* createRequest(provisioning))
+                .create(yield* createRequest(provisioning, egress))
                 .pipe(Effect.catch(() => reconcileCreate(provisioning)))
             : yield* provider.connect(existingProviderId, idleTimeoutMillis).pipe(Effect.mapError(providerFailure))
         const bound = yield* assignments
@@ -354,7 +368,11 @@ export const layer = (
         return publicAssignment(bound)
       })
 
-      const beginProvisioning = Effect.fn("Controller.beginProvisioning")(function* (assignment: ExecutorAssignment) {
+      const beginProvisioning = Effect.fn("Controller.beginProvisioning")(function* (
+        assignment: ExecutorAssignment,
+        egress: PhaseEgressPolicy,
+      ) {
+        yield* allowedEgress(egress, "setup")
         const credential = yield* issueSecret("executor-bootstrap")
         const provisioning = yield* assignments
           .beginProvisioning({
@@ -363,10 +381,14 @@ export const layer = (
             bootstrapLifetimeMillis,
           })
           .pipe(Effect.mapError(assignmentFailure))
-        return yield* createAndBootstrap(provisioning, credential)
+        return yield* createAndBootstrap(provisioning, credential, egress)
       })
 
-      const resumeAssignment = Effect.fn("Controller.resumeAssignment")(function* (assignment: ExecutorAssignment) {
+      const resumeAssignment = Effect.fn("Controller.resumeAssignment")(function* (
+        assignment: ExecutorAssignment,
+        egress: PhaseEgressPolicy,
+      ) {
+        yield* allowedEgress(egress, "runtime")
         const credential = yield* issueSecret("executor-bootstrap")
         const provisioning = yield* assignments
           .resume({
@@ -375,10 +397,10 @@ export const layer = (
             bootstrapLifetimeMillis,
           })
           .pipe(Effect.mapError(assignmentFailure))
-        return yield* createAndBootstrap(provisioning, credential)
+        return yield* createAndBootstrap(provisioning, credential, egress)
       })
 
-      const provision = Effect.fn("Controller.provision")(function* (assignmentId: string) {
+      const provision = Effect.fn("Controller.provision")(function* (assignmentId: string, egress: PhaseEgressPolicy) {
         const assignment = yield* load(assignmentId)
         yield* approvedPlacement(assignment)
         if (assignment.lifecycle._tag === "Active") {
@@ -387,13 +409,14 @@ export const layer = (
             .pipe(Effect.mapError(providerFailure))
           return publicAssignment(assignment)
         }
-        if (assignment.lifecycle._tag === "Paused") return yield* resumeAssignment(assignment)
+        if (assignment.lifecycle._tag === "Paused") return yield* resumeAssignment(assignment, egress)
         if (assignment.lifecycle._tag === "Terminated")
           return yield* failure("fenced", `Assignment ${assignmentId} is terminated`)
-        return yield* beginProvisioning(assignment)
+        return yield* beginProvisioning(assignment, egress)
       })
 
-      const replace = Effect.fn("Controller.replace")(function* (key: AssignmentKey) {
+      const replace = Effect.fn("Controller.replace")(function* (key: AssignmentKey, egress: PhaseEgressPolicy) {
+        yield* allowedEgress(egress, "runtime")
         const previous = yield* current(key)
         yield* approvedPlacement(previous)
         if (previous.lifecycle._tag !== "Active")
@@ -407,18 +430,18 @@ export const layer = (
             bootstrapLifetimeMillis,
           })
           .pipe(Effect.mapError(assignmentFailure))
-        const replacement = yield* createAndBootstrap(replacing, identity)
+        const replacement = yield* createAndBootstrap(replacing, identity, egress)
         if (retiringProviderId !== undefined) yield* provider.kill(retiringProviderId).pipe(Effect.ignore)
         return replacement
       })
 
-      const resume = Effect.fn("Controller.resume")(function* (key: AssignmentKey) {
+      const resume = Effect.fn("Controller.resume")(function* (key: AssignmentKey, egress: PhaseEgressPolicy) {
         const assignment = yield* current(key)
         yield* approvedPlacement(assignment)
         if (assignment.lifecycle._tag === "Active") return publicAssignment(assignment)
         if (assignment.lifecycle._tag !== "Paused")
           return yield* failure("assignment-conflict", "Assignment is not paused")
-        return yield* resumeAssignment(assignment)
+        return yield* resumeAssignment(assignment, egress)
       })
 
       const pause = Effect.fn("Controller.pause")(function* (key: AssignmentKey) {
@@ -621,6 +644,19 @@ export const layer = (
           .pipe(Effect.mapError((cause) => failure("checkout", cause.message)))
       })
 
+      const activatePhase = Effect.fn("Controller.activatePhase")(function* (
+        input: ProtocolAccess,
+        egress: PhaseEgressPolicy,
+      ) {
+        const assignment = yield* assignments
+          .authenticate(yield* assignmentAccess(input))
+          .pipe(Effect.mapError(assignmentFailure))
+        if (assignment.lifecycle._tag !== "Active") return yield* failure("fenced", "Executor session is not active")
+        yield* provider
+          .updateNetwork(assignment.lifecycle.providerInstanceId, yield* allowedEgress(egress))
+          .pipe(Effect.mapError(providerFailure))
+      })
+
       const cleanupOrphans = Effect.gen(function* () {
         const durable = yield* assignments.listManaged.pipe(Effect.mapError(assignmentFailure))
         const active = new Set(
@@ -656,6 +692,7 @@ export const layer = (
         heartbeat,
         checkpoint,
         checkout,
+        activatePhase,
         cleanupOrphans,
       })
     }),

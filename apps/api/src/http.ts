@@ -11,6 +11,7 @@ import type { HostedProductService } from "./hosted-product"
 import type { HostedThreadProtocolService } from "./hosted-thread-protocol"
 import type { HostedModelRegistryService } from "./hosted-model-registry"
 import type { HostedProviderCredentialsService } from "./hosted-provider-credentials"
+import type { HostedEnvironmentService } from "./hosted-environment"
 import type { Runtime as Executor } from "./executor"
 import type { ReadinessInterface as ExecutionReadiness } from "@rika/execution/postgres"
 
@@ -21,6 +22,7 @@ export interface HttpDependencies {
   readonly product: HostedProductService
   readonly threads?: HostedThreadProtocolService
   readonly credentials?: HostedProviderCredentialsService
+  readonly environment?: HostedEnvironmentService
   readonly models?: HostedModelRegistryService
   readonly executor: Executor
   readonly execution: ExecutionReadiness

@@ -7,6 +7,7 @@ import { NestedOperation, ToolContext } from "tenetkit"
 import { HostBindingRegistry } from "tenetkit/repl"
 import { Context, Crypto, Effect, Fiber, Layer, Option, Redacted, Schema, Stream } from "effect"
 import {
+  GatewayError,
   makeGateway as makeGatewayService,
   type BindingAuthority,
   type LifecycleStore,
@@ -23,7 +24,18 @@ const makeGateway = (
   append: LifecycleStore["append"] = () => Effect.void,
   load: LifecycleStore["load"] = () => Effect.succeed([]),
 ) =>
-  makeGatewayService(service, { append, load, prepare: () => Effect.void }).pipe(
+  makeGatewayService(
+    service,
+    { append, load, prepare: () => Effect.void },
+    {
+      activate: (_access, _phase, use) => use({ digest: `sha256:${"0".repeat(64)}`, values: {}, redactedNames: [] }),
+      replace: (key) =>
+        service.replace(key, { phase: "runtime", allow: ["api.example.test"] }).pipe(
+          Effect.asVoid,
+          Effect.mapError((error) => GatewayError.make({ kind: "fenced", message: error.message })),
+        ),
+    },
+  ).pipe(
     Effect.provideServiceEffect(
       Crypto.Crypto,
       Effect.scoped(Layer.build(BunCrypto.layer)).pipe(Effect.map((context) => Context.get(context, Crypto.Crypto))),
@@ -116,6 +128,7 @@ const controller = (overrides: Partial<Controller> = {}): Controller =>
       }),
     checkpoint: () => Effect.die("unused"),
     checkout: () => Effect.die("unused"),
+    activatePhase: () => Effect.die("unused"),
     cleanupOrphans: Effect.die("unused"),
     ...overrides,
   }) as Controller
@@ -181,7 +194,15 @@ describe("executor gateway", () => {
         { _tag: "PtyTerminate" as const, ptyId: "pty-1" },
       ])
         yield* gateway.sendPty("assignment-1", request)
-      expect(target.sent.slice(1).map((message) => decode(message))).toEqual([
+      expect(decode(target.sent[1]!)).toEqual({
+        _tag: "PhaseEnvironmentGranted",
+        phase: "setup",
+        digest: `sha256:${"0".repeat(64)}`,
+        operationKey: null,
+        values: {},
+        redactedNames: [],
+      })
+      expect(target.sent.slice(2).map((message) => decode(message))).toEqual([
         {
           _tag: "PtyCreate",
           fence,
@@ -331,7 +352,8 @@ describe("executor gateway", () => {
         }),
       )
       yield* Effect.yieldNow
-      expect(decode(target.sent[1]!)).toMatchObject({
+      const dispatched = target.sent.map((message) => decode(message)).find((message) => message._tag === "CellExecute")
+      expect(dispatched).toMatchObject({
         _tag: "CellExecute",
         request: {
           access,
@@ -363,7 +385,9 @@ describe("executor gateway", () => {
           },
         }),
       )
-      expect(decode(target.sent[2]!)).toEqual({
+      expect(
+        target.sent.map((message) => decode(message)).find((message) => message._tag === "CellTerminalReceipt"),
+      ).toEqual({
         _tag: "CellTerminalReceipt",
         access,
         operationKey: "operation-1",
@@ -844,7 +868,9 @@ describe("executor gateway", () => {
         }),
       )
       expect(error.kind).toBe("fenced")
-      expect(target.sent).toHaveLength(1)
+      expect(target.sent.map((message) => decode(message)).some((message) => message._tag === "CellExecute")).toBe(
+        false,
+      )
     }),
   )
 
@@ -895,7 +921,9 @@ describe("executor gateway", () => {
       yield* gateway.receive(replacementSocket, encode({ _tag: "ExecutorReconnect", access }))
       expect(firstSocket.closed).toEqual([[1008, "fenced"]])
       const replacementAccess = { ...access, leaseEpoch: 2 }
-      expect(decode(replacementSocket.sent[1]!)).toEqual({
+      expect(
+        replacementSocket.sent.map((message) => decode(message)).find((message) => message._tag === "CellReplay"),
+      ).toEqual({
         _tag: "CellReplay",
         access: replacementAccess,
         operationKey: "replacement-operation",

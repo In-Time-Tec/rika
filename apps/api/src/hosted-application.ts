@@ -12,6 +12,7 @@ import * as HostedExecution from "@rika/execution"
 import * as ExecutionPostgres from "@rika/execution/postgres"
 import * as RemoteCells from "@rika/execution/remote-cells"
 import { type ExecutorConfig, Executor, layer as executorLayer, service as executorService } from "./executor"
+import { HostedEnvironment, layer as hostedEnvironmentLayer } from "./hosted-environment"
 import { HostedOperations, layer as hostedOperationsLayer } from "./hosted-operations"
 import { HostedThreadProtocol, layer as hostedThreadProtocolLayer } from "./hosted-thread-protocol"
 import { HostedModelRegistry, layer as hostedModelRegistryLayer } from "./hosted-model-registry"
@@ -30,6 +31,7 @@ export interface HostedApplicationService {
   readonly operations: HostedOperations["Service"]
   readonly threads: HostedThreadProtocol["Service"]
   readonly credentials: HostedProviderCredentials["Service"]
+  readonly environment: HostedEnvironment["Service"]
   readonly models: HostedModelRegistry["Service"]
   readonly executor: Executor["Service"]
   readonly projectionWorker: HostedProjectionWorker["Service"]
@@ -65,13 +67,19 @@ export const layer = (options: {
           providerCredentialStoreLayer({ encryptionKey: options.providerCredentialKey }),
         ).pipe(Layer.provide(retainedData)),
       )
+      const environmentContext = yield* Layer.build(
+        hostedEnvironmentLayer({
+          encryptionKey: options.providerCredentialKey,
+          protectedEgressHosts: new Set([new URL(Redacted.value(options.databaseUrl)).hostname]),
+        }).pipe(Layer.provide(retainedData)),
+      )
       const modelContext = yield* Layer.build(
         hostedModelRegistryLayer.pipe(Layer.provide(Layer.succeedContext(Context.merge(data, credentialContext)))),
       )
       const executorContext = yield* Layer.build(
         executorService.pipe(
           Layer.provide(Layer.merge(executorLayer(options.executor), localExecutorLayer)),
-          Layer.provide(retainedData),
+          Layer.provide(Layer.succeedContext(Context.merge(data, environmentContext))),
         ),
       )
       const executor = Context.get(executorContext, Executor)
@@ -108,7 +116,7 @@ export const layer = (options: {
         }),
       )
       const hostedContext = Context.merge(
-        Context.merge(data, executionContext),
+        Context.merge(Context.merge(data, executionContext), environmentContext),
         Context.merge(credentialContext, modelContext),
       )
       const projectionWorkerContext = yield* Layer.build(
@@ -147,6 +155,7 @@ export const layer = (options: {
         operations: Context.get(operationsContext, HostedOperations),
         threads: Context.get(threadProtocolContext, HostedThreadProtocol),
         credentials: Context.get(credentialContext, HostedProviderCredentials),
+        environment: Context.get(environmentContext, HostedEnvironment),
         models: Context.get(modelContext, HostedModelRegistry),
         executor,
         projectionWorker,

@@ -27,6 +27,8 @@
     "./goal-service": "./src/thread/goal/goal-service.ts",
     "./executor-assignment": "./src/hosted/executor-assignment.ts",
     "./executor-assignments": "./src/hosted/executor-assignments.ts",
+    "./environment-policy": "./src/hosted/environment-policy.ts",
+    "./environment-store": "./src/hosted/environment-store.ts",
     "./hosted-authorization": "./src/hosted/authorization.ts",
     "./hosted-model": "./src/hosted/model.ts",
     "./local-runner-registration": "./src/hosted/local-runner-registration.ts",

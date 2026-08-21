@@ -15,6 +15,8 @@ import { HostedProductError, type HostedProductService } from "../src/hosted-pro
 import type { Runtime as Executor } from "../src/executor"
 import { isRikaApiPath, makeRikaApiHandler } from "../src/api"
 import type { HostedProviderCredentialsService } from "../src/hosted-provider-credentials"
+import type { HostedEnvironmentService } from "../src/hosted-environment"
+import { EnvironmentReferenceId } from "@rika/product/environment-policy"
 
 const account: Account = {
   user: {
@@ -332,6 +334,60 @@ describe("api HTTP", () => {
       expect(yield* Effect.promise(() => revoke.json())).toMatchObject({ state: "revoked", revision: "2" })
       expect(listed.status).toBe(200)
       expect(yield* Effect.promise(() => listed.json())).toEqual({ credentials: [status] })
+    }),
+  )
+
+  it.effect("accepts environment material only as redacted input and returns an opaque reference", () =>
+    Effect.gen(function* () {
+      const principal: IdentityPrincipal = { userId: "user-1", clientId: "client-1", dpopJkt: "thumbprint-1" }
+      const base = dependencies({ account })
+      let receivedSecret = ""
+      const reference = {
+        id: EnvironmentReferenceId.make("environment-1"),
+        ownerId: "owner-1",
+        scope: "personal" as const,
+        scopeId: "user-1",
+        name: "API_TOKEN",
+        classification: "secret" as const,
+        phases: ["runtime" as const],
+        revision: "1",
+        valueDigest: `sha256:${"a".repeat(64)}` as const,
+        state: "active" as const,
+        updatedByUserId: "user-1",
+        updatedAt: "2026-08-21T00:00:00.000Z" as const,
+      }
+      const environment: HostedEnvironmentService = {
+        put: (input) =>
+          Effect.sync(() => {
+            receivedSecret = Redacted.value(input.value)
+            return reference
+          }),
+        revoke: () => Effect.succeed({ ...reference, revision: "2", state: "revoked" }),
+        putOrganizationPolicy: () => Effect.void,
+        approveSource: () => Effect.die("unused"),
+        revokeSourceApproval: () => Effect.die("unused"),
+        putEgress: () => Effect.die("unused"),
+        usePhase: () => Effect.die("unused"),
+      }
+      const deps: HttpDependencies = {
+        ...base,
+        identity: { ...base.identity, identify: () => Effect.succeed(principal) },
+        devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
+        environment,
+      }
+      const put = yield* response("/api/v1/environment/API_TOKEN", deps, {
+        method: "PUT",
+        body: encodeJson({
+          owner: { kind: "personal" },
+          scope: "personal",
+          classification: "secret",
+          phases: ["runtime"],
+          value: "environment-api-secret",
+        }),
+      })
+      expect(put.status).toBe(200)
+      expect(receivedSecret).toBe("environment-api-secret")
+      expect(yield* Effect.promise(() => put.text())).not.toContain("environment-api-secret")
     }),
   )
 

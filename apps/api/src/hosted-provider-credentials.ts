@@ -3,7 +3,7 @@ import { Clock, Context, Crypto, DateTime, Effect, Layer, Option, Redacted, Sche
 import { ProviderCredentialStore, ProviderCredentialStoreError } from "@rika/product/provider-credential-store"
 import type { HostedOwner } from "@rika/product/hosted-model"
 import type { AuthenticatedPrincipal } from "./hosted-product"
-import { makeProviderCredentialCipher } from "./provider-credential-cipher"
+import { makeSecretCipher } from "./secret-cipher"
 
 export const HostedModelProvider = Schema.Literals(["openai", "anthropic", "openrouter"])
 export type HostedModelProvider = typeof HostedModelProvider.Type
@@ -80,7 +80,7 @@ export const layer = (options: { readonly encryptionKey: Redacted.Redacted<strin
     Effect.gen(function* () {
       const sql = yield* PgClient.PgClient
       const crypto = yield* Crypto.Crypto
-      const cipher = makeProviderCredentialCipher(options.encryptionKey)
+      const cipher = makeSecretCipher({ encodedKey: options.encryptionKey, domain: "provider-credential" })
       const authorizedOwnerId = Effect.fn("HostedProviderCredentials.authorizedOwnerId")(function* (
         principal: AuthenticatedPrincipal,
         owner: HostedOwner,
@@ -224,7 +224,7 @@ export const storeLayer = (options: { readonly encryptionKey: Redacted.Redacted<
     ProviderCredentialStore,
     Effect.gen(function* () {
       const sql = yield* PgClient.PgClient
-      const cipher = makeProviderCredentialCipher(options.encryptionKey)
+      const cipher = makeSecretCipher({ encodedKey: options.encryptionKey, domain: "provider-credential" })
       return ProviderCredentialStore.of({
         load: (credentialIdentity) =>
           sql<CredentialRow>`SELECT

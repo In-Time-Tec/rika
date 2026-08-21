@@ -7,6 +7,7 @@ import {
   type SandboxListOpts,
   type SandboxOpts,
   type SandboxPauseOpts,
+  type SandboxNetworkUpdate,
 } from "e2b"
 import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import type { ExecutorBootstrapIdentity } from "@rika/remote-execution/protocol"
@@ -42,7 +43,7 @@ export interface InventoryEntry extends Handle {
 }
 
 export class ProviderError extends Schema.TaggedError<ProviderError>()("ProviderError", {
-  operation: Schema.Literals(["bootstrap", "create", "connect", "pause", "kill", "touch", "inventory"]),
+  operation: Schema.Literals(["bootstrap", "create", "connect", "network", "pause", "kill", "touch", "inventory"]),
   message: Schema.String,
 }) {}
 
@@ -50,6 +51,10 @@ export interface Interface {
   readonly create: (request: CreateRequest) => Effect.Effect<Handle, ProviderError>
   readonly bootstrap: (request: BootstrapRequest) => Effect.Effect<void, ProviderError>
   readonly connect: (sandboxId: string, idleTimeoutMillis: number) => Effect.Effect<Handle, ProviderError>
+  readonly updateNetwork: (
+    sandboxId: string,
+    allowedEgress: ReadonlyArray<string>,
+  ) => Effect.Effect<void, ProviderError>
   readonly pauseFilesystem: (sandboxId: string) => Effect.Effect<boolean, ProviderError>
   readonly kill: (sandboxId: string) => Effect.Effect<boolean, ProviderError>
   readonly touch: (sandboxId: string, idleTimeoutMillis: number) => Effect.Effect<void, ProviderError>
@@ -81,6 +86,11 @@ export interface Sdk {
   readonly create: (templateId: string, options: SandboxOpts) => Promise<SdkHandle>
   readonly getInfo: (sandboxId: string, options: SandboxConnectOpts) => Promise<SandboxInfo>
   readonly connect: (sandboxId: string, options: SandboxConnectOpts) => Promise<SdkHandle>
+  readonly updateNetwork: (
+    sandboxId: string,
+    network: SandboxNetworkUpdate,
+    options: SandboxConnectOpts,
+  ) => Promise<void>
   readonly pause: (sandboxId: string, options: SandboxPauseOpts) => Promise<boolean>
   readonly kill: (sandboxId: string, options: SandboxConnectOpts) => Promise<boolean>
   readonly setTimeout: (sandboxId: string, timeoutMillis: number, options: SandboxConnectOpts) => Promise<void>
@@ -181,6 +191,8 @@ const liveSdk: Sdk = {
   create: (templateId, options) => Sandbox.create(templateId, options),
   getInfo: (sandboxId, options) => Sandbox.getInfo(sandboxId, options),
   connect: (sandboxId, options) => Sandbox.connect(sandboxId, options),
+  updateNetwork: (sandboxId, network, options) =>
+    Sandbox.connect(sandboxId, options).then((sandbox) => sandbox.updateNetwork(network, options)),
   pause: (sandboxId, options) => Sandbox.pause(sandboxId, options),
   kill: (sandboxId, options) => Sandbox.kill(sandboxId, options),
   setTimeout: (sandboxId, timeoutMillis, options) => Sandbox.setTimeout(sandboxId, timeoutMillis, options),
@@ -190,8 +202,24 @@ const liveSdk: Sdk = {
 
 const managedMetadata = { "rika.managed": "e2b-executor" } as const
 const bootstrapUrl = (sandboxId: string, domain = "e2b.app") => `https://7070-${sandboxId}.${domain}/.rika/bootstrap`
+const protectedNetworks = [
+  "0.0.0.0/8",
+  "10.0.0.0/8",
+  "100.64.0.0/10",
+  "127.0.0.0/8",
+  "169.254.0.0/16",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+  "224.0.0.0/4",
+  ALL_TRAFFIC,
+] as const
+const networkPolicy = (allowedEgress: ReadonlyArray<string>): SandboxNetworkUpdate => ({
+  allowInternetAccess: true,
+  allowOut: [...allowedEgress],
+  denyOut: [...protectedNetworks],
+})
 
-export const testing = { bootstrapHeaders, bootstrapSandbox, bootstrapUrl } as const
+export const testing = { bootstrapHeaders, bootstrapSandbox, bootstrapUrl, networkPolicy, protectedNetworks } as const
 
 const makeProvider = (options: Options, sdk: Sdk): Interface => {
   const apiKey = Redacted.value(options.apiKey)
@@ -234,11 +262,7 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
         secure: true,
         allowInternetAccess: true,
         lifecycle: { onTimeout: { action: "pause", keepMemory: false }, autoResume: false },
-        network: {
-          allowPublicTraffic: false,
-          allowOut: [...request.allowedEgress],
-          denyOut: [ALL_TRAFFIC],
-        },
+        network: { allowPublicTraffic: false, ...networkPolicy(request.allowedEgress) },
         metadata: {
           ...managedMetadata,
           "rika.app-id": request.appId,
@@ -283,6 +307,9 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
       Effect.map((sandbox) => ({ sandboxId: sandbox.sandboxId, state: "running" as const })),
     )
 
+  const updateNetwork = (sandboxId: string, allowedEgress: ReadonlyArray<string>) =>
+    attempt("network", () => sdk.updateNetwork(sandboxId, networkPolicy(allowedEgress), connection))
+
   const pauseFilesystem = (sandboxId: string) =>
     attempt("pause", () => sdk.pause(sandboxId, { ...connection, keepMemory: false }))
 
@@ -322,7 +349,7 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
     return managed
   })
 
-  return Provider.of({ create, bootstrap, connect, pauseFilesystem, kill, touch, inventory })
+  return Provider.of({ create, bootstrap, connect, updateNetwork, pauseFilesystem, kill, touch, inventory })
 }
 
 export const make = (options: Options): Interface => makeProvider(options, liveSdk)

@@ -45,12 +45,14 @@ import {
   ApiMessage,
   type ApiMessage as IncomingMessage,
   CellLifecycleFrame,
+  CellResponse as CellResponseSchema,
   ExecutorBootstrapWire,
   type Fence,
   ExecutorMessage,
   SessionWire,
   Target,
   type CellRequest,
+  type CellResponse,
 } from "./protocol"
 
 interface Config {
@@ -368,8 +370,24 @@ const sameAttribution = (left: ReturnType<typeof attribution>, right: ReturnType
   left.toolCallId === right.toolCallId &&
   left.attempt === right.attempt
 
-const redactOutput = (value: unknown) => {
-  const text = (typeof value === "string" ? value : JSON.stringify(value))
+const redactText = (value: string, secrets: ReadonlyArray<string>) =>
+  secrets.reduce((text, secret) => (secret.length === 0 ? text : text.split(secret).join("REDACTED")), value)
+
+const redactJson = (value: unknown, secrets: ReadonlyArray<string>): unknown => {
+  if (typeof value === "string") return redactText(value, secrets)
+  if (Array.isArray(value)) return value.map((entry) => redactJson(entry, secrets))
+  if (value !== null && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [redactText(key, secrets), redactJson(entry, secrets)]),
+    )
+  return value
+}
+
+const redactResponse = (response: CellResponse, secrets: ReadonlyArray<string>) =>
+  Schema.decodeUnknownSync(CellResponseSchema)(redactJson(response, secrets))
+
+const redactOutput = (value: unknown, secrets: ReadonlyArray<string>) => {
+  const text = redactText(typeof value === "string" ? value : JSON.stringify(value), secrets)
     .replace(/(token|password|secret|authorization)["']?\s*[:=]\s*["'][^"']+/gi, "$1=REDACTED")
     .replace(/\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]+\b/g, "REDACTED")
   return { text: text.slice(0, 16_384), truncated: text.length > 16_384 }
@@ -474,6 +492,33 @@ const consumePtyEvents = (
     )
   })
 
+type PhaseGrant = Extract<IncomingMessage, { readonly _tag: "PhaseEnvironmentGranted" }>
+
+const applyPhaseGrant = Effect.fn("Host.applyPhaseGrant")(function* (
+  message: PhaseGrant,
+  grants: Ref.Ref<Map<string, PhaseGrant>>,
+  executionEnvironment: Record<string, string>,
+  appliedEnvironment: Ref.Ref<Map<string, string>>,
+  cells: HostedKernel.Interface,
+  environmentAccess: Semaphore.Semaphore,
+) {
+  if (message.operationKey !== null) {
+    if (message.phase !== "runtime") return yield* HostError.make({ message: "Operation environment phase is invalid" })
+    yield* Ref.update(grants, (current) => new Map(current).set(message.operationKey as string, message))
+    return
+  }
+  yield* environmentAccess.withPermits(1)(
+    Effect.gen(function* () {
+      for (const name of Object.keys(executionEnvironment)) delete executionEnvironment[name]
+      Object.assign(executionEnvironment, message.values)
+      if (message.phase !== "runtime") return
+      const applied = yield* Ref.get(appliedEnvironment)
+      for (const [sessionId, digest] of applied) if (digest !== message.digest) yield* cells.restart(sessionId)
+      yield* Ref.set(appliedEnvironment, new Map([...applied.keys()].map((sessionId) => [sessionId, message.digest])))
+    }),
+  )
+})
+
 const consumeApi = (
   incoming: Queue.Queue<IncomingMessage>,
   writer: (chunk: string) => Effect.Effect<void, Socket.SocketError>,
@@ -485,6 +530,10 @@ const consumeApi = (
   cells: HostedKernel.Interface,
   machine: Machine["Service"],
   ptyDelivery: Semaphore.Semaphore,
+  grants: Ref.Ref<Map<string, PhaseGrant>>,
+  executionEnvironment: Record<string, string>,
+  appliedEnvironment: Ref.Ref<Map<string, string>>,
+  environmentAccess: Semaphore.Semaphore,
 ) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime
@@ -554,12 +603,22 @@ const consumeApi = (
           )
       }
       if (yield* dispatchPty(message, writer, ptyDelivery)) return
+      if (message._tag === "PhaseEnvironmentGranted") {
+        yield* applyPhaseGrant(message, grants, executionEnvironment, appliedEnvironment, cells, environmentAccess)
+      }
       if (message._tag === "CellExecute") {
         const access = yield* runtime.access.pipe(
           Effect.mapError((cause) => HostError.make({ message: cause.message })),
         )
         if (!sameAccess(access, message.request.access))
           return yield* HostError.make({ message: "Cell request has a stale executor fence" })
+        const phase = (yield* Ref.get(grants)).get(message.request.operationKey)
+        if (phase === undefined) return yield* HostError.make({ message: "Cell request has no runtime authorization" })
+        yield* Ref.update(grants, (current) => {
+          const next = new Map(current)
+          next.delete(message.request.operationKey)
+          return next
+        })
         const identity = attribution(message.request)
         const retained = (yield* Ref.get(frames)).get(message.request.operationKey)
         if (retained !== undefined) {
@@ -593,21 +652,38 @@ const consumeApi = (
         yield* emit(message.request.access, accepted)
         const operation = Effect.gen(function* () {
           yield* emit(message.request.access, { _tag: "Started", attribution: accepted.attribution, cursor: 2 })
-          const response = yield* cells
-            .execute(message.request, (chunk) =>
+          const secrets = phase.redactedNames.flatMap((name) => {
+            const value = phase.values[name]
+            return value === undefined ? [] : [value]
+          })
+          const response = yield* environmentAccess
+            .withPermits(1)(
               Effect.gen(function* () {
-                const output = redactOutput(chunk.text)
-                const outputFrames = (yield* Ref.get(frames)).get(message.request.operationKey) ?? []
-                if (outputFrames.filter((frame) => frame._tag === "Output").length >= 16) return
-                yield* emit(message.request.access, {
-                  _tag: "Output",
-                  attribution: accepted.attribution,
-                  cursor: outputFrames.length + 1,
-                  stream: chunk.stream,
-                  text: output.text,
-                  redacted: true,
-                  truncated: output.truncated,
-                }).pipe(Effect.ignore)
+                const applied = yield* Ref.get(appliedEnvironment)
+                const previousDigest = applied.get(message.request.sessionId)
+                if (previousDigest !== phase.digest) {
+                  for (const name of Object.keys(executionEnvironment)) delete executionEnvironment[name]
+                  Object.assign(executionEnvironment, phase.values)
+                  if (previousDigest !== undefined) yield* cells.restart(message.request.sessionId)
+                  yield* Ref.set(appliedEnvironment, new Map(applied).set(message.request.sessionId, phase.digest))
+                }
+                const result = yield* cells.execute(message.request, (chunk) =>
+                  Effect.gen(function* () {
+                    const output = redactOutput(chunk.text, secrets)
+                    const outputFrames = (yield* Ref.get(frames)).get(message.request.operationKey) ?? []
+                    if (outputFrames.filter((frame) => frame._tag === "Output").length >= 16) return
+                    yield* emit(message.request.access, {
+                      _tag: "Output",
+                      attribution: accepted.attribution,
+                      cursor: outputFrames.length + 1,
+                      stream: chunk.stream,
+                      text: output.text,
+                      redacted: true,
+                      truncated: output.truncated,
+                    }).pipe(Effect.ignore)
+                  }),
+                )
+                return redactResponse(result, secrets)
               }),
             )
             .pipe(
@@ -616,7 +692,7 @@ const consumeApi = (
                   ? Effect.failCause(cause)
                   : Effect.succeed({
                       _tag: "DomainFailure" as const,
-                      failure: { kind: "execution", message: String(cause) },
+                      failure: { kind: "execution", message: "Cell execution failed" },
                     }),
               ),
             )
@@ -722,6 +798,10 @@ const connect = Effect.fn("Host.connect")(function* (
   machine: Machine["Service"],
   ptyDelivery: Semaphore.Semaphore,
   activeWriter: Ref.Ref<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>,
+  grants: Ref.Ref<Map<string, PhaseGrant>>,
+  executionEnvironment: Record<string, string>,
+  appliedEnvironment: Ref.Ref<Map<string, string>>,
+  environmentAccess: Semaphore.Semaphore,
   connected: Effect.Effect<void> = Effect.void,
 ) {
   const runtime = yield* Runtime
@@ -765,7 +845,22 @@ const connect = Effect.fn("Host.connect")(function* (
       Fiber.join(reader).pipe(
         Effect.mapError(() => HostError.make({ message: "Executor controller connection closed" })),
       ),
-      consumeApi(incoming, writer, store, receipts, operations, frames, lifecycle, cells, machine, ptyDelivery),
+      consumeApi(
+        incoming,
+        writer,
+        store,
+        receipts,
+        operations,
+        frames,
+        lifecycle,
+        cells,
+        machine,
+        ptyDelivery,
+        grants,
+        executionEnvironment,
+        appliedEnvironment,
+        environmentAccess,
+      ),
     ),
     consumePtyEvents(writer, ptyDelivery),
   )
@@ -839,7 +934,15 @@ const receiveBootstrap = Effect.callback<Bootstrap, HostError>((resume) => {
   return Effect.promise(() => server.stop(true))
 })
 
-export const testing = { dispatchPty, operationReceiptStore, receiveBootstrap, sameFence } as const
+export const testing = {
+  applyPhaseGrant,
+  dispatchPty,
+  operationReceiptStore,
+  receiveBootstrap,
+  redactOutput,
+  redactResponse,
+  sameFence,
+} as const
 
 const host = Effect.scoped(
   Effect.gen(function* () {
@@ -963,6 +1066,7 @@ const host = Effect.scoped(
           latestCheckpointId: null,
           ...(config.restoredSession === undefined ? {} : { restoredSession: config.restoredSession }),
         })
+        const executionEnvironment: Record<string, string> = {}
         const runtimeContext = yield* Layer.build(runtime).pipe(
           Effect.mapError((error) => HostError.make({ message: error.message })),
         )
@@ -976,6 +1080,7 @@ const host = Effect.scoped(
           dataRoot: config.stateDirectory,
           read: readState,
           write: writeState,
+          environment: executionEnvironment,
           sendBinding: (message) =>
             Effect.gen(function* () {
               const writer = yield* Ref.get(activeWriter)
@@ -997,6 +1102,9 @@ const host = Effect.scoped(
         const frames = yield* Ref.make(yield* receipts.load)
         const lifecycle = yield* Semaphore.make(1)
         const ptyDelivery = yield* Semaphore.make(1)
+        const grants = yield* Ref.make(new Map<string, PhaseGrant>())
+        const appliedEnvironment = yield* Ref.make(new Map<string, string>())
+        const environmentAccess = yield* Semaphore.make(1)
         return yield* Effect.scoped(
           connect(
             config,
@@ -1009,6 +1117,10 @@ const host = Effect.scoped(
             machine,
             ptyDelivery,
             activeWriter,
+            grants,
+            executionEnvironment,
+            appliedEnvironment,
+            environmentAccess,
             connected,
           ),
         ).pipe(

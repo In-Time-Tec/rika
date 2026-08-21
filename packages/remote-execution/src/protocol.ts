@@ -15,6 +15,8 @@ const LeaseEpoch = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 const OutputText = Schema.String.check(Schema.isMaxLength(16_384))
 const RequestDigest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
 const PtyData = Schema.String.check(Schema.isMaxLength(16_384))
+const EnvironmentName = Schema.String.check(Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/))
+const EnvironmentDigest = Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/))
 
 export const ProtocolVersion = Schema.Literal(1)
 export type ProtocolVersion = typeof ProtocolVersion.Type
@@ -493,6 +495,13 @@ export type ExecutorMessage = typeof ExecutorMessage.Type
 export const ApiMessage = Schema.Union([
   Schema.TaggedStruct("ExecutorWelcome", { welcome: WelcomeWire }),
   Schema.TaggedStruct("ExecutorReconnected", { welcome: ReconnectWelcomeWire }),
+  Schema.TaggedStruct("PhaseEnvironmentGranted", {
+    phase: Schema.Literals(["setup", "runtime"]),
+    digest: EnvironmentDigest,
+    operationKey: Schema.NullOr(Identifier),
+    values: Schema.Record(EnvironmentName, Schema.String),
+    redactedNames: Schema.Array(EnvironmentName),
+  }),
   Schema.TaggedStruct("LeaseReceipt", { receipt: ReceiptWire }),
   Schema.TaggedStruct("LocalCellReceipt", { access: AccessWire, operationKey: Identifier, attempt: Sequence }),
   Schema.TaggedStruct("CheckpointAccepted", { checkpointId: Identifier, contentDigest: Sha256 }),

@@ -4,6 +4,7 @@ import { Effect, Redacted, Schema } from "effect"
 import { makeWithSdk, type Sdk, testing } from "../src/provider"
 
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const request = {
   appId: "rika",
@@ -76,8 +77,9 @@ describe("Provider", () => {
         lifecycle: { onTimeout: { action: "pause", keepMemory: false }, autoResume: false },
         network: {
           allowPublicTraffic: false,
+          allowInternetAccess: true,
           allowOut: ["api.example.test", "github.com"],
-          denyOut: ["0.0.0.0/0"],
+          denyOut: [...testing.protectedNetworks],
         },
         metadata: {
           "rika.managed": "e2b-executor",
@@ -223,6 +225,10 @@ describe("Provider", () => {
         calls.push(`connect:${sandboxId}`)
         return Promise.resolve({ sandboxId })
       },
+      updateNetwork: (sandboxId, network) => {
+        calls.push(`network:${sandboxId}:${JSON.stringify(network)}`)
+        return Promise.resolve()
+      },
       pause: (sandboxId, options) => {
         calls.push(`pause:${sandboxId}:${String(options.keepMemory)}`)
         return Promise.resolve(true)
@@ -249,6 +255,7 @@ describe("Provider", () => {
       expect(failed.message).not.toContain("e2b-controller-secret")
       expect(failed.message).not.toContain("bootstrap-secret")
       expect(yield* provider.connect("sandbox", 900_000)).toEqual({ sandboxId: "sandbox", state: "running" })
+      yield* provider.updateNetwork("sandbox", ["runtime.example.test"])
       yield* provider.bootstrap({
         sandboxId: "sandbox",
         credential: Redacted.make("bootstrap-secret"),
@@ -267,7 +274,13 @@ describe("Provider", () => {
       expect(yield* provider.pauseFilesystem("sandbox")).toBe(true)
       yield* provider.touch("sandbox", 900_000)
       expect(yield* provider.kill("sandbox")).toBe(true)
-      expect(calls).toEqual(["connect:sandbox", "pause:sandbox:false", "touch:sandbox:900000", "kill:sandbox"])
+      expect(calls).toEqual([
+        "connect:sandbox",
+        `network:sandbox:${encodeJson(testing.networkPolicy(["runtime.example.test"]))}`,
+        "pause:sandbox:false",
+        "touch:sandbox:900000",
+        "kill:sandbox",
+      ])
     })
   })
 

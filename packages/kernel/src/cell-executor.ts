@@ -16,6 +16,7 @@ export type Response =
 
 export interface Interface {
   readonly execute: (request: Request) => Effect.Effect<Response>
+  readonly restart: (sessionId: string) => Effect.Effect<void>
 }
 
 export class CellExecutor extends Context.Service<CellExecutor, Interface>()(
@@ -52,6 +53,7 @@ const make = (pool: KernelPool.Interface, modules: ReadonlyArray<string>): Inter
       (controller) => Effect.sync(() => controller.abort()),
     )
   },
+  restart: (sessionId) => pool.restart(sessionId, "profile-changed").pipe(Effect.asVoid, Effect.orDie),
 })
 
 export interface Options extends Composition.Options {

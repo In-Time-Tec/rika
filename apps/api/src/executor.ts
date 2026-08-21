@@ -16,7 +16,8 @@ import { ExecutorAssignmentId } from "@rika/product/hosted-model"
 import { bindingManifest, CellLifecycleFrame } from "@rika/remote-execution/protocol"
 import { HostBindingRegistry } from "tenetkit/repl"
 import { Context, Crypto, Effect, Encoding, Layer, Redacted, Schema } from "effect"
-import { GatewayError, makeGateway, type Gateway } from "./executor-gateway"
+import { GatewayError, makeGateway, type Gateway, type LifecycleStore } from "./executor-gateway"
+import { HostedEnvironment } from "./hosted-environment"
 import type { AuthenticatedPrincipal } from "./hosted-product"
 import { LocalExecutor } from "./local-executor"
 import { makeLocalGateway, type LocalGateway } from "./local-executor-gateway"
@@ -55,7 +56,7 @@ export const loadConfig = Effect.fn("ExecutorConfig.load")(function* (environmen
     templateId: yield* required(environment, "E2B_TEMPLATE_ID"),
     templateBuildId: yield* required(environment, "E2B_TEMPLATE_BUILD_ID"),
     apiUrl,
-    allowedEgress: [new URL(apiUrl).hostname, "github.com", "api.github.com"],
+    controlEgress: [new URL(apiUrl).hostname],
     apiKey: Redacted.make(yield* required(environment, "E2B_API_KEY"), { label: "e2b-api-key" }),
   }
 })
@@ -121,12 +122,13 @@ export const service = Layer.effect(
   Effect.gen(function* () {
     const controller = yield* Controller
     const assignments = yield* ExecutorAssignments
+    const environment = yield* HostedEnvironment
     const sql = yield* PgClient.PgClient
     const crypto = yield* Crypto.Crypto
     const scope = yield* Effect.scope
     const decodeLifecycle = Schema.decodeUnknownEffect(CellLifecycleFrame)
     const equivalentLifecycle = Schema.toEquivalence(CellLifecycleFrame)
-    const gateway = yield* makeGateway(controller, {
+    const lifecycle: LifecycleStore = {
       append: (assignmentId, frame) =>
         sql`INSERT INTO rika_hosted_executor_operation_frames
           (assignment_id, operation_key, attempt, cursor, kind, frame)
@@ -149,7 +151,10 @@ export const service = Layer.effect(
                   Effect.filterOrFail(
                     (persisted) => equivalentLifecycle(persisted, frame),
                     () =>
-                      GatewayError.make({ kind: "fenced", message: "Executor lifecycle cursor has different content" }),
+                      GatewayError.make({
+                        kind: "fenced",
+                        message: "Executor lifecycle cursor has different content",
+                      }),
                   ),
                   Effect.asVoid,
                   Effect.mapError((error) =>
@@ -261,6 +266,46 @@ export const service = Layer.effect(
             GatewayError.make({ kind: "transport", message: "Could not persist executor operation" }),
           ),
         ),
+    }
+    const gateway = yield* makeGateway(controller, lifecycle, {
+      activate: (access, phase, use) =>
+        environment
+          .usePhase({ assignmentId: access.fence.assignmentId, phase }, (resolved) =>
+            controller
+              .activatePhase(
+                {
+                  ...access,
+                  sessionToken: Redacted.make(access.sessionToken, { label: "executor-session" }),
+                },
+                resolved.egress,
+              )
+              .pipe(
+                Effect.andThen(
+                  use({
+                    digest: resolved.manifest.digest,
+                    values: resolved.values,
+                    redactedNames: resolved.manifest.references.map((reference) => reference.name),
+                  }),
+                ),
+              ),
+          )
+          .pipe(
+            Effect.mapError((error) =>
+              Schema.is(GatewayError)(error)
+                ? error
+                : GatewayError.make({ kind: "fenced", message: "Executor phase authorization was rejected" }),
+            ),
+          ),
+      replace: (key) =>
+        environment
+          .usePhase({ assignmentId: key.assignmentId, phase: "runtime" }, (resolved) =>
+            controller.replace(key, resolved.egress).pipe(Effect.asVoid),
+          )
+          .pipe(
+            Effect.mapError(() =>
+              GatewayError.make({ kind: "fenced", message: "Executor replacement authorization was rejected" }),
+            ),
+          ),
     })
     const local = yield* LocalExecutor
     const localGateway = yield* makeLocalGateway(local)
@@ -316,7 +361,19 @@ export const service = Layer.effect(
             bindings: authority,
           })
         }
-        yield* controller.provision(input.threadId)
+        const phase =
+          assignment.lifecycle._tag === "Paused" || assignment.lifecycle._tag === "Active" ? "runtime" : "setup"
+        yield* environment
+          .usePhase({ assignmentId: input.threadId, phase }, (resolved) =>
+            controller.provision(input.threadId, resolved.egress),
+          )
+          .pipe(
+            Effect.mapError((error) =>
+              Schema.is(ControllerError)(error)
+                ? error
+                : ControllerError.make({ kind: "repository", message: "Executor phase authorization was rejected" }),
+            ),
+          )
         const authority = yield* bindings(input, gateway.machine)
         const result = yield* gateway.execute({
           assignmentId: input.threadId,

@@ -41,7 +41,7 @@ it.effect.skipIf(databaseUrl === undefined)(
               templateId: "template-test",
               templateBuildId: "build-test",
               apiUrl: "wss://api.example.test/api/v1/executors",
-              allowedEgress: ["api.example.test"],
+              controlEgress: ["api.example.test"],
               apiKey: Redacted.make("e2b-test-key"),
             },
             workerId: "worker-test",

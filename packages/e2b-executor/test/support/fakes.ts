@@ -25,6 +25,7 @@ const digest = (_algorithm: string, data: Uint8Array) =>
 export interface FakeProviderState {
   readonly creates: Array<CreateRequest>
   readonly connects: Array<{ readonly sandboxId: string; readonly timeoutMillis: number }>
+  readonly networks: Array<{ readonly sandboxId: string; readonly allowedEgress: ReadonlyArray<string> }>
   readonly pauses: Array<string>
   readonly kills: Array<string>
   readonly touches: Array<{ readonly sandboxId: string; readonly timeoutMillis: number }>
@@ -64,6 +65,10 @@ const providerLayer = (state: FakeProviderState) =>
         state.connects.push({ sandboxId, timeoutMillis })
         return Effect.succeed({ sandboxId, state: "running" })
       },
+      updateNetwork: (sandboxId, allowedEgress) => {
+        state.networks.push({ sandboxId, allowedEgress })
+        return Effect.void
+      },
       pauseFilesystem: (sandboxId) => {
         state.pauses.push(sandboxId)
         return state.pauseFailure
@@ -97,6 +102,7 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
   const provider: FakeProviderState = {
     creates: [],
     connects: [],
+    networks: [],
     pauses: [],
     kills: [],
     touches: [],
@@ -144,7 +150,7 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     templateId: "ar7-template-alias",
     templateBuildId: "template-build-v1-immutable",
     apiUrl: "wss://api.example.test/executors",
-    allowedEgress: ["api.example.test", "github.com", "api.github.com"],
+    controlEgress: ["api.example.test"],
     ...overrides,
   }).pipe(Layer.provide(dependencies), Layer.provide(assignmentLayer))
   harness.layer = Layer.merge(controller, assignmentLayer)

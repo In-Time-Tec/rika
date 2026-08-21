@@ -19,7 +19,7 @@ describe("executor configuration", () => {
         templateId: "ar7-template-alias",
         templateBuildId: "7d0-build-receipt",
         apiUrl: "wss://api.example.test/api/v1/executors",
-        allowedEgress: ["api.example.test", "github.com", "api.github.com"],
+        controlEgress: ["api.example.test"],
       })
       expect(Redacted.value(configured.apiKey)).toBe("e2b-api-key")
       const templateError = yield* loadConfig({ ...environment, E2B_TEMPLATE_ID: "" }).pipe(Effect.flip)

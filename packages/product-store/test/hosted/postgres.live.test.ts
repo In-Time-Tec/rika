@@ -25,6 +25,8 @@ import {
 import { AssignmentRevision } from "@rika/product/executor-assignment"
 import { ExecutorAssignments, type Access, type Version } from "@rika/product/executor-assignments"
 import { HostedStore } from "@rika/product/hosted-store"
+import { EnvironmentStore } from "@rika/product/environment-store"
+import { EnvironmentReferenceId, SourceCommitSha, resolveEnvironmentReferences } from "@rika/product/environment-policy"
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined
@@ -131,6 +133,199 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               createdByUserId: ids.user,
               now: at(0),
             })
+            const environments = yield* EnvironmentStore
+            const encrypted = (seed: number) => ({
+              keyVersion: 1 as const,
+              nonce: new Uint8Array(12).fill(seed),
+              ciphertext: new Uint8Array([seed, seed + 1]),
+              authenticationTag: new Uint8Array(16).fill(seed + 2),
+            })
+            const valueInput = {
+              id: EnvironmentReferenceId.make("environment-live"),
+              ownerId: ids.organizationOwner,
+              scope: "organization" as const,
+              scopeId: ids.organizationOwner,
+              name: "LIVE_SECRET",
+              classification: "secret" as const,
+              phases: ["setup", "runtime"] as const,
+              valueDigest: `sha256:${"a".repeat(64)}` as const,
+              encrypted: encrypted(1),
+              userId: ids.user,
+              actorUserId: ids.user,
+            }
+            expect(yield* environments.putValue(valueInput)).toMatchObject({ revision: "1", state: "active" })
+            expect(
+              yield* environments.putValue({
+                ...valueInput,
+                valueDigest: `sha256:${"b".repeat(64)}`,
+                encrypted: encrypted(4),
+              }),
+            ).toMatchObject({ revision: "2", valueDigest: `sha256:${"b".repeat(64)}` })
+            const rotations = yield* Effect.all(
+              [
+                environments.putValue({
+                  ...valueInput,
+                  valueDigest: `sha256:${"c".repeat(64)}`,
+                  encrypted: encrypted(7),
+                }),
+                environments.putValue({
+                  ...valueInput,
+                  valueDigest: `sha256:${"d".repeat(64)}`,
+                  encrypted: encrypted(10),
+                }),
+              ],
+              { concurrency: 2 },
+            )
+            expect(rotations.map(({ revision }) => revision).sort()).toEqual(["3", "4"])
+            const untrusted = {
+              owner: "In-Time-Tec",
+              commitSha: SourceCommitSha.make("c".repeat(40)),
+              fork: true,
+              trustedRef: false,
+            }
+            const beforeApproval = yield* environments.resolvePhase({
+              ownerId: ids.organizationOwner,
+              projectId: ids.project,
+              userId: ids.user,
+              phase: "setup",
+              source: untrusted,
+            })
+            expect(beforeApproval.egress).toEqual({ phase: "setup", allow: [] })
+            expect(
+              resolveEnvironmentReferences({
+                ...beforeApproval,
+                phase: "setup",
+                source: untrusted,
+              }),
+            ).toEqual([])
+            yield* environments.putApproval({
+              ownerId: ids.organizationOwner,
+              projectId: ids.project,
+              sourceOwner: untrusted.owner,
+              sourceCommitSha: untrusted.commitSha,
+              phase: "setup",
+              actorUserId: ids.user,
+            })
+            const approved = yield* environments.resolvePhase({
+              ownerId: ids.organizationOwner,
+              projectId: ids.project,
+              userId: ids.user,
+              phase: "setup",
+              source: untrusted,
+            })
+            expect(approved.organizationPersonalOverrides).toBe(true)
+            yield* environments.putOrganizationPolicy({
+              ownerId: ids.organizationOwner,
+              personalOverrides: false,
+              actorUserId: ids.user,
+            })
+            expect(
+              (yield* environments.resolvePhase({
+                ownerId: ids.organizationOwner,
+                projectId: ids.project,
+                userId: ids.user,
+                phase: "setup",
+                source: untrusted,
+              })).organizationPersonalOverrides,
+            ).toBe(false)
+            expect(
+              resolveEnvironmentReferences({ ...approved, phase: "setup", source: untrusted }).map(
+                (reference) => reference.name,
+              ),
+            ).toEqual(["LIVE_SECRET"])
+            yield* environments.putEgress({
+              ownerId: ids.organizationOwner,
+              policy: { phase: "setup", allow: ["registry.npmjs.org"] },
+              actorUserId: ids.user,
+            })
+            expect(
+              (yield* environments.resolvePhase({
+                ownerId: ids.organizationOwner,
+                projectId: ids.project,
+                userId: ids.user,
+                phase: "setup",
+                source: untrusted,
+              })).egress,
+            ).toEqual({ phase: "setup", allow: ["registry.npmjs.org"] })
+            yield* environments.putEgress({
+              ownerId: ids.organizationOwner,
+              projectId: ids.project,
+              policy: { phase: "setup", allow: ["github.com"] },
+              actorUserId: ids.user,
+            })
+            expect(
+              (yield* environments.resolvePhase({
+                ownerId: ids.organizationOwner,
+                projectId: ids.project,
+                userId: ids.user,
+                phase: "setup",
+                source: untrusted,
+              })).egress,
+            ).toEqual({ phase: "setup", allow: ["github.com"] })
+            expect(
+              (yield* environments.resolvePhase({
+                ownerId: ids.organizationOwner,
+                projectId: ids.project,
+                userId: ids.user,
+                phase: "runtime",
+                source: untrusted,
+              })).egress,
+            ).toEqual({ phase: "runtime", allow: [] })
+            const changedSource = { ...untrusted, commitSha: SourceCommitSha.make("d".repeat(40)) }
+            const changed = yield* environments.resolvePhase({
+              ownerId: ids.organizationOwner,
+              projectId: ids.project,
+              userId: ids.user,
+              phase: "setup",
+              source: changedSource,
+            })
+            expect(resolveEnvironmentReferences({ ...changed, phase: "setup", source: changedSource })).toEqual([])
+            expect(
+              yield* environments.revokeApproval({
+                ownerId: ids.organizationOwner,
+                projectId: ids.project,
+                sourceOwner: untrusted.owner,
+                sourceCommitSha: untrusted.commitSha,
+                phase: "setup",
+                actorUserId: ids.user,
+              }),
+            ).toMatchObject({ revokedAt: expect.any(String) })
+            const revokedApproval = yield* environments.resolvePhase({
+              ownerId: ids.organizationOwner,
+              projectId: ids.project,
+              userId: ids.user,
+              phase: "setup",
+              source: untrusted,
+            })
+            expect(resolveEnvironmentReferences({ ...revokedApproval, phase: "setup", source: untrusted })).toEqual([])
+            expect(
+              yield* environments.revokeValue({
+                ownerId: ids.organizationOwner,
+                userId: ids.user,
+                scope: "organization",
+                scopeId: ids.organizationOwner,
+                name: "LIVE_SECRET",
+                actorUserId: ids.user,
+              }),
+            ).toMatchObject({ revision: "5", state: "revoked" })
+            expect(
+              (yield* environments.resolvePhase({
+                ownerId: ids.organizationOwner,
+                projectId: ids.project,
+                userId: ids.user,
+                phase: "setup",
+                source: untrusted,
+              })).candidates,
+            ).toEqual([])
+            const revokedMaterial = yield* Effect.promise(() =>
+              migrated!.query(
+                `SELECT key_version, nonce, ciphertext, authentication_tag
+                 FROM rika_hosted_environment_values WHERE id = 'environment-live'`,
+              ),
+            )
+            expect(revokedMaterial.rows).toEqual([
+              { key_version: null, nonce: null, ciphertext: null, authentication_tag: null },
+            ])
             yield* store.registerDevice({
               id: ids.device,
               userId: ids.user,

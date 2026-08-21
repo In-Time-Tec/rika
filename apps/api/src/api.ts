@@ -7,6 +7,13 @@ import {
   LocalRunnerPollResult,
   RemoteThreadCreationPreference,
 } from "@rika/product/local-runner-registration"
+import {
+  EnvironmentClassification,
+  EnvironmentPhase,
+  EnvironmentScope,
+  EnvironmentValueName,
+  SourceCommitSha,
+} from "@rika/product/environment-policy"
 import { HttpRouter, HttpServer, HttpServerRequest } from "effect/unstable/http"
 import {
   HttpApi,
@@ -17,6 +24,7 @@ import {
   HttpApiSchema,
 } from "effect/unstable/httpapi"
 import { accountAccess, type AccountAccess, type HttpDependencies } from "./http"
+import { HostedEnvironmentError } from "./hosted-environment"
 import { HostedModelProvider, HostedProviderCredentialError } from "./hosted-provider-credentials"
 
 const Message = { message: Schema.String }
@@ -90,6 +98,58 @@ const ProviderCredentialResponse = Schema.Struct({
   credentialIdentity: Schema.String,
 })
 const ProviderCredentialsResponse = Schema.Struct({ credentials: Schema.Array(ProviderCredentialResponse) })
+const EnvironmentOwnerRequest = {
+  owner: ConnectionOwner,
+  project_id: Schema.optionalKey(Schema.NonEmptyString),
+}
+const EnvironmentValueRequest = strict(
+  Schema.Struct({
+    ...EnvironmentOwnerRequest,
+    scope: EnvironmentScope,
+    classification: EnvironmentClassification,
+    phases: Schema.Array(EnvironmentPhase).check(Schema.isMinLength(1), Schema.isMaxLength(2)),
+    value: Schema.Redacted(Schema.NonEmptyString, { disallowJsonEncode: true }),
+  }),
+)
+const EnvironmentRevokeRequest = strict(Schema.Struct({ ...EnvironmentOwnerRequest, scope: EnvironmentScope }))
+const EnvironmentReferenceResponse = Schema.Struct({
+  id: Schema.String,
+  ownerId: Schema.String,
+  projectId: Schema.optionalKey(Schema.String),
+  scope: EnvironmentScope,
+  scopeId: Schema.String,
+  name: EnvironmentValueName,
+  classification: EnvironmentClassification,
+  phases: Schema.Array(EnvironmentPhase),
+  revision: Schema.String,
+  valueDigest: Schema.String,
+  state: Schema.Literals(["active", "revoked"]),
+  updatedByUserId: Schema.String,
+  updatedAt: Schema.String,
+})
+const EnvironmentPolicyRequest = strict(
+  Schema.Struct({ ...EnvironmentOwnerRequest, personal_overrides: Schema.Boolean }),
+)
+const SourceApprovalRequest = strict(
+  Schema.Struct({
+    ...EnvironmentOwnerRequest,
+    source_owner: Schema.NonEmptyString,
+    source_commit_sha: SourceCommitSha,
+    phase: EnvironmentPhase,
+  }),
+)
+const SourceApprovalResponse = Schema.Struct({
+  ownerId: Schema.String,
+  projectId: Schema.optionalKey(Schema.String),
+  sourceOwner: Schema.String,
+  sourceCommitSha: SourceCommitSha,
+  phase: EnvironmentPhase,
+  approvedByUserId: Schema.String,
+  approvedAt: Schema.String,
+  revokedAt: Schema.NullOr(Schema.String),
+})
+const EgressRequest = strict(Schema.Struct({ ...EnvironmentOwnerRequest, allow: Schema.Array(Schema.NonEmptyString) }))
+const EgressResponse = Schema.Struct({ phase: EnvironmentPhase, allow: Schema.Array(Schema.String) })
 
 export class CurrentAccess extends Context.Service<
   CurrentAccess,
@@ -170,6 +230,39 @@ class ProductGroup extends HttpApiGroup.make("product", { topLevel: true })
       success: ProviderCredentialsResponse,
       error: [Forbidden, Unprocessable, ServiceUnavailable],
     }),
+    HttpApiEndpoint.put("putEnvironment", "/api/v1/environment/:name", {
+      params: { name: EnvironmentValueName },
+      payload: EnvironmentValueRequest,
+      success: EnvironmentReferenceResponse,
+      error: [Forbidden, NotFound, Unprocessable, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.delete("revokeEnvironment", "/api/v1/environment/:name", {
+      params: { name: EnvironmentValueName },
+      payload: EnvironmentRevokeRequest,
+      success: EnvironmentReferenceResponse,
+      error: [Forbidden, NotFound, Unprocessable, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.put("putEnvironmentPolicy", "/api/v1/environment-policy", {
+      payload: EnvironmentPolicyRequest,
+      success: HttpApiSchema.NoContent,
+      error: [Forbidden, NotFound, Unprocessable, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.put("approveEnvironmentSource", "/api/v1/environment-approvals", {
+      payload: SourceApprovalRequest,
+      success: SourceApprovalResponse,
+      error: [Forbidden, NotFound, Unprocessable, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.delete("revokeEnvironmentSource", "/api/v1/environment-approvals", {
+      payload: SourceApprovalRequest,
+      success: SourceApprovalResponse,
+      error: [Forbidden, NotFound, Unprocessable, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.put("putEgress", "/api/v1/egress/:phase", {
+      params: { phase: EnvironmentPhase },
+      payload: EgressRequest,
+      success: EgressResponse,
+      error: [Forbidden, NotFound, Unprocessable, ServiceUnavailable],
+    }),
   )
   .middleware(Authorization) {}
 
@@ -217,7 +310,7 @@ const authenticatedPrincipal = (access: CurrentAccess["Service"]) => ({
   ...(access.principal.dpopJkt === undefined ? {} : { dpopJkt: access.principal.dpopJkt }),
 })
 
-const providerOwner = (owner: typeof ConnectionOwner.Type, access: CurrentAccess["Service"]) =>
+const hostedOwner = (owner: typeof ConnectionOwner.Type, access: CurrentAccess["Service"]) =>
   owner.kind === "personal"
     ? { _tag: "PersonalOwner" as const, userId: BetterAuthUserId.make(access.principal.userId) }
     : {
@@ -231,6 +324,13 @@ const providerCredentialFailure = (error: HostedProviderCredentialError) => {
     return Unprocessable.make({ message: error.message })
   }
   return ServiceUnavailable.make({ message: "Provider credential service unavailable" })
+}
+
+const environmentFailure = (error: HostedEnvironmentError) => {
+  if (error.kind === "forbidden") return Forbidden.make({ message: "Environment operation was rejected" })
+  if (error.kind === "missing") return NotFound.make({ message: error.message })
+  if (error.kind === "invalid") return Unprocessable.make({ message: error.message })
+  return ServiceUnavailable.make({ message: "Environment service unavailable" })
 }
 
 const productHandlers = (dependencies: HttpDependencies) =>
@@ -401,7 +501,7 @@ const productHandlers = (dependencies: HttpDependencies) =>
           return yield* dependencies.credentials
             .put({
               principal: authenticatedPrincipal(access),
-              owner: providerOwner(payload.owner, access),
+              owner: hostedOwner(payload.owner, access),
               provider: params.provider,
               apiKey: payload.api_key,
             })
@@ -419,7 +519,7 @@ const productHandlers = (dependencies: HttpDependencies) =>
           return yield* dependencies.credentials
             .revoke({
               principal: authenticatedPrincipal(access),
-              owner: providerOwner(payload.owner, access),
+              owner: hostedOwner(payload.owner, access),
               provider: params.provider,
             })
             .pipe(Effect.mapError(providerCredentialFailure))
@@ -436,10 +536,116 @@ const productHandlers = (dependencies: HttpDependencies) =>
           const credentials = yield* dependencies.credentials
             .list({
               principal: authenticatedPrincipal(access),
-              owner: providerOwner(payload.owner, access),
+              owner: hostedOwner(payload.owner, access),
             })
             .pipe(Effect.mapError(providerCredentialFailure))
           return { credentials: [...credentials] }
+        }),
+      putEnvironment: ({ params, payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          if (dependencies.environment === undefined)
+            return yield* ServiceUnavailable.make({ message: "Environment service unavailable" })
+          return yield* dependencies.environment
+            .put({
+              principal: authenticatedPrincipal(access),
+              owner: hostedOwner(payload.owner, access),
+              ...(payload.project_id === undefined ? {} : { projectId: payload.project_id }),
+              scope: payload.scope,
+              name: params.name,
+              classification: payload.classification,
+              phases: payload.phases,
+              value: payload.value,
+            })
+            .pipe(Effect.mapError(environmentFailure))
+        }),
+      revokeEnvironment: ({ params, payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          if (dependencies.environment === undefined)
+            return yield* ServiceUnavailable.make({ message: "Environment service unavailable" })
+          return yield* dependencies.environment
+            .revoke({
+              principal: authenticatedPrincipal(access),
+              owner: hostedOwner(payload.owner, access),
+              ...(payload.project_id === undefined ? {} : { projectId: payload.project_id }),
+              scope: payload.scope,
+              name: params.name,
+            })
+            .pipe(Effect.mapError(environmentFailure))
+        }),
+      putEnvironmentPolicy: ({ payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          if (dependencies.environment === undefined)
+            return yield* ServiceUnavailable.make({ message: "Environment service unavailable" })
+          yield* dependencies.environment
+            .putOrganizationPolicy({
+              principal: authenticatedPrincipal(access),
+              owner: hostedOwner(payload.owner, access),
+              ...(payload.project_id === undefined ? {} : { projectId: payload.project_id }),
+              personalOverrides: payload.personal_overrides,
+            })
+            .pipe(Effect.mapError(environmentFailure))
+        }),
+      approveEnvironmentSource: ({ payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          if (dependencies.environment === undefined)
+            return yield* ServiceUnavailable.make({ message: "Environment service unavailable" })
+          return yield* dependencies.environment
+            .approveSource({
+              principal: authenticatedPrincipal(access),
+              owner: hostedOwner(payload.owner, access),
+              ...(payload.project_id === undefined ? {} : { projectId: payload.project_id }),
+              sourceOwner: payload.source_owner,
+              sourceCommitSha: payload.source_commit_sha,
+              phase: payload.phase,
+            })
+            .pipe(Effect.mapError(environmentFailure))
+        }),
+      revokeEnvironmentSource: ({ payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          if (dependencies.environment === undefined)
+            return yield* ServiceUnavailable.make({ message: "Environment service unavailable" })
+          return yield* dependencies.environment
+            .revokeSourceApproval({
+              principal: authenticatedPrincipal(access),
+              owner: hostedOwner(payload.owner, access),
+              ...(payload.project_id === undefined ? {} : { projectId: payload.project_id }),
+              sourceOwner: payload.source_owner,
+              sourceCommitSha: payload.source_commit_sha,
+              phase: payload.phase,
+            })
+            .pipe(Effect.mapError(environmentFailure))
+        }),
+      putEgress: ({ params, payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          if (dependencies.environment === undefined)
+            return yield* ServiceUnavailable.make({ message: "Environment service unavailable" })
+          return yield* dependencies.environment
+            .putEgress({
+              principal: authenticatedPrincipal(access),
+              owner: hostedOwner(payload.owner, access),
+              ...(payload.project_id === undefined ? {} : { projectId: payload.project_id }),
+              phase: params.phase,
+              allow: payload.allow,
+            })
+            .pipe(Effect.mapError(environmentFailure))
         }),
     }),
   )
@@ -451,7 +657,10 @@ export const isRikaApiPath = (pathname: string) =>
   pathname === "/api/v1/me/context" ||
   pathname === "/api/v1/thread-sessions" ||
   pathname === "/api/v1/models" ||
+  pathname === "/api/v1/environment-policy" ||
+  pathname === "/api/v1/environment-approvals" ||
   pathname === "/api/v1/provider-credentials/list" ||
+  /^\/api\/v1\/(environment|egress)\/[^/]+$/.test(pathname) ||
   /^\/api\/v1\/provider-credentials\/[^/]+$/.test(pathname) ||
   /^\/api\/v1\/local-runners\/[^/]+(?:\/remote-thread-creation|\/admissions)?$/.test(pathname) ||
   /^\/api\/v1\/threads\/[^/]+\/local-executor-admissions$/.test(pathname)

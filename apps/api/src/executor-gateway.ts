@@ -41,6 +41,7 @@ import {
   Semaphore,
   Stream,
 } from "effect"
+import type { EnvironmentPhase } from "@rika/product/environment-policy"
 
 export interface Socket {
   readonly send: (message: string) => unknown
@@ -155,6 +156,24 @@ export interface LifecycleStore {
   readonly prepare: (input: ExecuteInput) => Effect.Effect<void, GatewayError>
 }
 
+export interface PhaseEnvironmentGrant {
+  readonly digest: string
+  readonly values: Readonly<Record<string, Redacted.Redacted<string>>>
+  readonly redactedNames: ReadonlyArray<string>
+}
+
+export interface PhaseAuthority {
+  readonly activate: <A, R>(
+    access: AccessWire,
+    phase: EnvironmentPhase,
+    use: (grant: PhaseEnvironmentGrant) => Effect.Effect<A, GatewayError, R>,
+  ) => Effect.Effect<A, GatewayError, R>
+  readonly replace: (key: {
+    readonly assignmentId: string
+    readonly generation: number
+  }) => Effect.Effect<void, GatewayError>
+}
+
 const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(ExecutorMessage))
 const encode = Schema.encodeSync(Schema.fromJsonString(ApiMessage))
 const equivalentLifecycle = Schema.toEquivalence(CellLifecycleFrameSchema)
@@ -229,6 +248,7 @@ const failure = (socket: Socket, message: ExecutorMessageValue, error: Controlle
 export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   controller: Controller,
   lifecycle: LifecycleStore,
+  phases: PhaseAuthority,
 ) {
   const sessions = yield* Ref.make(new Map<string, Session>())
   const assignments = yield* Ref.make(new Map<Socket, string>())
@@ -248,6 +268,31 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         ),
     )
   })
+
+  const grant = (
+    session: Session,
+    phase: EnvironmentPhase,
+    operationKey: string | null,
+  ): Effect.Effect<void, GatewayError> =>
+    phases.activate(session.access, phase, (environment) =>
+      Effect.try({
+        try: () => {
+          session.socket.send(
+            encode({
+              _tag: "PhaseEnvironmentGranted",
+              phase,
+              digest: environment.digest,
+              operationKey,
+              values: Object.fromEntries(
+                Object.entries(environment.values).map(([name, value]) => [name, Redacted.value(value)]),
+              ),
+              redactedNames: environment.redactedNames,
+            }),
+          )
+        },
+        catch: () => GatewayError.make({ kind: "transport", message: "Could not authorize executor phase" }),
+      }),
+    )
 
   const hydrate = Effect.fn("ExecutorGateway.hydrate")(function* (input: ExecuteInput) {
     const retained = yield* lifecycle.load(input.assignmentId, input.operationKey)
@@ -691,12 +736,12 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     }
     const acknowledged = yield* Effect.result(controller.validateAccess(redactAccess(successor)))
     if (acknowledged._tag === "Failure") return
-    yield* controller
+    yield* phases
       .replace({
         assignmentId: message.access.fence.assignmentId,
         generation: message.access.fence.assignmentGeneration,
       })
-      .pipe(Effect.catchCause(() => Effect.void))
+      .pipe(Effect.ignoreCause)
   })
 
   const handle = Effect.fn("ExecutorGateway.handle")(function* (socket: Socket, message: ExecutorMessageValue) {
@@ -709,7 +754,15 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           access: { version: 1, fence: welcome.fence, leaseEpoch: welcome.leaseEpoch, sessionToken },
           leaseExpiresAt: welcome.leaseExpiresAt,
         })
-        if (registered) socket.send(encode({ _tag: "ExecutorWelcome", welcome: { ...welcome, sessionToken } }))
+        if (registered) {
+          const session = {
+            socket,
+            access: { version: 1 as const, fence: welcome.fence, leaseEpoch: welcome.leaseEpoch, sessionToken },
+            leaseExpiresAt: welcome.leaseExpiresAt,
+          }
+          socket.send(encode({ _tag: "ExecutorWelcome", welcome: { ...welcome, sessionToken } }))
+          yield* grant(session, "setup", null)
+        }
         return
       }
       case "ExecutorReconnect": {
@@ -726,6 +779,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
             leaseExpiresAt: welcome.leaseExpiresAt,
           }
           socket.send(encode({ _tag: "ExecutorReconnected", welcome }))
+          yield* grant(session, "runtime", null)
           yield* replayPending(session)
         }
         return
@@ -923,6 +977,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           })
         if ((yield* Clock.currentTimeMillis) >= session.leaseExpiresAt) return yield* expired()
         yield* controller.validateAccess(redactAccess(session.access)).pipe(Effect.mapError(accessFailure))
+        yield* grant(session, "runtime", input.operationKey)
         yield* lifecycle.prepare(input)
         yield* hydrate(input)
         const result = yield* Deferred.make<ExecutionResult, GatewayError>()

@@ -8,11 +8,13 @@ import { assignmentInput, controller, createAssignment, makeHarness, readAssignm
 import { provideLayer } from "./support/layer"
 
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+const setupEgress = { phase: "setup", allow: ["github.com"] } as const
+const runtimeEgress = { phase: "runtime", allow: ["api.github.com"] } as const
 
 const provision = Effect.fn("test.provision")(function* () {
   const service = yield* controller
   const assignment = yield* createAssignment()
-  return yield* service.provision(assignment.id)
+  return yield* service.provision(assignment.id, setupEgress)
 })
 
 const authenticate = Effect.fn("test.authenticate")(function* (
@@ -54,8 +56,8 @@ describe("Controller", () => {
     return Effect.gen(function* () {
       const service = yield* controller
       yield* createAssignment()
-      const first = yield* service.provision(assignmentInput.id)
-      const second = yield* service.provision(assignmentInput.id)
+      const first = yield* service.provision(assignmentInput.id, setupEgress)
+      const second = yield* service.provision(assignmentInput.id, setupEgress)
       expect(first).toEqual(second)
       expect(first).toMatchObject({
         assignmentId: "assignment-1",
@@ -114,7 +116,7 @@ describe("Controller", () => {
     return Effect.gen(function* () {
       const service = yield* controller
       yield* createAssignment()
-      expect(yield* Effect.flip(service.provision(assignmentInput.id))).toMatchObject({
+      expect(yield* Effect.flip(service.provision(assignmentInput.id, setupEgress))).toMatchObject({
         kind: "provider",
         message: "Assignment template build is not approved",
       })
@@ -129,9 +131,9 @@ describe("Controller", () => {
       const service = yield* controller
       yield* provision()
       const first = yield* authenticate(harness, 1)
-      expect((yield* service.provision("assignment-1")).state).toBe("running")
+      expect((yield* service.provision("assignment-1", runtimeEgress)).state).toBe("running")
       expect((yield* service.pause({ assignmentId: "assignment-1", generation: 1 })).state).toBe("paused")
-      expect((yield* service.provision("assignment-1")).state).toBe("provisioning")
+      expect((yield* service.provision("assignment-1", runtimeEgress)).state).toBe("provisioning")
       expect(
         (yield* Effect.flip(
           service.heartbeat({ version: 1, access: first.access, cursor: { sequence: 1, value: "stale" } }),
@@ -157,6 +159,26 @@ describe("Controller", () => {
     }).pipe(provideLayer(harness.layer))
   })
 
+  it.effect("switches an authenticated sandbox from setup to separately authorized runtime egress", () => {
+    const harness = makeHarness()
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* provision()
+      const { access } = yield* authenticate(harness, 1)
+      yield* service.activatePhase(access, runtimeEgress)
+      expect(harness.provider.networks).toEqual([
+        {
+          sandboxId: "sandbox-1",
+          allowedEgress: ["api.example.test", "api.github.com"],
+        },
+      ])
+      expect(
+        (yield* Effect.flip(service.activatePhase(access, { phase: "runtime", allow: ["169.254.169.254"] }))).kind,
+      ).toBe("protocol")
+      expect(harness.provider.networks).toHaveLength(1)
+    }).pipe(provideLayer(harness.layer))
+  })
+
   it.effect("keeps durable pause fencing and retries an unknown provider pause outcome", () => {
     const harness = makeHarness()
     return Effect.gen(function* () {
@@ -169,7 +191,7 @@ describe("Controller", () => {
       harness.provider.pauseFailure = false
       expect((yield* service.pause({ assignmentId: "assignment-1", generation: 1 })).state).toBe("paused")
       expect(harness.provider.pauses).toEqual(["sandbox-1", "sandbox-1"])
-      expect((yield* service.provision("assignment-1")).state).toBe("provisioning")
+      expect((yield* service.provision("assignment-1", runtimeEgress)).state).toBe("provisioning")
     }).pipe(provideLayer(harness.layer))
   })
 
@@ -242,7 +264,7 @@ describe("Controller", () => {
       expect(reconnected.cursor).toEqual({ sequence: 4, value: "executor:4" })
       expect(reconnected.leaseEpoch).toBe(first.access.leaseEpoch + 1)
       expect((yield* Effect.flip(service.reconnect(first.access))).kind).toBe("fenced")
-      const replacement = yield* service.replace({ assignmentId: "assignment-1", generation: 1 })
+      const replacement = yield* service.replace({ assignmentId: "assignment-1", generation: 1 }, runtimeEgress)
       expect(replacement).toMatchObject({ generation: 2, sandboxId: "sandbox-2", state: "provisioning" })
       expect(harness.provider.kills).toContain("sandbox-1")
       expect((yield* Effect.flip(service.reconnect(first.access))).kind).toBe("fenced")
@@ -295,7 +317,7 @@ describe("Controller", () => {
       const service = yield* controller
       const assignments = yield* ExecutorAssignments
       yield* assignments.create({ ...assignmentInput, checkout: null })
-      yield* service.provision(assignmentInput.id)
+      yield* service.provision(assignmentInput.id, setupEgress)
       const { access } = yield* authenticate(harness, 1)
 
       expect(yield* Effect.flip(service.checkout(access))).toMatchObject({
@@ -335,7 +357,7 @@ describe("Controller", () => {
     return Effect.gen(function* () {
       const service = yield* controller
       yield* createAssignment()
-      expect(yield* service.provision("assignment-1")).toMatchObject({
+      expect(yield* service.provision("assignment-1", setupEgress)).toMatchObject({
         sandboxId: "sandbox-a-adopt",
         state: "provisioning",
       })
@@ -366,7 +388,7 @@ describe("Controller", () => {
     return Effect.gen(function* () {
       const service = yield* controller
       yield* createAssignment()
-      expect((yield* Effect.flip(service.provision("assignment-1"))).kind).toBe("provider")
+      expect((yield* Effect.flip(service.provision("assignment-1", setupEgress))).kind).toBe("provider")
       expect(harness.provider.bootstraps).toEqual([])
       expect(harness.provider.kills).toEqual([])
     }).pipe(provideLayer(harness.layer))
@@ -393,7 +415,7 @@ describe("Controller", () => {
     return Effect.gen(function* () {
       const service = yield* controller
       yield* createAssignment()
-      expect((yield* Effect.flip(service.provision("assignment-1"))).kind).toBe("provider")
+      expect((yield* Effect.flip(service.provision("assignment-1", setupEgress))).kind).toBe("provider")
       expect(harness.provider.bootstraps).toEqual([])
       expect(harness.provider.kills).toEqual([])
     }).pipe(provideLayer(harness.layer))
@@ -437,7 +459,7 @@ describe("Controller", () => {
       const reconnected = yield* service.reconnect(access)
       const renewed = { ...access, leaseEpoch: reconnected.leaseEpoch }
       yield* service.validateAccess(renewed)
-      yield* service.replace({ assignmentId: "assignment-1", generation: 1 })
+      yield* service.replace({ assignmentId: "assignment-1", generation: 1 }, runtimeEgress)
       expect((yield* Effect.flip(service.validateAccess(renewed))).kind).toBe("fenced")
     }).pipe(provideLayer(harness.layer))
   })

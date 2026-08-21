@@ -8,6 +8,7 @@ import type { AccessWire, BindingOutcome, CellRequest, CellResponse } from "./pr
 interface Runtime {
   readonly digest: string
   readonly cells: Cells["Service"]
+  readonly executor: CellExecutor["Service"]
   readonly proxy: BindingProxy.Interface
 }
 
@@ -18,6 +19,7 @@ export interface Options {
   readonly read: (operationKey: string) => Effect.Effect<CellState | undefined, CellError>
   readonly write: (operationKey: string, state: CellState) => Effect.Effect<void, CellError>
   readonly sendBinding: BindingProxy.Transport["send"]
+  readonly environment?: Readonly<Record<string, string>>
 }
 
 export interface Interface {
@@ -33,6 +35,7 @@ export interface Interface {
     readonly outcome: BindingOutcome
   }) => Effect.Effect<BindingOutcome, BindingProxy.BindingProxyError>
   readonly replayBindings: (access: AccessWire) => Effect.Effect<void, BindingProxy.BindingProxyError>
+  readonly restart: (sessionId: string) => Effect.Effect<void>
 }
 
 export const make: (options: Options) => Effect.Effect<Interface, never, Crypto.Crypto | Scope.Scope> = Effect.fn(
@@ -62,6 +65,7 @@ export const make: (options: Options) => Effect.Effect<Interface, never, Crypto.
             trustMode: "trusted-local",
             servers: [],
             registry: BindingProxy.layer(proxy.registry),
+            environment: options.environment ?? {},
           }).pipe(Layer.provide(BunServices.layer)),
         )
         const executor = Context.get(kernelContext, CellExecutor)
@@ -106,6 +110,7 @@ export const make: (options: Options) => Effect.Effect<Interface, never, Crypto.
         const created = {
           digest: request.bindings.digest,
           cells: Context.get(cellsContext, Cells),
+          executor,
           proxy,
         }
         yield* Ref.set(current, created)
@@ -129,5 +134,9 @@ export const make: (options: Options) => Effect.Effect<Interface, never, Crypto.
     Ref.get(current).pipe(
       Effect.flatMap((hosted) => (hosted === undefined ? Effect.void : hosted.proxy.replay(access))),
     )
-  return { execute, completeBinding, replayBindings } satisfies Interface
+  const restart: Interface["restart"] = (sessionId) =>
+    Ref.get(current).pipe(
+      Effect.flatMap((hosted) => (hosted === undefined ? Effect.void : hosted.executor.restart(sessionId))),
+    )
+  return { execute, completeBinding, replayBindings, restart } satisfies Interface
 })

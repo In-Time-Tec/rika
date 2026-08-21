@@ -19,6 +19,7 @@ import { Inspector, InspectionError } from "../../../packages/e2b-executor/src/c
 import { Provider, type BootstrapRequest, type CreateRequest } from "../../../packages/e2b-executor/src/provider"
 import { type Gateway, type Socket } from "../../api/src/executor-gateway"
 import { Executor, service as executorService } from "../../api/src/executor"
+import { HostedEnvironment, layer as hostedEnvironmentLayer } from "../../api/src/hosted-environment"
 import { HostedProduct, layer as hostedProductLayer } from "../../api/src/hosted-product"
 import { testLayer as hostedModelRegistryTestLayer } from "../../api/src/hosted-model-registry"
 import { layer as localExecutorLayer } from "../../api/src/local-executor"
@@ -40,7 +41,7 @@ import {
 } from "../src/hosted/hosted-contract"
 import { generate } from "../src/hosted/hosted-dpop"
 import { Service as ProductService } from "@rika/product/product-operation-service"
-import { BetterAuthUserId } from "@rika/product/hosted-model"
+import { BetterAuthUserId, OrganizationId } from "@rika/product/hosted-model"
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined
@@ -102,6 +103,22 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
           migrated!.query(
             `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
             VALUES ($1, 'Rika User', 'rika@example.test', true, now(), now())`,
+            [account.user.id],
+          ),
+        )
+        yield* Effect.promise(() =>
+          migrated!.query(
+            `WITH inserted_organization AS (
+                INSERT INTO "organization" (id, name, slug, created_at)
+                VALUES ('organization-cli-e2b', 'Rika Organization', 'rika-organization', now())
+                RETURNING id
+              ), inserted_member AS (
+                INSERT INTO "member" (id, organization_id, user_id, role, created_at)
+                SELECT 'member-cli-e2b', id, $1, 'owner', now() FROM inserted_organization
+                RETURNING organization_id
+              )
+              INSERT INTO rika_hosted_owners (id, kind, organization_id)
+              SELECT 'organization-owner-cli-e2b', 'organization', organization_id FROM inserted_member`,
             [account.user.id],
           ),
         )
@@ -175,6 +192,7 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
                 )
               }),
             connect: (sandboxId) => Effect.succeed({ sandboxId, state: "running" as const }),
+            updateNetwork: () => Effect.void,
             pauseFilesystem: () => Effect.succeed(true),
             kill: () => Effect.succeed(true),
             touch: () => Effect.void,
@@ -187,7 +205,7 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
           templateId: "ar7-template-alias",
           templateBuildId: "template-build-v1-immutable",
           apiUrl: "wss://api.example.test/api/v1/executors",
-          allowedEgress: ["api.example.test", "github.com", "api.github.com"],
+          controlEgress: ["api.example.test"],
         }).pipe(
           Layer.provide(
             Layer.mergeAll(
@@ -215,8 +233,13 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
           templateBuildId: "template-build-v1-immutable",
           providerScope: "integration-test",
         }).pipe(Layer.provide(shared))
+        const environmentLayer = hostedEnvironmentLayer({
+          encryptionKey: Redacted.make(Buffer.alloc(32, 1).toString("base64")),
+          protectedEgressHosts: new Set([new URL(url).hostname]),
+        }).pipe(Layer.provide(shared))
         const executorLayer = executorService.pipe(
           Layer.provide(controller),
+          Layer.provide(environmentLayer),
           Layer.provideMerge(localExecutorLayer.pipe(Layer.provide(shared))),
           Layer.provide(shared),
         )
@@ -235,6 +258,41 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
           owner: { _tag: "PersonalOwner", userId: BetterAuthUserId.make(account.user.id) },
           placement: "e2b",
         })
+        const environment = Context.get(yield* Layer.build(environmentLayer), HostedEnvironment)
+        const environmentPrincipal = { userId: account.user.id, deviceId, clientId }
+        yield* environment.put({
+          principal: environmentPrincipal,
+          owner: { _tag: "PersonalOwner", userId: BetterAuthUserId.make(account.user.id) },
+          scope: "personal",
+          name: "PERSONAL_ONLY",
+          classification: "plain",
+          phases: ["runtime"],
+          value: Redacted.make("personal-value"),
+        })
+        yield* environment.put({
+          principal: environmentPrincipal,
+          owner: {
+            _tag: "OrganizationOwner",
+            organizationId: OrganizationId.make("organization-cli-e2b"),
+          },
+          scope: "organization",
+          name: "ORGANIZATION_ONLY",
+          classification: "plain",
+          phases: ["runtime"],
+          value: Redacted.make("organization-value"),
+        })
+        const environmentOwners = yield* Effect.promise(() =>
+          migrated!.query<{ readonly name: string; readonly ownerKind: string }>(
+            `SELECT environment.name, owner_record.kind AS "ownerKind"
+              FROM rika_hosted_environment_values environment
+              JOIN rika_hosted_owners owner_record ON owner_record.id = environment.owner_id
+              WHERE environment.name IN ('PERSONAL_ONLY', 'ORGANIZATION_ONLY') ORDER BY environment.name`,
+          ),
+        )
+        expect(environmentOwners.rows).toEqual([
+          { name: "ORGANIZATION_ONLY", ownerKind: "organization" },
+          { name: "PERSONAL_ONLY", ownerKind: "personal" },
+        ])
         let credential: Credential | undefined
         const privateJwk = yield* generate()
         const dependencies: HttpDependencies = {
