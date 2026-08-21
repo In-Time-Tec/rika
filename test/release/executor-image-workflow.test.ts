@@ -70,12 +70,19 @@ test("builds one deterministic OCI candidate and canonical SPDX SBOM without reg
 })
 
 test("retains a complete vulnerability report and blocks every fixable HIGH or CRITICAL finding", () => {
+  const extraction = named("review", "Extract OCI candidate for vulnerability scan")
+  expect(extraction?.run).toContain("tar -xf executor-image.oci.tar -C executor-image.oci")
+  expect(extraction?.run).toContain("executor-image.oci/index.json")
+  expect(position("review", "Extract OCI candidate for vulnerability scan")).toBeLessThan(
+    position("review", "Scan candidate vulnerabilities"),
+  )
+
   const scan = steps("review").find((step) => step.uses?.startsWith("aquasecurity/trivy-action@"))
   expect(scan?.uses).toBe("aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25")
   expect(scan?.with).toMatchObject({
     version: "v0.70.0",
     "scan-type": "image",
-    input: "executor-image.oci.tar",
+    input: "executor-image.oci",
     scanners: "vuln",
     "vuln-type": "os,library",
     format: "json",
