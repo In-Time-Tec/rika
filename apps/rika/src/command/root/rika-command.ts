@@ -15,6 +15,7 @@ import { toolCatalogCommand } from "../product/tool-catalog-command"
 import { reviewCommand } from "../product/review-command"
 import { dispatch, type CliOperationService } from "./cli-operation-dispatch"
 import { executeRun, runCommand } from "./noninteractive-run-command"
+import * as LocalRunnerCommand from "./local-runner-command"
 import * as ReleaseUpdate from "../../release/release-update"
 import { version } from "../../platform/application-version"
 
@@ -82,6 +83,9 @@ export const command = Command.make(
     workspace,
     thread,
     ephemeral,
+    noTui: Flag.boolean("no-tui"),
+    allowRemoteThreadCreation: Flag.boolean("allow-remote-thread-creation"),
+    denyRemoteThreadCreation: Flag.boolean("deny-remote-thread-creation"),
     ...streamFlags,
     prompt,
   },
@@ -92,6 +96,25 @@ export const command = Command.make(
     ProductOperation.InvalidInput | ProductOperation.OperationUnavailable,
     FileSystem.FileSystem | CliOperationService | Stdio.Stdio
   > => {
+    if (values.allowRemoteThreadCreation && values.denyRemoteThreadCreation)
+      return Effect.fail(
+        ProductOperation.InvalidInput.make({
+          message: "--allow-remote-thread-creation and --deny-remote-thread-creation are mutually exclusive",
+        }),
+      )
+    if ((values.allowRemoteThreadCreation || values.denyRemoteThreadCreation) && !values.noTui)
+      return Effect.fail(
+        ProductOperation.InvalidInput.make({ message: "remote Thread admission flags require --no-tui" }),
+      )
+    if (values.noTui) {
+      let remoteThreadCreation: "allowed" | "denied" | undefined
+      if (values.allowRemoteThreadCreation) remoteThreadCreation = "allowed"
+      else if (values.denyRemoteThreadCreation) remoteThreadCreation = "denied"
+      return LocalRunnerCommand.dispatch({
+        ...(optionalValue(values.workspace) === undefined ? {} : { workspace: optionalValue(values.workspace) }),
+        ...(remoteThreadCreation === undefined ? {} : { remoteThreadCreation }),
+      })
+    }
     if (values.execute) return executeRun(values)
     if (values.streamJson || values.streamJsonInput || values.streamJsonThinking)
       return Effect.fail(

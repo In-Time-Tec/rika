@@ -1,7 +1,17 @@
 import { describe, expect, test } from "vitest"
-import { serverProcessRole, serverProcessRuntime } from "../src/private-runtime-role"
+import {
+  localExecutorProcessRole,
+  serverProcessRole,
+  serverProcessRuntime,
+  tuiControllerProcessRole,
+} from "../src/private-runtime-role"
 
 describe("private server process role", () => {
+  test("keeps the sibling client roles explicit", () => {
+    expect(tuiControllerProcessRole).toBe("--internal-tui-controller")
+    expect(localExecutorProcessRole).toBe("--internal-local-executor")
+  })
+
   test("gives the normal client and interactive runtime the same public server launch", () => {
     const input = {
       executable: "/usr/bin/bun",

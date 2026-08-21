@@ -1,6 +1,8 @@
 import { Config, Effect, Option } from "effect"
 
-export const serverProcessRole = "--internal-local-executor"
+export const serverProcessRole = "--internal-private-server"
+export const tuiControllerProcessRole = "--internal-tui-controller"
+export const localExecutorProcessRole = "--internal-local-executor"
 
 export interface ServerProcessRuntime {
   readonly executable: string

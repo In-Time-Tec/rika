@@ -1,0 +1,51 @@
+import { Effect, FileSystem, Schema } from "effect"
+import { LocalRunnerError, RemoteThreadCreation } from "./local-runner-contract"
+
+const PreferenceFile = Schema.Struct({
+  formatVersion: Schema.Literal(1),
+  checkouts: Schema.Record(Schema.String, RemoteThreadCreation),
+})
+
+export interface Store {
+  readonly get: (deviceId: string, checkoutFingerprint: string) => Effect.Effect<RemoteThreadCreation, LocalRunnerError>
+  readonly set: (
+    deviceId: string,
+    checkoutFingerprint: string,
+    preference: RemoteThreadCreation,
+  ) => Effect.Effect<void, LocalRunnerError>
+}
+
+const key = (deviceId: string, checkoutFingerprint: string) => `${deviceId}:${checkoutFingerprint}`
+const failure = (message: string) => LocalRunnerError.make({ message })
+
+export const make = Effect.fn("LocalRunnerPreference.make")(function* (path: string) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const load = Effect.gen(function* () {
+    if (!(yield* fileSystem.exists(path).pipe(Effect.mapError(() => failure("Runner admission could not be read")))))
+      return PreferenceFile.make({ formatVersion: 1, checkouts: {} })
+    return yield* fileSystem.readFileString(path).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(PreferenceFile))),
+      Effect.mapError(() => failure("Runner admission file is corrupt")),
+    )
+  })
+  return {
+    get: (deviceId: string, checkoutFingerprint: string) =>
+      Effect.map(load, (values) => values.checkouts[key(deviceId, checkoutFingerprint)] ?? "denied"),
+    set: (deviceId: string, checkoutFingerprint: string, preference: RemoteThreadCreation) =>
+      Effect.gen(function* () {
+        const current = yield* load
+        const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(PreferenceFile))({
+          formatVersion: 1,
+          checkouts: { ...current.checkouts, [key(deviceId, checkoutFingerprint)]: preference },
+        }).pipe(Effect.mapError(() => failure("Runner admission could not be encoded")))
+        const parent = path.slice(0, Math.max(path.lastIndexOf("/"), 1))
+        const temporary = `${path}.tmp-${process.pid}`
+        yield* fileSystem.makeDirectory(parent, { recursive: true, mode: 0o700 }).pipe(
+          Effect.andThen(fileSystem.writeFileString(temporary, encoded, { mode: 0o600 })),
+          Effect.andThen(fileSystem.rename(temporary, path)),
+          Effect.ensuring(fileSystem.remove(temporary, { force: true }).pipe(Effect.ignore)),
+          Effect.mapError(() => failure("Runner admission could not be saved")),
+        )
+      }),
+  } satisfies Store
+})

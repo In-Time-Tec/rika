@@ -12,12 +12,13 @@ import { clientProcessExitCode } from "../src/client/client-process-exit"
 import { parseJsonLines, readStreamInput } from "../src/command/root/noninteractive-run-command"
 import { run } from "../src/command/root/rika-command"
 import * as HostedCommand from "../src/command/root/hosted-command-dispatch"
+import * as LocalRunnerCommand from "../src/command/root/local-runner-command"
 
 const workspace = process.cwd()
-type Input = ProductInput | HostedCommand.Input
+type Input = ProductInput | HostedCommand.Input | LocalRunnerCommand.Input
 
 const testLayer = (calls: Ref.Ref<ReadonlyArray<Input>>) =>
-  Layer.merge(
+  Layer.mergeAll(
     Layer.succeed(
       Service,
       Service.of({
@@ -30,6 +31,14 @@ const testLayer = (calls: Ref.Ref<ReadonlyArray<Input>>) =>
       HostedCommand.Service,
       HostedCommand.Service.of({
         run: Effect.fn("CommandTest.runHosted")(function* (input) {
+          yield* Ref.update(calls, (current) => [...current, input])
+        }),
+      }),
+    ),
+    Layer.succeed(
+      LocalRunnerCommand.Service,
+      LocalRunnerCommand.Service.of({
+        run: Effect.fn("CommandTest.runLocalRunner")(function* (input) {
           yield* Ref.update(calls, (current) => [...current, input])
         }),
       }),
@@ -267,6 +276,24 @@ it.effect("exposes only the supported model credential providers", () =>
 it.effect("normalizes optional thread-list values", () =>
   Effect.gen(function* () {
     expect(yield* capture(["thread", "list", "--limit", "5"])).toEqual([{ _tag: "Thread", action: "list", limit: 5 }])
+  }),
+)
+
+it.effect("routes headless runner mode and keeps remote Thread creation opt in", () =>
+  Effect.gen(function* () {
+    expect(yield* capture(["--no-tui"])).toEqual([{}])
+    expect(yield* capture(["--no-tui", "--workspace", ".", "--allow-remote-thread-creation"])).toEqual([
+      { workspace, remoteThreadCreation: "allowed" },
+    ])
+    expect(yield* capture(["--no-tui", "--deny-remote-thread-creation"])).toEqual([
+      { remoteThreadCreation: "denied" },
+    ])
+    yield* failsWithoutDispatch(["--allow-remote-thread-creation"])
+    yield* failsWithoutDispatch([
+      "--no-tui",
+      "--allow-remote-thread-creation",
+      "--deny-remote-thread-creation",
+    ])
   }),
 )
 

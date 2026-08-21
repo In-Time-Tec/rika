@@ -15,6 +15,9 @@ import * as DataRoot from "@rika/configuration/canonical-data-root"
 import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
 import { inheritedEnvironment, privateRuntime } from "./private-runtime-launch"
 import * as HostedCommand from "../command/root/hosted-command-dispatch"
+import * as LocalRunnerCommand from "../command/root/local-runner-command"
+import * as LocalRunner from "../local-executor/local-runner"
+import * as HostedProfileStore from "../hosted/hosted-profile-store"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -202,6 +205,39 @@ const hostedCommandLayer = Layer.effect(
   }),
 )
 
+const localRunnerCommandLayer = Layer.effect(
+  LocalRunnerCommand.Service,
+  Effect.gen(function* () {
+    const platform = yield* Effect.context<
+      Crypto.Crypto | FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
+    >()
+    return LocalRunnerCommand.Service.of({
+      run: (input) =>
+        Effect.gen(function* () {
+          const home = yield* Config.string("HOME").pipe(Config.withDefault(process.cwd()))
+          const preferencePath = yield* LocalRunner.preferencePath
+          return yield* LocalRunner.runLocalRunner({
+            workspace: input.workspace ?? process.cwd(),
+            preferencePath,
+            ...(input.remoteThreadCreation === undefined
+              ? {}
+              : { requestedPreference: input.remoteThreadCreation }),
+          }).pipe(
+            Effect.scoped,
+            provideLayerScoped(
+              Layer.merge(HostedProfileStore.layer({ home }), LocalRunner.unavailableAdmissionLayer),
+            ),
+          )
+        }).pipe(
+          Effect.provide(platform),
+          Effect.mapError((error) =>
+            ProductOperation.OperationUnavailable.make({ operation: "LocalRunner", message: error.message }),
+          ),
+        ),
+    })
+  }),
+)
+
 export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<string>) {
   const program = (
     argv === undefined ? Command.run(command, { version }) : Command.runWith(command, { version })(argv)
@@ -219,7 +255,9 @@ export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<s
     }),
   )
   return yield* program.pipe(
-    provideLayerScoped(Layer.merge(dispatcherLayer(argv).pipe(Layer.provide(serverLayer)), hostedCommandLayer)),
+    provideLayerScoped(
+      Layer.mergeAll(dispatcherLayer(argv).pipe(Layer.provide(serverLayer)), hostedCommandLayer, localRunnerCommandLayer),
+    ),
   )
 })
 
