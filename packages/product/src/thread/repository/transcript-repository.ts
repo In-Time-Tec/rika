@@ -7,6 +7,8 @@ import type { PageOptions, ProjectionRecoveryCandidate } from "./transcript-repo
 import type { Unit } from "@rika/transcript/transcript-unit"
 import * as ExecutionProjection from "../../execution/contract/execution-projection"
 
+export type { ProjectionRecoveryCandidate } from "./transcript-repository-options"
+
 export class RepositoryError extends Schema.TaggedError<RepositoryError>()("TranscriptRepositoryError", {
   message: Schema.String,
 }) {}

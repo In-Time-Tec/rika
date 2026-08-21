@@ -5,6 +5,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
+import * as ProductRepositories from "@rika/product-store/postgres-product-repositories"
 import * as HostedTurnWorkerStore from "@rika/product-store/postgres-turn-worker-store"
 import * as HostedExecution from "@rika/execution"
 import * as ExecutionPostgres from "@rika/execution/postgres"
@@ -12,6 +13,7 @@ import * as RemoteCells from "@rika/execution/remote-cells"
 import { type ExecutorConfig, Executor, layer as executorLayer, service as executorService } from "./executor"
 import { HostedOperations, layer as hostedOperationsLayer } from "./hosted-operations"
 import { HostedProduct, layer as hostedProductLayer } from "./hosted-product"
+import { HostedProjectionWorker, layer as hostedProjectionWorkerLayer } from "./hosted-projection-worker"
 import { HostedTurnWorker, layer as hostedTurnWorkerLayer } from "./hosted-turn-worker"
 import { layer as localExecutorLayer } from "./local-executor"
 
@@ -19,6 +21,7 @@ export interface HostedApplicationService {
   readonly product: HostedProduct["Service"]
   readonly operations: HostedOperations["Service"]
   readonly executor: Executor["Service"]
+  readonly projectionWorker: HostedProjectionWorker["Service"]
   readonly turnWorker: HostedTurnWorker["Service"]
   readonly execution: {
     readonly gateway: ExecutionGateway.Interface
@@ -82,6 +85,13 @@ export const layer = (options: {
         }),
       )
       const hostedContext = Context.merge(data, executionContext)
+      const projectionWorkerContext = yield* Layer.build(
+        hostedProjectionWorkerLayer({ concurrency: 32, pollIntervalMillis: 250 }).pipe(
+          Layer.provide(ProductRepositories.projectionLayer),
+          Layer.provide(Layer.succeedContext(hostedContext)),
+        ),
+      )
+      const projectionWorker = Context.get(projectionWorkerContext, HostedProjectionWorker)
       const turnWorkerContext = yield* Layer.build(
         hostedTurnWorkerLayer({
           workerId: options.workerId,
@@ -106,6 +116,7 @@ export const layer = (options: {
         product: Context.get(productContext, HostedProduct),
         operations: Context.get(operationsContext, HostedOperations),
         executor,
+        projectionWorker,
         turnWorker,
         execution: {
           gateway: Context.get(executionContext, ExecutionGateway.Service),
@@ -113,6 +124,11 @@ export const layer = (options: {
           readiness: ExecutionPostgres.Readiness.of({
             check: Effect.all([
               Context.get(executionContext, ExecutionPostgres.Readiness).check,
+              projectionWorker.ready.pipe(
+                Effect.mapError((error) =>
+                  ExecutionPostgres.WorkerUnavailable.make({ message: error.message }),
+                ),
+              ),
               turnWorker.ready.pipe(
                 Effect.mapError((error) =>
                   ExecutionPostgres.WorkerUnavailable.make({ message: error.message }),

@@ -106,13 +106,10 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
           [...entries.values()]
             .filter(
               (projection) =>
-                projection.projectionVersion !== projectionVersion ||
-                (projection.turn._tag === "AgentExecution" &&
-                  projection.turn.status !== "queued" &&
-                  projection.turn.status !== "completed" &&
-                  projection.turn.status !== "failed" &&
-                  projection.turn.status !== "cancelled" &&
-                  projection.projectorCheckpoint === undefined),
+                projection.turn._tag === "AgentExecution" &&
+                (projection.turn.status === "running" || projection.turn.status === "cancelling") &&
+                projection.turn.executionLink !== undefined &&
+                projection.projectionVersion <= projectionVersion,
             )
             .map((projection) => ({ threadId: projection.turn.threadId, turnId: projection.turn.id })),
         ),

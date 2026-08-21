@@ -12,6 +12,7 @@
     "./execution-authority-reconciliation": "./src/execution/lifecycle/execution-authority-reconciliation.ts",
     "./execution-gateway": "./src/execution/contract/execution-gateway.ts",
     "./execution-projection": "./src/execution/contract/execution-projection.ts",
+    "./execution-projection-watch": "./src/execution/lifecycle/execution-projection-watch.ts",
     "./execution-request": "./src/execution/contract/execution-request.ts",
     "./execution-route-resolution": "./src/execution/service/execution-route-resolution.ts",
     "./execution-route-snapshot": "./src/execution/contract/execution-route-snapshot.ts",

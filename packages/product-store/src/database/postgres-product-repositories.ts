@@ -6,6 +6,8 @@ import * as ThreadRepository from "../thread/sqlite-thread-repository"
 import * as TranscriptRepository from "../transcript/sqlite-transcript-repository"
 import * as TurnRepository from "../turn/sqlite-turn-repository"
 
+export const projectionLayer = Layer.merge(TurnRepository.layer, TranscriptRepository.layer)
+
 export const layer = (ownerId: OwnerId) =>
   Layer.mergeAll(
     ThreadRepository.layerForOwner(ownerId),

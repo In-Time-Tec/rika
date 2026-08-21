@@ -22,9 +22,12 @@ export const layer = Layer.effect(
         function* (projectionVersion) {
           const rows = yield* sql`SELECT t.thread_id, t.id AS turn_id
         FROM rika_turns t
-        LEFT JOIN rika_transcript_checkpoints c ON c.turn_id = t.id
-        WHERE t.turn_kind = 'AgentExecution' AND t.status NOT IN ('queued', 'completed', 'failed', 'cancelled')
-          AND (c.turn_id IS NULL OR c.projection_version <> ${projectionVersion} OR c.projector_version IS NULL)
+        WHERE t.turn_kind = 'AgentExecution' AND t.status IN ('running', 'cancelling')
+          AND t.execution_link_json IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM rika_transcript_checkpoints c
+            WHERE c.turn_id = t.id AND c.projection_version > ${projectionVersion}
+          )
         ORDER BY t.created_at ASC, t.id ASC`.pipe(Effect.mapError(error))
           return rows.map((raw) => {
             const row = raw as Record<string, unknown>
