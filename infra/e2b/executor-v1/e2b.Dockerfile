@@ -21,18 +21,25 @@ RUN export DEBIAN_FRONTEND=noninteractive \
   && rm -f /etc/apt/sources.list.d/debian.sources \
   && apt-get update \
   && apt-get install -y --no-install-recommends \
-    bash=5.2.15-2+b8 ca-certificates=20230311 chromium=138.0.7204.49-1~deb12u1 \
-    curl=7.88.1-10+deb12u12 dnsutils=1:9.18.33-1~deb12u2 fd-find=8.6.0-3 \
+    bash=5.2.15-2+b8 build-essential=12.9 ca-certificates=20230311 cmake=3.25.1-1 \
+    chromium=138.0.7204.49-1~deb12u1 curl=7.88.1-10+deb12u12 \
+    dnsutils=1:9.18.33-1~deb12u2 fd-find=8.6.0-3 \
     ffmpeg=7:5.1.6-0+deb12u1 file=1:5.44-3 findutils=4.9.0-4 fzf=0.38.0-1+b1 \
-    gh=2.23.0+dfsg1-1 git=1:2.39.5-0+deb12u2 git-lfs=3.3.0-1+deb12u1 \
+    g++=4:12.2.0-3 gcc=4:12.2.0-3 gh=2.23.0+dfsg1-1 \
+    git=1:2.39.5-0+deb12u2 git-lfs=3.3.0-1+deb12u1 \
     imagemagick=8:6.9.11.60+dfsg-1.6+deb12u3 iproute2=6.1.0-3 jq=1.6-2.1 \
-    less=590-2.1~deb12u2 lsof=4.95.0-1 make=4.3-4.1 gcc=4:12.2.0-3 g++=4:12.2.0-3 \
-    netcat-openbsd=1.219-1 openssh-client=1:9.2p1-2+deb12u6 procps=2:4.0.2-3 \
+    less=590-2.1~deb12u2 locales=2.36-9+deb12u10 lsof=4.95.0-1 make=4.3-4.1 \
+    netcat-openbsd=1.219-1 ninja-build=1.11.1-2~deb12u1 openssh-client=1:9.2p1-2+deb12u6 \
+    pkg-config=1.8.1-1 procps=2:4.0.2-3 psmisc=23.6-1 \
     python3=3.11.2-1+b1 python3-pip=23.0.1+dfsg-1 python3-venv=3.11.2-1+b1 \
     redis-tools=5:7.0.15-1~deb12u4 ripgrep=13.0.0-4+b2 sqlite3=3.40.1-2+deb12u1 \
-    postgresql-client=15+248 sudo=1.9.13p3-1+deb12u1 tmux=3.3a-3 tree=2.1.0-1 \
-    unzip=6.0-28 wget=1.21.3-1+deb12u1 xz-utils=5.4.1-1 zip=3.0-13 \
+    postgresql-client=15+248 sudo=1.9.13p3-1+deb12u1 tar=1.34+dfsg-1.2+deb12u1 \
+    tmux=3.3a-3 tree=2.1.0-1 tzdata=2025b-0+deb12u1 util-linux=2.38.1-5+deb12u3 \
+    vim=2:9.0.1378-2+deb12u2 unzip=6.0-28 wget=1.21.3-1+deb12u1 \
+    xz-utils=5.4.1-1 zip=3.0-13 zstd=1.5.4+dfsg2-5 \
   && rm -rf /var/lib/apt/lists/* \
+  && sed -i 's/^# en_US.UTF-8 UTF-8$/en_US.UTF-8 UTF-8/' /etc/locale.gen \
+  && locale-gen \
   && curl -fsSLo /tmp/bun.zip "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip" \
   && echo "${BUN_SHA256}  /tmp/bun.zip" | sha256sum -c - \
   && unzip -q /tmp/bun.zip -d /tmp/bun && install -m 0755 /tmp/bun/bun-linux-x64/bun /usr/local/bin/bun \
@@ -87,6 +94,7 @@ RUN chmod 0555 /opt/rika/start.sh /opt/rika/rika \
   && sudo -n -u rika-workspace -- test -w /workspace
 
 ENV HOME=/home/rika-executor \
+  LANG=en_US.UTF-8 \
   PATH=/opt/rika-python/bin:/usr/local/bin:/usr/bin:/bin \
   RIKA_IMAGE_MANIFEST=/opt/rika/tool-manifest.json \
   RIKA_EXECUTOR_TARGET=e2b \

@@ -39,6 +39,61 @@ describe("E2B image source contract", () => {
     }
     for (const item of manifest.aptPackages) expect(dockerfile).toContain(`${item.name}=${item.version}`)
     expect(manifest.tools.every(({ expect }) => typeof expect === "string" && expect.length > 0)).toBe(true)
+    const tools = new Set(manifest.tools.map(({ name }) => name))
+    expect(tools.size).toBe(manifest.tools.length)
+    for (const name of [
+      "bash",
+      "bun",
+      "node",
+      "npm",
+      "corepack",
+      "pnpm",
+      "yarn",
+      "git",
+      "git-lfs",
+      "gh",
+      "ssh",
+      "rg",
+      "fd",
+      "find",
+      "jq",
+      "yq",
+      "fzf",
+      "tree",
+      "vim",
+      "tmux",
+      "ps",
+      "killall",
+      "lsof",
+      "script",
+      "curl",
+      "wget",
+      "nc",
+      "dig",
+      "ip",
+      "websocat",
+      "tar",
+      "zip",
+      "unzip",
+      "zstd",
+      "xz",
+      "make",
+      "gcc",
+      "g++",
+      "pkg-config",
+      "cmake",
+      "ninja",
+      "locale",
+      "python",
+      "sqlite",
+      "postgres",
+      "redis",
+      "ffmpeg",
+      "imagemagick",
+      "chromium",
+      "agent-browser",
+    ])
+      expect(tools).toContain(name)
   })
 
   test("separates users and excludes credential-bearing build context", async () => {
