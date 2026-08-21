@@ -41,7 +41,6 @@ const sandboxInfo = (sandboxId: string, state: "running" | "paused"): SandboxInf
   }) as unknown as SandboxInfo
 
 const attestationSdk = {
-  templateTags: () => Promise.resolve([{ tag: "default", buildId: request.templateBuildId }]),
   buildStatus: () =>
     Promise.resolve({
       templateId: request.templateId,
@@ -95,11 +94,12 @@ describe("Provider", () => {
     })
   })
 
-  it.effect("rejects a retargeted default build before creating a sandbox", () => {
+  it.effect("rejects an unknown immutable build before creating a sandbox", () => {
     let created = false
     const sdk = {
       ...attestationSdk,
-      templateTags: () => Promise.resolve([{ tag: "default", buildId: "different-build" }]),
+      buildStatus: () =>
+        Promise.resolve({ templateId: request.templateId, buildId: "different-build", status: "ready" as const }),
       create: () => {
         created = true
         return Promise.resolve({ sandboxId: "unexpected" })
@@ -114,13 +114,17 @@ describe("Provider", () => {
     })
   })
 
-  it.effect("kills a new sandbox when the default build is retargeted during creation", () => {
+  it.effect("kills a new sandbox when its immutable build no longer attests during creation", () => {
     let checks = 0
     const killed: Array<string> = []
     const sdk = {
       ...attestationSdk,
-      templateTags: () =>
-        Promise.resolve([{ tag: "default", buildId: checks++ === 0 ? request.templateBuildId : "retargeted-build" }]),
+      buildStatus: () =>
+        Promise.resolve({
+          templateId: request.templateId,
+          buildId: checks++ === 0 ? request.templateBuildId : "different-build",
+          status: "ready" as const,
+        }),
       create: () => Promise.resolve({ sandboxId: "retargeted" }),
       kill: (sandboxId: string) => {
         killed.push(sandboxId)
@@ -213,7 +217,7 @@ describe("Provider", () => {
     let bootstrapBody = ""
     const sdk: Sdk = {
       ...attestationSdk,
-      templateTags: () => Promise.reject(new Error("e2b-controller-secret bootstrap-secret")),
+      buildStatus: () => Promise.reject(new Error("e2b-controller-secret bootstrap-secret")),
       create: () => Promise.reject(new Error("e2b-controller-secret bootstrap-secret")),
       connect: (sandboxId) => {
         calls.push(`connect:${sandboxId}`)
@@ -267,10 +271,11 @@ describe("Provider", () => {
     })
   })
 
-  it.effect("rejects inventory whose metadata receipt is not the provider default build", () => {
+  it.effect("rejects inventory whose immutable build receipt does not attest", () => {
     const sdk = {
       ...attestationSdk,
-      templateTags: () => Promise.resolve([{ tag: "default", buildId: "different-build" }]),
+      buildStatus: () =>
+        Promise.resolve({ templateId: request.templateId, buildId: "different-build", status: "ready" as const }),
       list: () => {
         let read = false
         return {

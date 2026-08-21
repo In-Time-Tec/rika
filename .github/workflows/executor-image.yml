@@ -16,92 +16,125 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: executor-image-g${{ inputs.generation }}
+  cancel-in-progress: false
+
 jobs:
-  build:
+  review:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     outputs:
       digest: ${{ steps.image.outputs.digest }}
+      image: ${{ steps.identity.outputs.image }}
+      manifest-sha256: ${{ steps.identity.outputs.manifest-sha256 }}
     permissions:
       contents: read
-      packages: write
       id-token: write
       attestations: write
-    env:
-      IMAGE: ghcr.io/${{ github.repository_owner }}/rika-executor
-      TAG: g${{ inputs.generation }}-${{ github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Authenticate to GHCR
-        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      - name: Build immutable candidate
+      - name: Record deterministic source identity
+        id: identity
+        run: |
+          set -euo pipefail
+          test "${{ inputs.generation }}" -gt 0
+          if [ "${{ inputs.promote }}" = true ]; then test "$GITHUB_REF" = refs/heads/main; fi
+          owner="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/$owner/rika-executor-g${{ inputs.generation }}"
+          manifest_sha256="$(sha256sum infra/e2b/executor-v1/tool-manifest.json | cut -d' ' -f1)"
+          source_date_epoch="$(git show --no-patch --format=%ct "$GITHUB_SHA")"
+          test "${#manifest_sha256}" -eq 64
+          test "$source_date_epoch" -gt 0
+          {
+            echo "IMAGE=$image"
+            echo "MANIFEST_SHA256=$manifest_sha256"
+            echo "SOURCE_DATE_EPOCH=$source_date_epoch"
+          } >> "$GITHUB_ENV"
+          {
+            echo "image=$image"
+            echo "manifest-sha256=$manifest_sha256"
+          } >> "$GITHUB_OUTPUT"
+      - name: Build deterministic OCI candidate
         id: image
         run: |
-          test "${{ inputs.generation }}" -gt 0
-          docker manifest inspect "$IMAGE:$TAG" >/dev/null 2>&1 && {
-            echo "::error::Immutable generation $TAG already exists"
-            exit 1
-          }
-          docker build --pull --file infra/e2b/executor-v1/e2b.Dockerfile --tag "$IMAGE:$TAG" .
-          docker push "$IMAGE:$TAG"
-          digest="$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE:$TAG" | sed 's/^.*@//')"
-          test -n "$digest"
+          set -euo pipefail
+          docker buildx build \
+            --pull \
+            --platform linux/amd64 \
+            --provenance=false \
+            --sbom=false \
+            --build-arg BUILDKIT_MULTI_PLATFORM=1 \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "dev.rika.executor.manifest.sha256=$MANIFEST_SHA256" \
+            --file infra/e2b/executor-v1/e2b.Dockerfile \
+            --output "type=oci,dest=executor-image.oci.tar,rewrite-timestamp=true" \
+            --metadata-file executor-image-metadata.json \
+            .
+          digest="$(jq -er '."containerimage.digest" | select(test("^sha256:[a-f0-9]{64}$"))' executor-image-metadata.json)"
+          archive_digest="$(tar -xOf executor-image.oci.tar index.json | jq -er '.manifests | select(length == 1) | .[0].digest')"
+          test "$archive_digest" = "$digest"
           echo "digest=$digest" >> "$GITHUB_ENV"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          printf '%s@%s\n' "$IMAGE" "$digest" > image-subject.txt
-      - name: Make promoted image pullable by E2B
-        if: inputs.promote == true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          OWNER_TYPE: ${{ github.event.repository.owner.type }}
-        run: |
-          owner_path="orgs"
-          test "$OWNER_TYPE" = Organization || owner_path="users"
-          gh api --method PATCH "/$owner_path/${{ github.repository_owner }}/packages/container/rika-executor" \
-            --field visibility=public
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@f8bdd1d8ac5e901a77a92f111440fdb1b593736b # v0.20.6
+        env:
+          SYFT_SOURCE_NAME: ${{ env.IMAGE }}
+          SYFT_SOURCE_VERSION: ${{ env.digest }}
+          SYFT_FORMAT_PRETTY: "false"
         with:
-          image: ${{ env.IMAGE }}@${{ env.digest }}
+          image: oci-archive:executor-image.oci.tar
           format: spdx-json
-          output-file: executor-sbom.spdx.json
+          syft-version: v1.33.0
+          output-file: executor-sbom.raw.spdx.json
           upload-artifact: false
-      - name: Scan the exact image
-        id: scan
-        continue-on-error: true
-        uses: aquasecurity/trivy-action@76071ef0d7ec797419534a183b498b4d6366cf37 # 0.31.0
+          upload-release-assets: false
+      - name: Normalize SPDX deterministically
+        run: |
+          set -euo pipefail
+          created="$(date -u --date="@$SOURCE_DATE_EPOCH" '+%Y-%m-%dT%H:%M:%SZ')"
+          namespace="https://github.com/$GITHUB_REPOSITORY/sbom/${digest#sha256:}"
+          jq -S -c \
+            --arg created "$created" \
+            --arg namespace "$namespace" \
+            '.creationInfo.created = $created | .documentNamespace = $namespace' \
+            executor-sbom.raw.spdx.json > executor-sbom.spdx.json
+          rm executor-sbom.raw.spdx.json
+      - name: Scan candidate vulnerabilities
+        uses: aquasecurity/trivy-action@76071ef0d7ec797419534a183b498b4d6366cf37 # v0.31.0
         with:
-          image-ref: ${{ env.IMAGE }}@${{ env.digest }}
+          version: v0.63.0
+          scan-type: image
+          input: executor-image.oci.tar
+          scanners: vuln
+          vuln-type: os,library
           format: json
           output: executor-vulnerability-scan.json
-          severity: CRITICAL,HIGH
-          exit-code: 1
-          ignore-unfixed: true
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: 0
       - name: Record candidate identity
         run: |
-          jq -n \
+          set -euo pipefail
+          sbom_sha256="$(sha256sum executor-sbom.spdx.json | cut -d' ' -f1)"
+          scan_sha256="$(sha256sum executor-vulnerability-scan.json | cut -d' ' -f1)"
+          jq -S -n \
             --arg image "$IMAGE" \
-            --arg digest "$digest" \
-            --arg source "$GITHUB_SHA" \
+            --arg imageDigest "$digest" \
+            --arg sourceCommit "$GITHUB_SHA" \
+            --arg sourceDateEpoch "$SOURCE_DATE_EPOCH" \
+            --arg manifestSha256 "$MANIFEST_SHA256" \
+            --arg sbomSha256 "$sbom_sha256" \
+            --arg vulnerabilityScanSha256 "$scan_sha256" \
             --arg generation "${{ inputs.generation }}" \
-            '{generation:($generation|tonumber),sourceCommit:$source,image:$image,imageDigest:$digest,dockerfile:"infra/e2b/executor-v1/e2b.Dockerfile"}' \
+            '{schemaVersion:1,generation:($generation|tonumber),sourceCommit:$sourceCommit,sourceDateEpoch:($sourceDateEpoch|tonumber),image:$image,imageDigest:$imageDigest,dockerfile:"infra/e2b/executor-v1/e2b.Dockerfile",manifest:{path:"infra/e2b/executor-v1/tool-manifest.json",sha256:$manifestSha256},sbom:{path:"executor-sbom.spdx.json",format:"spdx-json",sha256:$sbomSha256},vulnerabilityScan:{path:"executor-vulnerability-scan.json",scanner:"trivy-v0.63.0",sha256:$vulnerabilityScanSha256,policy:{blockingSeverities:["HIGH","CRITICAL"],requiresFixedVersion:true}}}' \
             > executor-build.json
-      - name: Attest exact image manifest
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
-        with:
-          subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ env.digest }}
-          push-to-registry: true
-      - name: Attest build identity
+      - name: Attest review build record
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: executor-build.json
-      - name: Upload retrievable evidence
+      - name: Upload retained review evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -111,47 +144,166 @@ jobs:
             executor-sbom.spdx.json
             executor-vulnerability-scan.json
           if-no-files-found: error
-      - name: Enforce vulnerability gate
-        if: always()
-        run: test "${{ steps.scan.outcome }}" = success
+          retention-days: 90
+      - name: Enforce vulnerability policy
+        run: |
+          set -euo pipefail
+          blocking="$(jq '[.Results[]?.Vulnerabilities[]? | select((.Severity == "HIGH" or .Severity == "CRITICAL") and (.FixedVersion // "") != "")] | length' executor-vulnerability-scan.json)"
+          echo "Fixable HIGH or CRITICAL vulnerabilities: $blocking"
+          test "$blocking" -eq 0
+      - name: Upload private promotion handoff
+        if: inputs.promote == true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: executor-g${{ inputs.generation }}-${{ github.sha }}-oci
+          path: executor-image.oci.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
 
   promote:
     if: inputs.promote == true
-    needs: build
+    needs: review
     environment: executor-production
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      digest: ${{ needs.build.outputs.digest }}
+      IMAGE: ${{ needs.review.outputs.image }}
+      digest: ${{ needs.review.outputs.digest }}
+      MANIFEST_SHA256: ${{ needs.review.outputs.manifest-sha256 }}
     permissions:
       contents: read
+      packages: write
       id-token: write
       attestations: write
+      artifact-metadata: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Create new immutable E2B template build
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Download review evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: executor-g${{ inputs.generation }}-${{ github.sha }}-evidence
+      - name: Download exact OCI candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: executor-g${{ inputs.generation }}-${{ github.sha }}-oci
+      - name: Verify approved review evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(jq -er '.generation' executor-build.json)" -eq "${{ inputs.generation }}"
+          test "$(jq -er '.sourceCommit' executor-build.json)" = "$GITHUB_SHA"
+          test "$(jq -er '.image' executor-build.json)" = "$IMAGE"
+          test "$(jq -er '.imageDigest' executor-build.json)" = "$digest"
+          test "$(jq -er '.manifest.sha256' executor-build.json)" = "$MANIFEST_SHA256"
+          test "$(sha256sum infra/e2b/executor-v1/tool-manifest.json | cut -d' ' -f1)" = "$MANIFEST_SHA256"
+          test "$(tar -xOf executor-image.oci.tar index.json | jq -er '.manifests | select(length == 1) | .[0].digest')" = "$digest"
+          test "$(sha256sum executor-sbom.spdx.json | cut -d' ' -f1)" = "$(jq -er '.sbom.sha256' executor-build.json)"
+          test "$(sha256sum executor-vulnerability-scan.json | cut -d' ' -f1)" = "$(jq -er '.vulnerabilityScan.sha256' executor-build.json)"
+          test "$(jq '[.Results[]?.Vulnerabilities[]? | select((.Severity == "HIGH" or .Severity == "CRITICAL") and (.FixedVersion // "") != "")] | length' executor-vulnerability-scan.json)" -eq 0
+          gh attestation verify executor-build.json --repo "$GITHUB_REPOSITORY"
+      - name: Require a fresh generation package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER_TYPE: ${{ github.event.repository.owner.type }}
+        run: |
+          set -euo pipefail
+          owner_path="orgs"
+          test "$OWNER_TYPE" = Organization || owner_path="users"
+          package="rika-executor-g${{ inputs.generation }}"
+          if gh api "/$owner_path/${{ github.repository_owner }}/packages/container/$package/versions?per_page=1" > existing-versions.json 2> package-query-error.txt; then
+            test "$(jq 'length' existing-versions.json)" -eq 0
+          else
+            grep -q 'HTTP 404' package-query-error.txt
+          fi
+          rm -f existing-versions.json package-query-error.txt
+      - name: Authenticate to GHCR
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Upload immutable digest without a tag
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            --volume "$HOME/.docker:/root/.docker:ro" \
+            quay.io/skopeo/stable@sha256:47853bb9fb24202af9110531ebd6e43c5f97701254ca290596640290d17942f4 \
+            copy --preserve-digests --authfile /root/.docker/config.json \
+            oci-archive:/workspace/executor-image.oci.tar "docker://$IMAGE@$digest"
+      - name: Attest exact image provenance
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.digest }}
+          push-to-registry: true
+      - name: Attest executor build identity
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.digest }}
+          predicate-type: https://github.com/${{ github.repository }}/attestations/executor-image/v1
+          predicate-path: executor-build.json
+          push-to-registry: true
+      - name: Verify image attestations before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          subject="oci://$IMAGE@$digest"
+          gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" --predicate-type "https://slsa.dev/provenance/v1" --bundle-from-oci
+          gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" --predicate-type "https://github.com/$GITHUB_REPOSITORY/attestations/executor-image/v1" --bundle-from-oci
+      - name: Publish attested generation for E2B
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER_TYPE: ${{ github.event.repository.owner.type }}
+        run: |
+          owner_path="orgs"
+          test "$OWNER_TYPE" = Organization || owner_path="users"
+          gh api --method PATCH "/$owner_path/${{ github.repository_owner }}/packages/container/rika-executor-g${{ inputs.generation }}" \
+            --field visibility=public
+      - name: Create and smoke immutable E2B build
         env:
           E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
         run: |
+          set -euo pipefail
           test -n "$E2B_API_KEY"
-          printf 'FROM ghcr.io/${{ github.repository_owner }}/rika-executor@%s\n' "${{ env.digest }}" > e2b-promoted.Dockerfile
-          bunx @e2b/cli@2.16.2 template create rika-executor-v1 \
-            --path . \
-            --dockerfile e2b-promoted.Dockerfile \
+          template_alias="rika-executor-v1-g${{ inputs.generation }}"
+          template_context="$(mktemp -d)"
+          trap 'rm -rf "$template_context" "$RUNNER_TEMP/e2b-template-create.log"' EXIT
+          printf 'FROM %s@%s\n' "$IMAGE" "$digest" > "$template_context/e2b.Dockerfile"
+          bunx @e2b/cli@2.16.2 template create "$template_alias" \
+            --path "$template_context" \
+            --dockerfile e2b.Dockerfile \
             --cmd "/opt/rika/start.sh" \
-            --ready-cmd "curl --fail --silent http://127.0.0.1:7070/health"
-          bunx @e2b/cli@2.16.2 template list --format json > e2b-templates.json
-          build_id="$(jq -er '[.[] | select(.aliases | index("rika-executor-v1"))][0].buildID' e2b-templates.json)"
+            --ready-cmd "curl --fail --silent http://127.0.0.1:7070/health" \
+            2>&1 | tee "$RUNNER_TEMP/e2b-template-create.log"
+          identity="$(sed -n 's/.*Template created with ID: \([^,]*\), Build ID: \([^[:space:]]*\).*/\1 \2/p' "$RUNNER_TEMP/e2b-template-create.log" | tail -n 1)"
+          template_id="${identity%% *}"
+          build_id="${identity#* }"
+          test -n "$template_id"
           test -n "$build_id"
-          bun run packages/e2b-executor/scripts/image-smoke.ts "$build_id"
-          jq -n \
+          test "$template_id" != "$build_id"
+          bun run packages/e2b-executor/scripts/image-smoke.ts "$template_id" "$build_id" "$MANIFEST_SHA256"
+          jq -S -n \
             --arg buildId "$build_id" \
-            --arg image "ghcr.io/${{ github.repository_owner }}/rika-executor" \
-            --arg digest "${{ env.digest }}" \
-            --arg source "$GITHUB_SHA" \
+            --arg templateId "$template_id" \
+            --arg templateAlias "$template_alias" \
+            --arg image "$IMAGE" \
+            --arg imageDigest "$digest" \
+            --arg manifestSha256 "$MANIFEST_SHA256" \
+            --arg sourceCommit "$GITHUB_SHA" \
             --arg generation "${{ inputs.generation }}" \
-            '{generation:($generation|tonumber),sourceCommit:$source,image:$image,imageDigest:$digest,e2bTemplate:"rika-executor-v1",e2bBuildId:$buildId}' \
+            '{schemaVersion:1,generation:($generation|tonumber),sourceCommit:$sourceCommit,image:$image,imageDigest:$imageDigest,manifestSha256:$manifestSha256,e2bTemplateAlias:$templateAlias,e2bTemplateId:$templateId,e2bBuildId:$buildId}' \
             > executor-promotion.json
           cat executor-promotion.json >> "$GITHUB_STEP_SUMMARY"
       - name: Attest promoted template identity
@@ -166,3 +318,4 @@ jobs:
             executor-promotion.json
             executor-smoke.json
           if-no-files-found: error
+          retention-days: 90

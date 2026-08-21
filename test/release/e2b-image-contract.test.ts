@@ -43,7 +43,22 @@ describe("E2B image source contract", () => {
 
   test("separates users and excludes credential-bearing build context", async () => {
     const [dockerfile, ignore] = await Promise.all([text("e2b.Dockerfile"), text(".dockerignore", root)])
-    for (const entry of [".git", ".amp", ".agents", ".env", ".env.*", ".rika", "node_modules"])
+    for (const entry of [
+      ".git",
+      ".amp",
+      ".agents",
+      ".env",
+      ".env.*",
+      "**/.git-credentials",
+      "**/.netrc",
+      "**/.npmrc",
+      "**/.pypirc",
+      "**/.ssh",
+      "**/*.key",
+      "**/*.pem",
+      ".rika",
+      "node_modules",
+    ])
       expect(ignore.split("\n")).toContain(entry)
     expect(dockerfile).toContain("USER rika-executor")
     expect(dockerfile).toContain("sudo -n -u rika-workspace")

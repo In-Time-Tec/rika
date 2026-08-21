@@ -241,8 +241,15 @@ export const layer = (
         return assignment
       })
 
-      const createRequest = Effect.fn("Controller.createRequest")(function* (assignment: ExecutorAssignment) {
+      const approvedPlacement = Effect.fn("Controller.approvedPlacement")(function* (assignment: ExecutorAssignment) {
         const placement = yield* e2bPlacement(assignment)
+        if (placement.templateBuildId !== options.templateBuildId)
+          return yield* failure("provider", "Assignment template build is not approved")
+        return placement
+      })
+
+      const createRequest = Effect.fn("Controller.createRequest")(function* (assignment: ExecutorAssignment) {
+        const placement = yield* approvedPlacement(assignment)
         const request: CreateRequest = {
           appId: options.appId,
           deploymentId: options.deploymentId,
@@ -271,7 +278,7 @@ export const layer = (
         assignment: ExecutorAssignment,
         instanceId: string,
       ) {
-        const placement = yield* e2bPlacement(assignment)
+        const placement = yield* approvedPlacement(assignment)
         return {
           target: "e2b" as const,
           assignmentId: assignment.id,
@@ -373,7 +380,7 @@ export const layer = (
 
       const provision = Effect.fn("Controller.provision")(function* (assignmentId: string) {
         const assignment = yield* load(assignmentId)
-        yield* e2bPlacement(assignment)
+        yield* approvedPlacement(assignment)
         if (assignment.lifecycle._tag === "Active") {
           yield* provider
             .connect(assignment.lifecycle.providerInstanceId, idleTimeoutMillis)
@@ -388,6 +395,7 @@ export const layer = (
 
       const replace = Effect.fn("Controller.replace")(function* (key: AssignmentKey) {
         const previous = yield* current(key)
+        yield* approvedPlacement(previous)
         if (previous.lifecycle._tag !== "Active")
           return yield* failure("assignment-conflict", "Only an active assignment can be replaced")
         const retiringProviderId = providerInstanceId(previous)
@@ -406,6 +414,7 @@ export const layer = (
 
       const resume = Effect.fn("Controller.resume")(function* (key: AssignmentKey) {
         const assignment = yield* current(key)
+        yield* approvedPlacement(assignment)
         if (assignment.lifecycle._tag === "Active") return publicAssignment(assignment)
         if (assignment.lifecycle._tag !== "Paused")
           return yield* failure("assignment-conflict", "Assignment is not paused")
@@ -440,6 +449,12 @@ export const layer = (
         input: ProtocolAccess,
       ): Effect.fn.Return<Access, ControllerError> {
         if (input.fence.target !== "e2b") return yield* failure("fenced", "Executor target is not E2B")
+        yield* approvedPlacement(
+          yield* current({
+            assignmentId: input.fence.assignmentId,
+            generation: input.fence.assignmentGeneration,
+          }),
+        )
         return {
           assignmentId: ExecutorAssignmentId.make(input.fence.assignmentId),
           assignmentGeneration: FencingGeneration.make(String(input.fence.assignmentGeneration)),
@@ -457,7 +472,7 @@ export const layer = (
           assignmentId: input.fence.assignmentId,
           generation: input.fence.assignmentGeneration,
         })
-        const placement = yield* e2bPlacement(assignment)
+        const placement = yield* approvedPlacement(assignment)
         const lifecycle = assignment.lifecycle
         const sessionToken = Redacted.make(Redacted.value(input.bootstrapToken), { label: "executor-session" })
         let active: ExecutorAssignment

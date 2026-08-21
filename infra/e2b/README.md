@@ -12,6 +12,14 @@ bunx @e2b/cli@2.16.2 template create rika-executor-v1 \
 
 Record the returned build ID as the controller's immutable `templateBuildId`. Do not provision from the mutable template alias.
 
+## Supply-chain promotion
+
+`.github/workflows/executor-image.yml` is the release contract. A review run builds one Linux AMD64 OCI archive without registry credentials, derives its identity from the source commit and `tool-manifest.json` SHA-256, generates an SPDX 2.3 SBOM with pinned Syft, and scans all OS and library vulnerabilities with pinned Trivy. Syft's variable creation timestamp and document namespace are replaced with the source commit timestamp and image digest, then the JSON is key-sorted and compacted so the same candidate produces the same SBOM bytes.
+
+The blocking policy is: no `HIGH` or `CRITICAL` vulnerability with a nonempty fixed version may be promoted. Unfixed findings and lower severities remain in the retained report but do not block. `executor-build.json`, the canonical SBOM, and the complete vulnerability report are retained for 90 days. The private OCI handoff is retained for one day and contains only the already-built image; `.dockerignore` excludes repository metadata, local agent state, environment files, credential stores, private keys, and dependency caches from its build context.
+
+Promotion requires a `main` branch source and the `executor-production` GitHub environment. Generation `N` creates a fresh `rika-executor-gN` GHCR package and `rika-executor-v1-gN` E2B template; an existing package blocks reuse. The image is uploaded only by digest, never by tag. It remains private until GitHub has created and re-verified both SLSA provenance for the exact OCI manifest and Rika's build-identity attestation binding the source commit, tool-manifest digest, SBOM digest, and scan digest. E2B then builds from that digest in an isolated empty context. The workflow captures the template and build IDs from the create operation itself and runs the doctor against that exact build and expected manifest digest before retaining and attesting the promotion receipt.
+
 After creating the template, run the release smoke inside a sandbox made from that exact build:
 
 ```sh

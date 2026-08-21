@@ -5,6 +5,13 @@
 .env
 .env.*
 !.env.example
+**/.git-credentials
+**/.netrc
+**/.npmrc
+**/.pypirc
+**/.ssh
+**/*.key
+**/*.pem
 .rika
 .turbo
 artifacts

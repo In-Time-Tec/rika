@@ -6,6 +6,8 @@ import { Argument, Command } from "effect/unstable/cli"
 
 const DoctorResult = Schema.Struct({
   ok: Schema.Boolean,
+  image: Schema.Literal("rika-executor-v1"),
+  manifestSchemaVersion: Schema.Literal(1),
   buildId: Schema.String,
   manifestSha256: Schema.String,
   checks: Schema.Array(Schema.Struct({ ok: Schema.Boolean })),
@@ -17,10 +19,14 @@ class SmokeError extends Schema.TaggedError<SmokeError>()("SmokeError", { messag
 const decodeDoctorResult = Schema.decodeUnknownEffect(Schema.fromJsonString(DoctorResult))
 const encodeSmokeArtifact = Schema.encodeEffect(Schema.fromJsonString(SmokeArtifact))
 
-const smoke = Effect.fn("ExecutorImageSmoke.run")(function* (buildId: string) {
+const smoke = Effect.fn("ExecutorImageSmoke.run")(function* (
+  templateId: string,
+  buildId: string,
+  manifestSha256: string,
+) {
   yield* Effect.acquireUseRelease(
     Effect.tryPromise(() =>
-      Sandbox.create(`rika-executor-v1:${buildId}`, {
+      Sandbox.create(`${templateId}:${buildId}`, {
         timeoutMs: 300_000,
         secure: true,
         allowInternetAccess: true,
@@ -38,13 +44,12 @@ const smoke = Effect.fn("ExecutorImageSmoke.run")(function* (buildId: string) {
         if (
           result.ok !== true ||
           result.buildId !== buildId ||
+          result.manifestSha256 !== manifestSha256 ||
           result.checks.some((check) => check.ok !== true)
         )
           return yield* SmokeError.make({ message: "Promoted E2B image failed its doctor contract" })
         const artifact = yield* encodeSmokeArtifact({ ...result, sandboxId: sandbox.sandboxId })
-        yield* Effect.tryPromise(() =>
-          Bun.write("executor-smoke.json", `${artifact}\n`),
-        )
+        yield* Effect.tryPromise(() => Bun.write("executor-smoke.json", `${artifact}\n`))
       }),
     (sandbox) => Effect.tryPromise(() => sandbox.kill()).pipe(Effect.ignore),
   )
@@ -52,8 +57,12 @@ const smoke = Effect.fn("ExecutorImageSmoke.run")(function* (buildId: string) {
 
 const command = Command.make(
   "image-smoke",
-  { buildId: Argument.string("build-id") },
-  ({ buildId }) => smoke(buildId),
+  {
+    templateId: Argument.string("template-id"),
+    buildId: Argument.string("build-id"),
+    manifestSha256: Argument.string("manifest-sha256"),
+  },
+  ({ templateId, buildId, manifestSha256 }) => smoke(templateId, buildId, manifestSha256),
 )
 
 const main = Command.run(command, { version: "0.0.0" })

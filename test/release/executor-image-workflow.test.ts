@@ -1,12 +1,12 @@
 import { expect, test } from "vitest"
 
 type Step = {
+  readonly name?: string
   readonly uses?: string
   readonly run?: string
   readonly with?: Readonly<Record<string, unknown>>
   readonly if?: string
   readonly id?: string
-  readonly "continue-on-error"?: boolean
 }
 type Job = {
   readonly if?: string
@@ -15,7 +15,10 @@ type Job = {
   readonly permissions?: Readonly<Record<string, string>>
   readonly steps?: ReadonlyArray<Step>
 }
-type Workflow = { readonly jobs?: Readonly<Record<string, Job>> }
+type Workflow = {
+  readonly concurrency?: Readonly<Record<string, unknown>>
+  readonly jobs?: Readonly<Record<string, Job>>
+}
 
 const workflow = Bun.YAML.parse(await Bun.file(".github/workflows/executor-image.yml").text()) as Workflow
 const jobs = workflow.jobs ?? {}
@@ -24,60 +27,132 @@ const commands = (job: string) =>
   steps(job)
     .flatMap((step) => (step.run === undefined ? [] : [step.run]))
     .join("\n")
+const named = (job: string, name: string) => steps(job).find((step) => step.name === name)
+const position = (job: string, name: string) => steps(job).findIndex((step) => step.name === name)
 
-test("builds and scans the digest-pinned executor image and retains its SBOM", () => {
-  const build = commands("build")
-  expect(build).toContain("infra/e2b/executor-v1/e2b.Dockerfile")
-  expect(build).toContain("docker manifest inspect")
-  expect(build).toContain("docker push")
-  expect(build).toContain("RepoDigests")
-  expect(steps("build").find((step) => step.run?.includes("visibility=public"))?.if).toBe("inputs.promote == true")
+test("builds one deterministic OCI candidate and canonical SPDX SBOM without registry authority", () => {
+  expect(jobs.review?.permissions).toEqual({ contents: "read", "id-token": "write", attestations: "write" })
+  const review = commands("review")
+  expect(review).toContain("sha256sum infra/e2b/executor-v1/tool-manifest.json")
+  expect(review).toContain("git show --no-patch --format=%ct")
+  expect(review).toContain('if [ "${{ inputs.promote }}" = true ]; then test "$GITHUB_REF" = refs/heads/main; fi')
+  expect(review).toContain("docker buildx build")
+  expect(review).toContain("--platform linux/amd64")
+  expect(review).toContain("type=oci,dest=executor-image.oci.tar,rewrite-timestamp=true")
+  expect(review).toContain("dev.rika.executor.manifest.sha256=$MANIFEST_SHA256")
+  expect(review).not.toContain("docker push")
+  expect(review).not.toContain("docker login")
 
-  const sbom = steps("build").find((step) => step.uses?.startsWith("anchore/sbom-action@"))
-  const scan = steps("build").find((step) => step.uses?.startsWith("aquasecurity/trivy-action@"))
-  expect(sbom?.with?.image).toContain("@${{ env.digest }}")
-  expect(scan?.with?.["image-ref"]).toContain("@${{ env.digest }}")
-  expect(scan?.with?.["exit-code"]).toBe(1)
-  expect(scan?.["continue-on-error"]).toBe(true)
-  expect(steps("build").find((step) => step.uses?.startsWith("actions/upload-artifact@"))?.with?.path).toContain(
-    "executor-sbom.spdx.json",
-  )
-  expect(commands("build")).toContain('test "${{ steps.scan.outcome }}" = success')
+  const sbom = steps("review").find((step) => step.uses?.startsWith("anchore/sbom-action@"))
+  expect(sbom?.with).toMatchObject({
+    image: "oci-archive:executor-image.oci.tar",
+    format: "spdx-json",
+    "syft-version": "v1.33.0",
+    "upload-artifact": false,
+  })
+  expect(review).toContain(".creationInfo.created = $created")
+  expect(review).toContain(".documentNamespace = $namespace")
+  expect(review).toContain("jq -S -c")
+  expect(review).toContain('namespace="https://github.com/$GITHUB_REPOSITORY/sbom/${digest#sha256:}"')
+
+  const evidence = named("review", "Upload retained review evidence")
+  expect(evidence?.with?.path).toContain("executor-sbom.spdx.json")
+  expect(evidence?.with?.path).toContain("executor-vulnerability-scan.json")
+  expect(evidence?.with?.["retention-days"]).toBe(90)
 })
 
-test("attests the exact manifest and the build identity", () => {
-  expect(jobs.build?.permissions).toEqual({
-    contents: "read",
-    packages: "write",
-    "id-token": "write",
-    attestations: "write",
+test("retains a complete vulnerability report and blocks every fixable HIGH or CRITICAL finding", () => {
+  const scan = steps("review").find((step) => step.uses?.startsWith("aquasecurity/trivy-action@"))
+  expect(scan?.with).toMatchObject({
+    version: "v0.63.0",
+    "scan-type": "image",
+    input: "executor-image.oci.tar",
+    scanners: "vuln",
+    "vuln-type": "os,library",
+    format: "json",
+    output: "executor-vulnerability-scan.json",
+    severity: "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL",
+    "ignore-unfixed": false,
+    "exit-code": 0,
   })
-  const attestations = steps("build").filter((step) => step.uses?.startsWith("actions/attest-build-provenance@"))
-  expect(attestations).toHaveLength(2)
-  expect(attestations[0]?.with).toMatchObject({
+  const gate = named("review", "Enforce vulnerability policy")?.run ?? ""
+  expect(gate).toContain('.Severity == "HIGH" or .Severity == "CRITICAL"')
+  expect(gate).toContain('(.FixedVersion // "") != ""')
+  expect(gate).toContain('test "$blocking" -eq 0')
+  expect(position("review", "Enforce vulnerability policy")).toBeLessThan(
+    position("review", "Upload private promotion handoff"),
+  )
+})
+
+test("binds source, manifest, SBOM, scan, and image digests into signed provenance", () => {
+  const review = commands("review")
+  expect(review).toContain("sourceCommit:$sourceCommit")
+  expect(review).toContain("imageDigest:$imageDigest")
+  expect(review).toContain("manifest:{path:")
+  expect(review).toContain("sbom:{path:")
+  expect(review).toContain("vulnerabilityScan:{path:")
+  expect(named("review", "Attest review build record")?.with?.["subject-path"]).toBe("executor-build.json")
+
+  const provenance = named("promote", "Attest exact image provenance")
+  expect(provenance?.with).toMatchObject({
     "subject-name": "${{ env.IMAGE }}",
     "subject-digest": "${{ env.digest }}",
     "push-to-registry": true,
   })
-  expect(attestations[1]?.with?.["subject-path"]).toBe("executor-build.json")
-  expect(commands("build")).toContain("sourceCommit:$source")
-  expect(commands("build")).toContain("imageDigest:$digest")
+  const identity = named("promote", "Attest executor build identity")
+  expect(identity?.with).toMatchObject({
+    "subject-name": "${{ env.IMAGE }}",
+    "subject-digest": "${{ env.digest }}",
+    "predicate-path": "executor-build.json",
+    "push-to-registry": true,
+  })
+  expect(String(identity?.with?.["predicate-type"])).toContain("/attestations/executor-image/v1")
 })
 
-test("promotion is an explicit approved new E2B generation", () => {
+test("cannot publish or promote a mutable, reused, unreviewed, or unattested image", () => {
+  expect(workflow.concurrency).toEqual({
+    group: "executor-image-g${{ inputs.generation }}",
+    "cancel-in-progress": false,
+  })
   expect(jobs.promote?.if).toBe("inputs.promote == true")
-  expect(jobs.promote?.needs).toBe("build")
+  expect(jobs.promote?.needs).toBe("review")
   expect(jobs.promote?.environment).toBe("executor-production")
-  expect(commands("promote")).toContain("FROM ghcr.io/${{ github.repository_owner }}/rika-executor@%s")
-  expect(commands("promote")).toContain("@e2b/cli@2.16.2 template create rika-executor-v1")
-  expect(commands("promote")).toContain("--dockerfile e2b-promoted.Dockerfile")
-  expect(commands("promote")).toContain("template list --format json")
-  expect(commands("promote")).toContain('.aliases | index("rika-executor-v1")')
-  expect(commands("promote")).toContain('bun run packages/e2b-executor/scripts/image-smoke.ts "$build_id"')
-  expect(commands("promote")).toContain("e2bBuildId:$buildId")
-  expect(commands("promote")).toContain("generation:($generation|tonumber)")
-  expect(steps("promote").find((step) => step.uses?.startsWith("actions/upload-artifact@"))?.with?.path).toContain(
-    "executor-smoke.json",
+  expect(jobs.promote?.permissions).toMatchObject({ packages: "write", "id-token": "write", attestations: "write" })
+
+  expect(position("promote", "Verify approved review evidence")).toBeLessThan(
+    position("promote", "Require a fresh generation package"),
+  )
+  expect(position("promote", "Require a fresh generation package")).toBeLessThan(
+    position("promote", "Authenticate to GHCR"),
+  )
+  expect(position("promote", "Authenticate to GHCR")).toBeLessThan(
+    position("promote", "Upload immutable digest without a tag"),
+  )
+  expect(position("promote", "Upload immutable digest without a tag")).toBeLessThan(
+    position("promote", "Attest exact image provenance"),
+  )
+  expect(position("promote", "Attest executor build identity")).toBeLessThan(
+    position("promote", "Verify image attestations before publication"),
+  )
+  expect(position("promote", "Verify image attestations before publication")).toBeLessThan(
+    position("promote", "Publish attested generation for E2B"),
+  )
+  expect(position("promote", "Publish attested generation for E2B")).toBeLessThan(
+    position("promote", "Create and smoke immutable E2B build"),
+  )
+
+  const promote = commands("promote")
+  expect(promote).toContain("rika-executor-g${{ inputs.generation }}")
+  expect(promote).toContain('"docker://$IMAGE@$digest"')
+  expect(promote).toContain("copy --preserve-digests")
+  expect(promote).not.toContain("docker push")
+  expect(promote).not.toMatch(/\$IMAGE:[^/]/)
+  expect(promote).toContain('subject="oci://$IMAGE@$digest"')
+  expect(promote).toContain('template_alias="rika-executor-v1-g${{ inputs.generation }}"')
+  expect(promote).not.toContain("template list")
+  expect(promote).toContain("Template created with ID: \\([^,]*\\), Build ID:")
+  expect(promote).toContain(
+    'bun run packages/e2b-executor/scripts/image-smoke.ts "$template_id" "$build_id" "$MANIFEST_SHA256"',
   )
 })
 

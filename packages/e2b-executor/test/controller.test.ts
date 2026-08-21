@@ -109,6 +109,20 @@ describe("Controller", () => {
     }).pipe(provideLayer(harness.layer))
   })
 
+  it.effect("rejects an assignment whose immutable build is not controller-approved", () => {
+    const harness = makeHarness({ templateBuildId: "approved-build" })
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* createAssignment()
+      expect(yield* Effect.flip(service.provision(assignmentInput.id))).toMatchObject({
+        kind: "provider",
+        message: "Assignment template build is not approved",
+      })
+      expect(harness.provider.creates).toEqual([])
+      expect(harness.provider.bootstraps).toEqual([])
+    }).pipe(provideLayer(harness.layer))
+  })
+
   it.effect("uses filesystem pause, demand provisioning resume, lease renewal, and kill", () => {
     const harness = makeHarness()
     return Effect.gen(function* () {

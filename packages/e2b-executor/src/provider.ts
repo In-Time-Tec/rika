@@ -69,10 +69,6 @@ export interface Paginator {
 }
 
 export interface Sdk {
-  readonly templateTags: (
-    templateId: string,
-    options: SandboxConnectOpts,
-  ) => Promise<ReadonlyArray<{ readonly tag: string; readonly buildId: string }>>
   readonly buildStatus: (
     templateId: string,
     buildId: string,
@@ -176,7 +172,6 @@ const bootstrapSandbox = (
 }
 
 const liveSdk: Sdk = {
-  templateTags: (templateId, options) => Template.getTags(templateId, options),
   buildStatus: (templateId, buildId, options) =>
     Template.getBuildStatus({ templateId, buildId }, options).then((status) => ({
       templateId: status.templateID,
@@ -216,16 +211,10 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
     readonly templateId: string
     readonly templateBuildId: string
   }) {
-    const [tags, status] = yield* Effect.all(
-      [
-        attempt(request.operation, () => sdk.templateTags(request.templateId, connection)),
-        attempt(request.operation, () => sdk.buildStatus(request.templateId, request.templateBuildId, connection)),
-      ],
-      { concurrency: 2 },
+    const status = yield* attempt(request.operation, () =>
+      sdk.buildStatus(request.templateId, request.templateBuildId, connection),
     )
-    const defaultTag = tags.find((tag) => tag.tag === "default")
     if (
-      defaultTag?.buildId !== request.templateBuildId ||
       status.templateId !== request.templateId ||
       status.buildId !== request.templateBuildId ||
       status.status !== "ready"
