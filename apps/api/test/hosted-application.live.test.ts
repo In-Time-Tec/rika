@@ -2,13 +2,14 @@ import { expect, it } from "@effect/vitest"
 import { identityMigrations, runMigration } from "@rika/identity"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as ExecutionPostgres from "@rika/execution/postgres"
-import { Context, Effect, Exit, Layer, Random, Redacted, Schedule, Scope } from "effect"
+import { Context, Effect, Exit, Layer, Random, Redacted, Scope } from "effect"
 import { Pool } from "pg"
 import { HostedApplication, layer as hostedApplicationLayer } from "../src/hosted-application"
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 
 const query = (pool: Pool, text: string) => Effect.promise(() => pool.query(text))
+const waitForHostPoll = Effect.promise(() => Bun.sleep(10))
 
 it.effect.skipIf(databaseUrl === undefined)(
   "retains hosted execution resources until the application scope closes",
@@ -48,16 +49,18 @@ it.effect.skipIf(databaseUrl === undefined)(
           resourceScope,
         )
         const application = Context.get(context, HostedApplication)
-        for (let attempt = 0; attempt < 100; attempt += 1) {
+        for (let attempt = 0; attempt < 500; attempt += 1) {
           if ((yield* Effect.result(application.turnWorker.ready))._tag === "Success") break
-          yield* Effect.callback<void>((resume) => {
-            setImmediate(() => resume(Effect.void))
-          })
+          yield* waitForHostPoll
         }
         yield* application.turnWorker.ready
         expect(application.execution.gateway).toBeDefined()
         expect(application.execution.lifecycle).toBeDefined()
-        yield* application.execution.readiness.check.pipe(Effect.retry(Schedule.recurs(20)))
+        for (let attempt = 0; attempt < 500; attempt += 1) {
+          if ((yield* Effect.result(application.execution.readiness.check))._tag === "Success") break
+          yield* waitForHostPoll
+        }
+        yield* application.execution.readiness.check
         expect(
           yield* application.execution.gateway.inspectTurn({
             runId: "missing-run",
