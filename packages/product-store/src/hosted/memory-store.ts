@@ -25,6 +25,7 @@ import {
   Timestamp,
 } from "@rika/product/hosted-model"
 import { HostedStore, StoreError, type StoreFailureReason, type StoreService } from "@rika/product/hosted-store"
+import type { TurnId } from "@rika/product/turn-record"
 import { layer as assignmentLayer } from "./memory-assignments"
 
 interface ThreadState {
@@ -43,6 +44,7 @@ interface State {
   readonly devices: Map<string, AuthenticatedDevice>
   readonly clients: Map<string, AuthenticatedClient>
   readonly commands: Map<string, ReadonlyArray<ThreadCommand>>
+  readonly promptTurns: Map<string, TurnId>
   readonly events: Map<string, ReadonlyArray<ThreadEvent>>
   readonly cursors: Map<string, ResumableCursor>
   readonly writers: Map<string, TerminalWriterLease>
@@ -67,6 +69,7 @@ const emptyState = (): State => ({
   devices: new Map(),
   clients: new Map(),
   commands: new Map(),
+  promptTurns: new Map(),
   events: new Map(),
   cursors: new Map(),
   writers: new Map(),
@@ -366,6 +369,58 @@ const make = Effect.gen(function* () {
           }),
           commands: replace(current.commands, input.threadId, [...commands, command]),
         })
+      }),
+    admitPrompt: (input) =>
+      mutation(state, (current) => {
+        const threadState = current.threads.get(input.threadId)
+        if (threadState === undefined || threadState.thread.ownerId !== input.ownerId)
+          return fail("not-found", "Thread does not exist in the organization")
+        const client = requireClient(current, input, input.admittedAt)
+        if (client === undefined || input.actor.deviceId !== client.deviceId)
+          return fail("invalid-authority", "Command actor attribution does not match the authenticated client")
+        const commands = current.commands.get(input.threadId) ?? []
+        const previous = commands.find(
+          (command) => command.commandId === input.commandId || command.idempotencyKey === input.idempotencyKey,
+        )
+        const comparable = {
+          ...input,
+          command: { _tag: "SubmitPrompt" as const, prompt: input.prompt, mode: input.executionRoute.mode },
+        }
+        if (previous !== undefined) {
+          const turnId = current.promptTurns.get(previous.commandId)
+          if (turnId === undefined)
+            return fail("conflict", "Command identity was admitted without a queued Turn")
+          return commandEquivalent(previous, comparable)
+            ? succeed({ command: previous, turnId }, current)
+            : fail("conflict", "Command identity or idempotency key was reused with different content")
+        }
+        if ([...current.promptTurns.values()].includes(input.turnId))
+          return fail("conflict", "Turn identity is already in use")
+        const allocated = allocateCommitCursor(current, input.ownerId)
+        const command: ThreadCommand = {
+          ownerId: input.ownerId,
+          threadId: input.threadId,
+          commandId: input.commandId,
+          idempotencyKey: input.idempotencyKey,
+          actor: input.actor,
+          command: comparable.command,
+          admittedAt: input.admittedAt,
+          sequence: Sequence.make(String(threadState.nextCommandSequence)),
+          commitCursor: allocated.commitCursor,
+        }
+        return succeed(
+          { command, turnId: input.turnId },
+          {
+            ...current,
+            ownerCounters: allocated.ownerCounters,
+            threads: replace(current.threads, input.threadId, {
+              ...threadState,
+              nextCommandSequence: threadState.nextCommandSequence + 1n,
+            }),
+            commands: replace(current.commands, input.threadId, [...commands, command]),
+            promptTurns: replace(current.promptTurns, input.commandId, input.turnId),
+          },
+        )
       }),
     readCommands: (input) =>
       Ref.get(state).pipe(

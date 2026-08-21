@@ -141,7 +141,11 @@ export const RunRequest = Schema.Struct({
 })
 export type RunRequest = typeof RunRequest.Type
 
-export const RunResult = Schema.Struct({ output: Schema.String })
+export const RunResult = Schema.Struct({
+  commandId: Schema.String,
+  turnId: Schema.String,
+  status: Schema.Literal("queued"),
+})
 export type RunResult = typeof RunResult.Type
 
 export interface HttpInterface {

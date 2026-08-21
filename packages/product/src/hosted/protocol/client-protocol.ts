@@ -23,7 +23,7 @@ import {
 } from "../model"
 
 export const ClientCommand = Schema.Union([
-  Schema.TaggedStruct("SubmitPrompt", { prompt: Schema.NonEmptyString }),
+  Schema.TaggedStruct("SubmitPrompt", { prompt: Schema.NonEmptyString, mode: Schema.optionalKey(Schema.NonEmptyString) }),
   Schema.TaggedStruct("Steer", { text: Schema.NonEmptyString }),
   Schema.TaggedStruct("Cancel", {}),
   Schema.TaggedStruct("TerminalInput", {

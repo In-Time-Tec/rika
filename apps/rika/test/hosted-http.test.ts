@@ -62,7 +62,9 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
             response(request, { threadId: "thread-1", url: "https://hosted.example.test/threads/thread-1" }),
           )
         if (path === "/api/v1/threads/e2b_thread-1/operations")
-          return Effect.succeed(response(request, { output: "done" }))
+          return Effect.succeed(
+            response(request, { commandId: "operation-1", turnId: "turn-1", status: "queued" }, 202),
+          )
         return Effect.succeed(response(request, {}))
       })
       const context = yield* Layer.build(
@@ -105,8 +107,8 @@ it.effect("uses per-install registration, Better Auth OAuth paths, DPoP, and con
         "thread-1",
       )
       expect(
-        (yield* http.runThread(origin, threadId, { prompt: ["hello"], mode: "low" }, "operation-1", session)).output,
-      ).toBe("done")
+        yield* http.runThread(origin, threadId, { prompt: ["hello"], mode: "low" }, "operation-1", session),
+      ).toEqual({ commandId: "operation-1", turnId: "turn-1", status: "queued" })
       expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
         "/api/v1/auth/cli/registrations",
         "/api/auth/device/code",

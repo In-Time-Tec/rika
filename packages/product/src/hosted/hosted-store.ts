@@ -1,4 +1,6 @@
 import { Context, Effect, Schema } from "effect"
+import type { ExecutionRouteSnapshot } from "../execution/contract/execution-route-snapshot"
+import type { TurnId } from "../thread/model/turn-record"
 import type { ClientCommand } from "./protocol/client-protocol"
 import {
   type ActorAttribution,
@@ -141,6 +143,24 @@ export interface AdmitCommandInput {
   readonly admittedAt: Timestamp
 }
 
+export interface AdmitPromptInput {
+  readonly ownerId: OwnerId
+  readonly threadId: ThreadId
+  readonly commandId: CommandId
+  readonly idempotencyKey: IdempotencyKey
+  readonly turnId: TurnId
+  readonly actor: ActorAttribution
+  readonly prompt: string
+  readonly executionRoute: ExecutionRouteSnapshot
+  readonly admittedAt: Timestamp
+  readonly queueCapacity: number
+}
+
+export interface AdmittedPrompt {
+  readonly command: ThreadCommand
+  readonly turnId: TurnId
+}
+
 export interface AppendEventInput {
   readonly eventId: EventId
   readonly idempotencyKey: IdempotencyKey
@@ -237,6 +257,7 @@ export interface StoreService {
   readonly registerDevice: (input: RegisterDeviceInput) => Effect.Effect<AuthenticatedDevice, StoreError>
   readonly authenticateClient: (input: AuthenticateClientInput) => Effect.Effect<AuthenticatedClient, StoreError>
   readonly admitCommand: (input: AdmitCommandInput) => Effect.Effect<ThreadCommand, StoreError>
+  readonly admitPrompt: (input: AdmitPromptInput) => Effect.Effect<AdmittedPrompt, StoreError>
   readonly readCommands: (input: ReadThreadLogInput) => Effect.Effect<ReadonlyArray<ThreadCommand>, StoreError>
   readonly appendEvent: (input: AppendEventInput) => Effect.Effect<ThreadEvent, StoreError>
   /** Append a terminal recovery event without requiring the expired dispatch lease. */

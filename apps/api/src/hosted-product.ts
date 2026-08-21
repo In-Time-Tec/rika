@@ -1,29 +1,27 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { Clock, Context, Crypto, DateTime, Effect, Layer, Schema } from "effect"
+import * as Configuration from "@rika/configuration/configuration-settings"
+import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
 import {
-  AssignmentLeaseEpoch,
   BetterAuthMemberId,
   BetterAuthUserId,
   ClientId,
   CommandId,
   DeviceId,
-  EventId,
   ExecutorAssignmentId,
-  FencingGeneration,
   type HostedOwner,
   IdempotencyKey,
   OrganizationId,
   OwnerId,
   ProjectId,
-  type Sequence,
   ThreadId,
   WorkspaceId,
 } from "@rika/product/hosted-model"
 import { HostedStore, StoreError } from "@rika/product/hosted-store"
+import { TurnId } from "@rika/product/turn-record"
 import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
-import { CellResponse as CellResponseSchema, type AccessWire, type CellResponse } from "@rika/remote-execution/protocol"
 
 export interface AuthenticatedPrincipal {
   readonly userId: string
@@ -43,14 +41,13 @@ export interface ProjectContext {
 }
 
 export interface AdmittedRun {
-  readonly operationKey: string
-  readonly commandSequence: Sequence
-  readonly prompt: string
-  readonly previous?: CellResponse
+  readonly commandId: string
+  readonly turnId: string
+  readonly status: "queued"
 }
 
 export class HostedProductError extends Schema.TaggedError<HostedProductError>()("HostedProductError", {
-  kind: Schema.optionalKey(Schema.Literals(["conflict", "not-found", "forbidden", "unavailable"])),
+  kind: Schema.optionalKey(Schema.Literals(["conflict", "not-found", "forbidden", "invalid", "unavailable"])),
   message: Schema.String,
 }) {}
 
@@ -85,12 +82,8 @@ export interface HostedProductService {
     readonly threadId: string
     readonly operationKey: string
     readonly prompt: string
+    readonly mode?: string
   }) => Effect.Effect<AdmittedRun, HostedProductError>
-  readonly completeRun: (input: {
-    readonly run: AdmittedRun
-    readonly access: AccessWire
-    readonly response: CellResponse
-  }) => Effect.Effect<void, HostedProductError>
 }
 
 export class HostedProduct extends Context.Service<HostedProduct, HostedProductService>()(
@@ -255,6 +248,8 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
                   inheritProjectGrants: executorKind === "e2b" && projectId !== undefined,
                   now: timestamp,
                 })
+                yield* sql`INSERT INTO rika_workspaces (owner_id, path, created_at)
+                  VALUES (${authority.owner.id}, ${workspaceId}, ${currentTime})`.pipe(Effect.mapError(unavailable))
                 const threadId = ThreadId.make(
                   `${executorKind === "e2b" ? "e2b" : "local"}_${yield* crypto.randomUUIDv4}`,
                 )
@@ -268,6 +263,11 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
                   inheritProjectGrants: executorKind === "e2b" && projectId !== undefined,
                   now: timestamp,
                 })
+                yield* sql`INSERT INTO rika_threads
+                  (id, owner_id, workspace, title, created_at, updated_at)
+                  VALUES (${thread.id}, ${authority.owner.id}, ${workspaceId}, 'New thread', ${currentTime}, ${currentTime})`.pipe(
+                  Effect.mapError(unavailable),
+                )
                 if (input.owner._tag === "OrganizationOwner" && selected === undefined) {
                   if (membershipId === undefined) return yield* forbidden()
                   yield* store.putThreadGrant({
@@ -367,49 +367,33 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
                 deviceId: DeviceId.make(input.principal.deviceId),
               } as const)
         yield* activateClient(input.principal, userId)
-        const command = yield* store.admitCommand({
+        const executionRoute = yield* Effect.try({
+          try: () =>
+            ExecutionRouteResolution.resolve(
+              Configuration.Defaults.settingsDefaults,
+              input.mode ?? Configuration.Defaults.settingsDefaults.defaultMode,
+              undefined,
+              undefined,
+            ),
+          catch: (cause) => HostedProductError.make({ kind: "invalid", message: String(cause) }),
+        })
+        const admitted = yield* store.admitPrompt({
           ownerId: OwnerId.make(resolved.ownerId),
           threadId: ThreadId.make(input.threadId),
           commandId: CommandId.make(input.operationKey),
           idempotencyKey: IdempotencyKey.make(input.operationKey),
+          turnId: TurnId.make(yield* crypto.randomUUIDv4),
           actor,
-          command: { _tag: "SubmitPrompt", prompt: input.prompt },
-          admittedAt: DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis)),
-        })
-        const previousRows = yield* sql<{ readonly event: unknown }>`SELECT event FROM rika_hosted_thread_events
-          WHERE owner_id = ${resolved.ownerId} AND thread_id = ${input.threadId}
-            AND idempotency_key = ${command.idempotencyKey} LIMIT 1`.pipe(Effect.mapError(unavailable))
-        const previousEvent = previousRows[0]?.event
-        const previous =
-          typeof previousEvent === "object" &&
-          previousEvent !== null &&
-          "_tag" in previousEvent &&
-          previousEvent._tag === "CellResult" &&
-          "response" in previousEvent
-            ? yield* Schema.decodeUnknownEffect(CellResponseSchema)(previousEvent.response).pipe(
-                Effect.mapError(unavailable),
-              )
-            : undefined
-        return {
-          operationKey: String(command.idempotencyKey),
-          commandSequence: command.sequence,
           prompt: input.prompt,
-          ...(previous === undefined ? {} : { previous }),
-        }
-      }, Effect.mapError(storeFailure))
-
-      const completeRun: HostedProductService["completeRun"] = Effect.fn("HostedProduct.completeRun")(function* (
-        input,
-      ) {
-        yield* store.appendEvent({
-          eventId: EventId.make(input.run.operationKey),
-          idempotencyKey: IdempotencyKey.make(input.run.operationKey),
-          assignmentId: ExecutorAssignmentId.make(input.access.fence.assignmentId),
-          assignmentGeneration: FencingGeneration.make(String(input.access.fence.assignmentGeneration)),
-          leaseEpoch: AssignmentLeaseEpoch.make(String(input.access.leaseEpoch)),
-          commandSequence: input.run.commandSequence,
-          event: { _tag: "CellResult", operationKey: input.run.operationKey, response: input.response },
+          executionRoute,
+          admittedAt: DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis)),
+          queueCapacity: 32,
         })
+        return {
+          commandId: String(admitted.command.commandId),
+          turnId: String(admitted.turnId),
+          status: "queued" as const,
+        }
       }, Effect.mapError(storeFailure))
 
       return HostedProduct.of({
@@ -417,7 +401,6 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
         projects,
         createConnection,
         admitRun,
-        completeRun,
       })
     }),
   )

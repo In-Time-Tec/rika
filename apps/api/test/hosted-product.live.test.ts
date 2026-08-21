@@ -94,19 +94,29 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
         owner: personal("personal-user"),
         placement: "local",
       })
-      yield* product.admitRun({
+      const admissionInput = {
         principal: principal("personal-user"),
         threadId: connection.threadId,
         operationKey: "personal-operation",
         prompt: "personal prompt",
-      })
+      } as const
+      const admitted = yield* product.admitRun(admissionInput)
+      expect(yield* product.admitRun(admissionInput)).toEqual(admitted)
+      expect(
+        yield* failureKind(product.admitRun({ ...admissionInput, prompt: "different prompt" })),
+      ).toBe("conflict")
+      expect(yield* failureKind(product.admitRun({ ...admissionInput, mode: "low" }))).toBe("conflict")
       const facts = yield* query(
         pool,
         `SELECT owner_record.id AS owner_id, owner_record.user_id, thread.created_by_user_id,
-          command.actor, (SELECT count(*)::int FROM "member" WHERE user_id = $1) AS memberships
+          command.actor, command.turn_id, turn.status, turn.prompt,
+          (SELECT count(*)::int FROM "member" WHERE user_id = $1) AS memberships,
+          (SELECT count(*)::int FROM rika_turns WHERE thread_id = thread.id) AS turn_count,
+          (SELECT queued_count FROM rika_thread_queue_state WHERE thread_id = thread.id) AS queued_count
         FROM rika_hosted_thread_commands command
         JOIN rika_hosted_threads thread ON thread.id = command.thread_id
-        JOIN rika_hosted_owners owner_record ON owner_record.id = command.owner_id`,
+        JOIN rika_hosted_owners owner_record ON owner_record.id = command.owner_id
+        JOIN rika_turns turn ON turn.id = command.turn_id`,
         ["personal-user"],
       )
       expect(facts.rows).toHaveLength(1)
@@ -114,6 +124,11 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
         user_id: "personal-user",
         created_by_user_id: "personal-user",
         memberships: 0,
+        turn_id: admitted.turnId,
+        status: "queued",
+        prompt: "personal prompt",
+        turn_count: 1,
+        queued_count: 1,
         actor: { _tag: "PersonalActor", userId: "personal-user", owner: personal("personal-user") },
       })
     }),

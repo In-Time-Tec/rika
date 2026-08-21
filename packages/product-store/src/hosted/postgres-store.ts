@@ -1,6 +1,7 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { Effect, Layer, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql/SqlClient"
+import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import {
   ActorAttribution,
   AuditEvent,
@@ -26,11 +27,13 @@ import {
   ThreadGrant,
   type ThreadId,
 } from "@rika/product/hosted-model"
+import { TurnId } from "@rika/product/turn-record"
 import {
   HostedStore,
   StoreError,
   type AcquireTerminalWriterInput,
   type AdmitCommandInput,
+  type AdmitPromptInput,
   type AppendEventInput,
   type AppendRecoveredEventInput,
   type AuthenticateClientInput,
@@ -59,6 +62,7 @@ const decode = <S extends Schema.Top>(schema: S, value: unknown) =>
 const limit = (value: number) => Math.min(Math.max(Math.trunc(value), 1), 1_000)
 const transaction = <A>(sql: SqlClient, effect: Effect.Effect<A, StoreError>) =>
   sql.withTransaction(effect).pipe(Effect.catchTag("SqlError", databaseError))
+const ExecutionRouteJson = Schema.fromJsonString(ExecutionRouteSnapshot)
 const commandEquivalent = Schema.toEquivalence(
   Schema.Struct({
     ownerId: ThreadCommand.fields.ownerId,
@@ -448,6 +452,86 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
     )
   })
 
+  const admitPrompt = Effect.fn("PostgresStore.admitPrompt")(function* (input: AdmitPromptInput) {
+    if (input.prompt.length === 0) return yield* failure("conflict", "Prompt cannot be empty")
+    const queueCapacity = Math.trunc(input.queueCapacity)
+    if (queueCapacity < 1) return yield* failure("conflict", "Prompt queue capacity must be positive")
+    const admittedAtMillis = Date.parse(input.admittedAt)
+    if (!Number.isFinite(admittedAtMillis)) return yield* failure("conflict", "Prompt admission timestamp is invalid")
+    const executionRoute = yield* Schema.encodeEffect(ExecutionRouteJson)(input.executionRoute).pipe(
+      Effect.mapError(databaseError),
+    )
+    const commandInput: AdmitCommandInput = {
+      ownerId: input.ownerId,
+      threadId: input.threadId,
+      commandId: input.commandId,
+      idempotencyKey: input.idempotencyKey,
+      actor: input.actor,
+      command: { _tag: "SubmitPrompt", prompt: input.prompt, mode: input.executionRoute.mode },
+      admittedAt: input.admittedAt,
+    }
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        const locked = yield* query(sql`SELECT id FROM rika_hosted_threads
+          WHERE id = ${input.threadId} AND owner_id = ${input.ownerId} FOR UPDATE`)
+        if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist for the owner")
+        yield* requireThreadAccess(sql, input, roleRank.controller, input.admittedAt)
+        const existingRows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId",
+          command_id AS "commandId", idempotency_key AS "idempotencyKey", turn_id AS "turnId",
+          actor, sequence::text AS sequence, commit_cursor::text AS "commitCursor", command,
+          to_char(admitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "admittedAt"
+          FROM rika_hosted_thread_commands
+          WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
+            AND (command_id = ${input.commandId} OR idempotency_key = ${input.idempotencyKey})`)
+        if (existingRows.length > 1)
+          return yield* failure("conflict", "Command identity or idempotency key collides with multiple commands")
+        if (existingRows[0] !== undefined) {
+          const existing = yield* decode(ThreadCommand, existingRows[0])
+          if (!commandEquivalent(existing, commandInput))
+            return yield* failure("conflict", "Command identity or idempotency key was reused with different content")
+          const turnId = (existingRows[0] as { readonly turnId?: unknown }).turnId
+          if (typeof turnId !== "string")
+            return yield* failure("conflict", "Command identity was admitted without a queued Turn")
+          return { command: existing, turnId: TurnId.make(turnId) }
+        }
+        const productThread = yield* query(sql`SELECT 1 FROM rika_threads
+          WHERE id = ${input.threadId} AND owner_id = ${input.ownerId} FOR KEY SHARE`)
+        if (productThread[0] === undefined)
+          return yield* failure("invalid-authority", "Thread has no product state for the owner")
+        const collidingTurn = yield* query(sql`SELECT 1 FROM rika_turns WHERE id = ${input.turnId}`)
+        if (collidingTurn[0] !== undefined) return yield* failure("conflict", "Turn identity is already in use")
+        yield* query(sql`INSERT INTO rika_turns
+          (id, thread_id, turn_kind, prompt, execution_route_json, author_json, lineage_json, status, created_at, updated_at)
+          VALUES (${input.turnId}, ${input.threadId}, 'AgentExecution', ${input.prompt}, ${executionRoute},
+            '{"_tag":"Human"}', '{"_tag":"Original"}', 'queued', ${admittedAtMillis}, ${admittedAtMillis})`)
+        yield* query(sql`INSERT INTO rika_thread_queue_state (thread_id)
+          VALUES (${input.threadId}) ON CONFLICT (thread_id) DO NOTHING`)
+        const queueRows = yield* query(sql`UPDATE rika_thread_queue_state
+          SET revision = revision + 1, queued_count = queued_count + 1
+          WHERE thread_id = ${input.threadId} AND queued_count < ${queueCapacity}
+          RETURNING queued_count`)
+        if (queueRows[0] === undefined) return yield* failure("conflict", "Thread prompt queue is full")
+        const sequences = yield* query(sql<{ readonly sequence: string }>`UPDATE rika_hosted_threads
+          SET next_command_sequence = next_command_sequence + 1
+          WHERE id = ${input.threadId} AND owner_id = ${input.ownerId}
+          RETURNING (next_command_sequence - 1)::text AS sequence`)
+        const sequence = Sequence.make(sequences[0]!.sequence)
+        const commitCursor = yield* allocateCommitCursor(sql, input.ownerId)
+        const rows = yield* query(sql`INSERT INTO rika_hosted_thread_commands
+          (owner_id, thread_id, command_id, idempotency_key, turn_id, actor, sequence, commit_cursor, command, admitted_at)
+          VALUES (${input.ownerId}, ${input.threadId}, ${input.commandId}, ${input.idempotencyKey}, ${input.turnId},
+            ${sql.json(input.actor)}, ${sequence}::bigint, ${commitCursor}::bigint,
+            ${sql.json(commandInput.command)}, ${input.admittedAt})
+          RETURNING owner_id AS "ownerId", thread_id AS "threadId", command_id AS "commandId",
+            idempotency_key AS "idempotencyKey", actor, sequence::text AS sequence,
+            commit_cursor::text AS "commitCursor", command,
+            to_char(admitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "admittedAt"`)
+        return { command: yield* decode(ThreadCommand, rows[0]), turnId: input.turnId }
+      }),
+    )
+  })
+
   const readCommands: StoreService["readCommands"] = Effect.fn("PostgresStore.readCommands")(function* (input) {
     yield* requireThreadAccess(sql, input, roleRank.viewer)
     const rows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId", command_id AS "commandId",
@@ -829,6 +913,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
     registerDevice,
     authenticateClient,
     admitCommand,
+    admitPrompt,
     readCommands,
     appendEvent,
     appendRecoveredEvent,

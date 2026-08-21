@@ -371,5 +371,5 @@ export const runThread = Effect.fn("HostedAccount.runThread")(function* (threadI
   const result = yield* authenticated(profile, (session) =>
     http.runThread(profile.origin, threadId, request, key, session),
   )
-  yield* Console.log(result.output)
+  yield* Console.log(`Queued turn ${result.turnId} for command ${result.commandId}`)
 })

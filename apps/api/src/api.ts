@@ -85,7 +85,11 @@ const OperationRequest = strict(
     mode: Schema.optionalKey(Schema.String),
   }),
 )
-const OperationResponse = Schema.Struct({ output: Schema.String, exitCode: Schema.optionalKey(Schema.Int) })
+const OperationResponse = Schema.Struct({
+  commandId: Schema.String,
+  turnId: Schema.String,
+  status: Schema.Literal("queued"),
+}).pipe(HttpApiSchema.status(202))
 
 export class CurrentAccess extends Context.Service<
   CurrentAccess,
@@ -279,50 +283,18 @@ const productHandlers = (dependencies: HttpDependencies) =>
               threadId: params.threadId,
               operationKey: headers["idempotency-key"],
               prompt: payload.prompt.join("\n"),
+              ...(payload.mode === undefined ? {} : { mode: payload.mode }),
             })
             .pipe(
               Effect.mapError((error) => {
                 if (error.kind === "conflict") return Conflict.make({ message: "Operation identity conflicts" })
                 if (error.kind === "not-found") return NotFound.make({ message: "Thread is unavailable" })
                 if (error.kind === "forbidden") return Forbidden.make({ message: "Operation was not admitted" })
+                if (error.kind === "invalid") return Unprocessable.make({ message: "Operation is invalid" })
                 return ServiceUnavailable.make({ message: "Product service unavailable" })
               }),
             )
-          let response = run.previous
-          if (response === undefined) {
-            const result = yield* dependencies.executor
-              .run({ threadId: params.threadId, operationKey: run.operationKey, code: run.prompt })
-              .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Executor is unavailable" })))
-            if (!result.eventPersisted) {
-              if (result.access === undefined)
-                return yield* ServiceUnavailable.make({ message: "Executor result has no completion authority" })
-              yield* dependencies.product
-                .completeRun({ run, access: result.access, response: result.response })
-                .pipe(
-                  Effect.mapError(() =>
-                    ServiceUnavailable.make({ message: "Operation result could not be persisted" }),
-                  ),
-                )
-            }
-            response = result.response
-          }
-          if (response._tag === "Suspend")
-            return yield* ServiceUnavailable.make({ message: "Executor operation suspended" })
-          if (response._tag === "DomainFailure") {
-            const failureValue = response.failure as Record<string, unknown>
-            const stdout = typeof failureValue.stdout === "string" ? failureValue.stdout : ""
-            const stderr = typeof failureValue.stderr === "string" ? failureValue.stderr : ""
-            const exitCode = typeof failureValue.exitCode === "number" ? failureValue.exitCode : undefined
-            return { output: `${stdout}${stderr}`, ...(exitCode === undefined ? {} : { exitCode }) }
-          }
-          const value = response.result
-          if (typeof value !== "object" || value === null || Array.isArray(value))
-            return yield* ServiceUnavailable.make({ message: "Executor returned an invalid result" })
-          const output = value as Record<string, unknown>
-          const stdout = typeof output.stdout === "string" ? output.stdout : ""
-          const stderr = typeof output.stderr === "string" ? output.stderr : ""
-          const exitCode = typeof output.exitCode === "number" ? output.exitCode : undefined
-          return { output: `${stdout}${stderr}`, ...(exitCode === undefined ? {} : { exitCode }) }
+          return run
         }),
     }),
   )

@@ -35,4 +35,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "c8414d553f8eb3775b6930944f07cdf76a9ac857c324d24d71e0e66816741f29",
     url: new URL("../../migrations/postgres/0006-product-state.sql", import.meta.url),
   },
+  {
+    id: "product/0007_hosted_prompt_admission",
+    checksum: "7acbef20b49d79185a1da7bcb00138c509966f2a0fe0dff5e8f614932f490442",
+    url: new URL("../../migrations/postgres/0007-hosted-prompt-admission.sql", import.meta.url),
+  },
 ]

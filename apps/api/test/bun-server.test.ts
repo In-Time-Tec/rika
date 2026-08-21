@@ -30,7 +30,6 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
       projects: () => Effect.die("unused"),
       createConnection: () => Effect.die("unused"),
       admitRun: () => Effect.die("unused"),
-      completeRun: () => Effect.die("unused"),
     }
     const identity: IdentityRuntime = {
       handle: () => Effect.die("unused"),
@@ -144,7 +143,6 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
         projects: () => Effect.die("unused"),
         createConnection: () => Effect.die("unused"),
         admitRun: () => Effect.die("unused"),
-        completeRun: () => Effect.die("unused"),
       },
       executor: {
         controller: undefined as never,

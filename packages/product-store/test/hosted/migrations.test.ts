@@ -12,6 +12,7 @@ it.effect("keeps hosted PostgreSQL migration identities and checksums exact", ()
       "product/0004_local_executor",
       "product/0005_local_executor_recovery",
       "product/0006_product_state",
+      "product/0007_hosted_prompt_admission",
     ])
     for (const migration of migrations) {
       const sql = yield* Effect.promise(() => Bun.file(migration.url).arrayBuffer())
