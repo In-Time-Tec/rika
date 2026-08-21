@@ -14,6 +14,7 @@ const Sha256 = Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/))
 const LeaseEpoch = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 const OutputText = Schema.String.check(Schema.isMaxLength(16_384))
 const RequestDigest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
+const PtyData = Schema.String.check(Schema.isMaxLength(16_384))
 
 export const ProtocolVersion = Schema.Literal(1)
 export type ProtocolVersion = typeof ProtocolVersion.Type
@@ -348,7 +349,7 @@ export const PtyCreate = Schema.Struct({
 })
 export type PtyCreate = typeof PtyCreate.Type
 
-export const PtyInput = Schema.Struct({ ptyId: Identifier, data: Schema.String })
+export const PtyInput = Schema.Struct({ ptyId: Identifier, data: PtyData })
 export type PtyInput = typeof PtyInput.Type
 
 export const PtyResize = Schema.Struct({ ptyId: Identifier, cols: Dimension, rows: Dimension })
@@ -359,7 +360,7 @@ export type PtyReconnect = typeof PtyReconnect.Type
 
 export const PtyTranscriptChunk = Schema.Struct({
   cursor: Sequence,
-  data: Schema.String,
+  data: PtyData,
 })
 export type PtyTranscriptChunk = typeof PtyTranscriptChunk.Type
 
@@ -460,7 +461,9 @@ export const ExecutorMessage = Schema.Union([
   Schema.TaggedStruct("CheckoutRequested", { requestId: Identifier, access: AccessWire }),
   Schema.TaggedStruct("PtyOpened", { access: AccessWire, pty: PtyCreate }),
   Schema.TaggedStruct("PtyOutput", { access: AccessWire, ptyId: Identifier, chunk: PtyTranscriptChunk }),
+  Schema.TaggedStruct("PtyReplayGap", { access: AccessWire, ptyId: Identifier, gap: PtyGap }),
   Schema.TaggedStruct("PtyDisconnected", { access: AccessWire, ptyId: Identifier, cursor: Sequence }),
+  Schema.TaggedStruct("PtyTerminated", { access: AccessWire, ptyId: Identifier, cursor: Sequence }),
   Schema.TaggedStruct("CellResult", {
     access: AccessWire,
     operationKey: Identifier,
@@ -499,6 +502,7 @@ export const ApiMessage = Schema.Union([
   Schema.TaggedStruct("PtyResize", { fence: Fence, request: PtyResize }),
   Schema.TaggedStruct("PtyDisconnect", { fence: Fence, ptyId: Identifier }),
   Schema.TaggedStruct("PtyReconnect", { fence: Fence, request: PtyReconnect }),
+  Schema.TaggedStruct("PtyTerminate", { fence: Fence, ptyId: Identifier }),
   Schema.TaggedStruct("CellExecute", { request: CellRequest }),
   Schema.TaggedStruct("CellCancel", { access: AccessWire, operationKey: Identifier, attempt: Sequence }),
   Schema.TaggedStruct("CellReplay", { access: AccessWire, operationKey: Identifier, afterCursor: Sequence }),

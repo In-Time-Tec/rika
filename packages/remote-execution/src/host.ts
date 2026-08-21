@@ -1,7 +1,6 @@
-import { BunFileSystem } from "@effect/platform-bun"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
+import * as BunServices from "@effect/platform-bun/BunServices"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
-import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import {
   Cause,
   Context,
@@ -13,12 +12,15 @@ import {
   FileSystem,
   Layer,
   Option,
+  Path,
   Queue,
   Redacted,
   Ref,
   Schema,
   Semaphore,
+  Stream,
 } from "effect"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import * as Socket from "effect/unstable/socket/Socket"
 import { BindingProxyError } from "./binding-proxy"
 import { CellError, State as CellState, type State as CellStateValue } from "./cells"
@@ -30,6 +32,14 @@ import {
   workspaceLayer as machineLayer,
   type State as MachineStateValue,
 } from "./machine"
+import {
+  Manager as PtyManager,
+  driverLayer as ptyDriverLayer,
+  layer as ptyLayer,
+  liveCapabilities,
+  repositoryLayer as ptyRepositoryLayer,
+  type Connection as PtyConnection,
+} from "./pty"
 import { Runtime, layer as runtimeLayer } from "./runtime"
 import {
   ApiMessage,
@@ -99,6 +109,7 @@ const directoryMode = 0o700
 const fileMode = 0o600
 const sandboxIdPath = "/run/e2b/.E2B_SANDBOX_ID"
 const workspaceRoot = Bun.env.RIKA_EXECUTOR_WORKSPACE_ROOT || "/workspace"
+const workspaceUser = "rika-workspace"
 
 const sandboxInstanceId = () =>
   Bun.file(sandboxIdPath)
@@ -320,18 +331,19 @@ const waitForWelcome = (
     return yield* waitForWelcome(incoming, store)
   })
 
+const sameFence = (left: Fence, right: Fence) =>
+  left.target === right.target &&
+  left.assignmentId === right.assignmentId &&
+  left.assignmentGeneration === right.assignmentGeneration &&
+  left.instanceId === right.instanceId &&
+  left.executorId === right.executorId &&
+  left.processIncarnation === right.processIncarnation
+
 const sameAccess = (
   left: { readonly fence: Fence; readonly leaseEpoch: number; readonly sessionToken: string },
   right: typeof left,
 ) =>
-  left.leaseEpoch === right.leaseEpoch &&
-  left.sessionToken === right.sessionToken &&
-  left.fence.target === right.fence.target &&
-  left.fence.assignmentId === right.fence.assignmentId &&
-  left.fence.assignmentGeneration === right.fence.assignmentGeneration &&
-  left.fence.instanceId === right.fence.instanceId &&
-  left.fence.executorId === right.fence.executorId &&
-  left.fence.processIncarnation === right.fence.processIncarnation
+  left.leaseEpoch === right.leaseEpoch && left.sessionToken === right.sessionToken && sameFence(left.fence, right.fence)
 
 const attribution = (request: CellRequest) => ({
   operationKey: request.operationKey,
@@ -363,6 +375,105 @@ const redactOutput = (value: unknown) => {
   return { text: text.slice(0, 16_384), truncated: text.length > 16_384 }
 }
 
+const ptyCreate = (connection: PtyConnection) => ({
+  ptyId: connection.ptyId,
+  command: connection.command,
+  cwd: connection.cwd,
+  cols: connection.cols,
+  rows: connection.rows,
+})
+
+const dispatchPty = Effect.fn("Host.dispatchPty")(function* (
+  message: IncomingMessage,
+  writer: (chunk: string) => Effect.Effect<void, Socket.SocketError>,
+  delivery: Semaphore.Semaphore,
+) {
+  if (
+    message._tag !== "PtyCreate" &&
+    message._tag !== "PtyInput" &&
+    message._tag !== "PtyResize" &&
+    message._tag !== "PtyDisconnect" &&
+    message._tag !== "PtyReconnect" &&
+    message._tag !== "PtyTerminate"
+  )
+    return false
+  const runtime = yield* Runtime
+  const pty = yield* PtyManager
+  const access = yield* runtime.access.pipe(Effect.mapError((cause) => HostError.make({ message: cause.message })))
+  if (!sameFence(access.fence, message.fence))
+    return yield* HostError.make({ message: "PTY request has a stale executor fence" })
+  const write = (outgoing: Parameters<typeof encodeExecutorMessage>[0]) =>
+    writer(encodeExecutorMessage(outgoing)).pipe(
+      Effect.mapError(() => HostError.make({ message: "Could not write PTY frame" })),
+    )
+  yield* delivery.withPermits(1)(
+    Effect.gen(function* () {
+      if (message._tag === "PtyCreate") {
+        const opened = yield* pty.create(message.request)
+        yield* write(
+          opened.terminated
+            ? { _tag: "PtyTerminated", access, ptyId: opened.ptyId, cursor: opened.cursor }
+            : { _tag: "PtyOpened", access, pty: ptyCreate(opened) },
+        )
+        return
+      }
+      if (message._tag === "PtyInput") {
+        yield* pty.input(message.request)
+        return
+      }
+      if (message._tag === "PtyResize") {
+        const resized = yield* pty.resize(message.request)
+        yield* write({ _tag: "PtyOpened", access, pty: ptyCreate(resized) })
+        return
+      }
+      if (message._tag === "PtyDisconnect") {
+        const disconnected = yield* pty.disconnect(message.ptyId)
+        yield* write({ _tag: "PtyDisconnected", access, ptyId: disconnected.ptyId, cursor: disconnected.cursor })
+        return
+      }
+      if (message._tag === "PtyReconnect") {
+        const reconnected = yield* pty.reconnect(message.request)
+        yield* write({ _tag: "PtyOpened", access, pty: ptyCreate(reconnected) })
+        if (reconnected.gap !== null)
+          yield* write({ _tag: "PtyReplayGap", access, ptyId: reconnected.ptyId, gap: reconnected.gap })
+        yield* Effect.forEach(
+          reconnected.transcript,
+          (chunk) => write({ _tag: "PtyOutput", access, ptyId: reconnected.ptyId, chunk }),
+          { discard: true },
+        )
+        return
+      }
+      const terminated = yield* pty.terminate(message.ptyId)
+      yield* write({ _tag: "PtyTerminated", access, ptyId: terminated.ptyId, cursor: terminated.cursor })
+    }).pipe(Effect.mapError((cause) => HostError.make({ message: cause.message }))),
+  )
+  return true
+})
+
+const consumePtyEvents = (
+  writer: (chunk: string) => Effect.Effect<void, Socket.SocketError>,
+  delivery: Semaphore.Semaphore,
+) =>
+  Effect.gen(function* () {
+    const runtime = yield* Runtime
+    const pty = yield* PtyManager
+    yield* pty.events.pipe(
+      Stream.runForEach((event) =>
+        delivery.withPermits(1)(
+          Effect.gen(function* () {
+            const access = yield* runtime.access
+            const outgoing =
+              event._tag === "Output"
+                ? { _tag: "PtyOutput" as const, access, ptyId: event.ptyId, chunk: event.chunk }
+                : { _tag: "PtyTerminated" as const, access, ptyId: event.ptyId, cursor: event.cursor }
+            yield* writer(encodeExecutorMessage(outgoing))
+          }),
+        ),
+      ),
+      Effect.mapError((cause) => HostError.make({ message: cause.message })),
+    )
+  })
+
 const consumeApi = (
   incoming: Queue.Queue<IncomingMessage>,
   writer: (chunk: string) => Effect.Effect<void, Socket.SocketError>,
@@ -373,6 +484,7 @@ const consumeApi = (
   lifecycle: Semaphore.Semaphore,
   cells: HostedKernel.Interface,
   machine: Machine["Service"],
+  ptyDelivery: Semaphore.Semaphore,
 ) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime
@@ -441,6 +553,7 @@ const consumeApi = (
             Effect.forkScoped,
           )
       }
+      if (yield* dispatchPty(message, writer, ptyDelivery)) return
       if (message._tag === "CellExecute") {
         const access = yield* runtime.access.pipe(
           Effect.mapError((cause) => HostError.make({ message: cause.message })),
@@ -607,6 +720,7 @@ const connect = Effect.fn("Host.connect")(function* (
   lifecycle: Semaphore.Semaphore,
   cells: HostedKernel.Interface,
   machine: Machine["Service"],
+  ptyDelivery: Semaphore.Semaphore,
   activeWriter: Ref.Ref<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>,
   connected: Effect.Effect<void> = Effect.void,
 ) {
@@ -646,14 +760,20 @@ const connect = Effect.fn("Host.connect")(function* (
     Effect.forkScoped,
   )
   yield* heartbeat
-  return yield* Effect.raceFirst(
-    Fiber.join(reader).pipe(
-      Effect.mapError(() => HostError.make({ message: "Executor controller connection closed" })),
+  const connectedSession = Effect.raceFirst(
+    Effect.raceFirst(
+      Fiber.join(reader).pipe(
+        Effect.mapError(() => HostError.make({ message: "Executor controller connection closed" })),
+      ),
+      consumeApi(incoming, writer, store, receipts, operations, frames, lifecycle, cells, machine, ptyDelivery),
     ),
-    consumeApi(incoming, writer, store, receipts, operations, frames, lifecycle, cells, machine),
-  ).pipe(
+    consumePtyEvents(writer, ptyDelivery),
+  )
+  const pty = yield* PtyManager
+  return yield* connectedSession.pipe(
     Effect.ensuring(
       Effect.gen(function* () {
+        yield* pty.disconnectAll.pipe(Effect.ignore)
         const running = yield* Ref.getAndSet(operations, new Map())
         yield* Effect.forEach(running.values(), Fiber.interrupt, { discard: true })
         yield* Ref.set(activeWriter, undefined)
@@ -719,7 +839,7 @@ const receiveBootstrap = Effect.callback<Bootstrap, HostError>((resume) => {
   return Effect.promise(() => server.stop(true))
 })
 
-export const testing = { operationReceiptStore, receiveBootstrap } as const
+export const testing = { dispatchPty, operationReceiptStore, receiveBootstrap, sameFence } as const
 
 const host = Effect.scoped(
   Effect.gen(function* () {
@@ -813,12 +933,33 @@ const host = Effect.scoped(
           config.fence.assignmentId,
           config.fence.assignmentGeneration,
         )
+        const ptyContext = yield* Layer.build(
+          ptyLayer.pipe(
+            Layer.provide(
+              Layer.merge(
+                ptyDriverLayer({
+                  fence: config.fence,
+                  workspaceRoot,
+                  workspaceUser,
+                }),
+                ptyRepositoryLayer({
+                  stateDirectory: config.stateDirectory,
+                  fence: config.fence,
+                }),
+              ),
+            ),
+          ),
+        ).pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
+        const capabilities = yield* liveCapabilities(workspaceUser)
+        const pty = Context.get(ptyContext, PtyManager)
+        yield* pty.disconnectAll.pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
+        const ptyCursor = yield* pty.cursor.pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
         const runtime = runtimeLayer({
           fence: config.fence,
           bootstrapToken: config.bootstrapToken,
           templateBuildId: config.templateBuildId,
-          capabilities: { cells: true, checkpoints: false, pty: false },
-          cursors: { command: 0, event: 0, pty: 0 },
+          capabilities: { ...capabilities, pty: config.fence.target === "e2b" && capabilities.pty },
+          cursors: { command: 0, event: 0, pty: ptyCursor },
           latestCheckpointId: null,
           ...(config.restoredSession === undefined ? {} : { restoredSession: config.restoredSession }),
         })
@@ -855,10 +996,23 @@ const host = Effect.scoped(
         const operations = yield* Ref.make(new Map<string, Fiber.Fiber<void, unknown>>())
         const frames = yield* Ref.make(yield* receipts.load)
         const lifecycle = yield* Semaphore.make(1)
+        const ptyDelivery = yield* Semaphore.make(1)
         return yield* Effect.scoped(
-          connect(config, store, receipts, operations, frames, lifecycle, cells, machine, activeWriter, connected),
+          connect(
+            config,
+            store,
+            receipts,
+            operations,
+            frames,
+            lifecycle,
+            cells,
+            machine,
+            ptyDelivery,
+            activeWriter,
+            connected,
+          ),
         ).pipe(
-          Effect.provide(runtimeContext),
+          Effect.provide(Context.merge(runtimeContext, ptyContext)),
           Effect.catchCause(() => Effect.sleep("1 second")),
           Effect.forever,
         )
@@ -868,7 +1022,12 @@ const host = Effect.scoped(
     ): Effect.Effect<
       never,
       HostError,
-      Crypto.Crypto | FileSystem.FileSystem | Socket.WebSocketConstructor | import("effect").Scope.Scope
+      | ChildProcessSpawner.ChildProcessSpawner
+      | Crypto.Crypto
+      | FileSystem.FileSystem
+      | Path.Path
+      | Socket.WebSocketConstructor
+      | import("effect").Scope.Scope
     > =>
       Effect.gen(function* () {
         const replacement = yield* Effect.scoped(receiveBootstrap)
@@ -896,7 +1055,12 @@ const host = Effect.scoped(
     ): Effect.Effect<
       never,
       HostError,
-      Crypto.Crypto | FileSystem.FileSystem | Socket.WebSocketConstructor | import("effect").Scope.Scope
+      | ChildProcessSpawner.ChildProcessSpawner
+      | Crypto.Crypto
+      | FileSystem.FileSystem
+      | Path.Path
+      | Socket.WebSocketConstructor
+      | import("effect").Scope.Scope
     > =>
       Effect.gen(function* () {
         const running = yield* Effect.forkScoped(run(identity, bootstrapToken, restoredSession))
@@ -935,9 +1099,8 @@ const host = Effect.scoped(
 )
 
 const program: Effect.Effect<void, HostError> = Effect.scoped(
-  Effect.flatMap(
-    Layer.build(Layer.mergeAll(BunSocket.layerWebSocketConstructor, BunCrypto.layer, BunFileSystem.layer)),
-    (context) => Effect.provide(host, context),
+  Effect.flatMap(Layer.build(Layer.merge(BunSocket.layerWebSocketConstructor, BunServices.layer)), (context) =>
+    Effect.provide(host, context),
   ),
 )
 

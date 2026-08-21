@@ -1,9 +1,11 @@
 import { BunFileSystem } from "@effect/platform-bun"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Option, Redacted } from "effect"
-import { sessionStore } from "../src/host"
+import { Effect, FileSystem, Layer, Option, Redacted, Semaphore, Stream } from "effect"
+import { sessionStore, testing } from "../src/host"
+import { Manager as PtyManager } from "../src/pty"
 import { Runtime, layer as runtimeLayer } from "../src/runtime"
 import type { Fence, SessionWire } from "../src/protocol"
+import { provideLayer } from "./support/layer"
 
 const fence: Fence = {
   target: "e2b",
@@ -66,4 +68,48 @@ describe("executor host session state", () => {
       ),
     ),
   )
+
+  it.effect("rejects a stale assignment fence before invoking the PTY process driver", () => {
+    let creates = 0
+    const pty = Layer.succeed(
+      PtyManager,
+      PtyManager.of({
+        create: () => Effect.sync(() => creates++).pipe(Effect.andThen(Effect.die("unexpected create"))),
+        input: () => Effect.die("unexpected input"),
+        resize: () => Effect.die("unexpected resize"),
+        disconnect: () => Effect.die("unexpected disconnect"),
+        disconnectAll: Effect.void,
+        reconnect: () => Effect.die("unexpected reconnect"),
+        terminate: () => Effect.die("unexpected terminate"),
+        recordOutput: () => Effect.die("unexpected output"),
+        cursor: Effect.succeed(0),
+        events: Stream.empty,
+      }),
+    )
+    const runtime = runtimeLayer({
+      fence,
+      bootstrapToken: Redacted.make("consumed"),
+      templateBuildId: "build-1",
+      capabilities: { cells: true, checkpoints: false, pty: true },
+      cursors: { command: 0, event: 0, pty: 0 },
+      latestCheckpointId: null,
+      restoredSession: session,
+    })
+    return Effect.gen(function* () {
+      const delivery = yield* Semaphore.make(1)
+      const error = yield* Effect.flip(
+        testing.dispatchPty(
+          {
+            _tag: "PtyCreate",
+            fence: { ...fence, assignmentGeneration: 2 },
+            request: { ptyId: "pty-1", command: "bash", cwd: "/workspace", cols: 80, rows: 24 },
+          },
+          () => Effect.void,
+          delivery,
+        ),
+      )
+      expect(error.message).toBe("PTY request has a stale executor fence")
+      expect(creates).toBe(0)
+    }).pipe(provideLayer(Layer.merge(runtime, pty)))
+  })
 })

@@ -5,7 +5,7 @@ import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
 import { ApiMessage, BindingRequest, ExecutorMessage } from "@rika/remote-execution/protocol"
 import { NestedOperation, ToolContext } from "tenetkit"
 import { HostBindingRegistry } from "tenetkit/repl"
-import { Context, Crypto, Effect, Fiber, Layer, Redacted, Schema } from "effect"
+import { Context, Crypto, Effect, Fiber, Layer, Option, Redacted, Schema, Stream } from "effect"
 import {
   makeGateway as makeGatewayService,
   type BindingAuthority,
@@ -146,6 +146,73 @@ describe("executor gateway", () => {
         _tag: "ExecutorWelcome",
         welcome: { sessionToken: "session-token" },
       })
+    }),
+  )
+
+  it.effect("routes assignment-fenced PTY requests and events through the live executor session", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      const gateway = yield* makeGateway(controller())
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: true },
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      for (const request of [
+        {
+          _tag: "PtyCreate" as const,
+          request: { ptyId: "pty-1", command: "bash", cwd: "/workspace", cols: 80, rows: 24 },
+        },
+        { _tag: "PtyInput" as const, request: { ptyId: "pty-1", data: "echo routed\n" } },
+        { _tag: "PtyResize" as const, request: { ptyId: "pty-1", cols: 120, rows: 40 } },
+        { _tag: "PtyDisconnect" as const, ptyId: "pty-1" },
+        { _tag: "PtyReconnect" as const, request: { ptyId: "pty-1", cursor: 4 } },
+        { _tag: "PtyTerminate" as const, ptyId: "pty-1" },
+      ])
+        yield* gateway.sendPty("assignment-1", request)
+      expect(target.sent.slice(1).map((message) => decode(message))).toEqual([
+        {
+          _tag: "PtyCreate",
+          fence,
+          request: { ptyId: "pty-1", command: "bash", cwd: "/workspace", cols: 80, rows: 24 },
+        },
+        { _tag: "PtyInput", fence, request: { ptyId: "pty-1", data: "echo routed\n" } },
+        { _tag: "PtyResize", fence, request: { ptyId: "pty-1", cols: 120, rows: 40 } },
+        { _tag: "PtyDisconnect", fence, ptyId: "pty-1" },
+        { _tag: "PtyReconnect", fence, request: { ptyId: "pty-1", cursor: 4 } },
+        { _tag: "PtyTerminate", fence, ptyId: "pty-1" },
+      ])
+
+      const observed = yield* Effect.forkChild(Stream.runHead(gateway.ptyEvents("assignment-1")))
+      yield* Effect.yieldNow
+      const output = {
+        _tag: "PtyOutput" as const,
+        access,
+        ptyId: "pty-1",
+        chunk: { cursor: 5, data: "routed\r\n" },
+      }
+      yield* gateway.receive(target, encode(output))
+      expect(Option.getOrThrow(yield* Fiber.join(observed))).toEqual(output)
+      expect(target.closed).toEqual([])
+
+      yield* gateway.receive(target, encode({ ...output, access: { ...access, leaseEpoch: 2 } }))
+      expect(decode(target.sent.at(-1)!)).toEqual({
+        _tag: "Fenced",
+        fence,
+        message: "PTY frame has a stale executor session",
+      })
+      expect(target.closed).toEqual([[1008, "fenced"]])
     }),
   )
 

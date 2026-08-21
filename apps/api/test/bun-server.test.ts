@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Deferred, Effect, Exit, Fiber, Redacted, Schema, Scope } from "effect"
+import { Deferred, Effect, Exit, Fiber, Redacted, Schema, Scope, Stream } from "effect"
 import type { CliDeviceDirectory, IdentityConfig, IdentityDirectory, IdentityRuntime } from "@rika/identity"
 import { ServerFrame } from "@rika/product/client-protocol"
 import type { HostedProductService } from "../src/hosted-product"
@@ -62,6 +62,8 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
         execute: () => Effect.die("unused"),
         cancel: () => Effect.void,
         machine: () => Effect.die("unused"),
+        sendPty: () => Effect.die("unused"),
+        ptyEvents: () => Stream.empty,
       },
       localGateway: {
         receive: () => Effect.void,
@@ -175,6 +177,8 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
           execute: () => Effect.die("unused"),
           cancel: () => Effect.void,
           machine: () => Effect.die("unused"),
+          sendPty: () => Effect.die("unused"),
+          ptyEvents: () => Stream.empty,
         },
         localGateway: {
           receive: () => Effect.void,
@@ -268,6 +272,8 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
           execute: () => Effect.die("unused"),
           cancel: () => Effect.void,
           machine: () => Effect.die("unused"),
+          sendPty: () => Effect.die("unused"),
+          ptyEvents: () => Stream.empty,
         },
         localGateway: {
           receive: () => Effect.void,

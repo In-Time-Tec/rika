@@ -20,6 +20,10 @@ import {
   type BindingOutcome,
   BindingRequest,
   type MachineOutcome,
+  type PtyCreate,
+  type PtyInput,
+  type PtyReconnect,
+  type PtyResize,
 } from "@rika/remote-execution/protocol"
 import {
   Cause,
@@ -30,10 +34,12 @@ import {
   Effect,
   Encoding,
   Option,
+  PubSub,
   Redacted,
   Ref,
   Schema,
   Semaphore,
+  Stream,
 } from "effect"
 
 export interface Socket {
@@ -51,6 +57,21 @@ export interface ExecutionResult {
   readonly access: AccessWire
   readonly response: CellResponse
 }
+
+export type PtyRequest =
+  | { readonly _tag: "PtyCreate"; readonly request: PtyCreate }
+  | { readonly _tag: "PtyInput"; readonly request: PtyInput }
+  | { readonly _tag: "PtyResize"; readonly request: PtyResize }
+  | { readonly _tag: "PtyDisconnect"; readonly ptyId: string }
+  | { readonly _tag: "PtyReconnect"; readonly request: PtyReconnect }
+  | { readonly _tag: "PtyTerminate"; readonly ptyId: string }
+
+export type PtyEvent = Extract<
+  ExecutorMessageValue,
+  {
+    readonly _tag: "PtyOpened" | "PtyOutput" | "PtyReplayGap" | "PtyDisconnected" | "PtyTerminated"
+  }
+>
 
 interface Pending {
   readonly assignmentId: string
@@ -121,6 +142,8 @@ export interface Gateway {
     operationKey: string,
     request: MachineBindings.Request,
   ) => Effect.Effect<MachineBindings.Outcome, GatewayError>
+  readonly sendPty: (assignmentId: string, request: PtyRequest) => Effect.Effect<void, GatewayError>
+  readonly ptyEvents: (assignmentId: string) => Stream.Stream<PtyEvent>
 }
 
 export interface LifecycleStore {
@@ -181,7 +204,9 @@ const fenceOf = (message: ExecutorMessageValue): Fence | undefined => {
     case "CheckoutRequested":
     case "PtyOpened":
     case "PtyOutput":
+    case "PtyReplayGap":
     case "PtyDisconnected":
+    case "PtyTerminated":
     case "CellLifecycle":
     case "BindingInvoke":
     case "MachineResult":
@@ -212,6 +237,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   const frames = yield* Ref.make(new Map<string, ReadonlyArray<CellLifecycleFrame>>())
   const terminals = yield* Ref.make(new Map<string, Extract<CellLifecycleFrame, { readonly _tag: "Terminal" }>>())
   const admission = yield* Semaphore.make(1)
+  const ptyFrames = yield* PubSub.sliding<PtyEvent>(256)
   const crypto = yield* Crypto.Crypto
   const digest = Effect.fn("ExecutorGateway.digest")(function* (value: string) {
     return Encoding.encodeHex(
@@ -639,6 +665,19 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     yield* Deferred.succeed(call.result, outcome)
   })
 
+  const publishPty = Effect.fn("ExecutorGateway.publishPty")(function* (socket: Socket, message: PtyEvent) {
+    yield* admission.withPermits(1)(
+      Effect.gen(function* () {
+        const assignmentId = yield* Ref.get(assignments).pipe(Effect.map((current) => current.get(socket)))
+        const session = assignmentId === undefined ? undefined : (yield* Ref.get(sessions)).get(assignmentId)
+        if (session?.socket !== socket || !sameAccess(session.access, message.access))
+          return yield* GatewayError.make({ kind: "fenced", message: "PTY frame has a stale executor session" })
+        if ((yield* Clock.currentTimeMillis) >= session.leaseExpiresAt) return yield* expired()
+        yield* PubSub.publish(ptyFrames, message)
+      }),
+    )
+  })
+
   const recover = Effect.fn("ExecutorGateway.recover")(function* (
     message: ExecutorMessageValue,
     error: ControllerError | GatewayError,
@@ -748,9 +787,10 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         return yield* persistLifecycle(socket, message.access, message.frame)
       case "PtyOpened":
       case "PtyOutput":
+      case "PtyReplayGap":
       case "PtyDisconnected":
-        close(socket, 1003, "unsupported")
-        return
+      case "PtyTerminated":
+        return yield* publishPty(socket, message)
     }
   })
 
@@ -781,6 +821,31 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         }),
       ),
     )
+
+  const sendPty = Effect.fn("ExecutorGateway.sendPty")(function* (assignmentId: string, request: PtyRequest) {
+    const connected = yield* awaitSession(assignmentId).pipe(Effect.timeoutOption("30 seconds"))
+    if (Option.isNone(connected))
+      return yield* GatewayError.make({ kind: "timeout", message: "Executor did not connect in time" })
+    yield* admission.withPermits(1)(
+      Effect.gen(function* () {
+        const session = (yield* Ref.get(sessions)).get(assignmentId)
+        if (session === undefined)
+          return yield* GatewayError.make({
+            kind: "disconnected",
+            message: "Executor disconnected before the PTY request could be sent",
+          })
+        if ((yield* Clock.currentTimeMillis) >= session.leaseExpiresAt) return yield* expired()
+        yield* controller.validateAccess(redactAccess(session.access)).pipe(Effect.mapError(accessFailure))
+        yield* Effect.try({
+          try: () => session.socket.send(encode({ ...request, fence: session.access.fence })),
+          catch: () => GatewayError.make({ kind: "transport", message: "Could not send the PTY request" }),
+        })
+      }),
+    )
+  })
+
+  const ptyEvents = (assignmentId: string) =>
+    Stream.fromPubSub(ptyFrames).pipe(Stream.filter((message) => message.access.fence.assignmentId === assignmentId))
 
   const invokeMachine = Effect.fn("ExecutorGateway.invokeMachine")(function* (
     assignmentId: string,
@@ -1025,5 +1090,5 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     )
   })
 
-  return { receive, disconnected, execute, cancel, machine } satisfies Gateway
+  return { receive, disconnected, execute, cancel, machine, sendPty, ptyEvents } satisfies Gateway
 })

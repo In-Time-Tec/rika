@@ -198,4 +198,30 @@ describe("executor protocol v1", () => {
       ).toBeDefined()
     }),
   )
+
+  it.effect("decodes bounded PTY replay gaps and explicit termination", () =>
+    Effect.gen(function* () {
+      const access = { version: 1 as const, fence, leaseEpoch: 1, sessionToken: "session" }
+      const terminate = { _tag: "PtyTerminate" as const, fence, ptyId: "pty-1" }
+      const gap = {
+        _tag: "PtyReplayGap" as const,
+        access,
+        ptyId: "pty-1",
+        gap: { fromCursor: 1, toCursor: 4 },
+      }
+      const terminated = { _tag: "PtyTerminated" as const, access, ptyId: "pty-1", cursor: 8 }
+      expect(yield* Schema.decodeUnknownEffect(ApiMessage)(terminate)).toEqual(terminate)
+      expect(yield* Schema.decodeUnknownEffect(ExecutorMessage)(gap)).toEqual(gap)
+      expect(yield* Schema.decodeUnknownEffect(ExecutorMessage)(terminated)).toEqual(terminated)
+      expect(
+        (yield* Effect.flip(
+          Schema.decodeUnknownEffect(ApiMessage)({
+            _tag: "PtyInput",
+            fence,
+            request: { ptyId: "pty-1", data: "x".repeat(16_385) },
+          }),
+        )).issue,
+      ).toBeDefined()
+    }),
+  )
 })
