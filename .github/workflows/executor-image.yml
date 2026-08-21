@@ -103,9 +103,9 @@ jobs:
             executor-sbom.raw.spdx.json > executor-sbom.spdx.json
           rm executor-sbom.raw.spdx.json
       - name: Scan candidate vulnerabilities
-        uses: aquasecurity/trivy-action@76071ef0d7ec797419534a183b498b4d6366cf37 # v0.31.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          version: v0.63.0
+          version: v0.70.0
           scan-type: image
           input: executor-image.oci.tar
           scanners: vuln
@@ -129,7 +129,7 @@ jobs:
             --arg sbomSha256 "$sbom_sha256" \
             --arg vulnerabilityScanSha256 "$scan_sha256" \
             --arg generation "${{ inputs.generation }}" \
-            '{schemaVersion:1,generation:($generation|tonumber),sourceCommit:$sourceCommit,sourceDateEpoch:($sourceDateEpoch|tonumber),image:$image,imageDigest:$imageDigest,dockerfile:"infra/e2b/executor-v1/e2b.Dockerfile",manifest:{path:"infra/e2b/executor-v1/tool-manifest.json",sha256:$manifestSha256},sbom:{path:"executor-sbom.spdx.json",format:"spdx-json",sha256:$sbomSha256},vulnerabilityScan:{path:"executor-vulnerability-scan.json",scanner:"trivy-v0.63.0",sha256:$vulnerabilityScanSha256,policy:{blockingSeverities:["HIGH","CRITICAL"],requiresFixedVersion:true}}}' \
+            '{schemaVersion:1,generation:($generation|tonumber),sourceCommit:$sourceCommit,sourceDateEpoch:($sourceDateEpoch|tonumber),image:$image,imageDigest:$imageDigest,dockerfile:"infra/e2b/executor-v1/e2b.Dockerfile",manifest:{path:"infra/e2b/executor-v1/tool-manifest.json",sha256:$manifestSha256},sbom:{path:"executor-sbom.spdx.json",format:"spdx-json",sha256:$sbomSha256},vulnerabilityScan:{path:"executor-vulnerability-scan.json",scanner:"trivy-v0.70.0",sha256:$vulnerabilityScanSha256,policy:{blockingSeverities:["HIGH","CRITICAL"],requiresFixedVersion:true}}}' \
             > executor-build.json
       - name: Attest review build record
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0

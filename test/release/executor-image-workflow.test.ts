@@ -71,8 +71,9 @@ test("builds one deterministic OCI candidate and canonical SPDX SBOM without reg
 
 test("retains a complete vulnerability report and blocks every fixable HIGH or CRITICAL finding", () => {
   const scan = steps("review").find((step) => step.uses?.startsWith("aquasecurity/trivy-action@"))
+  expect(scan?.uses).toBe("aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25")
   expect(scan?.with).toMatchObject({
-    version: "v0.63.0",
+    version: "v0.70.0",
     "scan-type": "image",
     input: "executor-image.oci.tar",
     scanners: "vuln",
@@ -83,6 +84,7 @@ test("retains a complete vulnerability report and blocks every fixable HIGH or C
     "ignore-unfixed": false,
     "exit-code": 0,
   })
+  expect(commands("review")).toContain('scanner:"trivy-v0.70.0"')
   const gate = named("review", "Enforce vulnerability policy")?.run ?? ""
   expect(gate).toContain('.Severity == "HIGH" or .Severity == "CRITICAL"')
   expect(gate).toContain('(.FixedVersion // "") != ""')
