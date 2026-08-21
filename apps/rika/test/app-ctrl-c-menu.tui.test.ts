@@ -111,6 +111,7 @@ test(
         yield* Effect.promise(() => app.type("Cancel this busy turn."))
         app.pressEnter()
         yield* app.waitModelRequests(1)
+        yield* app.waitFrame("Waiting")
         app.pressKey("c", { ctrl: true })
 
         yield* app.waitTranscript(
