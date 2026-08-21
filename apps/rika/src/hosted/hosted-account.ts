@@ -12,6 +12,7 @@ import {
   type Profile,
   type IdentityContext,
   type Session,
+  type ModelProvider,
   type TokenSet,
 } from "./hosted-contract"
 import type { RunRequest } from "./hosted-contract"
@@ -372,4 +373,47 @@ export const runThread = Effect.fn("HostedAccount.runThread")(function* (threadI
     http.runThread(profile.origin, threadId, request, key, session),
   )
   yield* Console.log(`Queued turn ${result.turnId} for command ${result.commandId}`)
+})
+
+export const putProviderCredential = Effect.fn("HostedAccount.putProviderCredential")(function* (
+  provider: ModelProvider,
+  apiKey: string,
+) {
+  const profile = yield* selectedProfile()
+  const http = yield* Http
+  const result = yield* authenticated(profile, (session) =>
+    http.putProviderCredential(profile.origin, profile.owner, provider, Redacted.make(apiKey), session),
+  )
+  yield* Console.log(`${result.provider} credential is ${result.state} at revision ${result.revision}`)
+})
+
+export const listProviderCredentials = Effect.fn("HostedAccount.listProviderCredentials")(function* (
+  provider?: ModelProvider,
+) {
+  const profile = yield* selectedProfile()
+  const http = yield* Http
+  const statuses = yield* authenticated(profile, (session) =>
+    http.listProviderCredentials(profile.origin, profile.owner, session),
+  )
+  const selected = provider === undefined ? statuses : statuses.filter((entry) => entry.provider === provider)
+  if (selected.length === 0) {
+    yield* Console.log(
+      provider === undefined ? "No provider credentials configured" : `${provider} credential is missing`,
+    )
+    return
+  }
+  for (const entry of selected) {
+    yield* Console.log(`${entry.provider}\t${entry.state}\trevision ${entry.revision}`)
+  }
+})
+
+export const revokeProviderCredential = Effect.fn("HostedAccount.revokeProviderCredential")(function* (
+  provider: ModelProvider,
+) {
+  const profile = yield* selectedProfile()
+  const http = yield* Http
+  const result = yield* authenticated(profile, (session) =>
+    http.revokeProviderCredential(profile.origin, profile.owner, provider, session),
+  )
+  yield* Console.log(`${result.provider} credential is ${result.state} at revision ${result.revision}`)
 })

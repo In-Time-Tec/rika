@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
+import { Effect, Redacted, Schema } from "effect"
 import {
   CliDeviceDirectoryError,
   IdentityDirectoryError,
@@ -14,6 +14,7 @@ import { handleRequest, type HttpDependencies } from "../src/http"
 import { HostedProductError, type HostedProductService } from "../src/hosted-product"
 import type { Runtime as Executor } from "../src/executor"
 import { isRikaApiPath, makeRikaApiHandler } from "../src/api"
+import type { HostedProviderCredentialsService } from "../src/hosted-provider-credentials"
 
 const account: Account = {
   user: {
@@ -269,6 +270,59 @@ describe("api HTTP", () => {
       const rejected = yield* response("/api/v1/me/context", withDevice(false))
       expect(accepted.status).toBe(200)
       expect(rejected.status).toBe(401)
+    }),
+  )
+
+  it.effect("manages provider credentials without returning secret material", () =>
+    Effect.gen(function* () {
+      const principal: IdentityPrincipal = { userId: "user-1", clientId: "client-1", dpopJkt: "thumbprint-1" }
+      const base = dependencies({ account })
+      let receivedSecret = ""
+      const status = {
+        provider: "openai" as const,
+        state: "active" as const,
+        revision: "1",
+        credentialIdentity: "provider-credential-1",
+      }
+      const credentials: HostedProviderCredentialsService = {
+        put: (input) =>
+          Effect.sync(() => {
+            receivedSecret = Redacted.value(input.apiKey)
+            return status
+          }),
+        revoke: () => Effect.succeed({ ...status, state: "revoked", revision: "2" }),
+        list: () => Effect.succeed([status]),
+        require: () => Effect.succeed(status),
+      }
+      const deps: HttpDependencies = {
+        ...base,
+        identity: { ...base.identity, identify: () => Effect.succeed(principal) },
+        devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
+        credentials,
+        models: { modes: ["low", "medium"], resolve: () => Effect.die("unused") },
+      }
+      const models = yield* response("/api/v1/models", deps)
+      const put = yield* response("/api/v1/provider-credentials/openai", deps, {
+        method: "PUT",
+        body: encodeJson({ owner: { kind: "personal" }, api_key: "provider-api-secret" }),
+      })
+      const revoke = yield* response("/api/v1/provider-credentials/openai", deps, {
+        method: "DELETE",
+        body: encodeJson({ owner: { kind: "personal" } }),
+      })
+      const listed = yield* response("/api/v1/provider-credentials/list", deps, {
+        method: "POST",
+        body: encodeJson({ owner: { kind: "personal" } }),
+      })
+      expect(models.status).toBe(200)
+      expect(yield* Effect.promise(() => models.json())).toEqual({ modes: ["low", "medium"] })
+      expect(put.status).toBe(200)
+      expect(receivedSecret).toBe("provider-api-secret")
+      expect(yield* Effect.promise(() => put.text())).not.toContain("provider-api-secret")
+      expect(revoke.status).toBe(200)
+      expect(yield* Effect.promise(() => revoke.json())).toMatchObject({ state: "revoked", revision: "2" })
+      expect(listed.status).toBe(200)
+      expect(yield* Effect.promise(() => listed.json())).toEqual({ credentials: [status] })
     }),
   )
 
@@ -621,8 +675,7 @@ describe("api HTTP", () => {
           devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
           product: {
             ...product,
-            admitRun: () =>
-              Effect.succeed({ commandId: operationKey, turnId: "original-turn", status: "queued" }),
+            admitRun: () => Effect.succeed({ commandId: operationKey, turnId: "original-turn", status: "queued" }),
           },
           executor: {
             ...executor,

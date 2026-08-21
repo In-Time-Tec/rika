@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { OperationUnavailable } from "@rika/product/product-operation"
 import { Service } from "@rika/product/product-operation-service"
-import type { Input } from "@rika/product/product-operation"
+import type { Input as ProductInput } from "@rika/product/product-operation"
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Ref, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -11,17 +11,29 @@ import { cleanInteractiveRuntimeExit } from "../src/client/client-process"
 import { clientProcessExitCode } from "../src/client/client-process-exit"
 import { parseJsonLines, readStreamInput } from "../src/command/root/noninteractive-run-command"
 import { run } from "../src/command/root/rika-command"
+import * as HostedCommand from "../src/command/root/hosted-command-dispatch"
 
 const workspace = process.cwd()
+type Input = ProductInput | HostedCommand.Input
 
 const testLayer = (calls: Ref.Ref<ReadonlyArray<Input>>) =>
-  Layer.succeed(
-    Service,
-    Service.of({
-      run: Effect.fn("CommandTest.run")(function* (input) {
-        yield* Ref.update(calls, (current) => [...current, input])
+  Layer.merge(
+    Layer.succeed(
+      Service,
+      Service.of({
+        run: Effect.fn("CommandTest.run")(function* (input) {
+          yield* Ref.update(calls, (current) => [...current, input])
+        }),
       }),
-    }),
+    ),
+    Layer.succeed(
+      HostedCommand.Service,
+      HostedCommand.Service.of({
+        run: Effect.fn("CommandTest.runHosted")(function* (input) {
+          yield* Ref.update(calls, (current) => [...current, input])
+        }),
+      }),
+    ),
   )
 
 it("maps pure client interruption to success without masking failures", () => {
@@ -370,13 +382,8 @@ it.effect("dispatches catalog, extension, and maintenance operations", () =>
       [["config", "list"], { _tag: "Config", action: "list" }],
       [["config", "edit", "--workspace"], { _tag: "Config", action: "edit", workspace: true }],
       [["config", "keymap"], { _tag: "Config", action: "keymap" }],
-      [["credential", "set", "openai"], { _tag: "Auth", action: "login", provider: "openai", deviceCode: false }],
-      [
-        ["credential", "set", "openai", "--device-code"],
-        { _tag: "Auth", action: "login", provider: "openai", deviceCode: true },
-      ],
-      [["credential", "list", "openai"], { _tag: "Auth", action: "status", provider: "openai" }],
-      [["credential", "revoke", "openai"], { _tag: "Auth", action: "logout", provider: "openai" }],
+      [["credential", "list", "openai"], { _tag: "Credential", action: "list", provider: "openai" }],
+      [["credential", "revoke", "openai"], { _tag: "Credential", action: "revoke", provider: "openai" }],
       [["tools", "list"], { _tag: "ToolCatalog", action: "list" }],
       [["tools", "list", "--mode", "ultra"], { _tag: "ToolCatalog", action: "list", mode: "ultra" }],
       [["tools", "list", "--mode", "deep-review"], { _tag: "ToolCatalog", action: "list", mode: "deep-review" }],

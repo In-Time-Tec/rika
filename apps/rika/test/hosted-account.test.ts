@@ -53,6 +53,9 @@ const unusedHttp: HttpInterface = {
   revokeAllDevices: () => Effect.die("unused"),
   createRemoteConnection: () => Effect.die("unused"),
   runThread: () => Effect.die("unused"),
+  putProviderCredential: () => Effect.die("unused"),
+  listProviderCredentials: () => Effect.die("unused"),
+  revokeProviderCredential: () => Effect.die("unused"),
 }
 
 it.effect("defaults a first login with zero organizations to Personal", () =>
@@ -88,8 +91,7 @@ it.effect("defaults a first login with zero organizations to Personal", () =>
                 _tag: "Complete",
                 tokens: { accessToken: "access", refreshToken: "refresh", expiresIn: 600 },
               }),
-            context: () =>
-              Effect.succeed({ account: { id: "user-1", email: "dev@example.test" }, organizations: [] }),
+            context: () => Effect.succeed({ account: { id: "user-1", email: "dev@example.test" }, organizations: [] }),
           }),
         ),
         Layer.succeed(Browser, Browser.of({ open: () => Effect.die("unused") })),

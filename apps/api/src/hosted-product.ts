@@ -1,7 +1,5 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { Clock, Context, Crypto, DateTime, Effect, Layer, Schema } from "effect"
-import * as Configuration from "@rika/configuration/configuration-settings"
-import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
 import {
@@ -22,6 +20,11 @@ import {
 import { HostedStore, StoreError } from "@rika/product/hosted-store"
 import { TurnId } from "@rika/product/turn-record"
 import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
+import {
+  HostedModelRegistry,
+  HostedModelRegistryError,
+  testLayer as hostedModelRegistryTestLayer,
+} from "./hosted-model-registry"
 
 export interface AuthenticatedPrincipal {
   readonly userId: string
@@ -66,6 +69,12 @@ const storeFailure = (error: unknown) => {
   return HostedProductError.make({ kind, message: "Hosted product operation was rejected" })
 }
 
+const modelFailure = (error: HostedModelRegistryError) =>
+  HostedProductError.make({
+    kind: error.kind === "unavailable" ? "unavailable" : "invalid",
+    message: error.message,
+  })
+
 export interface HostedProductService {
   readonly ready: Effect.Effect<void, HostedProductError>
   readonly projects: (
@@ -99,6 +108,7 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
       const assignments = yield* ExecutorAssignments
       const policy = yield* AuthorizationPolicy
       const crypto = yield* Crypto.Crypto
+      const modelRegistry = yield* HostedModelRegistry
 
       const activateClient = Effect.fn("HostedProduct.activateClient")(function* (
         principal: AuthenticatedPrincipal,
@@ -367,16 +377,9 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
                 deviceId: DeviceId.make(input.principal.deviceId),
               } as const)
         yield* activateClient(input.principal, userId)
-        const executionRoute = yield* Effect.try({
-          try: () =>
-            ExecutionRouteResolution.resolve(
-              Configuration.Defaults.settingsDefaults,
-              input.mode ?? Configuration.Defaults.settingsDefaults.defaultMode,
-              undefined,
-              undefined,
-            ),
-          catch: (cause) => HostedProductError.make({ kind: "invalid", message: String(cause) }),
-        })
+        const executionRoute = yield* modelRegistry
+          .resolve(resolved.ownerId, input.mode)
+          .pipe(Effect.mapError(modelFailure))
         const admitted = yield* store.admitPrompt({
           ownerId: OwnerId.make(resolved.ownerId),
           threadId: ThreadId.make(input.threadId),
@@ -405,8 +408,13 @@ export const layer = (options: { readonly templateBuildId: string; readonly prov
     }),
   )
 
-export const postgres = (options: {
+export const postgresTest = (options: {
   readonly database: PgClient.PgPoolConfig
   readonly templateBuildId: string
   readonly providerScope: string
-}) => layer(options).pipe(Layer.provide(Layer.merge(postgresLayer(options.database), AuthorizationPolicy.layer)))
+}) =>
+  layer(options).pipe(
+    Layer.provide(
+      Layer.mergeAll(postgresLayer(options.database), AuthorizationPolicy.layer, hostedModelRegistryTestLayer),
+    ),
+  )

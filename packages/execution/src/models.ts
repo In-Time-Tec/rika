@@ -11,7 +11,10 @@ import {
 import { Errors } from "tenetkit/runtime"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
-import type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
+import {
+  ProviderCredentialStoreError,
+  type ProviderCredentialStoreShape,
+} from "@rika/product/provider-credential-store"
 import { Config, Effect, Layer, Option, Redacted } from "effect"
 import { FetchHttpClient, type HttpClient } from "effect/unstable/http"
 import * as OpenAiAccountCredentials from "./openai-account-credentials"
@@ -26,12 +29,22 @@ const apiKey = (candidate: CandidateSnapshot) =>
 const storedCredentialApiKey = (
   candidate: CandidateSnapshot,
   store: ProviderCredentialStoreShape | undefined,
-): Effect.Effect<Config.Config<Redacted.Redacted<string>>> => {
+): Effect.Effect<Config.Config<Redacted.Redacted<string>>, ProviderCredentialStoreError> => {
   const identity = candidate.providerConnection.credentialIdentity
   if (identity === undefined || store === undefined) return Effect.succeed(apiKey(candidate))
   return store.load(identity).pipe(
-    Effect.orElseSucceed(() => Option.none<Redacted.Redacted<string>>()),
-    Effect.map((credential) => (Option.isSome(credential) ? Config.succeed(credential.value) : apiKey(candidate))),
+    Effect.flatMap(
+      Option.match({
+        onNone: () =>
+          Effect.fail(
+            ProviderCredentialStoreError.make({
+              kind: "missing",
+              message: "Provider credential is unavailable",
+            }),
+          ),
+        onSome: (credential) => Effect.succeed(Config.succeed(credential)),
+      }),
+    ),
   )
 }
 
@@ -40,7 +53,10 @@ export const layer = (options: {
   readonly credentialStore?: ProviderCredentialStoreShape
   readonly openAiAccountAuth?: OpenAiAuth.ServiceInterface
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
-}): Layer.Layer<ModelRegistry.ModelRegistry, Config.ConfigError | Errors.ExecutableRegistrationInvalid> => {
+}): Layer.Layer<
+  ModelRegistry.ModelRegistry,
+  Config.ConfigError | Errors.ExecutableRegistrationInvalid | ProviderCredentialStoreError
+> => {
   const { candidate, credentialStore, openAiAccountAuth } = options
   const httpClientLayer = options.httpClientLayer ?? FetchHttpClient.layer
   const registrationKey = candidate.registrationIdentity
@@ -71,31 +87,49 @@ export const layer = (options: {
           credentials: OpenAiAccountCredentials.fromRikaAuth(openAiAccountAuth, fingerprint),
         }).pipe(Layer.provide(httpClientLayer))
       }
-      return OpenAiResponses.layer({
-        model: candidate.model,
-        provider: candidate.providerConnection.provider,
-        registrationKey,
-        config: OpenAiResponses.decodeConfig(candidate.providerOptions),
-        apiKey: apiKey(candidate),
-        baseUrl: candidate.providerConnection.baseUrl,
-      }).pipe(Layer.provide(httpClientLayer))
+      return Layer.unwrap(
+        storedCredentialApiKey(candidate, credentialStore).pipe(
+          Effect.map((resolvedApiKey) =>
+            OpenAiResponses.layer({
+              model: candidate.model,
+              provider: candidate.providerConnection.provider,
+              registrationKey,
+              config: OpenAiResponses.decodeConfig(candidate.providerOptions),
+              apiKey: resolvedApiKey,
+              baseUrl: candidate.providerConnection.baseUrl,
+            }).pipe(Layer.provide(httpClientLayer)),
+          ),
+        ),
+      )
     case "openai-chat-completions":
-      return OpenAiChatCompletions.layer({
-        model: candidate.model,
-        provider: candidate.providerConnection.provider,
-        registrationKey,
-        config: OpenAiChatCompletions.decodeConfig(candidate.providerOptions),
-        apiKey: apiKey(candidate),
-        baseUrl: candidate.providerConnection.baseUrl,
-      }).pipe(Layer.provide(httpClientLayer))
+      return Layer.unwrap(
+        storedCredentialApiKey(candidate, credentialStore).pipe(
+          Effect.map((resolvedApiKey) =>
+            OpenAiChatCompletions.layer({
+              model: candidate.model,
+              provider: candidate.providerConnection.provider,
+              registrationKey,
+              config: OpenAiChatCompletions.decodeConfig(candidate.providerOptions),
+              apiKey: resolvedApiKey,
+              baseUrl: candidate.providerConnection.baseUrl,
+            }).pipe(Layer.provide(httpClientLayer)),
+          ),
+        ),
+      )
     case "anthropic":
-      return Anthropic.layer({
-        model: candidate.model,
-        registrationKey,
-        config: Anthropic.decodeConfig(candidate.providerOptions),
-        apiKey: apiKey(candidate),
-        clientConfig: { apiUrl: Config.succeed(candidate.providerConnection.baseUrl) },
-      }).pipe(Layer.provide(httpClientLayer))
+      return Layer.unwrap(
+        storedCredentialApiKey(candidate, credentialStore).pipe(
+          Effect.map((resolvedApiKey) =>
+            Anthropic.layer({
+              model: candidate.model,
+              registrationKey,
+              config: Anthropic.decodeConfig(candidate.providerOptions),
+              apiKey: resolvedApiKey,
+              clientConfig: { apiUrl: Config.succeed(candidate.providerConnection.baseUrl) },
+            }).pipe(Layer.provide(httpClientLayer)),
+          ),
+        ),
+      )
     case "openrouter":
       return Layer.unwrap(
         storedCredentialApiKey(candidate, credentialStore).pipe(

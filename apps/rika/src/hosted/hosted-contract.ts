@@ -148,6 +148,16 @@ export const RunResult = Schema.Struct({
 })
 export type RunResult = typeof RunResult.Type
 
+export const ModelProvider = Schema.Literals(["openai", "anthropic", "openrouter"])
+export type ModelProvider = typeof ModelProvider.Type
+export const ProviderCredentialStatus = Schema.Struct({
+  provider: ModelProvider,
+  state: Schema.Literals(["active", "revoked"]),
+  revision: Schema.String,
+  credentialIdentity: Schema.String,
+})
+export type ProviderCredentialStatus = typeof ProviderCredentialStatus.Type
+
 export interface HttpInterface {
   readonly register: (
     origin: string,
@@ -195,6 +205,24 @@ export interface HttpInterface {
     idempotencyKey: string,
     session: Session,
   ) => Effect.Effect<RunResult, HostedError>
+  readonly putProviderCredential: (
+    origin: string,
+    owner: OwnerSelection,
+    provider: ModelProvider,
+    apiKey: Redacted.Redacted<string>,
+    session: Session,
+  ) => Effect.Effect<ProviderCredentialStatus, HostedError>
+  readonly listProviderCredentials: (
+    origin: string,
+    owner: OwnerSelection,
+    session: Session,
+  ) => Effect.Effect<ReadonlyArray<ProviderCredentialStatus>, HostedError>
+  readonly revokeProviderCredential: (
+    origin: string,
+    owner: OwnerSelection,
+    provider: ModelProvider,
+    session: Session,
+  ) => Effect.Effect<ProviderCredentialStatus, HostedError>
 }
 
 export class Http extends Context.Service<Http, HttpInterface>()("@rika/cli/hosted/hosted-contract/Http") {}

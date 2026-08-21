@@ -33,6 +33,7 @@ it.effect.skipIf(databaseUrl === undefined)(
           hostedApplicationLayer({
             database: { url: Redacted.make(url), maxConnections: 8 },
             databaseUrl: Redacted.make(url),
+            providerCredentialKey: Redacted.make("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
             executor: {
               appId: "rika-test",
               deploymentId: "deployment-test",

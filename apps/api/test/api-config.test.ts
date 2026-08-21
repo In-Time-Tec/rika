@@ -20,6 +20,7 @@ const environment = {
   E2B_TEMPLATE_ID: "template",
   E2B_TEMPLATE_BUILD_ID: "build",
   RIKA_EXECUTOR_API_URL: "wss://api.example.com/api/v1/executors",
+  RIKA_PROVIDER_CREDENTIAL_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 }
 
 const failure = (input: Record<string, string | undefined>) =>
@@ -35,5 +36,8 @@ it.effect("reports missing database and executor provider configuration as typed
   Effect.gen(function* () {
     expect((yield* failure({ ...environment, DATABASE_URL: "" })).dependency).toBe("database")
     expect((yield* failure({ ...environment, E2B_API_KEY: "" })).dependency).toBe("executor-provider")
+    expect((yield* failure({ ...environment, RIKA_PROVIDER_CREDENTIAL_KEY: "invalid" })).dependency).toBe(
+      "model-provider",
+    )
   }),
 )

@@ -10,6 +10,7 @@ import {
   HttpApiSchema,
 } from "effect/unstable/httpapi"
 import { accountAccess, type AccountAccess, type HttpDependencies } from "./http"
+import { HostedModelProvider, HostedProviderCredentialError } from "./hosted-provider-credentials"
 
 const Message = { message: Schema.String }
 
@@ -90,6 +91,21 @@ const OperationResponse = Schema.Struct({
   turnId: Schema.String,
   status: Schema.Literal("queued"),
 }).pipe(HttpApiSchema.status(202))
+const ModelsResponse = Schema.Struct({ modes: Schema.Array(Schema.String) })
+const ProviderCredentialRequest = strict(
+  Schema.Struct({
+    owner: ConnectionOwner,
+    api_key: Schema.Redacted(Schema.NonEmptyString, { disallowJsonEncode: true }),
+  }),
+)
+const ProviderCredentialRevokeRequest = strict(Schema.Struct({ owner: ConnectionOwner }))
+const ProviderCredentialResponse = Schema.Struct({
+  provider: HostedModelProvider,
+  state: Schema.Literals(["active", "revoked"]),
+  revision: Schema.String,
+  credentialIdentity: Schema.String,
+})
+const ProviderCredentialsResponse = Schema.Struct({ credentials: Schema.Array(ProviderCredentialResponse) })
 
 export class CurrentAccess extends Context.Service<
   CurrentAccess,
@@ -135,6 +151,27 @@ class ProductGroup extends HttpApiGroup.make("product", { topLevel: true })
       payload: OperationRequest,
       success: OperationResponse,
       error: [Forbidden, NotFound, Conflict, Unprocessable, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.get("models", "/api/v1/models", {
+      success: ModelsResponse,
+      error: ServiceUnavailable,
+    }),
+    HttpApiEndpoint.put("putProviderCredential", "/api/v1/provider-credentials/:provider", {
+      params: { provider: HostedModelProvider },
+      payload: ProviderCredentialRequest,
+      success: ProviderCredentialResponse,
+      error: [Forbidden, Unprocessable, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.delete("revokeProviderCredential", "/api/v1/provider-credentials/:provider", {
+      params: { provider: HostedModelProvider },
+      payload: ProviderCredentialRevokeRequest,
+      success: ProviderCredentialResponse,
+      error: [Forbidden, Unprocessable, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.post("listProviderCredentials", "/api/v1/provider-credentials/list", {
+      payload: ProviderCredentialRevokeRequest,
+      success: ProviderCredentialsResponse,
+      error: [Forbidden, Unprocessable, ServiceUnavailable],
     }),
   )
   .middleware(Authorization) {}
@@ -182,6 +219,22 @@ const authenticatedPrincipal = (access: CurrentAccess["Service"]) => ({
   clientId: access.principal.clientId!,
   ...(access.principal.dpopJkt === undefined ? {} : { dpopJkt: access.principal.dpopJkt }),
 })
+
+const providerOwner = (owner: typeof ConnectionOwner.Type, access: CurrentAccess["Service"]) =>
+  owner.kind === "personal"
+    ? { _tag: "PersonalOwner" as const, userId: BetterAuthUserId.make(access.principal.userId) }
+    : {
+        _tag: "OrganizationOwner" as const,
+        organizationId: OrganizationId.make(owner.organization_id),
+      }
+
+const providerCredentialFailure = (error: HostedProviderCredentialError) => {
+  if (error.kind === "forbidden") return Forbidden.make({ message: "Provider credential operation was rejected" })
+  if (error.kind === "invalid" || error.kind === "missing" || error.kind === "revoked") {
+    return Unprocessable.make({ message: error.message })
+  }
+  return ServiceUnavailable.make({ message: "Provider credential service unavailable" })
+}
 
 const productHandlers = (dependencies: HttpDependencies) =>
   HttpApiBuilder.group(RikaApi, "product", (handlers) =>
@@ -296,6 +349,62 @@ const productHandlers = (dependencies: HttpDependencies) =>
             )
           return run
         }),
+      models: () =>
+        dependencies.models === undefined
+          ? Effect.fail(ServiceUnavailable.make({ message: "Model registry unavailable" }))
+          : Effect.succeed({ modes: [...dependencies.models.modes] }),
+      putProviderCredential: ({ params, payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined) {
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          }
+          if (dependencies.credentials === undefined) {
+            return yield* ServiceUnavailable.make({ message: "Provider credential service unavailable" })
+          }
+          return yield* dependencies.credentials
+            .put({
+              principal: authenticatedPrincipal(access),
+              owner: providerOwner(payload.owner, access),
+              provider: params.provider,
+              apiKey: payload.api_key,
+            })
+            .pipe(Effect.mapError(providerCredentialFailure))
+        }),
+      revokeProviderCredential: ({ params, payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined) {
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          }
+          if (dependencies.credentials === undefined) {
+            return yield* ServiceUnavailable.make({ message: "Provider credential service unavailable" })
+          }
+          return yield* dependencies.credentials
+            .revoke({
+              principal: authenticatedPrincipal(access),
+              owner: providerOwner(payload.owner, access),
+              provider: params.provider,
+            })
+            .pipe(Effect.mapError(providerCredentialFailure))
+        }),
+      listProviderCredentials: ({ payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined) {
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          }
+          if (dependencies.credentials === undefined) {
+            return yield* ServiceUnavailable.make({ message: "Provider credential service unavailable" })
+          }
+          const credentials = yield* dependencies.credentials
+            .list({
+              principal: authenticatedPrincipal(access),
+              owner: providerOwner(payload.owner, access),
+            })
+            .pipe(Effect.mapError(providerCredentialFailure))
+          return { credentials: [...credentials] }
+        }),
     }),
   )
 
@@ -305,6 +414,9 @@ export const isRikaApiPath = (pathname: string) =>
   pathname === "/api/v1/auth/cli/devices/revoke-all" ||
   pathname === "/api/v1/me/context" ||
   pathname === "/api/v1/connections" ||
+  pathname === "/api/v1/models" ||
+  pathname === "/api/v1/provider-credentials/list" ||
+  /^\/api\/v1\/provider-credentials\/[^/]+$/.test(pathname) ||
   /^\/api\/v1\/threads\/[^/]+\/(operations|local-executor-admissions)$/.test(pathname)
 
 export const makeRikaApiHandler = (dependencies: HttpDependencies) =>

@@ -44,17 +44,9 @@ it.effect("routes hosted execution without calling the local server operation", 
       yield* invoke(["thread", "new"])
       yield* invoke(["thread", "new", "--remote"])
       yield* invoke(["--execute", "hello", "--thread", "e2b_thread-1", "--mode", "low"])
-      yield* invoke(["credential", "set", "openai"])
       yield* invoke(["credential", "list", "openrouter"])
-      yield* invoke(["credential", "rotate", "openai", "--device-code"])
       yield* invoke(["credential", "revoke", "openrouter"])
-      expect(yield* Ref.get(productCalls)).toEqual([
-        { _tag: "Thread", action: "new" },
-        { _tag: "Auth", action: "login", provider: "openai", deviceCode: false },
-        { _tag: "Auth", action: "status", provider: "openrouter" },
-        { _tag: "Auth", action: "login", provider: "openai", deviceCode: true },
-        { _tag: "Auth", action: "logout", provider: "openrouter" },
-      ])
+      expect(yield* Ref.get(productCalls)).toEqual([{ _tag: "Thread", action: "new" }])
       expect(yield* Ref.get(productCalls)).not.toContainEqual(
         expect.objectContaining({ _tag: "Run", threadId: "e2b_thread-1" }),
       )
@@ -73,9 +65,11 @@ it.effect("routes hosted execution without calling the local server operation", 
         { _tag: "Organization", action: "invite", email: "dev@example.test" },
         { _tag: "RemoteThread", action: "new" },
         { _tag: "RemoteRun", threadId: "e2b_thread-1", request: { prompt: ["hello"], mode: "low" } },
+        { _tag: "Credential", action: "list", provider: "openrouter" },
+        { _tag: "Credential", action: "revoke", provider: "openrouter" },
       ])
       expect((yield* Effect.exit(invoke(["credential", "list", "--scope", "user"])))._tag).toBe("Failure")
-      expect(yield* Ref.get(productCalls)).toHaveLength(5)
+      expect(yield* Ref.get(productCalls)).toHaveLength(1)
     }),
   ),
 )

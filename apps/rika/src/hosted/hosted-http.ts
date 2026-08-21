@@ -7,11 +7,13 @@ import {
   Http,
   IdentityContext,
   Invitation,
+  ProviderCredentialStatus,
   Registration,
   RemoteConnection,
   RunResult,
   scopes,
   type DevicePoll,
+  type OwnerSelection,
   type PrivateJwk,
   type Session,
   type TokenSet,
@@ -38,9 +40,14 @@ const OAuthErrorWire = Schema.Struct({
   error_description: Schema.optionalKey(Schema.String),
 })
 const DevicesWire = Schema.Union([Schema.Array(CliDevice), Schema.Struct({ devices: Schema.Array(CliDevice) })])
+const ProviderCredentialsWire = Schema.Struct({ credentials: Schema.Array(ProviderCredentialStatus) })
 
 const failure = (kind: HostedError["kind"], message: string) => HostedError.make({ kind, message })
 const resource = (origin: string) => `${origin}/api/v1`
+const ownerWire = (owner: OwnerSelection) =>
+  owner.kind === "personal"
+    ? { kind: "personal" as const }
+    : { kind: "organization" as const, organization_id: owner.organizationId }
 
 const tokensFrom = (
   wire: typeof TokenWire.Type,
@@ -127,7 +134,7 @@ export const layer = Layer.effect(
       return yield* responseError(response.status, action)
     })
     const authenticatedJson = <S extends Schema.Constraint>(
-      method: "GET" | "POST",
+      method: "GET" | "POST" | "PUT" | "DELETE",
       url: string,
       request: HttpClientRequest.HttpClientRequest,
       session: Session,
@@ -337,6 +344,41 @@ export const layer = Layer.effect(
           session,
           RunResult,
           "Hosted thread operation",
+        )
+      },
+      putProviderCredential: (origin, owner, provider, apiKey, session) => {
+        const url = `${origin}/api/v1/provider-credentials/${provider}`
+        return authenticatedJson(
+          "PUT",
+          url,
+          HttpClientRequest.put(url).pipe(
+            HttpClientRequest.bodyJsonUnsafe({ owner: ownerWire(owner), api_key: Redacted.value(apiKey) }),
+          ),
+          session,
+          ProviderCredentialStatus,
+          "Provider credential update",
+        )
+      },
+      listProviderCredentials: (origin, owner, session) => {
+        const url = `${origin}/api/v1/provider-credentials/list`
+        return authenticatedJson(
+          "POST",
+          url,
+          HttpClientRequest.post(url).pipe(HttpClientRequest.bodyJsonUnsafe({ owner: ownerWire(owner) })),
+          session,
+          ProviderCredentialsWire,
+          "Provider credential list",
+        ).pipe(Effect.map((response) => response.credentials))
+      },
+      revokeProviderCredential: (origin, owner, provider, session) => {
+        const url = `${origin}/api/v1/provider-credentials/${provider}`
+        return authenticatedJson(
+          "DELETE",
+          url,
+          HttpClientRequest.delete(url).pipe(HttpClientRequest.bodyJsonUnsafe({ owner: ownerWire(owner) })),
+          session,
+          ProviderCredentialStatus,
+          "Provider credential revocation",
         )
       },
     })

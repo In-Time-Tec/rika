@@ -30,6 +30,11 @@ const operation = (input: Input) => {
     return HostedAccount.invite(input.email)
   }
   if (input._tag === "RemoteRun") return HostedAccount.runThread(input.threadId, input.request)
+  if (input._tag === "Credential") {
+    if (input.action === "put") return HostedAccount.putProviderCredential(input.provider, input.apiKey)
+    if (input.action === "list") return HostedAccount.listProviderCredentials(input.provider)
+    return HostedAccount.revokeProviderCredential(input.provider)
+  }
   return HostedAccount.createRemoteThread()
 }
 

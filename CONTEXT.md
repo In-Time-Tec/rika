@@ -16,7 +16,7 @@
 - **Agent:** an immutable TenetKit definition that configures the model/tool loop used by an Execution. It is not a durable identity, conversation, or the loop itself.
 - **Child Run:** a durable child Execution with narrowed instructions or capabilities. User-facing copy may say subagent.
 - **Mode:** a user-named behavior profile that selects model routes and reasoning behavior.
-- **Provider:** a configured connection to a model service. Credentials come from named environment variables or a profile-scoped account login; each admitted route pins the authentication kind and non-secret credential identity.
+- **Provider:** an API-owned connection to a model service. Each admitted route pins the model definition, authentication kind, and non-secret owner-scoped credential identity; Railway resolves the credential only when constructing the TenetKit model resource.
 - **Resolved Context:** the guidance, mentions, skills, memory, and Thread references selected for an Execution.
 - **Cell:** one `typescript` tool call and the TypeScript source it evaluates in the Session's kernel.
 - **Kernel:** the persistent Bun REPL process one TenetKit Session evaluates its cells in. Its namespace is working memory, never durable authority.

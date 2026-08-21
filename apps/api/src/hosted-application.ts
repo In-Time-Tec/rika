@@ -3,6 +3,7 @@ import type * as PgClient from "@effect/sql-pg/PgClient"
 import { Context, Effect, Layer, Redacted } from "effect"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
+import { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
 import * as ProductRepositories from "@rika/product-store/postgres-product-repositories"
@@ -12,7 +13,13 @@ import * as ExecutionPostgres from "@rika/execution/postgres"
 import * as RemoteCells from "@rika/execution/remote-cells"
 import { type ExecutorConfig, Executor, layer as executorLayer, service as executorService } from "./executor"
 import { HostedOperations, layer as hostedOperationsLayer } from "./hosted-operations"
+import { HostedModelRegistry, layer as hostedModelRegistryLayer } from "./hosted-model-registry"
 import { HostedProduct, layer as hostedProductLayer } from "./hosted-product"
+import {
+  HostedProviderCredentials,
+  layer as hostedProviderCredentialsLayer,
+  storeLayer as providerCredentialStoreLayer,
+} from "./hosted-provider-credentials"
 import { HostedProjectionWorker, layer as hostedProjectionWorkerLayer } from "./hosted-projection-worker"
 import { HostedTurnWorker, layer as hostedTurnWorkerLayer } from "./hosted-turn-worker"
 import { layer as localExecutorLayer } from "./local-executor"
@@ -20,6 +27,8 @@ import { layer as localExecutorLayer } from "./local-executor"
 export interface HostedApplicationService {
   readonly product: HostedProduct["Service"]
   readonly operations: HostedOperations["Service"]
+  readonly credentials: HostedProviderCredentials["Service"]
+  readonly models: HostedModelRegistry["Service"]
   readonly executor: Executor["Service"]
   readonly projectionWorker: HostedProjectionWorker["Service"]
   readonly turnWorker: HostedTurnWorker["Service"]
@@ -37,6 +46,7 @@ export class HostedApplication extends Context.Service<HostedApplication, Hosted
 export const layer = (options: {
   readonly database: PgClient.PgPoolConfig
   readonly databaseUrl: Redacted.Redacted<string>
+  readonly providerCredentialKey: Redacted.Redacted<string>
   readonly executor: ExecutorConfig
   readonly workerId: string
 }) =>
@@ -47,6 +57,15 @@ export const layer = (options: {
         Layer.mergeAll(postgresLayer(options.database), AuthorizationPolicy.layer, BunCrypto.layer),
       )
       const retainedData = Layer.succeedContext(data)
+      const credentialContext = yield* Layer.build(
+        Layer.merge(
+          hostedProviderCredentialsLayer({ encryptionKey: options.providerCredentialKey }),
+          providerCredentialStoreLayer({ encryptionKey: options.providerCredentialKey }),
+        ).pipe(Layer.provide(retainedData)),
+      )
+      const modelContext = yield* Layer.build(
+        hostedModelRegistryLayer.pipe(Layer.provide(Layer.succeedContext(Context.merge(data, credentialContext)))),
+      )
       const executorContext = yield* Layer.build(
         executorService.pipe(
           Layer.provide(Layer.merge(executorLayer(options.executor), localExecutorLayer)),
@@ -57,6 +76,10 @@ export const layer = (options: {
       const executionContext = yield* Layer.build(
         HostedExecution.layerHosted({
           kernel: { runtimeVersion: Bun.version, dataRoot: "/workspace" },
+          credentialStore: Layer.succeed(
+            ProviderCredentialStore,
+            Context.get(credentialContext, ProviderCredentialStore),
+          ),
           cells: HostedExecution.remoteCells({
             cells: RemoteCells.layer({
               execute: (request) =>
@@ -84,7 +107,10 @@ export const layer = (options: {
           },
         }),
       )
-      const hostedContext = Context.merge(data, executionContext)
+      const hostedContext = Context.merge(
+        Context.merge(data, executionContext),
+        Context.merge(credentialContext, modelContext),
+      )
       const projectionWorkerContext = yield* Layer.build(
         hostedProjectionWorkerLayer({ concurrency: 32, pollIntervalMillis: 250 }).pipe(
           Layer.provide(ProductRepositories.projectionLayer),
@@ -97,10 +123,7 @@ export const layer = (options: {
           workerId: options.workerId,
           leaseMillis: 30_000,
           pollIntervalMillis: 250,
-        }).pipe(
-          Layer.provide(HostedTurnWorkerStore.layer),
-          Layer.provide(Layer.succeedContext(hostedContext)),
-        ),
+        }).pipe(Layer.provide(HostedTurnWorkerStore.layer), Layer.provide(Layer.succeedContext(hostedContext))),
       )
       const turnWorker = Context.get(turnWorkerContext, HostedTurnWorker)
       const productContext = yield* Layer.build(
@@ -115,6 +138,8 @@ export const layer = (options: {
       return HostedApplication.of({
         product: Context.get(productContext, HostedProduct),
         operations: Context.get(operationsContext, HostedOperations),
+        credentials: Context.get(credentialContext, HostedProviderCredentials),
+        models: Context.get(modelContext, HostedModelRegistry),
         executor,
         projectionWorker,
         turnWorker,
@@ -125,14 +150,10 @@ export const layer = (options: {
             check: Effect.all([
               Context.get(executionContext, ExecutionPostgres.Readiness).check,
               projectionWorker.ready.pipe(
-                Effect.mapError((error) =>
-                  ExecutionPostgres.WorkerUnavailable.make({ message: error.message }),
-                ),
+                Effect.mapError((error) => ExecutionPostgres.WorkerUnavailable.make({ message: error.message })),
               ),
               turnWorker.ready.pipe(
-                Effect.mapError((error) =>
-                  ExecutionPostgres.WorkerUnavailable.make({ message: error.message }),
-                ),
+                Effect.mapError((error) => ExecutionPostgres.WorkerUnavailable.make({ message: error.message })),
               ),
             ]).pipe(Effect.map(([readiness]) => readiness)),
           }),

@@ -45,4 +45,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "c9616cd9fecf1cb3b8115acdc3d0b03ada1cd0cbe189111aac2c0ad84ce79dd3",
     url: new URL("../../migrations/postgres/0008-hosted-turn-worker.sql", import.meta.url),
   },
+  {
+    id: "product/0009_provider_credentials",
+    checksum: "5511abe15bfa0da11a07637c9f84f802b0f0a2417cd98fe9cd0f55de33547fc1",
+    url: new URL("../../migrations/postgres/0009-provider-credentials.sql", import.meta.url),
+  },
 ]

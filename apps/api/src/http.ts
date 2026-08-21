@@ -8,6 +8,8 @@ import type {
   IdentityRuntimeError,
 } from "@rika/identity"
 import type { HostedProductService } from "./hosted-product"
+import type { HostedModelRegistryService } from "./hosted-model-registry"
+import type { HostedProviderCredentialsService } from "./hosted-provider-credentials"
 import type { Runtime as Executor } from "./executor"
 import type { ReadinessInterface as ExecutionReadiness } from "@rika/execution/postgres"
 
@@ -16,6 +18,8 @@ export interface HttpDependencies {
   readonly directory: IdentityDirectory
   readonly devices: CliDeviceDirectory
   readonly product: HostedProductService
+  readonly credentials?: HostedProviderCredentialsService
+  readonly models?: HostedModelRegistryService
   readonly executor: Executor
   readonly execution: ExecutionReadiness
   readonly production: boolean

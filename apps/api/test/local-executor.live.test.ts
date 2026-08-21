@@ -8,6 +8,7 @@ import { layer as productPostgres } from "@rika/product-store/postgres-layer"
 import type { Access } from "@rika/remote-execution/protocol"
 import { Effect, Layer, Random, Redacted } from "effect"
 import { Pool } from "pg"
+import { testLayer as hostedModelRegistryTestLayer } from "../src/hosted-model-registry"
 import { HostedProduct, layer as hostedProductLayer, type AuthenticatedPrincipal } from "../src/hosted-product"
 import { LocalExecutor, layer as localExecutorLayer } from "../src/local-executor"
 
@@ -91,6 +92,7 @@ const isolated = <A, E, R>(
           productPostgres({ url: Redacted.make(url), maxConnections: 8 }),
           AuthorizationPolicy.layer,
           BunCrypto.layer,
+          hostedModelRegistryTestLayer,
         )
         const context = yield* Layer.build(
           Layer.merge(

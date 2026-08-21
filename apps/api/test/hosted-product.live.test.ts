@@ -5,7 +5,7 @@ import { BetterAuthUserId, OrganizationId } from "@rika/product/hosted-model"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { Effect, Layer, Random, Redacted } from "effect"
 import { Pool, type QueryResult } from "pg"
-import { HostedProduct, HostedProductError, postgres, type AuthenticatedPrincipal } from "../src/hosted-product"
+import { HostedProduct, HostedProductError, postgresTest, type AuthenticatedPrincipal } from "../src/hosted-product"
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined
@@ -68,7 +68,7 @@ const withDatabase = <A, E, R>(label: string, use: (pool: Pool) => Effect.Effect
           yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
         }
         const context = yield* Layer.build(
-          postgres({
+          postgresTest({
             database: { url: Redacted.make(url), maxConnections: 8 },
             templateBuildId: "hosted-product-live",
             providerScope: "hosted-product-live",
@@ -102,9 +102,7 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
       } as const
       const admitted = yield* product.admitRun(admissionInput)
       expect(yield* product.admitRun(admissionInput)).toEqual(admitted)
-      expect(
-        yield* failureKind(product.admitRun({ ...admissionInput, prompt: "different prompt" })),
-      ).toBe("conflict")
+      expect(yield* failureKind(product.admitRun({ ...admissionInput, prompt: "different prompt" }))).toBe("conflict")
       expect(yield* failureKind(product.admitRun({ ...admissionInput, mode: "low" }))).toBe("conflict")
       const facts = yield* query(
         pool,
