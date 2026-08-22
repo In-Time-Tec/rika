@@ -23,15 +23,15 @@ CREATE INDEX rika_hosted_client_authorities_active
   ON rika_hosted_client_authorities (owner_id, expires_at, client_id)
   WHERE revoked_at IS NULL;
 
-ALTER TABLE rika_hosted_local_executor_admissions
+ALTER TABLE rika_hosted_runner_admissions
   ADD COLUMN revoked_at TIMESTAMPTZ;
 
-UPDATE rika_hosted_local_executor_admissions
+UPDATE rika_hosted_runner_admissions
 SET expires_at = created_at + interval '5 minutes'
 WHERE expires_at > created_at + interval '5 minutes';
 
-ALTER TABLE rika_hosted_local_executor_admissions
-  ADD CONSTRAINT rika_hosted_local_executor_admissions_short_lived
+ALTER TABLE rika_hosted_runner_admissions
+  ADD CONSTRAINT rika_hosted_runner_admissions_short_lived
   CHECK (expires_at <= created_at + interval '5 minutes');
 
 UPDATE rika_hosted_executor_assignments
@@ -81,7 +81,7 @@ BEGIN
     AND client_record.device_id = authority_device_id
     AND client_record.user_id = authority_user_id;
 
-  UPDATE rika_hosted_local_executor_admissions
+  UPDATE rika_hosted_runner_admissions
   SET revoked_at = COALESCE(revoked_at, authority_revoked_at)
   WHERE device_id = authority_device_id AND user_id = authority_user_id;
 
@@ -89,7 +89,7 @@ BEGIN
   SET revoked_at = COALESCE(revoked_at, authority_revoked_at)
   WHERE device_id = authority_device_id AND user_id = authority_user_id;
 
-  DELETE FROM rika_hosted_local_runner_registrations
+  DELETE FROM rika_hosted_runner_registrations
   WHERE device_id = authority_device_id AND user_id = authority_user_id;
 
   UPDATE rika_hosted_executor_assignments
@@ -105,7 +105,7 @@ BEGIN
     lease_epoch = NULL,
     lease_expires_at = NULL,
     updated_at = authority_revoked_at
-  WHERE executor_kind = 'local_device'
+  WHERE executor_kind = 'runner'
     AND placement ->> 'deviceId' = authority_device_id
     AND lifecycle <> 'terminated';
 
@@ -148,7 +148,7 @@ BEGIN
     AND authority.owner_id = selected_owner_id
     AND client_record.user_id = OLD.user_id;
 
-  UPDATE rika_hosted_local_executor_admissions admission
+  UPDATE rika_hosted_runner_admissions admission
   SET revoked_at = COALESCE(admission.revoked_at, transaction_timestamp())
   WHERE admission.owner_id = selected_owner_id AND admission.user_id = OLD.user_id;
 
@@ -167,7 +167,7 @@ BEGIN
     updated_at = transaction_timestamp()
   FROM rika_hosted_devices device
   WHERE assignment.owner_id = selected_owner_id
-    AND assignment.executor_kind = 'local_device'
+    AND assignment.executor_kind = 'runner'
     AND assignment.placement ->> 'deviceId' = device.id
     AND device.user_id = OLD.user_id
     AND assignment.lifecycle <> 'terminated';

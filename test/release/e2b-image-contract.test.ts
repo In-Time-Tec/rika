@@ -167,7 +167,7 @@ describe("E2B image source contract", () => {
 
     expect(create).toContain(".fromImage(image, { username, password: Redacted.value(password) })")
     expect(create).toContain("rika-executor ALL=(root) NOPASSWD: ${createRuntimeDirectory}")
-    expect(create).toContain('> /etc/sudoers.d/rika-runtime && chmod 0440 /etc/sudoers.d/rika-runtime')
+    expect(create).toContain("> /etc/sudoers.d/rika-runtime && chmod 0440 /etc/sudoers.d/rika-runtime")
     expect(create).toContain('.setUser("rika-executor")')
     expect(create).toContain("`sudo -n ${createRuntimeDirectory} && exec /opt/rika/start.sh`")
     expect(create).toContain('"curl --fail --silent http://127.0.0.1:7070/health"')

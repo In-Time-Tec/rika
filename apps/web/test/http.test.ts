@@ -29,7 +29,7 @@ const response = (path: string, access?: AccountAccess, options?: RequestInit) =
 describe("web HTTP", () => {
   it.effect("serves browser pages and owned assets with security headers", () =>
     Effect.gen(function* () {
-      for (const path of ["/login", "/signup", "/verify-email", "/forgot-password", "/reset-password"]) {
+      for (const path of ["/login", "/signup", "/verify-email", "/forgot-password", "/reset-password", "/threads"]) {
         const result = yield* response(path)
         expect(result.status).toBe(200)
         expect(result.headers.get("content-type")).toBe("text/html; charset=utf-8")
@@ -40,6 +40,10 @@ describe("web HTTP", () => {
       const script = yield* response("/assets/web.js")
       expect(css.headers.get("content-type")).toBe("text/css; charset=utf-8")
       expect(script.headers.get("content-type")).toBe("text/javascript; charset=utf-8")
+      const threads = yield* response("/threads")
+      const threadHtml = yield* Effect.promise(() => threads.text())
+      expect(threadHtml).toContain('id="root"')
+      expect(threadHtml).toContain("/assets/thread-client.js")
     }),
   )
 

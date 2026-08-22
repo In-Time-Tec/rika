@@ -35,7 +35,7 @@ const valid = (credential) => ({
   body: JSON.stringify({
     credential,
     identity: {
-      target: "e2b",
+      target: "orb",
       ownerId: "owner-1",
       threadId: "thread-1",
       assignmentId: "assignment-1",
@@ -95,7 +95,7 @@ const host = Bun.spawn(["bun", "run", "./src/host.ts"], {
   env: {
     ...process.env,
     E2B_SANDBOX_ID: "sandbox-from-bootstrap",
-    RIKA_EXECUTOR_TARGET: "e2b",
+    RIKA_EXECUTOR_TARGET: "orb",
     RIKA_EXECUTOR_ASSIGNMENT_ID: "template-readiness",
     RIKA_EXECUTOR_GENERATION: "1",
     RIKA_EXECUTOR_ID: "template-readiness:g1",
@@ -125,7 +125,7 @@ try {
     body: JSON.stringify({
       credential: "one-time-bootstrap",
       identity: {
-        target: "e2b",
+        target: "orb",
         ownerId: "owner-from-bootstrap",
         threadId: "thread-from-bootstrap",
         assignmentId: "assignment-from-bootstrap",
@@ -223,7 +223,7 @@ describe.sequential("executor host process", () => {
                 body: "accepted",
                 credential: expect.stringMatching(/^bootstrap-[ab]$/),
                 identity: {
-                  target: "e2b",
+                  target: "orb",
                   ownerId: "owner-1",
                   threadId: "thread-1",
                   assignmentId: "assignment-1",
@@ -274,7 +274,7 @@ describe.sequential("executor host process", () => {
                     _tag: "ExecutorHello",
                     hello: {
                       fence: {
-                        target: "e2b",
+                        target: "orb",
                         assignmentId: "assignment-from-bootstrap",
                         assignmentGeneration: 7,
                         instanceId: expect.any(String),

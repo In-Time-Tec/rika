@@ -71,12 +71,16 @@ const unusedHttp: HttpInterface = {
   revokeDevice: () => Effect.die("unused"),
   revokeAllDevices: () => Effect.die("unused"),
   issueThreadTicket: () => Effect.die("unused"),
-  registerLocalRunner: () => Effect.die("unused"),
+  registerRunner: () => Effect.die("unused"),
   setRemoteThreadCreation: () => Effect.die("unused"),
-  pollLocalRunner: () => Effect.die("unused"),
+  pollRunner: () => Effect.die("unused"),
   putProviderCredential: () => Effect.die("unused"),
   listProviderCredentials: () => Effect.die("unused"),
   revokeProviderCredential: () => Effect.die("unused"),
+  createProject: () => Effect.die("unused"),
+  putEnvironment: () => Effect.die("unused"),
+  revokeEnvironment: () => Effect.die("unused"),
+  publishRepository: () => Effect.die("unused"),
 }
 
 it.effect("defaults a first login with zero organizations to Personal", () =>
@@ -526,6 +530,9 @@ it.effect("creates for Personal with zero organizations and fails closed for a s
               return Ref.update(created, (value) => value + 1).pipe(Effect.as("thread-1" as never))
             },
             submit: () => Effect.die("unused"),
+            ensureService: () => Effect.die("unused"),
+            stopService: () => Effect.die("unused"),
+            openPortal: () => Effect.die("unused"),
           }),
         ),
         BunCrypto.layer,

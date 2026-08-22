@@ -36,11 +36,11 @@ const EncodedArchiveContent = Schema.String.check(
 export const ProtocolVersion = Schema.Literal(1)
 export type ProtocolVersion = typeof ProtocolVersion.Type
 
-export const Target = Schema.Literals(["local_device", "e2b"])
+export const Target = Schema.Literals(["runner", "orb"])
 export type Target = typeof Target.Type
 
 export const ExecutorBootstrapIdentity = Schema.Struct({
-  target: Schema.Literal("e2b"),
+  target: Schema.Literal("orb"),
   ownerId: Identifier,
   threadId: Identifier,
   assignmentId: Identifier,
@@ -85,14 +85,14 @@ export type ExecutorBootstrapWire = typeof ExecutorBootstrapWire.Type
  * This is separate from `ExecutorBootstrapWire`, whose E2B identity remains
  * attested by the sandbox bootstrap listener.
  */
-export const LocalExecutorAdmissionWire = Schema.Struct({
+export const RunnerAdmissionWire = Schema.Struct({
   admissionId: Identifier,
   ticket: Identifier,
   executorUrl: Identifier,
   workspaceIdentity: Identifier,
   expiresAt: Timestamp,
 })
-export type LocalExecutorAdmissionWire = typeof LocalExecutorAdmissionWire.Type
+export type RunnerAdmissionWire = typeof RunnerAdmissionWire.Type
 
 export const Cursor = Schema.Struct({
   sequence: Sequence,
@@ -574,7 +574,7 @@ export const WorkspacePreparationEvidenceWire = Schema.Struct({
 })
 export type WorkspacePreparationEvidenceWire = typeof WorkspacePreparationEvidenceWire.Type
 
-export const LocalExecutorHelloWire = Schema.Struct({
+export const RunnerHelloWire = Schema.Struct({
   admissionId: Identifier,
   ticket: Identifier,
   processIncarnation: Identifier,
@@ -582,14 +582,14 @@ export const LocalExecutorHelloWire = Schema.Struct({
   workspaceCapabilities: WorkspaceCapabilitySnapshot,
   cursors: ResumeCursors,
 })
-export type LocalExecutorHelloWire = typeof LocalExecutorHelloWire.Type
+export type RunnerHelloWire = typeof RunnerHelloWire.Type
 
-/** Frames accepted only on the foreground local executor socket. */
-export const LocalExecutorMessage = Schema.Union([
-  Schema.TaggedStruct("LocalExecutorHello", { hello: LocalExecutorHelloWire }),
+/** Frames accepted only on the foreground Runner socket. */
+export const RunnerMessage = Schema.Union([
+  Schema.TaggedStruct("RunnerHello", { hello: RunnerHelloWire }),
   Schema.TaggedStruct("ExecutorReconnect", { access: AccessWire }),
   Schema.TaggedStruct("ExecutorHeartbeat", { heartbeat: HeartbeatWire }),
-  Schema.TaggedStruct("LocalExecutorGoodbye", { access: AccessWire }),
+  Schema.TaggedStruct("RunnerGoodbye", { access: AccessWire }),
   Schema.TaggedStruct("LocalCellResult", {
     access: AccessWire,
     operationKey: Identifier,
@@ -614,7 +614,7 @@ export const LocalExecutorMessage = Schema.Union([
     outcome: MachineOutcome,
   }),
 ])
-export type LocalExecutorMessage = typeof LocalExecutorMessage.Type
+export type RunnerMessage = typeof RunnerMessage.Type
 
 export const ExecutorMessage = Schema.Union([
   Schema.TaggedStruct("ExecutorHello", {

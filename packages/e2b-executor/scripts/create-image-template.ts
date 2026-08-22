@@ -19,8 +19,7 @@ export const createImageTemplate = Effect.fn("ExecutorImageTemplate.create")(fun
   const username = yield* Config.string("GHCR_USERNAME")
   const password = yield* Config.redacted("GHCR_PASSWORD")
   const apiKey = yield* Config.redacted("E2B_API_KEY")
-  const createRuntimeDirectory =
-    "/usr/bin/install -d -m 2750 -o rika-executor -g rika-workspace /run/rika"
+  const createRuntimeDirectory = "/usr/bin/install -d -m 2750 -o rika-executor -g rika-workspace /run/rika"
   const template = Template()
     .fromImage(image, { username, password: Redacted.value(password) })
     .runCmd(

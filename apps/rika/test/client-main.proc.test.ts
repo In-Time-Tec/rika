@@ -9,7 +9,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | Scope.S
     Effect.scoped(Layer.build(BunServices.layer).pipe(Effect.flatMap((context) => Effect.provide(effect, context)))),
   )
 
-test("plain rika starts only sibling hosted TUI-controller and local-executor roles", () =>
+test("plain rika starts only sibling hosted TUI-controller and runner-executor roles", () =>
   run(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -27,7 +27,7 @@ test("plain rika starts only sibling hosted TUI-controller and local-executor ro
             HOME: root,
             RIKA_TEST_RUNTIME_EXECUTABLE: fixture,
             RIKA_TEST_ROLE_LOG: roleLog,
-            RIKA_TEST_LOCAL_EXECUTOR_STDOUT: "1",
+            RIKA_TEST_RUNNER_EXECUTOR_STDOUT: "1",
           },
           extendEnv: true,
         }),
@@ -51,12 +51,12 @@ test("plain rika starts only sibling hosted TUI-controller and local-executor ro
       for (let attempt = 0; attempt < 100; attempt += 1) {
         const text = yield* fileSystem.readFileString(roleLog).pipe(Effect.orElseSucceed(() => ""))
         roles = text.trim().split("\n")
-        if (roles.includes("local-executor-stopped")) break
+        if (roles.includes("runner-executor-stopped")) break
         yield* Effect.sleep("50 millis")
       }
       expect(roles).toContain("tui-controller|hello")
-      expect(roles).toContain(`local-executor|--no-tui --workspace ${process.cwd()}`)
-      expect(roles).toContain("local-executor-stopped")
+      expect(roles).toContain(`runner-executor|--no-tui --workspace ${process.cwd()}`)
+      expect(roles).toContain("runner-executor-stopped")
       const files = yield* Effect.promise(() =>
         Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: root, onlyFiles: true })),
       )
@@ -108,7 +108,7 @@ test("plain rika exposes a hosted controller failure and does not fall back to l
             RIKA_TEST_RUNTIME_EXECUTABLE: fixture,
             RIKA_TEST_ROLE_LOG: roleLog,
             RIKA_TEST_TUI_FAILURE: "1",
-            RIKA_TEST_LOCAL_EXECUTOR_FAILURE: "1",
+            RIKA_TEST_RUNNER_EXECUTOR_FAILURE: "1",
           },
           extendEnv: true,
         }),
@@ -117,11 +117,10 @@ test("plain rika exposes a hosted controller failure and does not fall back to l
         concurrency: 2,
       })
       expect(Number(exitCode)).not.toBe(0)
-      expect(stderr.trim().split("\n")).toEqual(["ERROR", "  Run rika auth login first"])
-      expect((yield* fileSystem.readFileString(roleLog)).trim().split("\n")).toEqual([
-        `local-executor|--no-tui --workspace ${process.cwd()}`,
-        "tui-controller|",
-      ])
+      expect(stderr.trim()).toBe("Run rika auth login first")
+      expect((yield* fileSystem.readFileString(roleLog)).trim().split("\n").toSorted()).toEqual(
+        [`runner-executor|--no-tui --workspace ${process.cwd()}`, "tui-controller|"].toSorted(),
+      )
       const files = yield* Effect.promise(() =>
         Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: root, onlyFiles: true })),
       )

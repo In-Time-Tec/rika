@@ -91,9 +91,14 @@ test("summarizes direct subagents and tools without inflating them with descenda
   expect(formatActivity(activity)).toBe("Running 1 subagent, 1 tool")
   expect(formatActivity({ _tag: "RunningTools", subagents: 5, tools: 3 })).toBe("Running 5 subagents, 3 tools")
 })
-test("exposes thread, mode, context, fast mode, subagent limits, and quit commands in the command palette", () => {
+test("exposes local and Orb Thread creation plus the current command controls", () => {
   expect(commands.map((command) => command.id)).toEqual([
     "new-thread",
+    "new-orb-thread",
+    "pause-orb",
+    "resume-orb",
+    "enable-remote-thread-creation",
+    "disable-remote-thread-creation",
     "threads",
     "mode",
     "context",

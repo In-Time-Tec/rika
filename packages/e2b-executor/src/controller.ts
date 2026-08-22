@@ -1,4 +1,4 @@
-import { type ExecutorAssignment, type E2BPlacement } from "@rika/product/executor-assignment"
+import { type ExecutorAssignment, type OrbPlacement } from "@rika/product/executor-assignment"
 import { AssignmentError, ExecutorAssignments, type Access } from "@rika/product/executor-assignments"
 import { resolveEgressPolicy, type EnvironmentPhase, type PhaseEgressPolicy } from "@rika/product/environment-policy"
 import * as HostedObservability from "@rika/product/hosted-observability"
@@ -161,6 +161,7 @@ export interface Interface {
   ) => Effect.Effect<Assignment, ControllerError>
   readonly pause: (key: AssignmentKey, quiescence?: Quiescence) => Effect.Effect<Assignment, ControllerError>
   readonly kill: (key: AssignmentKey) => Effect.Effect<Assignment, ControllerError>
+  readonly portal: (key: AssignmentKey, port: number) => Effect.Effect<string, ControllerError>
   readonly hello: (hello: Hello) => Effect.Effect<Welcome, ControllerError>
   readonly reconnect: (access: ProtocolAccess) => Effect.Effect<ReconnectWelcome, ControllerError>
   readonly validateAccess: (access: ProtocolAccess) => Effect.Effect<void, ControllerError>
@@ -218,10 +219,10 @@ const failure = (kind: ControllerError["kind"], message: string) => ControllerEr
 const epochMillis = (value: string) => DateTime.toEpochMillis(DateTime.makeUnsafe(value))
 const number = (value: string) => Number(value)
 
-const e2bPlacement = (assignment: ExecutorAssignment): Effect.Effect<E2BPlacement, ControllerError> =>
-  assignment.placement._tag === "E2BPlacement"
+const orbPlacement = (assignment: ExecutorAssignment): Effect.Effect<OrbPlacement, ControllerError> =>
+  assignment.placement._tag === "OrbPlacement"
     ? Effect.succeed(assignment.placement)
-    : Effect.fail(failure("fenced", "Assignment placement is not E2B"))
+    : Effect.fail(failure("fenced", "Assignment placement is not an Orb"))
 
 const providerInstanceId = (assignment: ExecutorAssignment): string | undefined => {
   const lifecycle = assignment.lifecycle
@@ -242,7 +243,7 @@ const assignmentCorrelation = (assignment: ExecutorAssignment): HostedObservabil
     threadId: assignment.threadId,
     assignmentId: assignment.id,
     ...(sandboxId === undefined ? {} : { sandboxId }),
-    ...(assignment.placement._tag === "E2BPlacement" ? { buildId: assignment.placement.templateBuildId } : {}),
+    ...(assignment.placement._tag === "OrbPlacement" ? { buildId: assignment.placement.templateBuildId } : {}),
   }
 }
 
@@ -252,7 +253,7 @@ const publicAssignment = (assignment: ExecutorAssignment): Assignment => {
   if (lifecycle._tag === "Active") state = "running"
   if (lifecycle._tag === "Paused") state = "paused"
   if (lifecycle._tag === "Terminated") state = "terminated"
-  const templateBuildId = assignment.placement._tag === "E2BPlacement" ? assignment.placement.templateBuildId : ""
+  const templateBuildId = assignment.placement._tag === "OrbPlacement" ? assignment.placement.templateBuildId : ""
   const sandboxId = providerInstanceId(assignment)
   return {
     assignmentId: assignment.id,
@@ -346,7 +347,7 @@ export const layer = (
       })
 
       const approvedPlacement = Effect.fn("Controller.approvedPlacement")(function* (assignment: ExecutorAssignment) {
-        const placement = yield* e2bPlacement(assignment)
+        const placement = yield* orbPlacement(assignment)
         if (placement.templateBuildId !== options.templateBuildId)
           return yield* failure("provider", "Assignment template build is not approved")
         return placement
@@ -368,7 +369,7 @@ export const layer = (
           idleTimeoutMillis,
           allowedEgress: yield* allowedEgress(authorization.egress),
           environment: {
-            RIKA_EXECUTOR_TARGET: "e2b",
+            RIKA_EXECUTOR_TARGET: "orb",
             RIKA_EXECUTOR_ASSIGNMENT_ID: assignment.id,
             RIKA_EXECUTOR_GENERATION: assignment.generation,
             RIKA_EXECUTOR_ID: `${assignment.id}:g${assignment.generation}`,
@@ -401,7 +402,7 @@ export const layer = (
       ) {
         const placement = yield* approvedPlacement(assignment)
         return {
-          target: "e2b" as const,
+          target: "orb" as const,
           ownerId: assignment.ownerId,
           threadId: assignment.threadId,
           assignmentId: assignment.id,
@@ -468,7 +469,7 @@ export const layer = (
         metadata["rika.deployment-id"] === options.deploymentId &&
         metadata["rika.assignment-id"] === assignment.id &&
         metadata["rika.generation"] === assignment.generation &&
-        assignment.placement._tag === "E2BPlacement" &&
+        assignment.placement._tag === "OrbPlacement" &&
         templateId === options.templateId &&
         templateBuildId === assignment.placement.templateBuildId
 
@@ -644,13 +645,7 @@ export const layer = (
                 bootstrapLifetimeMillis,
               })
               .pipe(Effect.mapError(assignmentFailure))
-            const replacement = yield* createAndBootstrap(
-              replacing,
-              identity,
-              authorization,
-              "replacement",
-              restore,
-            )
+            const replacement = yield* createAndBootstrap(replacing, identity, authorization, "replacement", restore)
             if (retiringProviderId !== undefined)
               yield* HostedObservability.observe(
                 "sandbox_reap",
@@ -710,6 +705,16 @@ export const layer = (
           }),
         )
       })
+      const portal = Effect.fn("Controller.portal")(function* (key: AssignmentKey, port: number) {
+        const assignment = yield* current(key)
+        yield* approvedPlacement(assignment)
+        if (!Number.isSafeInteger(port) || port < 1 || port > 65_535)
+          return yield* failure("protocol", "Portal port must be between 1 and 65535")
+        const sandboxId = providerInstanceId(assignment)
+        if (sandboxId === undefined) return yield* failure("assignment-conflict", "Orb is not running")
+        const hostname = yield* provider.host(sandboxId, port).pipe(Effect.mapError(providerFailure))
+        return `https://${hostname}`
+      })
 
       const kill = Effect.fn("Controller.kill")(function* (key: AssignmentKey) {
         const assignment = yield* current(key)
@@ -729,7 +734,7 @@ export const layer = (
       const assignmentAccess = Effect.fn("Controller.assignmentAccess")(function* (
         input: ProtocolAccess,
       ): Effect.fn.Return<Access, ControllerError> {
-        if (input.fence.target !== "e2b") return yield* failure("fenced", "Executor target is not E2B")
+        if (input.fence.target !== "orb") return yield* failure("fenced", "Executor target is not E2B")
         yield* approvedPlacement(
           yield* current({
             assignmentId: input.fence.assignmentId,
@@ -748,7 +753,7 @@ export const layer = (
       })
 
       const hello = Effect.fn("Controller.hello")(function* (input: Hello) {
-        if (input.fence.target !== "e2b") return yield* failure("fenced", "Executor target is not E2B")
+        if (input.fence.target !== "orb") return yield* failure("fenced", "Executor target is not E2B")
         if (!input.capabilities.cells)
           return yield* failure("protocol", "Executor transport does not support cell execution")
         const assignment = yield* current({
@@ -1154,6 +1159,7 @@ export const layer = (
         resume,
         pause,
         kill,
+        portal,
         hello,
         reconnect: (access) =>
           HostedObservability.observe(
@@ -1161,7 +1167,7 @@ export const layer = (
             {
               assignmentId: access.fence.assignmentId,
               sandboxId: access.fence.instanceId,
-              ...(access.fence.target === "e2b" ? { buildId: options.templateBuildId } : {}),
+              ...(access.fence.target === "orb" ? { buildId: options.templateBuildId } : {}),
             },
             reconnect(access),
           ),

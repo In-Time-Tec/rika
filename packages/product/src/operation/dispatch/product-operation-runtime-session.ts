@@ -29,14 +29,17 @@ type ProductOperationInteractiveSessionInput = Omit<
 
 export type ProductOperationInteractiveSessionFactory = (
   workspace: string,
-  settings?: { readonly initialThreadId?: string; readonly serverOwner?: boolean },
+  settings?: { readonly initialThreadId?: string; readonly recoveryOwner?: boolean },
 ) => Effect.Effect<InteractiveSessionRuntimeResult, OperationError, never>
 
 export const makeProductOperationInteractiveSession = (
   input: ProductOperationInteractiveSessionInput,
 ): ProductOperationInteractiveSessionFactory => {
   let sequence = 0
-  return (workspace: string, settings: { readonly initialThreadId?: string; readonly serverOwner?: boolean } = {}) => {
+  return (
+    workspace: string,
+    settings: { readonly initialThreadId?: string; readonly recoveryOwner?: boolean } = {},
+  ) => {
     const runtimeInput: InteractiveSessionInput = {
       ...input,
       encodeJson: input.encodeJson,

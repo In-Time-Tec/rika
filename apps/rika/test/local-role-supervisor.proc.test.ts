@@ -7,7 +7,7 @@ import { processRoleLaunch } from "../src/client/local-role-supervisor"
 const withPlatform = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.scoped(Layer.build(BunServices.layer).pipe(Effect.flatMap((context) => Effect.provide(effect, context))))
 
-it.effect("starts the TUI controller and local executor as sibling processes", () =>
+it.effect("starts the TUI controller and Runner as sibling processes", () =>
   withPlatform(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -20,19 +20,19 @@ it.effect("starts the TUI controller and local executor as sibling processes", (
           arguments: [fixture, "tui-controller"],
           environment: { RIKA_TEST_ROLE_LOG: root },
         },
-        "local-executor": {
+        "runner-executor": {
           executable: "/bin/sh",
-          arguments: [fixture, "local-executor"],
+          arguments: [fixture, "runner-executor"],
           environment: { RIKA_TEST_ROLE_LOG: root },
         },
       })
-      const executor = yield* launch.start("local-executor")
+      const executor = yield* launch.start("runner-executor")
       const tui = yield* launch.start("tui-controller")
       expect(yield* Effect.all([executor.exit, tui.exit], { concurrency: 2 })).toEqual([
         { exitCode: 0, errorOutput: "" },
         { exitCode: 0, errorOutput: "" },
       ])
-      for (const event of ["local-executor-started", "tui-controller-started", "tui-controller-exited"])
+      for (const event of ["runner-executor-started", "tui-controller-started", "tui-controller-exited"])
         expect(yield* fileSystem.exists(`${root}-${event}`)).toBe(true)
     }),
   ),

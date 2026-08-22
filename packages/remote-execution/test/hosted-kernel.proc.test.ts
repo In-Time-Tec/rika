@@ -18,7 +18,7 @@ import {
 const access = {
   version: 1 as const,
   fence: {
-    target: "local_device" as const,
+    target: "runner" as const,
     assignmentId: "assignment-1",
     assignmentGeneration: 1,
     instanceId: "device-1",

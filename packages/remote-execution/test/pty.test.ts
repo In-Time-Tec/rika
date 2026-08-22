@@ -17,7 +17,7 @@ import type { Fence } from "../src/protocol"
 import { provideLayer } from "./support/layer"
 
 const fence: Fence = {
-  target: "e2b",
+  target: "orb",
   assignmentId: "assignment-1",
   assignmentGeneration: 3,
   instanceId: "sandbox-3",

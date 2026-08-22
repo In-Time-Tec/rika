@@ -44,7 +44,7 @@ const program = Effect.gen(function* () {
     idleTimeoutMillis: 900_000,
     allowedEgress: ["controller.invalid", "github.com", "api.github.com"],
     environment: {
-      RIKA_EXECUTOR_TARGET: "e2b",
+      RIKA_EXECUTOR_TARGET: "orb",
       RIKA_EXECUTOR_ASSIGNMENT_ID: "live-validation",
       RIKA_EXECUTOR_GENERATION: "1",
       RIKA_EXECUTOR_ID: "live-validation:g1",
@@ -60,7 +60,7 @@ const program = Effect.gen(function* () {
           sandboxId: sandbox.sandboxId,
           credential: Redacted.make("live-validation-bootstrap"),
           identity: {
-            target: "e2b",
+            target: "orb",
             ownerId: "live-owner",
             threadId: "live-thread",
             assignmentId: "live-validation",

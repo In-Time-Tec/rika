@@ -236,8 +236,8 @@ describe("tool contracts", () => {
       const searchQueries = (schema.properties as Record<string, unknown>).searchQueries
       expect(searchQueries).toEqual({
         type: "array",
-        items: { type: "string", allOf: [{ pattern: "\\S" }] },
-        allOf: [{ minItems: 1 }],
+        items: { type: "string", pattern: "\\S" },
+        minItems: 1,
       })
       expect(searchQueries).not.toHaveProperty("prefixItems")
       expect(schema.properties).not.toHaveProperty("providers")

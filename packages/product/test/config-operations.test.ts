@@ -9,7 +9,6 @@ import { provideLayer } from "./product-test-layer"
 const options: ConfigOperations.Options = {
   globalConfigPath: "/home/config.json",
   workspaceConfigPath: "/work/config.json",
-  productDatabasePath: "/home/rika.db",
 }
 
 it.effect("prints effective redacted config and keymap", () =>
@@ -117,7 +116,7 @@ it.effect("edits the selected path and reports secret-safe doctor status", () =>
       ConfigurationService.memoryConfigurationLayer(),
       ConfigOperations.testLayer({
         edit: (path) => Ref.update(edits, (values) => [...values, path]),
-        exists: (path) => Effect.succeed(path === options.productDatabasePath),
+        exists: () => Effect.succeed(false),
       }),
     )
     const lines = yield* Effect.gen(function* () {
@@ -127,7 +126,7 @@ it.effect("edits the selected path and reports secret-safe doctor status", () =>
       return yield* TestConsole.logLines
     }).pipe(provideLayer(layer))
     expect(yield* Ref.get(edits)).toEqual([options.globalConfigPath, options.workspaceConfigPath])
-    expect(lines[0]).toContain('"product": "present"')
+    expect(lines[0]).not.toContain('"databases"')
     expect(lines[0]).toContain('"webSearch": {}')
   }),
 )
@@ -160,7 +159,7 @@ it.effect("lists MCP transports and reports present doctor branches", () =>
     }).pipe(provideLayer(layer))
     expect(lines[0]).toContain('"apiKey": "present"')
     expect(lines[1]).toContain('"transport": "command"')
-    expect(lines[3]).toContain('"product": "present"')
+    expect(lines[3]).toContain('"global": "present"')
     expect(lines[3]).toContain('"parallel": "present"')
     expect(lines[3]).toContain('"apiKey": "present"')
     expect(lines.join("\n")).not.toContain("model-secret")
@@ -183,7 +182,6 @@ it.effect("reports missing config and mixed doctor paths", () =>
       return yield* TestConsole.logLines
     }).pipe(provideLayer(layer))
     expect(lines[0]).toContain('"webSearchCredentials": {}')
-    expect(lines[1]).toContain('"product": "missing"')
     expect(lines[1]).toContain('"global": "missing"')
     expect(lines[1]).toContain('"workspace": "present"')
   }),

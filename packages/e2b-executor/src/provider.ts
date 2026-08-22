@@ -44,7 +44,17 @@ export interface InventoryEntry extends Handle {
 }
 
 export class ProviderError extends Schema.TaggedError<ProviderError>()("ProviderError", {
-  operation: Schema.Literals(["bootstrap", "create", "connect", "network", "pause", "kill", "touch", "inventory"]),
+  operation: Schema.Literals([
+    "bootstrap",
+    "create",
+    "connect",
+    "host",
+    "network",
+    "pause",
+    "kill",
+    "touch",
+    "inventory",
+  ]),
   message: Schema.String,
 }) {}
 
@@ -52,6 +62,7 @@ export interface Interface {
   readonly create: (request: CreateRequest) => Effect.Effect<Handle, ProviderError>
   readonly bootstrap: (request: BootstrapRequest) => Effect.Effect<void, ProviderError>
   readonly connect: (sandboxId: string, idleTimeoutMillis: number) => Effect.Effect<Handle, ProviderError>
+  readonly host: (sandboxId: string, port: number) => Effect.Effect<string, ProviderError>
   readonly updateNetwork: (
     sandboxId: string,
     allowedEgress: ReadonlyArray<string>,
@@ -87,6 +98,7 @@ export interface Sdk {
   readonly create: (templateId: string, options: SandboxOpts) => Promise<SdkHandle>
   readonly getInfo: (sandboxId: string, options: SandboxConnectOpts) => Promise<SandboxInfo>
   readonly connect: (sandboxId: string, options: SandboxConnectOpts) => Promise<SdkHandle>
+  readonly host: (sandboxId: string, port: number, options: SandboxConnectOpts) => Promise<string>
   readonly updateNetwork: (
     sandboxId: string,
     network: SandboxNetworkUpdate,
@@ -192,6 +204,7 @@ const liveSdk: Sdk = {
   create: (templateId, options) => Sandbox.create(templateId, options),
   getInfo: (sandboxId, options) => Sandbox.getInfo(sandboxId, options),
   connect: (sandboxId, options) => Sandbox.connect(sandboxId, options),
+  host: (sandboxId, port, options) => Sandbox.connect(sandboxId, options).then((sandbox) => sandbox.getHost(port)),
   updateNetwork: (sandboxId, network, options) =>
     Sandbox.connect(sandboxId, options).then((sandbox) => sandbox.updateNetwork(network, options)),
   pause: (sandboxId, options) => Sandbox.pause(sandboxId, options),
@@ -308,6 +321,8 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
       Effect.map((sandbox) => ({ sandboxId: sandbox.sandboxId, state: "running" as const })),
     )
 
+  const host = (sandboxId: string, port: number) => attempt("host", () => sdk.host(sandboxId, port, connection))
+
   const updateNetwork = (sandboxId: string, allowedEgress: ReadonlyArray<string>) =>
     attempt("network", () => sdk.updateNetwork(sandboxId, networkPolicy(allowedEgress), connection))
 
@@ -350,7 +365,7 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
     return managed
   })
 
-  return Provider.of({ create, bootstrap, connect, updateNetwork, pauseFilesystem, kill, touch, inventory })
+  return Provider.of({ create, bootstrap, connect, host, updateNetwork, pauseFilesystem, kill, touch, inventory })
 }
 
 export const make = (options: Options): Interface => makeProvider(options, liveSdk)

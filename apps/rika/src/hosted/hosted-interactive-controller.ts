@@ -4,7 +4,7 @@ import { OperationUnavailable } from "@rika/product/product-operation"
 import { CredentialStore, HostedError, ThreadClient, Http } from "./hosted-contract"
 import { authenticated, selectedProfile } from "./hosted-account"
 import { makeHostedInteractiveSession } from "./hosted-interactive-session"
-import { preferencePath, prepareLocalCheckout } from "../local-executor/local-runner"
+import { preferencePath, prepareRunnerCheckout } from "../runner/runner"
 import type { InteractiveTuiOptions } from "../interactive/process/interactive-process-loop"
 import { interactiveTui } from "../interactive/process/interactive-process-loop"
 
@@ -21,41 +21,64 @@ const run = Effect.fn("HostedInteractiveController.run")(function* (
   const profile = yield* selectedProfile()
   const http = yield* Http
   yield* authenticated(profile, (session) => http.context(profile.origin, session))
-  const prepared = yield* prepareLocalCheckout({
+  const prepared = yield* prepareRunnerCheckout({
     workspace: input.workspace ?? process.cwd(),
     preferencePath: yield* preferencePath,
   })
   const threads = yield* ThreadClient
   const crypto = yield* Crypto.Crypto
   const credentials = yield* CredentialStore
-  const createThread: Effect.Effect<string, HostedError> = Effect.gen(function* () {
-    const commandId = yield* crypto.randomUUIDv4
-    const ticket = yield* authenticated(profile, (session) => http.issueThreadTicket(profile.origin, session))
-    return yield* threads.create({
-      ticket,
-      commandId,
-      owner: profile.owner,
-      ...(profile.project === undefined ? {} : { project: profile.project }),
-      executorKind: "local_device",
-      localRunnerTarget: {
-        deviceId: prepared.checkout.registration.deviceId,
-        checkoutFingerprint: prepared.checkout.registration.checkoutFingerprint,
-      },
-    })
-  }).pipe(
-    Effect.provideService(Http, http),
-    Effect.provideService(CredentialStore, credentials),
-    Effect.mapError((error) =>
-      Schema.is(HostedError)(error)
-        ? error
-        : HostedError.make({ kind: "host", message: "Could not create a hosted Thread identifier" }),
-    ),
-  )
-  const threadId = input.threadId ?? (yield* createThread)
+  const createThread = (executorKind: "runner" | "orb"): Effect.Effect<string, HostedError> =>
+    Effect.gen(function* () {
+      const commandId = yield* crypto.randomUUIDv4
+      const ticket = yield* authenticated(profile, (session) => http.issueThreadTicket(profile.origin, session))
+      return yield* threads.create({
+        ticket,
+        commandId,
+        owner: profile.owner,
+        ...(profile.project === undefined ? {} : { project: profile.project }),
+        executorKind,
+        ...(executorKind === "runner"
+          ? {
+              runnerTarget: {
+                deviceId: prepared.checkout.registration.deviceId,
+                checkoutFingerprint: prepared.checkout.registration.checkoutFingerprint,
+              },
+            }
+          : {}),
+      })
+    }).pipe(
+      Effect.provideService(Http, http),
+      Effect.provideService(CredentialStore, credentials),
+      Effect.mapError((error) =>
+        Schema.is(HostedError)(error)
+          ? error
+          : HostedError.make({ kind: "host", message: "Could not create a hosted Thread identifier" }),
+      ),
+    )
+  const setRemoteThreadCreation = (preference: "allowed" | "denied") =>
+    authenticated(profile, (session) =>
+      http.setRemoteThreadCreation(
+        profile.origin,
+        prepared.checkout.registration.checkoutFingerprint,
+        preference,
+        session,
+      ),
+    ).pipe(
+      Effect.provideService(Http, http),
+      Effect.provideService(CredentialStore, credentials),
+      Effect.mapError((error) =>
+        Schema.is(HostedError)(error)
+          ? error
+          : HostedError.make({ kind: "host", message: "Could not update Runner admission" }),
+      ),
+    )
+  const threadId = input.threadId ?? (yield* createThread("runner"))
   const hosted = yield* makeHostedInteractiveSession({
     threadId,
-    executorKind: "local_device",
-    createThread: createThread.pipe(Effect.map(String)),
+    executorKind: "runner",
+    createThread: (executorKind) => createThread(executorKind).pipe(Effect.map(String)),
+    setRemoteThreadCreation,
   })
   yield* interactiveTui(options)(
     {

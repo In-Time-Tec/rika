@@ -87,7 +87,7 @@ export interface ProductOperationExecutionState extends ProductOperationExecutio
     | import("../../context/context-resolution-service").Service
     | import("@rika/extensions/execution-extension-service").ExecutionExtensionService
   >
-  readonly prepareServerReplacement: Effect.Effect<void>
+  readonly closeAdmissions: Effect.Effect<void>
   readonly rawBackend: ExecutionGatewayInterface
   readonly executionSessionLifecycle: import("@rika/product/execution-session-lifecycle").Interface
   readonly acquiredBackend: ExecutionGatewayInterface
@@ -142,7 +142,7 @@ export const buildProductOperationExecutionState = (
       rootTurnOwner,
       extensionService,
       acquiredDependencies,
-      prepareServerReplacement,
+      closeAdmissions,
       rawBackend,
       executionSessionLifecycle,
       acquiredBackend,
@@ -236,7 +236,7 @@ export const buildProductOperationExecutionState = (
       extensionService,
       deleteThread: threadDeletion.request,
       acquiredDependencies,
-      prepareServerReplacement,
+      closeAdmissions,
       rawBackend,
       executionSessionLifecycle,
       acquiredBackend,

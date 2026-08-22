@@ -6,7 +6,7 @@ import { Manager, PtyError, driverLayer, layer as ptyLayer, repositoryLayer, typ
 import type { Fence } from "../src/protocol"
 
 const fence: Fence = {
-  target: "e2b",
+  target: "orb",
   assignmentId: "assignment-proc",
   assignmentGeneration: 1,
   instanceId: `sandbox-${process.pid}`,

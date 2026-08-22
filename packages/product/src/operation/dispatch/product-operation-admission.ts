@@ -26,7 +26,7 @@ export const makeProductOperationAdmission = Effect.fn("ProductOperation.makeAdm
       (admitted): Effect.Effect<A, E, R> => (admitted === true ? effect : Effect.fail(closed)),
       (admitted) => (admitted === true ? release : Effect.void),
     )
-  const prepareServerReplacement = admission
+  const closeAdmissions = admission
     .withPermits(1)(
       Ref.modify(state, (current) => [current.active, current.closed ? current : { ...current, closed: true }]),
     )
@@ -38,19 +38,19 @@ export const makeProductOperationAdmission = Effect.fn("ProductOperation.makeAdm
     startTurn: (backendInput) =>
       withExecutionAdmission(
         rawBackend.startTurn(backendInput),
-        ExecutionGateway.StartTurnFailure.make({ message: "Server replacement has closed execution admission" }),
+        ExecutionGateway.StartTurnFailure.make({ message: "Runtime shutdown has closed execution admission" }),
       ),
     cancelTurn: (link, reason) =>
       withExecutionAdmission(
         rawBackend.cancelTurn(link, reason),
-        ExecutionGateway.CancelTurnFailure.make({ message: "Server replacement has closed execution admission" }),
+        ExecutionGateway.CancelTurnFailure.make({ message: "Runtime shutdown has closed execution admission" }),
       ),
     steerTurn: (link, steering) =>
       withExecutionAdmission(
         rawBackend.steerTurn(link, steering),
         ExecutionGateway.SteeringFailure.make({
           kind: "unknown",
-          message: "Server replacement has closed execution admission",
+          message: "Runtime shutdown has closed execution admission",
         }),
       ),
     approveTurn: (link, approval) =>
@@ -58,7 +58,7 @@ export const makeProductOperationAdmission = Effect.fn("ProductOperation.makeAdm
         rawBackend.approveTurn(link, approval),
         ExecutionGateway.ApprovalResponseFailure.make({
           kind: "unavailable",
-          message: "Server replacement has closed execution admission",
+          message: "Runtime shutdown has closed execution admission",
         }),
       ),
     denyTurn: (link, approval) =>
@@ -66,11 +66,11 @@ export const makeProductOperationAdmission = Effect.fn("ProductOperation.makeAdm
         rawBackend.denyTurn(link, approval),
         ExecutionGateway.ApprovalResponseFailure.make({
           kind: "unavailable",
-          message: "Server replacement has closed execution admission",
+          message: "Runtime shutdown has closed execution admission",
         }),
       ),
     watchTurn: (link, cursor) => rawBackend.watchTurn(link, cursor),
     inspectTurn: (link) => rawBackend.inspectTurn(link),
   })
-  return { acquiredBackend, prepareServerReplacement }
+  return { acquiredBackend, closeAdmissions }
 })

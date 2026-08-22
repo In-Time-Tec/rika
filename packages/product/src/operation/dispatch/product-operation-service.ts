@@ -20,7 +20,7 @@ export interface ProductOperationServiceInput {
   readonly path: import("effect").Path.Path | undefined
   readonly executionDependencies: ProductOperationRuntimeState["executionDependencies"]
   readonly stopActiveExecutionWorkWithProjection: ProductOperationRuntimeState["stopActiveExecutionWorkWithProjection"]
-  readonly prepareServerReplacement: Effect.Effect<void>
+  readonly closeAdmissions: Effect.Effect<void>
   readonly unavailable: (input: Input, message?: string) => OperationUnavailable
   readonly operationError: typeof import("../operation-error").operationError
   readonly publishInteractiveActivity: (origin: number, event: InteractiveEvent) => InteractiveEvent
@@ -44,18 +44,17 @@ export interface ProductOperationServiceInput {
 }
 
 export const makeProductOperationService = (input: ProductOperationServiceInput) => {
-  const { state, schedule, executionDependencies, stopActiveExecutionWorkWithProjection, prepareServerReplacement } =
-    input
+  const { state, schedule, executionDependencies, stopActiveExecutionWorkWithProjection, closeAdmissions } = input
   const typedExecutionDependencies: Context.Context<ExecutionGateway.Service | TurnRepository.Service> =
     executionDependencies
   return Service.of({
     stopActiveExecutionWork: stopActiveExecutionWorkWithProjection.pipe(
       Effect.provide(typedExecutionDependencies),
       Effect.mapError((error: unknown) =>
-        OperationUnavailable.make({ operation: "ServerAbandonment", message: String(error) }),
+        OperationUnavailable.make({ operation: "ExecutionShutdown", message: String(error) }),
       ),
     ),
-    prepareServerReplacement,
+    closeAdmissions,
     run: makeProductOperationRun({
       ...state,
       ...input,

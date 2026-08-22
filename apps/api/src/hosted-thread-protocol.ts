@@ -29,7 +29,7 @@ import {
 import { ThreadProtocolStore, type ThreadProtocolCommand } from "@rika/product/thread-protocol-store"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId as ProductTurnId } from "@rika/product/turn-record"
-import { HostedOperations, HostedOperationsError } from "./hosted-operations"
+import { HostedThreadApplication, HostedThreadApplicationError } from "./hosted-thread-application"
 import { type AuthenticatedPrincipal, HostedProduct, HostedProductError, type ThreadAuthority } from "./hosted-product"
 import { HostedToolPolicy } from "./hosted-tool-policy"
 import { HostedWorkspace } from "./hosted-workspace"
@@ -77,7 +77,7 @@ const storeFailure = (error: StoreError) => {
   return HostedThreadProtocolError.make({ kind, message: error.message })
 }
 const operationFailure = (error: unknown) =>
-  unavailable(Schema.is(HostedOperationsError)(error) ? error.message : String(error))
+  unavailable(Schema.is(HostedThreadApplicationError)(error) ? error.message : String(error))
 const frame = (payload: ServerFrame["payload"]): ServerFrame => ({ protocolVersion, payload })
 
 const commandResult = (command: ThreadProtocolCommand, requestId: RequestId): ServerFrame["payload"] => {
@@ -190,7 +190,7 @@ export const layer = Layer.effect(
   HostedThreadProtocol,
   Effect.gen(function* () {
     const product = yield* HostedProduct
-    const operations = yield* HostedOperations
+    const operations = yield* HostedThreadApplication
     const workspace = yield* HostedWorkspace
     const store = yield* ThreadProtocolStore
     const hosted = yield* HostedStore
@@ -299,7 +299,7 @@ export const layer = Layer.effect(
                 owner,
                 ...(command.projectId === undefined ? {} : { projectId: command.projectId }),
                 executorKind: command.executorKind,
-                ...(command.localRunnerTarget === undefined ? {} : { localRunnerTarget: command.localRunnerTarget }),
+                ...(command.runnerTarget === undefined ? {} : { runnerTarget: command.runnerTarget }),
                 threadId: command.commandId,
               })
               .pipe(Effect.mapError(productFailure))
@@ -395,6 +395,30 @@ export const layer = Layer.effect(
               (yield* operations
                 .snapshot(authority.ownerId, ProductThreadId.make(command.threadId))
                 .pipe(Effect.mapError(operationFailure)))
+            const presenceNow = Timestamp.make(receivedAt)
+            const presenceExpiresAt = Timestamp.make(
+              DateTime.formatIso(DateTime.add(DateTime.makeUnsafe(receivedAt), { minutes: 1 })),
+            )
+            const participants = yield* hosted
+              .upsertPresence({
+                ownerId: authority.ownerId,
+                threadId: command.threadId,
+                actor: authority.actor,
+                status: "viewing",
+                now: presenceNow,
+                expiresAt: presenceExpiresAt,
+              })
+              .pipe(
+                Effect.andThen(
+                  hosted.listPresence({
+                    ownerId: authority.ownerId,
+                    threadId: command.threadId,
+                    actor: authority.actor,
+                    now: presenceNow,
+                  }),
+                ),
+                Effect.orElseSucceed(() => []),
+              )
             return [
               frame({
                 _tag: "ThreadSnapshot",
@@ -419,10 +443,28 @@ export const layer = Layer.effect(
                       },
                     }),
                   )),
+              frame({
+                _tag: "PresenceSnapshot",
+                threadId: command.threadId,
+                participants: participants.map(({ actor, status }) => ({ actor, status })),
+              }),
             ]
           }
 
           if (command._tag === "Detach") {
+            if (attached !== undefined) {
+              const now = Timestamp.make(receivedAt)
+              yield* hosted
+                .upsertPresence({
+                  ownerId: attached.authority.ownerId,
+                  threadId: attached.threadId,
+                  actor: attached.authority.actor,
+                  status: "away",
+                  now,
+                  expiresAt: now,
+                })
+                .pipe(Effect.ignore)
+            }
             attached = undefined
             return []
           }
@@ -430,13 +472,66 @@ export const layer = Layer.effect(
             return yield* HostedThreadProtocolError.make({ kind: "invalid", message: "Attach a Thread first" })
           let requiredAction: AuthorizationAction = "thread:control"
           if (command._tag === "InspectWorkspaceFile") requiredAction = "workspace:file:view"
-          if (command._tag === "EnsureRepositoryService" || command._tag === "StopRepositoryService")
+          if (
+            command._tag === "EnsureRepositoryService" ||
+            command._tag === "StopRepositoryService" ||
+            command._tag === "PauseOrb" ||
+            command._tag === "ResumeOrb" ||
+            command._tag === "OpenPortal"
+          )
             requiredAction = "workspace:service:control"
           if (command._tag === "AcknowledgeCursor") requiredAction = "thread:view"
+          if (command._tag === "UpdatePresence") requiredAction = "presence:update"
           const authority = yield* product
             .authorizeThread(principal, attached.threadId, requiredAction)
             .pipe(Effect.mapError(productFailure))
           attached = { threadId: attached.threadId, authority }
+
+          if (command._tag === "UpdatePresence") {
+            const now = Timestamp.make(receivedAt)
+            yield* hosted
+              .upsertPresence({
+                ownerId: authority.ownerId,
+                threadId: attached.threadId,
+                actor: authority.actor,
+                status: command.status,
+                now,
+                expiresAt: Timestamp.make(
+                  DateTime.formatIso(DateTime.add(DateTime.makeUnsafe(receivedAt), { minutes: 1 })),
+                ),
+              })
+              .pipe(Effect.mapError(storeFailure))
+            const participants = yield* hosted
+              .listPresence({ ownerId: authority.ownerId, threadId: attached.threadId, actor: authority.actor, now })
+              .pipe(Effect.mapError(storeFailure))
+            return [
+              frame({
+                _tag: "PresenceSnapshot",
+                threadId: attached.threadId,
+                participants: participants.map(({ actor, status }) => ({ actor, status })),
+              }),
+            ]
+          }
+
+          if (command._tag === "OpenPortal") {
+            const url = yield* workspace.portal(attached.threadId, command.port).pipe(
+              Effect.mapError((error) =>
+                HostedThreadProtocolError.make({
+                  kind: error.kind === "unsupported" ? "invalid" : "unavailable",
+                  message: error.message,
+                }),
+              ),
+            )
+            return [
+              frame({
+                _tag: "PortalOpened",
+                requestId: message.requestId,
+                threadId: attached.threadId,
+                port: command.port,
+                url,
+              }),
+            ]
+          }
 
           if (command._tag === "InspectWorkspaceFile") {
             const inspection = yield* workspace
@@ -598,6 +693,19 @@ export const layer = Layer.effect(
                   readonly decision: "approve" | "deny"
                 }
               | undefined
+            if (command._tag === "PauseOrb" || command._tag === "ResumeOrb") {
+              yield* (
+                command._tag === "PauseOrb" ? workspace.pause(attached!.threadId) : workspace.resume(attached!.threadId)
+              ).pipe(
+                Effect.mapError((error) =>
+                  HostedThreadProtocolError.make({
+                    kind: error.kind === "unsupported" ? "invalid" : "unavailable",
+                    message: error.message,
+                  }),
+                ),
+              )
+              return { result: { _tag: "Applied" } as const, events: [] as ReadonlyArray<InteractiveEvent> }
+            }
             if (command._tag === "EnsureRepositoryService" || command._tag === "StopRepositoryService") {
               const result = yield* workspace
                 .execute(

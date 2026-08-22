@@ -9,7 +9,7 @@ export const authCommand = Command.make("auth").pipe(
       "login",
       {
         server: Flag.string("server").pipe(Flag.optional),
-        noOpen: Flag.boolean("no-open"),
+        noOpen: Flag.boolean("no-open").pipe(Flag.withDefault(false)),
       },
       ({ server, noOpen }) => {
         const selectedServer = Option.getOrUndefined(server)
@@ -21,10 +21,10 @@ export const authCommand = Command.make("auth").pipe(
         })
       },
     ),
-    Command.make("status", { json: Flag.boolean("json") }, ({ json }) =>
+    Command.make("status", { json: Flag.boolean("json").pipe(Flag.withDefault(false)) }, ({ json }) =>
       dispatch({ _tag: "Auth", action: "status", json }),
     ),
-    Command.make("logout", { all: Flag.boolean("all") }, ({ all }) =>
+    Command.make("logout", { all: Flag.boolean("all").pipe(Flag.withDefault(false)) }, ({ all }) =>
       dispatch({ _tag: "Auth", action: "logout", ...(all ? { all: true } : {}) }),
     ),
     Command.make("devices", {}, () => dispatch({ _tag: "Auth", action: "devices" })),

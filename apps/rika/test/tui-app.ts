@@ -6,7 +6,7 @@ import { createTestRenderer } from "@opentui/core/testing"
 import { productLayer, Service } from "@rika/product/product-operation-service"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
-import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
+import * as TranscriptRepository from "@rika/product-store/postgres-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ThreadQuery from "@rika/product/thread-query-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
@@ -153,7 +153,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     threadSearchRepositoryLayer,
     threadSummaryRepositoryLayer,
     transcriptRepositoryLayer,
-  } = makeTuiAppRepositoryLayers(path.join(root, "rika.db"))
+  } = makeTuiAppRepositoryLayers()
   const repositoryContext = yield* Layer.buildWithScope(
     Layer.mergeAll(
       repositoryLayer,
@@ -183,7 +183,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   })
   const executionBackendContext = yield* Layer.buildWithScope(
     backendLayer({
-      filename: path.join(root, "tenetkit.db"),
+      dataRoot: root,
       kernelPool,
       registryLayer: laneModels.registryLayer,
       toolRuntimeLayer,
@@ -302,7 +302,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     Effect.catch(() => renderOnce),
     Effect.timeoutOrElse({ duration: "1 second", orElse: () => renderOnce }),
   )
-  const waitFor = (predicate: (frame: string) => boolean, timeoutMillis: number) =>
+  const waitFor = (predicate: (frame: string) => boolean, timeoutMillis: number, description: string) =>
     Effect.gen(function* () {
       const started = currentWallTime()
       for (;;) {
@@ -310,7 +310,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
         const captured = frame()
         if (predicate(captured)) return captured
         if (currentWallTime() - started >= timeoutMillis) {
-          return yield* Effect.die(`tui-app timed out waiting on frame\n${captured}`)
+          return yield* Effect.die(`tui-app timed out waiting for ${description}\n${captured}`)
         }
         yield* Effect.sleep("20 millis")
       }
@@ -326,7 +326,11 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
         yield* Effect.sleep("20 millis")
       }
     })
-  const settled = waitFor((captured) => !activityMarkers.some((marker) => captured.includes(marker)), 10_000)
+  const settled = waitFor(
+    (captured) => !activityMarkers.some((marker) => captured.includes(marker)),
+    10_000,
+    "settled frame",
+  )
   const app: TuiApp = {
     workspace,
     type: (text) => setup.mockInput.typeText(text),
@@ -392,10 +396,12 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
           yield* Effect.sleep("20 millis")
         }
       }),
-    waitFrame: (marker, timeoutMillis = 10_000) => waitFor((captured) => captured.includes(marker), timeoutMillis),
-    waitFrameMatch: (predicate, timeoutMillis = 10_000) => waitFor(predicate, timeoutMillis),
-    waitCost: waitFor((captured) => /\$[0-9]/u.test(captured), 10_000),
-    waitGone: (marker, timeoutMillis = 10_000) => waitFor((captured) => !captured.includes(marker), timeoutMillis),
+    waitFrame: (marker, timeoutMillis = 10_000) =>
+      waitFor((captured) => captured.includes(marker), timeoutMillis, `frame containing ${marker}`),
+    waitFrameMatch: (predicate, timeoutMillis = 10_000) => waitFor(predicate, timeoutMillis, "matching frame"),
+    waitCost: waitFor((captured) => /\$[0-9]/u.test(captured), 10_000, "cost frame"),
+    waitGone: (marker, timeoutMillis = 10_000) =>
+      waitFor((captured) => !captured.includes(marker), timeoutMillis, `frame without ${marker}`),
     waitTerminalTitle: (predicate, timeoutMillis = 10_000) => waitTerminalTitle(predicate, timeoutMillis),
     settled,
     reload: Effect.gen(function* () {

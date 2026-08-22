@@ -44,7 +44,7 @@ export const ToolAuditCheckpoint = Schema.Struct({
 export type ToolAuditCheckpoint = typeof ToolAuditCheckpoint.Type
 
 export const ToolAuditExecutor = Schema.Struct({
-  kind: Schema.Literals(["local_device", "e2b"]),
+  kind: Schema.Literals(["runner", "orb"]),
   assignmentId: Schema.String,
   generation: Schema.Int,
   leaseEpoch: Schema.Int,
@@ -453,7 +453,7 @@ export const invokeAdmittedTool: (
 interface AdmissionRow {
   readonly ownerId: string
   readonly actor: unknown
-  readonly executorKind: "local_device" | "e2b"
+  readonly executorKind: "runner" | "orb"
   readonly repositoryIdentity: string | null
   readonly branch: string | null
 }
@@ -492,7 +492,7 @@ interface AuditRow {
 
 const unavailable = () => HostedToolPolicyError.make({ kind: "unavailable", message: "Tool audit is unavailable" })
 
-const executorOf = (access: AccessWire, kind: "local_device" | "e2b"): ToolAuditExecutor => ({
+const executorOf = (access: AccessWire, kind: "runner" | "orb"): ToolAuditExecutor => ({
   kind,
   assignmentId: access.fence.assignmentId,
   generation: access.fence.assignmentGeneration,
@@ -546,19 +546,18 @@ export const layer = Layer.effect(
       return Encoding.encodeHex(yield* crypto.digest("SHA-256", new TextEncoder().encode(value)).pipe(Effect.orDie))
     })
 
-    const insert = Effect.fn("HostedToolPolicy.insert")(
-      function* (input: {
-        readonly context: ToolAdmissionContext
-        readonly phase: "admission" | "decision" | "outcome"
-        readonly decisionActor?: ActorAttribution
-        readonly authorizationId?: string
-        readonly checkpoint?: ToolAuditCheckpoint
-        readonly decision: ToolAuditRecord["decision"]
-        readonly outcome: ToolAuditRecord["outcome"]
-      }) {
-        const value = input.context
-        const capabilities = yield* Schema.encodeEffect(ToolCapabilitiesJson)(value.policy.capabilities)
-        yield* sql`INSERT INTO rika_hosted_tool_audit_records
+    const insert = Effect.fn("HostedToolPolicy.insert")(function* (input: {
+      readonly context: ToolAdmissionContext
+      readonly phase: "admission" | "decision" | "outcome"
+      readonly decisionActor?: ActorAttribution
+      readonly authorizationId?: string
+      readonly checkpoint?: ToolAuditCheckpoint
+      readonly decision: ToolAuditRecord["decision"]
+      readonly outcome: ToolAuditRecord["outcome"]
+    }) {
+      const value = input.context
+      const capabilities = yield* Schema.encodeEffect(ToolCapabilitiesJson)(value.policy.capabilities)
+      yield* sql`INSERT INTO rika_hosted_tool_audit_records
           (audit_group_id, phase, owner_id, thread_id, turn_id, actor, decision_actor,
             policy_id, policy_version, capability, capabilities, side_effect, approval, replay_policy,
             authorization_id, authorization_checkpoint, module, operation, operation_key, call_id,
@@ -571,20 +570,18 @@ export const layer = Layer.effect(
             ${value.operationKey}, ${value.callId}, ${value.argumentsDigest}, ${value.workspaceId},
             ${value.repository === null ? null : sql.json(value.repository)}, ${value.branch}, ${sql.json(value.executor)},
             ${input.decision}, ${input.outcome})`
-      },
-      Effect.mapError(unavailable),
-    )
+    }, Effect.mapError(unavailable))
 
     const begin: HostedToolPolicyService["begin"] = Effect.fn("HostedToolPolicy.begin")(function* (input) {
       const rows = yield* sql<AdmissionRow>`SELECT thread.owner_id AS "ownerId",
           COALESCE(legacy.actor, protocol.actor) AS actor,
           assignment.executor_kind AS "executorKind",
-          CASE WHEN assignment.executor_kind = 'local_device'
+          CASE WHEN assignment.executor_kind = 'runner'
             THEN registration.repository ->> 'identity'
             WHEN assignment.checkout IS NOT NULL
             THEN assignment.checkout ->> 'repositoryId'
             ELSE NULL END AS "repositoryIdentity",
-          CASE WHEN assignment.executor_kind = 'local_device'
+          CASE WHEN assignment.executor_kind = 'runner'
             THEN COALESCE(
               registration.repository ->> 'branch',
               CASE WHEN registration.repository ? 'headRevision'
@@ -598,8 +595,8 @@ export const layer = Layer.effect(
         JOIN rika_hosted_workspaces workspace ON workspace.id = thread.workspace_id AND workspace.owner_id = thread.owner_id
         JOIN rika_hosted_executor_assignments assignment
           ON assignment.thread_id = thread.id AND assignment.owner_id = thread.owner_id
-        LEFT JOIN rika_hosted_local_runner_registrations registration
-          ON assignment.executor_kind = 'local_device'
+        LEFT JOIN rika_hosted_runner_registrations registration
+          ON assignment.executor_kind = 'runner'
           AND registration.device_id = assignment.placement ->> 'deviceId'
           AND registration.checkout_fingerprint = assignment.placement ->> 'checkoutFingerprint'
         LEFT JOIN LATERAL (
@@ -651,7 +648,7 @@ export const layer = Layer.effect(
             (owner_record.kind = 'organization' AND membership.id IS NOT NULL AND (
               thread.created_by_user_id = membership.user_id
               OR thread_grant.role IN ('operator', 'owner')
-              OR (thread.executor_kind = 'e2b' AND thread.inherit_project_grants
+              OR (thread.executor_kind = 'orb' AND thread.inherit_project_grants
                 AND project_grant.role IN ('operator', 'owner'))
             ))
           )`.pipe(Effect.mapError(unavailable))
@@ -838,7 +835,7 @@ export const layer = Layer.effect(
           owner_record.kind = 'personal' OR membership.role IN ('owner', 'admin')
           OR thread.created_by_user_id = ${input.principal.userId}
           OR thread_grant.role IS NOT NULL
-          OR (thread.executor_kind = 'e2b' AND thread.inherit_project_grants AND project_grant.role IS NOT NULL)
+          OR (thread.executor_kind = 'orb' AND thread.inherit_project_grants AND project_grant.role IS NOT NULL)
         ) ORDER BY record.sequence DESC LIMIT ${Math.min(Math.max(input.limit, 1), 500)}`.pipe(
         Effect.mapError(unavailable),
       )

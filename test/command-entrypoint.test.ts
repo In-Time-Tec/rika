@@ -5,7 +5,6 @@ const manifest = (await Bun.file("package.json").json()) as {
 }
 
 test("root operational commands point directly at their owners", () => {
-  expect(manifest.scripts.bench).toBe("bun run scripts/benchmark/benchmark-runner.ts")
   expect(manifest.scripts.package).toBe("bun run scripts/packaging/package-target.ts")
   expect(manifest.scripts["npm-package"]).toBe("bun run scripts/packaging/npm-package.ts")
   expect(manifest.scripts["release-smoke"]).toBe("bun run scripts/release/release-smoke.ts")

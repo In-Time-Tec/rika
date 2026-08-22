@@ -80,6 +80,8 @@ export const productLayer = <
       const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem)
       const path = yield* Effect.serviceOption(Path.Path)
       let activitySequence = 0
+      // System projections have no originating client session and must reach session 0.
+      const systemActivityOrigin = -1
       const interactiveSinks = new Map<number, (origin: number, event: InteractiveEvent) => void>()
       const sessionThreadViews = new Map<number, () => string | undefined>()
       const publishInteractiveActivity = (origin: number, event: InteractiveEvent): InteractiveEvent => {
@@ -100,7 +102,7 @@ export const productLayer = <
           ? Effect.void
           : options.goals.get(threadId).pipe(
               Effect.map((goal) =>
-                publishInteractiveActivity(0, {
+                publishInteractiveActivity(systemActivityOrigin, {
                   _tag: "GoalChanged",
                   threadId,
                   ...(goal === undefined
@@ -121,7 +123,7 @@ export const productLayer = <
         const status = turn.status
         if (status !== "completed" && status !== "failed" && status !== "cancelled") return Effect.void
         return Effect.sync(() =>
-          publishInteractiveActivity(0, {
+          publishInteractiveActivity(systemActivityOrigin, {
             _tag: "TurnSettled",
             selectionEpoch: 0,
             activitySequence: 0,
@@ -163,7 +165,7 @@ export const productLayer = <
         path: Option.getOrUndefined(path),
         executionDependencies: state.executionDependencies,
         stopActiveExecutionWorkWithProjection: state.stopActiveExecutionWorkWithProjection,
-        prepareServerReplacement: state.prepareServerReplacement,
+        closeAdmissions: state.closeAdmissions,
         unavailable,
         operationError,
         publishInteractiveActivity,

@@ -1,9 +1,9 @@
   ╭─ Command Palette ────────╮
   │ > thread                 │
-  │                          │
-  │                          │
   │ new thread               │
-  │ switch                   │
+  │ new in Orb               │
+  │ enable remote Thread cre │
+  │ disable remote Thread cr │
   ╰──────────────────────────╯
 ╭─────────────────────── high ─╮
 │                              │

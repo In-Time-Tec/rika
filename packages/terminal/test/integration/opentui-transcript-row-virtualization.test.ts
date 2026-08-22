@@ -33,51 +33,52 @@ const rowVirtualizationRunnable = process.platform !== "linux"
 test.skipIf(!rowVirtualizationRunnable)(
   "mounts only viewport bands for one 50k-line entry and preserves Home/End semantics",
   () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      try {
-        surface.update(giantEntryModel(50_000))
-        yield* openTui(() => setup.flush())
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
+        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        try {
+          surface.update(giantEntryModel(50_000))
+          yield* openTui(() => setup.flush())
 
-        const tail = surface.transcriptDiagnostics()
-        const mountedCeiling =
-          mountedTranscriptRowBudget(surface.transcriptScroll.viewport.height) + transcriptRenderableBandRows
-        expect(tail.rowTotal).toBeGreaterThan(49_000)
-        expect(tail.mountedPhysicalRows).toBeLessThanOrEqual(mountedCeiling)
-        expect(Math.max(...tail.rows.map((row) => row.height))).toBeLessThanOrEqual(transcriptRenderableBandRows)
-        expect(setup.captureCharFrame()).toContain("physical-line-49999")
-        const tailRows = [...tail.rows]
+          const tail = surface.transcriptDiagnostics()
+          const mountedCeiling =
+            mountedTranscriptRowBudget(surface.transcriptScroll.viewport.height) + transcriptRenderableBandRows
+          expect(tail.rowTotal).toBeGreaterThan(49_000)
+          expect(tail.mountedPhysicalRows).toBeLessThanOrEqual(mountedCeiling)
+          expect(Math.max(...tail.rows.map((row) => row.height))).toBeLessThanOrEqual(transcriptRenderableBandRows)
+          expect(setup.captureCharFrame()).toContain("physical-line-49999")
+          const tailRows = [...tail.rows]
 
-        surface.transcriptScroll.scrollTo(42)
-        yield* openTui(() => setup.flush())
+          surface.transcriptScroll.scrollTo(42)
+          yield* openTui(() => setup.flush())
 
-        const middle = surface.transcriptDiagnostics()
-        expect(setup.captureCharFrame()).toContain("physical-line-00042")
-        expect(middle.spacerRowsBefore).toBeLessThanOrEqual(surface.transcriptScroll.scrollTop)
-        expect(middle.spacerRowsBefore + middle.mountedPhysicalRows + middle.spacerRowsAfter).toBe(middle.rowTotal)
-        expect(middle.mountedPhysicalRows).toBeLessThanOrEqual(mountedCeiling)
+          const middle = surface.transcriptDiagnostics()
+          expect(setup.captureCharFrame()).toContain("physical-line-00042")
+          expect(middle.spacerRowsBefore).toBeLessThanOrEqual(surface.transcriptScroll.scrollTop)
+          expect(middle.spacerRowsBefore + middle.mountedPhysicalRows + middle.spacerRowsAfter).toBe(middle.rowTotal)
+          expect(middle.mountedPhysicalRows).toBeLessThanOrEqual(mountedCeiling)
 
-        setup.mockInput.pressKey("\u001b[H")
-        yield* openTui(() => setup.flush())
+          setup.mockInput.pressKey("\u001b[H")
+          yield* openTui(() => setup.flush())
 
-        const head = surface.transcriptDiagnostics()
-        expect(surface.transcriptScroll.scrollTop).toBe(0)
-        expect(setup.captureCharFrame()).toContain("physical-line-00000")
-        expect(head.mountedPhysicalRows).toBeLessThanOrEqual(mountedCeiling)
-        expect(tailRows.every((row) => row.isDestroyed)).toBe(true)
+          const head = surface.transcriptDiagnostics()
+          expect(surface.transcriptScroll.scrollTop).toBe(0)
+          expect(setup.captureCharFrame()).toContain("physical-line-00000")
+          expect(head.mountedPhysicalRows).toBeLessThanOrEqual(mountedCeiling)
+          expect(tailRows.every((row) => row.isDestroyed)).toBe(true)
 
-        setup.mockInput.pressKey("\u001b[F")
-        yield* openTui(() => setup.flush())
+          setup.mockInput.pressKey("\u001b[F")
+          yield* openTui(() => setup.flush())
 
-        const followed = surface.transcriptDiagnostics()
-        expect(followed.following).toBe(true)
-        expect(setup.captureCharFrame()).toContain("physical-line-49999")
-        expect(followed.mountedPhysicalRows).toBeLessThanOrEqual(mountedCeiling)
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
+          const followed = surface.transcriptDiagnostics()
+          expect(followed.following).toBe(true)
+          expect(setup.captureCharFrame()).toContain("physical-line-49999")
+          expect(followed.mountedPhysicalRows).toBeLessThanOrEqual(mountedCeiling)
+        } finally {
+          surface.destroy()
+          setup.renderer.destroy()
+        }
+      }),
+    ),
+)

@@ -1,4 +1,4 @@
-CREATE TYPE rika_hosted_executor_kind AS ENUM ('local_device', 'e2b');
+CREATE TYPE rika_hosted_executor_kind AS ENUM ('runner', 'orb');
 CREATE TYPE rika_hosted_grant_role AS ENUM ('viewer', 'controller', 'operator', 'owner');
 CREATE TYPE rika_hosted_presence_status AS ENUM ('viewing', 'controlling', 'away');
 CREATE TYPE rika_hosted_assignment_lifecycle AS ENUM (
@@ -74,7 +74,7 @@ CREATE TABLE rika_hosted_workspaces (
   UNIQUE (id, owner_id, project_id, executor_kind),
   FOREIGN KEY (project_id, owner_id)
     REFERENCES rika_hosted_projects (id, owner_id) ON DELETE RESTRICT,
-  CHECK (executor_kind = 'e2b' OR inherit_project_grants = false)
+  CHECK (executor_kind = 'orb' OR inherit_project_grants = false)
 );
 
 CREATE INDEX rika_hosted_workspaces_project
@@ -96,7 +96,7 @@ CREATE TABLE rika_hosted_threads (
   UNIQUE (id, owner_id, executor_kind),
   FOREIGN KEY (workspace_id, owner_id, project_id, executor_kind)
     REFERENCES rika_hosted_workspaces (id, owner_id, project_id, executor_kind) ON DELETE RESTRICT,
-  CHECK (executor_kind = 'e2b' OR inherit_project_grants = false)
+  CHECK (executor_kind = 'orb' OR inherit_project_grants = false)
 );
 
 CREATE INDEX rika_hosted_threads_project
@@ -157,7 +157,7 @@ CREATE TABLE rika_hosted_executor_assignments (
   executor_kind rika_hosted_executor_kind NOT NULL,
   placement JSONB NOT NULL CHECK (
     jsonb_typeof(placement) = 'object'
-    AND placement ->> '_tag' IN ('LocalDevicePlacement', 'E2BPlacement')
+    AND placement ->> '_tag' IN ('RunnerPlacement', 'OrbPlacement')
   ),
   checkout JSONB CHECK (
     checkout IS NULL OR (
@@ -192,8 +192,8 @@ CREATE TABLE rika_hosted_executor_assignments (
   FOREIGN KEY (thread_id, owner_id, executor_kind)
     REFERENCES rika_hosted_threads (id, owner_id, executor_kind) ON DELETE CASCADE,
   CHECK (
-    (executor_kind = 'local_device' AND placement ->> '_tag' = 'LocalDevicePlacement')
-    OR (executor_kind = 'e2b' AND placement ->> '_tag' = 'E2BPlacement')
+    (executor_kind = 'runner' AND placement ->> '_tag' = 'RunnerPlacement')
+    OR (executor_kind = 'orb' AND placement ->> '_tag' = 'OrbPlacement')
   ),
   CHECK (lease_epoch IS NULL OR last_lease_epoch >= lease_epoch),
   CHECK (
@@ -336,25 +336,6 @@ CREATE TABLE rika_hosted_presence (
 CREATE INDEX rika_hosted_presence_expiry
   ON rika_hosted_presence (owner_id, thread_id, expires_at);
 
-CREATE TABLE rika_hosted_local_workspace_bindings (
-  id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL,
-  FOREIGN KEY (owner_id) REFERENCES rika_hosted_owners (id) ON DELETE CASCADE,
-  thread_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  device_id TEXT NOT NULL,
-  root_path TEXT NOT NULL CHECK (length(root_path) > 0),
-  workspace_fingerprint TEXT NOT NULL CHECK (length(workspace_fingerprint) > 0),
-  executor_kind rika_hosted_executor_kind NOT NULL DEFAULT 'local_device'
-    CHECK (executor_kind = 'local_device'),
-  created_at TIMESTAMPTZ NOT NULL,
-  last_seen_at TIMESTAMPTZ NOT NULL,
-  UNIQUE (thread_id, device_id),
-  FOREIGN KEY (thread_id, owner_id, executor_kind)
-    REFERENCES rika_hosted_threads (id, owner_id, executor_kind) ON DELETE CASCADE,
-  FOREIGN KEY (device_id, user_id)
-    REFERENCES rika_hosted_devices (id, user_id) ON DELETE CASCADE
-);
 
 CREATE TABLE rika_hosted_checkpoints (
   id TEXT PRIMARY KEY,

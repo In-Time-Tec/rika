@@ -75,6 +75,7 @@ const providerLayer = (state: FakeProviderState) =>
           ? Effect.fail(ProviderError.make({ operation: "connect", message: "cold wake failed" }))
           : Effect.succeed({ sandboxId, state: "running" })
       },
+      host: (sandboxId, port) => Effect.succeed(`${port}-${sandboxId}.e2b.app`),
       updateNetwork: (sandboxId, allowedEgress) => {
         state.networks.push({ sandboxId, allowedEgress })
         return Effect.void
@@ -267,7 +268,7 @@ export const assignmentInput = {
   threadId: ThreadId.make("thread-1"),
   workspaceId: WorkspaceId.make("workspace-1"),
   placement: {
-    _tag: "E2BPlacement" as const,
+    _tag: "OrbPlacement" as const,
     templateBuildId: "template-build-v1-immutable",
     providerScope: "test",
   },

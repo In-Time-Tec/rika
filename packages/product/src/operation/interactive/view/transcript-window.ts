@@ -375,8 +375,6 @@ export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageIn
     state.transcriptCursor = oldestCursor
     state.newestTranscriptCursor = page.newestCursor ?? transcriptCursorFor(page.entries.at(-1))
     state.hasOlder = hasOlder
-    const queue = yield* turns.readQueue(thread.id)
-    const activeTurn = yield* turns.findActive(thread.id)
     if (isCurrentSelectionState(state) !== true || (yield* Ref.get(selectionRequest)) !== request) return
     yield* selectionAdmission.withPermits(1)(
       Effect.uninterruptible(
@@ -391,6 +389,8 @@ export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageIn
           yield* Ref.set(interactiveThread, thread)
           setSelectedThreadId(String(thread.id))
           loading.committed = true
+          const queue = yield* turns.readQueue(thread.id)
+          const activeTurn = yield* turns.findActive(thread.id)
           dispatch({
             _tag: "SelectionLoaded",
             selectionEpoch: request,

@@ -17,6 +17,19 @@ test("a stale terminal event for another turn does not clear the active turn", (
   expect(afterStale.activeTurnId).toBe("turn-b")
   expect(afterStale.submittedDrafts).toHaveLength(1)
 })
+test("settles a completed projected turn after active selection clears", () => {
+  const projected: Model = {
+    ...initial("/work"),
+    busy: true,
+    activeTurnId: undefined,
+    activity: { _tag: "Waiting" },
+    submittedDrafts: [{ input: "prompt", attachments: [], cursor: 0, turnId: "turn-a" }],
+  }
+  const completed = update(projected, { _tag: "ExecutionCompleted", turnId: "turn-a" })
+  expect(completed.busy).toBe(false)
+  expect(completed.activity).toBeUndefined()
+  expect(completed.submittedDrafts).toEqual([])
+})
 test("settles cancellation without adding a textual notice", () => {
   const running: Model = {
     ...initial("/work"),

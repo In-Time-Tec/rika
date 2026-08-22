@@ -2,7 +2,7 @@ import { Effect, Layer, Stream } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type { Connection } from "effect/unstable/sql/SqlConnection"
 import { SqlError, UnknownError } from "effect/unstable/sql/SqlError"
-import { makeCompilerSqlite } from "effect/unstable/sql/Statement"
+import { makeCompiler } from "@effect/sql-pg/PgClient"
 import * as Reactivity from "effect/unstable/reactivity/Reactivity"
 
 export interface RecordedStatement {
@@ -25,7 +25,7 @@ export const makeRecordingSql = (): RecordingSql => {
   const statements: Array<RecordedStatement> = []
   const outcomes: Array<Outcome> = []
   const execute = (sql: string, parameters: ReadonlyArray<unknown>) => {
-    const normalized = sql.replace(/\s+/g, " ").trim()
+    const normalized = sql.replace(/\$\d+/g, "?").replace(/\s+/g, " ").trim()
     if (/^(?:BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\b/.test(normalized)) return Effect.succeed([])
     statements.push({ sql: normalized, parameters })
     const outcome = outcomes.shift() ?? { _tag: "Rows", rows: [] }
@@ -51,7 +51,7 @@ export const makeRecordingSql = (): RecordingSql => {
       SqlClient.SqlClient,
       SqlClient.make({
         acquirer: Effect.succeed(connection),
-        compiler: makeCompilerSqlite(),
+        compiler: makeCompiler(),
         spanAttributes: [],
       }),
     ).pipe(Layer.provide(Layer.effect(Reactivity.Reactivity, Reactivity.make))),

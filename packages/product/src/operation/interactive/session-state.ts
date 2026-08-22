@@ -147,7 +147,7 @@ export interface InteractiveSessionStateInput {
   readonly publishInteractiveActivity: (origin: number, event: InteractiveEvent) => InteractiveEvent
   readonly activitySequence: number
   readonly initialThreadId: string | undefined
-  readonly serverOwner: boolean
+  readonly recoveryOwner: boolean
   readonly options: import("../dispatch/product-operation-options").ProductLayerOptions<
     Error,
     Error,

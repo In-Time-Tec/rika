@@ -67,7 +67,7 @@ export const requireThreadAccess = Effect.fn("PostgresAuthority.requireThreadAcc
   const threads = yield* query(sql<{
     readonly createdByUserId: string
     readonly projectId: string | null
-    readonly executorKind: "local_device" | "e2b"
+    readonly executorKind: "runner" | "orb"
     readonly inheritProjectGrants: boolean
   }>`SELECT created_by_user_id AS "createdByUserId", project_id AS "projectId",
       executor_kind AS "executorKind", inherit_project_grants AS "inheritProjectGrants"
@@ -84,7 +84,7 @@ export const requireThreadAccess = Effect.fn("PostgresAuthority.requireThreadAcc
       AND membership_id = ${input.actor.membershipId}
     FOR KEY SHARE`)
   const inherited =
-    thread.executorKind === "e2b" && thread.inheritProjectGrants && thread.projectId !== null
+    thread.executorKind === "orb" && thread.inheritProjectGrants && thread.projectId !== null
       ? yield* query(sql<{ readonly role: "viewer" | "controller" | "operator" | "owner" }>`SELECT role
           FROM rika_hosted_project_grants
           WHERE owner_id = ${input.ownerId}

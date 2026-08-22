@@ -7,9 +7,9 @@ RUN bun install --frozen-lockfile --production --ignore-scripts \
 
 FROM oven/bun:1.4.0-slim
 WORKDIR /app
-COPY --from=build --chown=bun:bun /app/apps/web/dist/main.js ./main.js
+COPY --from=build --chown=bun:bun /app/apps/web/dist ./dist
 
 ENV NODE_ENV=production
 EXPOSE 3000
 USER bun
-CMD ["bun", "./main.js"]
+CMD ["bun", "./dist/server/main.js"]

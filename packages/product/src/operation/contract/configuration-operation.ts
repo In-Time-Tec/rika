@@ -21,7 +21,6 @@ export class Adapter extends Context.Service<Adapter, AdapterInterface>()(
 export interface Options {
   readonly globalConfigPath: string
   readonly workspaceConfigPath: string
-  readonly productDatabasePath: string
 }
 
 const json = (value: unknown) => Console.log(JSON.stringify(value, null, 2))
@@ -116,11 +115,7 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
       yield* adapter.edit(input.workspace ? options.workspaceConfigPath : options.globalConfigPath)
     return
   }
-  const productDatabase = yield* adapter.exists(options.productDatabasePath)
   yield* json({
-    databases: {
-      product: productDatabase ? "present" : "missing",
-    },
     config: {
       diagnostics: config.diagnostics,
       global: (yield* adapter.exists(options.globalConfigPath)) ? "present" : "missing",

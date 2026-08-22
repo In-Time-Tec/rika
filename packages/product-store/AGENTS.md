@@ -1,5 +1,3 @@
 # @rika/product-store
 
-Owns the current Rika product SQLite schema and repositories. Raw SQL and SQLite clients remain inside this package. SQL and memory repository layers preserve the same constraints and ordering.
-
-- `Database.layer` creates the current baseline for a fresh database and rejects every other existing schema without changing it.
+Owns Rika's PostgreSQL product repositories and faithful in-memory test implementations. Raw SQL and PostgreSQL clients remain inside this package. PostgreSQL and memory repository layers preserve the same constraints and ordering.

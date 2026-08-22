@@ -18,7 +18,7 @@ const request = (module: string, operation: string, input: Exclude<BindingReques
 const access = {
   version: 1 as const,
   fence: {
-    target: "e2b" as const,
+    target: "orb" as const,
     assignmentId: "assignment-test",
     assignmentGeneration: 1,
     instanceId: "sandbox-test",

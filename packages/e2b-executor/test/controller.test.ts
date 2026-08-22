@@ -56,7 +56,7 @@ const authenticate = Effect.fn("test.authenticate")(function* (
   const service = yield* controller
   const request = harness.provider.bootstraps.findLast((bootstrap) => bootstrap.sandboxId === `sandbox-${generation}`)!
   const fence = {
-    target: "e2b" as const,
+    target: "orb" as const,
     assignmentId: assignmentInput.id,
     assignmentGeneration: generation,
     instanceId: `sandbox-${generation}`,
@@ -109,7 +109,7 @@ describe("Controller", () => {
         generation: 1,
         idleTimeoutMillis: Controller.IdleTimeoutMillis,
         environment: {
-          RIKA_EXECUTOR_TARGET: "e2b",
+          RIKA_EXECUTOR_TARGET: "orb",
           RIKA_EXECUTOR_ID: "assignment-1:g1",
           RIKA_EXECUTOR_TEMPLATE_BUILD_ID: "template-build-v1-immutable",
           RIKA_EXECUTOR_WORKSPACE_ID: "workspace-1",
@@ -135,7 +135,7 @@ describe("Controller", () => {
       ])
       const bootstrapRequest = harness.provider.bootstraps[0]!
       expect(bootstrapRequest.identity).toEqual({
-        target: "e2b",
+        target: "orb",
         ownerId: "owner-1",
         threadId: "thread-1",
         assignmentId: "assignment-1",
@@ -266,7 +266,7 @@ describe("Controller", () => {
       yield* provision()
       const bootstrap = harness.provider.bootstraps[0]!.credential
       const fence = {
-        target: "e2b" as const,
+        target: "orb" as const,
         assignmentId: "assignment-1",
         assignmentGeneration: 1,
         instanceId: "sandbox-1",

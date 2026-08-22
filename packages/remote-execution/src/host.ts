@@ -156,7 +156,7 @@ const executorIdentity = Effect.gen(function* () {
       Effect.mapError(() => HostError.make({ message: "RIKA_EXECUTOR_TARGET is invalid" })),
     ),
   )
-  if (target !== "e2b") return yield* HostError.make({ message: "Hosted executor target must be e2b" })
+  if (target !== "orb") return yield* HostError.make({ message: "Hosted executor target must be e2b" })
   const assignmentId = yield* required("RIKA_EXECUTOR_ASSIGNMENT_ID")
   const generationText = yield* required("RIKA_EXECUTOR_GENERATION")
   const assignmentGeneration = Number(generationText)
@@ -178,7 +178,7 @@ const executorIdentity = Effect.gen(function* () {
     threadId: yield* required("RIKA_EXECUTOR_THREAD_ID"),
     assignmentId,
     assignmentGeneration,
-    instanceId: target === "e2b" ? yield* required("E2B_SANDBOX_ID") : yield* required("RIKA_EXECUTOR_INSTANCE_ID"),
+    instanceId: target === "orb" ? yield* required("E2B_SANDBOX_ID") : yield* required("RIKA_EXECUTOR_INSTANCE_ID"),
     executorId: yield* required("RIKA_EXECUTOR_ID"),
     templateBuildId: yield* required("RIKA_EXECUTOR_TEMPLATE_BUILD_ID"),
     apiUrl: yield* required("RIKA_EXECUTOR_API_URL"),
@@ -1745,7 +1745,7 @@ const host = Effect.scoped(
         const pty = Context.get(ptyContext, PtyManager)
         yield* pty.disconnectAll.pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
         const ptyCursor = yield* pty.cursor.pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
-        const ptyReady = config.fence.target === "e2b" && capabilities.pty
+        const ptyReady = config.fence.target === "orb" && capabilities.pty
         const workspaceCapabilities = yield* inspectWorkspaceCapabilities({
           target: config.fence.target,
           workspacePath: workspaceRoot,

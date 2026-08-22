@@ -11,7 +11,7 @@ import { provideLayer } from "./support/layer"
 import { workspaceCapabilities } from "./support/workspace-capabilities"
 
 const fence: Fence = {
-  target: "e2b",
+  target: "orb",
   assignmentId: "assignment-1",
   assignmentGeneration: 1,
   instanceId: "sandbox-1",

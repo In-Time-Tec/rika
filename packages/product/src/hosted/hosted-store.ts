@@ -31,7 +31,6 @@ import {
   type IdempotencyKey,
   type JsonObject,
   type LeaseId,
-  type LocalWorkspaceBinding,
   type OwnerId,
   type Presence,
   type PresenceStatus,
@@ -46,7 +45,6 @@ import {
   type ThreadGrant,
   type ThreadId,
   type Timestamp,
-  type WorkspaceBindingId,
   type WorkspaceId,
 } from "./model"
 
@@ -249,17 +247,6 @@ export interface UpsertPresenceInput extends ThreadCursorInput {
   readonly expiresAt: Timestamp
 }
 
-export interface BindLocalWorkspaceInput {
-  readonly id: WorkspaceBindingId
-  readonly ownerId: OwnerId
-  readonly threadId: ThreadId
-  readonly userId: BetterAuthUserId
-  readonly deviceId: DeviceId
-  readonly rootPath: string
-  readonly workspaceFingerprint: string
-  readonly now: Timestamp
-}
-
 export interface RecordAuditEventInput {
   readonly id: AuditEventId
   readonly ownerId: OwnerId
@@ -309,7 +296,6 @@ export interface StoreService {
   readonly listPresence: (
     input: ThreadCursorInput & { readonly now: Timestamp },
   ) => Effect.Effect<ReadonlyArray<Presence>, StoreError>
-  readonly bindLocalWorkspace: (input: BindLocalWorkspaceInput) => Effect.Effect<LocalWorkspaceBinding, StoreError>
   readonly recordAuditEvent: (input: RecordAuditEventInput) => Effect.Effect<AuditEvent, StoreError>
   readonly putCredentialReference: (
     input: PutCredentialReferenceInput,

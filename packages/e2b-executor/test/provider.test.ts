@@ -23,7 +23,7 @@ const request = {
 } as const
 
 const bootstrapIdentity = (sandboxId: string) => ({
-  target: "e2b" as const,
+  target: "orb" as const,
   ownerId: "owner-1",
   threadId: "thread-1",
   assignmentId: "assignment-1",
@@ -231,6 +231,10 @@ describe("Provider", () => {
         calls.push(`connect:${sandboxId}`)
         return Promise.resolve({ sandboxId })
       },
+      host: (sandboxId, port) => {
+        calls.push(`host:${sandboxId}:${port}`)
+        return Promise.resolve(`${port}-${sandboxId}.e2b.app`)
+      },
       updateNetwork: (sandboxId, network) => {
         calls.push(`network:${sandboxId}:${JSON.stringify(network)}`)
         return Promise.resolve()
@@ -261,6 +265,7 @@ describe("Provider", () => {
       expect(failed.message).not.toContain("e2b-controller-secret")
       expect(failed.message).not.toContain("bootstrap-secret")
       expect(yield* provider.connect("sandbox", 900_000)).toEqual({ sandboxId: "sandbox", state: "running" })
+      expect(yield* provider.host("sandbox", 3000)).toBe("3000-sandbox.e2b.app")
       yield* provider.updateNetwork("sandbox", ["runtime.example.test"])
       yield* provider.bootstrap({
         sandboxId: "sandbox",
@@ -284,6 +289,7 @@ describe("Provider", () => {
       expect(yield* provider.kill("sandbox")).toBe(true)
       expect(calls).toEqual([
         "connect:sandbox",
+        "host:sandbox:3000",
         `network:sandbox:${encodeJson(testing.networkPolicy(["runtime.example.test"]))}`,
         "pause:sandbox:false",
         "touch:sandbox:900000",

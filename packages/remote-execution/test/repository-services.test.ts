@@ -107,7 +107,7 @@ describe("Repository service supervision", () => {
         const fileSystem = Context.get(platform, FileSystem.FileSystem)
         const stateDirectory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-repository-services-" })
         const fence = {
-          target: "e2b",
+          target: "orb",
           assignmentId: "assignment-1",
           assignmentGeneration: 1,
           instanceId: "sandbox-1",

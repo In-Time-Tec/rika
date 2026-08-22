@@ -41,6 +41,11 @@ export interface InteractiveSession {
   readonly cancel: Effect.Effect<void, OperationUnavailable>
   readonly quit: Effect.Effect<void, OperationUnavailable>
   readonly newThread: Effect.Effect<void, OperationUnavailable>
+  readonly newOrbThread?: Effect.Effect<void, OperationUnavailable>
+  readonly pauseOrb?: Effect.Effect<void, OperationUnavailable>
+  readonly resumeOrb?: Effect.Effect<void, OperationUnavailable>
+  readonly enableRemoteThreadCreation?: Effect.Effect<void, OperationUnavailable>
+  readonly disableRemoteThreadCreation?: Effect.Effect<void, OperationUnavailable>
   readonly archiveThread: Effect.Effect<void, OperationUnavailable>
   readonly archiveAndNewThread: Effect.Effect<void, OperationUnavailable>
   readonly selectThread: (threadId: string) => Effect.Effect<void, OperationUnavailable>
@@ -211,7 +216,7 @@ export type InteractiveRuntimeContext = InteractiveSessionInput &
   InteractiveSessionState & {
     readonly workspace: string
     readonly sessionId: number
-    readonly serverOwner: boolean
+    readonly recoveryOwner: boolean
     readonly supervisionInitialized: Deferred.Deferred<void, InteractiveSupervisionError>
     readonly emit: InteractiveOperationFeed["emit"]
     readonly dispatchFailure: dispatchInteractiveFailure

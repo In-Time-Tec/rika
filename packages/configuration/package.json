@@ -9,7 +9,6 @@
     "./model-route": "./src/model-routing/model-route.ts",
     "./model-route-label": "./src/model-routing/model-route-label.ts",
     "./model-route-resolution": "./src/model-routing/model-route-resolution.ts",
-    "./canonical-data-root": "./src/path-resolution/canonical-data-root.ts",
     "./configuration-paths": "./src/path-resolution/configuration-paths.ts",
     "./profile-data-paths": "./src/path-resolution/profile-data-paths.ts",
     "./configuration-settings": "./src/settings/configuration-settings.ts",

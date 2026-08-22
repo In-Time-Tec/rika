@@ -12,11 +12,11 @@ import { clientProcessExitCode } from "../src/client/client-process-exit"
 import { parseJsonLines, readStreamInput } from "../src/command/root/noninteractive-run-command"
 import { run } from "../src/command/root/rika-command"
 import * as HostedCommand from "../src/command/root/hosted-command-dispatch"
-import * as LocalRunnerCommand from "../src/command/root/local-runner-command"
-import { localExecutorProcessRole, tuiControllerProcessRole } from "../src/private-runtime-role"
+import * as RunnerCommand from "../src/command/root/runner-command"
+import { runnerExecutorProcessRole, tuiControllerProcessRole } from "../src/private-runtime-role"
 
 const workspace = process.cwd()
-type Input = ProductInput | HostedCommand.Input | LocalRunnerCommand.Input
+type Input = ProductInput | HostedCommand.Input | RunnerCommand.Input
 
 const testLayer = (calls: Ref.Ref<ReadonlyArray<Input>>) =>
   Layer.mergeAll(
@@ -37,8 +37,8 @@ const testLayer = (calls: Ref.Ref<ReadonlyArray<Input>>) =>
       }),
     ),
     Layer.succeed(
-      LocalRunnerCommand.Service,
-      LocalRunnerCommand.Service.of({
+      RunnerCommand.Service,
+      RunnerCommand.Service.of({
         run: Effect.fn("CommandTest.runLocalRunner")(function* (input) {
           yield* Ref.update(calls, (current) => [...current, input])
         }),
@@ -50,6 +50,13 @@ it("maps pure client interruption to success without masking failures", () => {
   expect(clientProcessExitCode({ exit: Exit.interrupt(1), interruptedBySigint: true })).toBe(0)
   expect(clientProcessExitCode({ exit: Exit.interrupt(1), interruptedBySigint: false })).toBe(130)
   expect(clientProcessExitCode({ exit: Exit.succeed(undefined), interruptedBySigint: false })).toBe(0)
+  expect(
+    clientProcessExitCode({
+      exit: Exit.succeed(undefined),
+      interruptedBySigint: false,
+      successfulExitCode: 17,
+    }),
+  ).toBe(17)
   expect(clientProcessExitCode({ exit: Exit.fail("real failure"), interruptedBySigint: true })).toBe(1)
 })
 
@@ -153,7 +160,7 @@ it.effect("renders help without dispatching an operation", () =>
     expect(output.join("\n")).toContain("Hosted durable coding agent")
     expect(output.join("\n")).toContain("diagnostics")
     expect(output.join("\n")).not.toContain(tuiControllerProcessRole)
-    expect(output.join("\n")).not.toContain(localExecutorProcessRole)
+    expect(output.join("\n")).not.toContain(runnerExecutorProcessRole)
     yield* execute(run(["diagnostics", "--help"]), layer)
     expect((yield* TestConsole.logLines).join("\n")).toContain("performance")
     expect(yield* Ref.get(calls)).toEqual([])
@@ -298,7 +305,7 @@ it.effect("routes headless runner mode and keeps remote Thread creation opt in",
 it.effect("dispatches interactive inputs and hosted non-interactive execution", () =>
   Effect.gen(function* () {
     expect(yield* capture([tuiControllerProcessRole])).toEqual([{ _tag: "Interactive", prompt: [], ephemeral: false }])
-    expect(yield* capture([localExecutorProcessRole, "--no-tui", "--workspace", "."])).toEqual([{ workspace }])
+    expect(yield* capture([runnerExecutorProcessRole, "--no-tui", "--workspace", "."])).toEqual([{ workspace }])
     expect(yield* capture(["hello", "world", "--mode", "high", "--ephemeral"])).toEqual([
       { _tag: "Interactive", prompt: ["hello", "world"], mode: "high", ephemeral: true },
     ])
@@ -334,6 +341,49 @@ it.effect("creates and continues hosted Threads without a local Thread operation
       [["thread", "continue", "a"], { _tag: "Interactive", prompt: [], threadId: "a", ephemeral: false }],
     ]
     for (const [argv, expected] of cases) expect(yield* capture(argv)).toEqual([expected])
+  }),
+)
+
+it.effect("routes Projects, secrets, repository services, portals, and synchronization", () =>
+  Effect.gen(function* () {
+    expect(yield* capture(["project", "list"])).toEqual([{ _tag: "Project", action: "list" }])
+    expect(yield* capture(["project", "create", "Remote Platform"])).toEqual([
+      { _tag: "Project", action: "create", name: "Remote Platform" },
+    ])
+    expect(yield* capture(["project", "use", "remote-platform"])).toEqual([
+      { _tag: "Project", action: "use", project: "remote-platform" },
+    ])
+    expect(yield* capture(["secret", "revoke", "DEPLOY_TOKEN", "--scope", "project"])).toEqual([
+      { _tag: "Secret", action: "revoke", name: "DEPLOY_TOKEN", scope: "project" },
+    ])
+    expect(
+      yield* capture(["thread", "service", "start", "thread-1", "web", "bun", "run", "dev", "--cwd", "apps/web"]),
+    ).toEqual([
+      {
+        _tag: "ThreadService",
+        action: "ensure",
+        threadId: "thread-1",
+        service: { serviceId: "web", command: "bun", args: ["run", "dev"], cwd: "apps/web" },
+      },
+    ])
+    expect(yield* capture(["thread", "service", "stop", "thread-1", "web"])).toEqual([
+      { _tag: "ThreadService", action: "stop", threadId: "thread-1", serviceId: "web" },
+    ])
+    expect(yield* capture(["thread", "portal", "thread-1", "3000"])).toEqual([
+      { _tag: "ThreadPortal", threadId: "thread-1", port: 3000 },
+    ])
+    expect(
+      yield* capture(["thread", "sync", "thread-1", "0123456789abcdef0123456789abcdef01234567", "--target", "main"]),
+    ).toEqual([
+      {
+        _tag: "ThreadSync",
+        threadId: "thread-1",
+        commitSha: "0123456789abcdef0123456789abcdef01234567",
+        targetBranch: "main",
+        title: "Rika: synchronize 0123456789ab",
+        body: "",
+      },
+    ])
   }),
 )
 

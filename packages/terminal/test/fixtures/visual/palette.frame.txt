@@ -1,11 +1,13 @@
-
-
-                   :
   ╭─ Command Palette ────────────────────────────────────────────────────────╮
   │ >                                                                        │
   │                                                                          │
   │                                                                          │
   │           thread  new thread                                             │
+  │           thread  new in Orb                                             │
+  │              orb  pause                                                  │
+  │              orb  resume                                                 │
+  │           runner  enable remote Thread creation                          │
+  │           runner  disable remote Thread creation                         │
   │           thread  switch                                         Ctrl+T  │
   │             mode  change mode                                    Ctrl+S  │
   │            usage  show context and usage                         Ctrl+Y  │
@@ -14,8 +16,6 @@
   │        subagents  set max depth                                          │
   │             rika  quit                                           Ctrl+C  │
   ╰──────────────────────────────────────────────────────────────────────────╯
-            ...............
-                   .
 
 ╭─────────────────────────────────────────────────────────────────────── high ─╮
 │                                                                              │

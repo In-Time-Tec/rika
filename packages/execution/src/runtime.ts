@@ -27,16 +27,7 @@ import * as Postgres from "./postgres"
 import { TreeProjector } from "./projection/tree"
 import { resolveSemanticTreeEvent, type SemanticTreeEvent } from "./projection/semantic-event"
 
-/**
- * The runtime database always lives directly under the profile data root as `<dataRoot>/tenetkit.db`,
- * so the root the kernel pins is derived from the one path the composition root already supplies
- * rather than threaded through the product Turn contract. Deriving it keeps the pinned profile
- * describing the kernel this host actually runs; a supplied value overrides it verbatim.
- */
-const derivedKernelOptions = (filename: string): KernelOptions => {
-  const separator = filename.lastIndexOf("/")
-  return { runtimeVersion: Bun.version, dataRoot: separator > 0 ? filename.slice(0, separator) : "." }
-}
+const derivedKernelOptions = (dataRoot: string): KernelOptions => ({ runtimeVersion: Bun.version, dataRoot })
 
 /** The kernel a cell runs in, plus the seam that answers its host requests. */
 export type KernelPoolServices = KernelPool.KernelPool | ExecutorRuntime.CellContext
@@ -51,7 +42,7 @@ export interface LocalCells extends LocalCellResolver {
 
 export type Cells = LocalCells | RemoteCellRoute
 
-interface CommonOptions {
+export interface CommonOptions {
   readonly kernel: KernelOptions
   readonly cells?: Cells
   readonly capabilities?: (workspace: string) => Effect.Effect<{
@@ -70,8 +61,8 @@ export interface HostedOptions extends CommonOptions {
   readonly postgres: Postgres.Options
 }
 
-export interface LocalOptions extends Omit<CommonOptions, "kernel"> {
-  readonly filename: string
+export interface MemoryOptions extends Omit<CommonOptions, "kernel"> {
+  readonly dataRoot: string
   readonly kernel?: KernelOptions
 }
 
@@ -628,19 +619,18 @@ export const layerHosted = (
     }),
   )
 
-export const layerLocal = (
-  options: LocalOptions,
+export const layerMemory = (
+  options: MemoryOptions,
 ): Layer.Layer<
   ExecutionGateway.Service | ExecutionSessionLifecycle.Service | Runtime.Runtime,
   ExecutionGateway.StartTurnFailure
 > => {
   const shared: CommonOptions = {
     ...options,
-    kernel: options.kernel ?? derivedKernelOptions(options.filename),
+    kernel: options.kernel ?? derivedKernelOptions(options.dataRoot),
   }
   return executionLayer(shared, (credentialStore) =>
-    Runtime.layerSqlite({
-      filename: options.filename,
+    Runtime.layerMemory({
       resolver: resolverFor(shared, credentialStore),
       addresses: [],
       ...(options.subscriberQueueCapacity === undefined

@@ -15,7 +15,6 @@ import {
   HostedOwnerRecord,
   HostedWorkspace,
   JsonObject,
-  LocalWorkspaceBinding,
   ExecutorInstanceId,
   type OwnerId,
   Presence,
@@ -39,7 +38,6 @@ import {
   type AppendEventInput,
   type AppendRecoveredEventInput,
   type AuthenticateClientInput,
-  type BindLocalWorkspaceInput,
   type CreateProjectInput,
   type CreateThreadInput,
   type CreateWorkspaceInput,
@@ -231,7 +229,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
   })
 
   const createWorkspace = Effect.fn("PostgresStore.createWorkspace")(function* (input: CreateWorkspaceInput) {
-    if (input.executorKind === "local_device" && input.inheritProjectGrants === true)
+    if (input.executorKind === "runner" && input.inheritProjectGrants === true)
       return yield* failure("invalid-authority", "Local workspaces cannot inherit project grants")
     yield* requireOwnerCreator(sql, { ownerId: input.ownerId, userId: input.createdByUserId })
     if (input.projectId !== undefined) {
@@ -240,7 +238,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
       )
       if (project[0] === undefined) return yield* failure("not-found", "Project does not exist for the owner")
     }
-    const inherit = input.executorKind === "e2b" ? (input.inheritProjectGrants ?? true) : false
+    const inherit = input.executorKind === "orb" ? (input.inheritProjectGrants ?? true) : false
     const rows = yield* query(sql`INSERT INTO rika_hosted_workspaces
       (id, owner_id, project_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
       VALUES (${input.id}, ${input.ownerId}, ${input.projectId ?? null}, ${input.createdByUserId}, ${input.executorKind}, ${inherit}, ${input.now})
@@ -253,13 +251,13 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
   })
 
   const createThread = Effect.fn("PostgresStore.createThread")(function* (input: CreateThreadInput) {
-    if (input.executorKind === "local_device" && input.inheritProjectGrants === true)
+    if (input.executorKind === "runner" && input.inheritProjectGrants === true)
       return yield* failure("invalid-authority", "Local threads cannot inherit project grants")
     yield* requireOwnerCreator(sql, { ownerId: input.ownerId, userId: input.createdByUserId })
     const rows = yield* query(sql`INSERT INTO rika_hosted_threads
       (id, owner_id, project_id, workspace_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
       SELECT ${input.id}, ${input.ownerId}, ${input.projectId ?? null}, workspace.id, ${input.createdByUserId}, ${input.executorKind},
-        CASE WHEN ${input.executorKind} = 'e2b' THEN COALESCE(${input.inheritProjectGrants ?? null}, workspace.inherit_project_grants) ELSE false END, ${input.now}
+        CASE WHEN ${input.executorKind} = 'orb' THEN COALESCE(${input.inheritProjectGrants ?? null}, workspace.inherit_project_grants) ELSE false END, ${input.now}
       FROM rika_hosted_workspaces workspace WHERE workspace.id = ${input.workspaceId} AND workspace.owner_id = ${input.ownerId}
         AND workspace.project_id IS NOT DISTINCT FROM ${input.projectId ?? null} AND workspace.executor_kind = ${input.executorKind}
       RETURNING id, owner_id AS "ownerId", project_id AS "projectId", workspace_id AS "workspaceId",
@@ -848,40 +846,6 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
     )
   })
 
-  const bindLocalWorkspace = Effect.fn("PostgresStore.bindLocalWorkspace")(function* (input: BindLocalWorkspaceInput) {
-    const authority = yield* query(sql`SELECT 1 FROM rika_hosted_owners owner_record
-      JOIN rika_hosted_threads thread ON thread.owner_id = owner_record.id
-        AND thread.id = ${input.threadId} AND thread.executor_kind = 'local_device'
-      JOIN rika_hosted_devices device ON device.id = ${input.deviceId}
-        AND device.user_id = ${input.userId} AND device.revoked_at IS NULL
-      LEFT JOIN "member" membership ON owner_record.kind = 'organization'
-        AND membership.organization_id = owner_record.organization_id AND membership.user_id = ${input.userId}
-      WHERE owner_record.id = ${input.ownerId}
-        AND ((owner_record.kind = 'personal' AND owner_record.user_id = ${input.userId})
-          OR (owner_record.kind = 'organization' AND membership.id IS NOT NULL))
-      FOR KEY SHARE OF owner_record, thread, device`)
-    if (authority[0] === undefined)
-      return yield* failure("invalid-authority", "Workspace binding requires the user's local thread and device")
-    const rows = yield* query(sql`INSERT INTO rika_hosted_local_workspace_bindings
-      (id, owner_id, thread_id, user_id, device_id, root_path, workspace_fingerprint,
-        created_at, last_seen_at)
-      VALUES (${input.id}, ${input.ownerId}, ${input.threadId}, ${input.userId}, ${input.deviceId},
-        ${input.rootPath}, ${input.workspaceFingerprint}, ${input.now}, ${input.now})
-      ON CONFLICT (thread_id, device_id) DO UPDATE SET
-        root_path = EXCLUDED.root_path,
-        workspace_fingerprint = EXCLUDED.workspace_fingerprint,
-        last_seen_at = EXCLUDED.last_seen_at
-      WHERE rika_hosted_local_workspace_bindings.owner_id = EXCLUDED.owner_id
-        AND rika_hosted_local_workspace_bindings.user_id = EXCLUDED.user_id
-      RETURNING id, owner_id AS "ownerId", thread_id AS "threadId", user_id AS "userId",
-        device_id AS "deviceId", root_path AS "rootPath", workspace_fingerprint AS "workspaceFingerprint",
-        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",
-        to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastSeenAt"`)
-    if (rows[0] === undefined)
-      return yield* failure("invalid-authority", "Workspace binding identity cannot be reassigned")
-    return yield* decode(LocalWorkspaceBinding, rows[0])
-  })
-
   const recordAuditEvent = Effect.fn("PostgresStore.recordAuditEvent")(function* (input: RecordAuditEventInput) {
     return yield* transaction(
       sql,
@@ -961,7 +925,6 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
     renewTerminalWriter,
     upsertPresence,
     listPresence,
-    bindLocalWorkspace,
     recordAuditEvent,
     putCredentialReference,
   })

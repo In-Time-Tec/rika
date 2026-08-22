@@ -8,8 +8,8 @@ import { Command } from "effect/unstable/cli"
 import { command, version } from "../command/root/rika-command"
 import { privateRuntime } from "./private-runtime-launch"
 import * as HostedCommand from "../command/root/hosted-command-dispatch"
-import * as LocalRunnerCommand from "../command/root/local-runner-command"
-import * as LocalRunner from "../local-executor/local-runner"
+import * as RunnerCommand from "../command/root/runner-command"
+import * as Runner from "../runner/runner"
 import * as HostedCli from "../hosted/hosted-cli"
 import { processRoleLaunch, superviseLocalRoles } from "./local-role-supervisor"
 
@@ -84,10 +84,10 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                       arguments: [...controller.prefixArguments, ...forwardedArguments],
                       environment: { RIKA_INTERNAL_CLIENT_RUNTIME: "1" },
                     },
-                    "local-executor": {
+                    "runner-executor": {
                       executable: executor.executable,
                       arguments: [...executor.prefixArguments, "--no-tui", "--workspace", workspace],
-                      environment: { RIKA_INTERNAL_LOCAL_EXECUTOR: "1" },
+                      environment: { RIKA_INTERNAL_RUNNER_EXECUTOR: "1" },
                     },
                   })
                   const result = yield* superviseLocalRoles({
@@ -95,9 +95,13 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                     launch,
                   })
                   if (cleanInteractiveRuntimeExit(result.exitCode)) return
+                  if (result.errorOutput.trim().length === 0) {
+                    process.exitCode = result.exitCode
+                    return
+                  }
                   return yield* ProductOperation.OperationUnavailable.make({
                     operation: "Interactive",
-                    message: result.errorOutput.trim() || "Rika could not start. Run rika diagnostics status.",
+                    message: result.errorOutput.trim(),
                   })
                 }
               }),
@@ -139,8 +143,8 @@ const hostedCommandLayer = Layer.effect(
   }),
 )
 
-const localRunnerCommandLayer = Layer.effect(
-  LocalRunnerCommand.Service,
+const runnerCommandLayer = Layer.effect(
+  RunnerCommand.Service,
   Effect.gen(function* () {
     const platform = yield* Effect.context<
       | Crypto.Crypto
@@ -149,24 +153,24 @@ const localRunnerCommandLayer = Layer.effect(
       | ChildProcessSpawner.ChildProcessSpawner
       | HttpClient.HttpClient
     >()
-    return LocalRunnerCommand.Service.of({
+    return RunnerCommand.Service.of({
       run: (input) =>
         Effect.gen(function* () {
           const home = yield* Config.string("HOME").pipe(Config.withDefault(process.cwd()))
-          const preferencePath = yield* LocalRunner.preferencePath
+          const preferencePath = yield* Runner.preferencePath
           const hosted = HostedCli.liveLayer(home)
-          return yield* LocalRunner.runLocalRunner({
+          return yield* Runner.runRunner({
             workspace: input.workspace ?? process.cwd(),
             preferencePath,
             ...(input.remoteThreadCreation === undefined ? {} : { requestedPreference: input.remoteThreadCreation }),
           }).pipe(
             Effect.scoped,
-            provideLayerScoped(Layer.merge(hosted, LocalRunner.liveAdmissionLayer.pipe(Layer.provide(hosted)))),
+            provideLayerScoped(Layer.merge(hosted, Runner.liveAdmissionLayer.pipe(Layer.provide(hosted)))),
           )
         }).pipe(
           Effect.provide(platform),
           Effect.mapError((error) =>
-            ProductOperation.OperationUnavailable.make({ operation: "LocalRunner", message: error.message }),
+            ProductOperation.OperationUnavailable.make({ operation: "Runner", message: error.message }),
           ),
         ),
     })
@@ -184,7 +188,7 @@ export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<s
     }),
   )
   return yield* program.pipe(
-    provideLayerScoped(Layer.mergeAll(dispatcherLayer(argv), hostedCommandLayer, localRunnerCommandLayer)),
+    provideLayerScoped(Layer.mergeAll(dispatcherLayer(argv), hostedCommandLayer, runnerCommandLayer)),
   )
 })
 

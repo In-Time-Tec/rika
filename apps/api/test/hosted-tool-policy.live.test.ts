@@ -40,7 +40,7 @@ const organizationActor = Schema.decodeSync(ActorAttribution)({
 const access = (assignmentId: string, instanceId: string) => ({
   version: 1 as const,
   fence: {
-    target: "e2b" as const,
+    target: "orb" as const,
     assignmentId,
     assignmentGeneration: 1,
     instanceId,
@@ -71,12 +71,12 @@ const seed = (pool: Pool) =>
       ('organization-project', 'organization-owner', 'organization-project', 'organization-user', now(), now());
      INSERT INTO rika_hosted_workspaces
       (id, owner_id, project_id, created_by_user_id, executor_kind, inherit_project_grants, created_at) VALUES
-      ('personal-workspace', 'personal-owner', 'personal-project', 'personal-user', 'e2b', false, now()),
-      ('organization-workspace', 'organization-owner', 'organization-project', 'organization-user', 'e2b', false, now());
+      ('personal-workspace', 'personal-owner', 'personal-project', 'personal-user', 'orb', false, now()),
+      ('organization-workspace', 'organization-owner', 'organization-project', 'organization-user', 'orb', false, now());
      INSERT INTO rika_hosted_threads
       (id, owner_id, project_id, workspace_id, created_by_user_id, executor_kind, inherit_project_grants, created_at) VALUES
-      ('personal-thread', 'personal-owner', 'personal-project', 'personal-workspace', 'personal-user', 'e2b', false, now()),
-      ('organization-thread', 'organization-owner', 'organization-project', 'organization-workspace', 'organization-user', 'e2b', false, now());
+      ('personal-thread', 'personal-owner', 'personal-project', 'personal-workspace', 'personal-user', 'orb', false, now()),
+      ('organization-thread', 'organization-owner', 'organization-project', 'organization-workspace', 'organization-user', 'orb', false, now());
      INSERT INTO rika_hosted_project_repositories
       (project_id, owner_id, repository_id, installation_id, installation_account_id,
        installation_account_login, installation_account_type, repository_owner, repository_name,
@@ -100,13 +100,13 @@ const seed = (pool: Pool) =>
       (id, owner_id, thread_id, workspace_id, executor_kind, placement, checkout, generation, revision,
        last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
        session_digest, lease_epoch, lease_expires_at) VALUES
-      ('personal-assignment', 'personal-owner', 'personal-thread', 'personal-workspace', 'e2b',
-       '{"_tag":"E2BPlacement","templateBuildId":"build","providerScope":"scope"}',
+      ('personal-assignment', 'personal-owner', 'personal-thread', 'personal-workspace', 'orb',
+       '{"_tag":"OrbPlacement","templateBuildId":"build","providerScope":"scope"}',
        '{"ownerId":"personal-owner","projectId":"personal-project","repositoryId":"repository-personal","installationId":"installation","owner":"owner","name":"repo","ref":"main","commitSha":"1111111111111111111111111111111111111111","private":true,"gitIdentity":{"name":"Personal User","email":"personal@example.test"}}',
        1, 0, 1, 'active', 'personal-instance', 'personal-assignment-executor', 'personal-assignment-process',
        'personal-session-digest', 1, now() + interval '4 minutes'),
-      ('organization-assignment', 'organization-owner', 'organization-thread', 'organization-workspace', 'e2b',
-       '{"_tag":"E2BPlacement","templateBuildId":"build","providerScope":"scope"}',
+      ('organization-assignment', 'organization-owner', 'organization-thread', 'organization-workspace', 'orb',
+       '{"_tag":"OrbPlacement","templateBuildId":"build","providerScope":"scope"}',
        '{"ownerId":"organization-owner","projectId":"organization-project","repositoryId":"repository-organization","installationId":"installation","owner":"owner","name":"repo","ref":"main","commitSha":"2222222222222222222222222222222222222222","private":true,"gitIdentity":{"name":"Organization User","email":"organization@example.test"}}',
        1, 0, 1, 'active', 'organization-instance', 'organization-assignment-executor', 'organization-assignment-process',
        'organization-session-digest', 1, now() + interval '4 minutes');
@@ -175,7 +175,7 @@ it.effect.skipIf(databaseUrl === undefined)(
             actor: personalActor,
             repository: { identity: "repository-personal" },
             branch: `detached:${"1".repeat(40)}`,
-            executor: { assignmentId: "personal-assignment", kind: "e2b" },
+            executor: { assignmentId: "personal-assignment", kind: "orb" },
             policy: { capability: "publishing.execute", approval: "exact" },
           })
           yield* policy.outcome({ ...admission, authorizationId: "internal-approval", outcome: "suspended" })

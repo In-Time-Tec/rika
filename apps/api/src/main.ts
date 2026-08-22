@@ -65,7 +65,7 @@ const program = Effect.scoped(
         devices: makePostgresCliDeviceDirectory(pool),
         product: application.product,
         toolPolicy: application.toolPolicy,
-        threads: application.threads,
+        threads: application.threadProtocol,
         credentials: application.credentials,
         environment: application.environment,
         models: application.models,

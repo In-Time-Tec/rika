@@ -1,7 +1,7 @@
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import { productLayer as makeProductLayer } from "@rika/product/product-operation-service"
-import * as ProductStoreSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
-import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
+import * as ProductStoreSummaryRepository from "@rika/product-store/postgres-thread-summary-repository"
+import * as TranscriptRepository from "@rika/product-store/postgres-transcript-repository"
 
 import { Effect, Layer } from "effect"
 

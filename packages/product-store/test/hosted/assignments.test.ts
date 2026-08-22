@@ -52,7 +52,7 @@ const open = (suffix: string) =>
       ownerId: ids.owner,
       threadId: ThreadId.make(`thread-${suffix}`),
       workspaceId: WorkspaceId.make(`workspace-${suffix}`),
-      placement: { _tag: "E2BPlacement", templateBuildId: "template", providerScope: "scope" },
+      placement: { _tag: "OrbPlacement", templateBuildId: "template", providerScope: "scope" },
       checkout: null,
     })
     const provisioning = yield* assignments.beginProvisioning({

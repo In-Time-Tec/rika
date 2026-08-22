@@ -28,9 +28,9 @@ Rika is a local coding-agent CLI and OpenTUI app written in Effect TypeScript. R
 - Use released TenetKit, Effect, and OpenTUI package exports. Never edit, import from, format, build, or test `repos/*`.
 - Use Effect services, schemas, streams, scopes, typed errors, platform APIs, and structured concurrency. Keep raw Promise or host APIs in a named outer adapter only when Effect has no equivalent.
 - Run Effects only at app, process, test-host, or framework boundaries. Keep pure computations pure.
-- Build CLI surfaces with `effect/unstable/cli`, use Effect SQL for Rika SQLite state, use WebSockets for Rika process transport, and keep OpenTUI imports in the TUI adapter.
+- Build CLI surfaces with `effect/unstable/cli`, use WebSockets for client and Executor transport, and keep OpenTUI imports in the TUI adapter.
 - Language-model provider SDKs are forbidden outside released TenetKit contracts. `@rika/coding-tools` may use web-research provider SDKs only when they preserve Effect interruption, retry, and resource semantics; otherwise use Effect HTTP adapters.
-- Do not add Rivet, actors, web or IDE clients, remote runners, orbs, a local semantic code index, or ast-grep outline tools. External semantic code research is allowed through web-research providers.
+- Browser Thread control is a FoldKit program. Runner and Orb execution are first-class; E2B remains the only Orb provider. Do not add IDE integration, Rivet, actors, interchangeable Orb providers, a local semantic code index, or ast-grep outline tools.
 - Do not create catch-all `utils`, `helpers`, `common`, or `lib` modules. Do not put comments in code.
 
 ## Documentation

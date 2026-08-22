@@ -14,7 +14,7 @@ import {
   Timestamp,
   WorkspaceId,
 } from "./model"
-import { CheckoutFingerprint } from "./local-runner-registration"
+import { CheckoutFingerprint } from "./runner-registration"
 
 const OpaqueId = Schema.String.check(Schema.isPattern(/^[\x21-\x7e]{1,512}$/))
 
@@ -65,20 +65,20 @@ export const RepositoryCheckout = Schema.Struct({
 })
 export type RepositoryCheckout = typeof RepositoryCheckout.Type
 
-export const LocalDevicePlacement = Schema.TaggedStruct("LocalDevicePlacement", {
+export const RunnerPlacement = Schema.TaggedStruct("RunnerPlacement", {
   deviceId: DeviceId,
   checkoutFingerprint: CheckoutFingerprint,
   requestingDeviceId: DeviceId,
 })
-export type LocalDevicePlacement = typeof LocalDevicePlacement.Type
+export type RunnerPlacement = typeof RunnerPlacement.Type
 
-export const E2BPlacement = Schema.TaggedStruct("E2BPlacement", {
+export const OrbPlacement = Schema.TaggedStruct("OrbPlacement", {
   templateBuildId: OpaqueId,
   providerScope: OpaqueId,
 })
-export type E2BPlacement = typeof E2BPlacement.Type
+export type OrbPlacement = typeof OrbPlacement.Type
 
-export const ExecutorPlacement = Schema.Union([LocalDevicePlacement, E2BPlacement])
+export const ExecutorPlacement = Schema.Union([RunnerPlacement, OrbPlacement])
 export type ExecutorPlacement = typeof ExecutorPlacement.Type
 
 export const PendingAssignment = Schema.TaggedStruct("Pending", {})
@@ -148,14 +148,14 @@ export const ExecutorAssignment = ExecutorAssignmentStruct.check(
     const issues: Array<{ readonly path: ReadonlyArray<PropertyKey>; readonly issue: string }> = []
     if (
       !(
-        (assignment.executorKind === "e2b" && assignment.placement._tag === "E2BPlacement") ||
-        (assignment.executorKind === "local_device" && assignment.placement._tag === "LocalDevicePlacement")
+        (assignment.executorKind === "orb" && assignment.placement._tag === "OrbPlacement") ||
+        (assignment.executorKind === "runner" && assignment.placement._tag === "RunnerPlacement")
       )
     )
       issues.push({ path: ["placement"], issue: "placement must match executor kind" })
     if (
       assignment.checkout !== null &&
-      (assignment.executorKind !== "e2b" || assignment.checkout.ownerId !== assignment.ownerId)
+      (assignment.executorKind !== "orb" || assignment.checkout.ownerId !== assignment.ownerId)
     )
       issues.push({ path: ["checkout"], issue: "repository checkout must match its remote assignment owner" })
     if (

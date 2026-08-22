@@ -1,16 +1,19 @@
 import { Crypto, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { ClientTicketResponse } from "@rika/product/client-protocol"
-import { LocalRunnerPollResult } from "@rika/product/local-runner-registration"
+import { RunnerPollResult } from "@rika/product/runner-registration"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import {
   CliDevice,
   DeviceAuthorization,
   HostedError,
+  EnvironmentReferenceStatus,
   Http,
   IdentityContext,
   Invitation,
   ProviderCredentialStatus,
+  Project,
   Registration,
+  RepositoryPublicationStatus,
   scopes,
   type DevicePoll,
   type OwnerSelection,
@@ -323,35 +326,35 @@ export const layer = Layer.effect(
           "Hosted Thread session",
         )
       },
-      registerLocalRunner: (origin, checkoutFingerprint, registration, session) => {
-        const url = `${origin}/api/v1/local-runners/${encodeURIComponent(checkoutFingerprint)}`
+      registerRunner: (origin, checkoutFingerprint, registration, session) => {
+        const url = `${origin}/api/v1/runners/${encodeURIComponent(checkoutFingerprint)}`
         return authenticatedEmpty(
           "PUT",
           url,
           HttpClientRequest.put(url).pipe(HttpClientRequest.bodyJsonUnsafe(registration)),
           session,
-          "Local runner registration",
+          "Runner registration",
         )
       },
       setRemoteThreadCreation: (origin, checkoutFingerprint, preference, session) => {
-        const url = `${origin}/api/v1/local-runners/${encodeURIComponent(checkoutFingerprint)}/remote-thread-creation`
+        const url = `${origin}/api/v1/runners/${encodeURIComponent(checkoutFingerprint)}/remote-thread-creation`
         return authenticatedEmpty(
           "PUT",
           url,
           HttpClientRequest.put(url).pipe(HttpClientRequest.bodyJsonUnsafe({ preference })),
           session,
-          "Local runner preference",
+          "Runner preference",
         )
       },
-      pollLocalRunner: (origin, checkoutFingerprint, session) => {
-        const url = `${origin}/api/v1/local-runners/${encodeURIComponent(checkoutFingerprint)}/admissions`
+      pollRunner: (origin, checkoutFingerprint, session) => {
+        const url = `${origin}/api/v1/runners/${encodeURIComponent(checkoutFingerprint)}/admissions`
         return authenticatedJson(
           "POST",
           url,
           HttpClientRequest.post(url),
           session,
-          LocalRunnerPollResult,
-          "Local runner admission",
+          RunnerPollResult,
+          "Runner admission",
         )
       },
       putProviderCredential: (origin, owner, provider, apiKey, session) => {
@@ -387,6 +390,73 @@ export const layer = Layer.effect(
           session,
           ProviderCredentialStatus,
           "Provider credential revocation",
+        )
+      },
+      createProject: (origin, owner, name, session) => {
+        const url = `${origin}/api/v1/projects`
+        return authenticatedJson(
+          "POST",
+          url,
+          HttpClientRequest.post(url).pipe(HttpClientRequest.bodyJsonUnsafe({ owner: ownerWire(owner), name })),
+          session,
+          Project,
+          "Project creation",
+        )
+      },
+      putEnvironment: (origin, owner, project, name, scope, phases, value, session) => {
+        const url = `${origin}/api/v1/environment/${encodeURIComponent(name)}`
+        return authenticatedJson(
+          "PUT",
+          url,
+          HttpClientRequest.put(url).pipe(
+            HttpClientRequest.bodyJsonUnsafe({
+              owner: ownerWire(owner),
+              ...(project === undefined ? {} : { project_id: project }),
+              scope,
+              classification: "secret",
+              phases,
+              value: Redacted.value(value),
+            }),
+          ),
+          session,
+          EnvironmentReferenceStatus,
+          "Secret update",
+        )
+      },
+      revokeEnvironment: (origin, owner, project, name, scope, session) => {
+        const url = `${origin}/api/v1/environment/${encodeURIComponent(name)}`
+        return authenticatedJson(
+          "DELETE",
+          url,
+          HttpClientRequest.delete(url).pipe(
+            HttpClientRequest.bodyJsonUnsafe({
+              owner: ownerWire(owner),
+              ...(project === undefined ? {} : { project_id: project }),
+              scope,
+            }),
+          ),
+          session,
+          EnvironmentReferenceStatus,
+          "Secret revocation",
+        )
+      },
+      publishRepository: (origin, threadId, commitSha, targetBranch, title, body, operationKey, session) => {
+        const url = `${origin}/api/v1/threads/${encodeURIComponent(threadId)}/repository-publications`
+        return authenticatedJson(
+          "POST",
+          url,
+          HttpClientRequest.post(url).pipe(
+            HttpClientRequest.setHeader("idempotency-key", operationKey),
+            HttpClientRequest.bodyJsonUnsafe({
+              commit_sha: commitSha,
+              ...(targetBranch === undefined ? {} : { target_branch: targetBranch }),
+              title,
+              body,
+            }),
+          ),
+          session,
+          RepositoryPublicationStatus,
+          "Repository synchronization",
         )
       },
     })

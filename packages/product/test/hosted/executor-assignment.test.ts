@@ -22,18 +22,18 @@ const base = {
 }
 
 it("rejects executor kinds that contradict their placement", () => {
-  const e2bPlacement = { _tag: "E2BPlacement", templateBuildId: "build-1", providerScope: "scope-1" }
+  const e2bPlacement = { _tag: "OrbPlacement", templateBuildId: "build-1", providerScope: "scope-1" }
   const localPlacement = {
-    _tag: "LocalDevicePlacement",
+    _tag: "RunnerPlacement",
     deviceId: "device-1",
     checkoutFingerprint: "checkout-1",
     requestingDeviceId: "device-1",
   }
 
-  expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "e2b", placement: e2bPlacement })).toBe(true)
-  expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "local_device", placement: localPlacement })).toBe(true)
-  expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "local_device", placement: e2bPlacement })).toBe(false)
-  expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "e2b", placement: localPlacement })).toBe(false)
+  expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "orb", placement: e2bPlacement })).toBe(true)
+  expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "runner", placement: localPlacement })).toBe(true)
+  expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "runner", placement: e2bPlacement })).toBe(false)
+  expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "orb", placement: localPlacement })).toBe(false)
 })
 
 it("requires a complete immutable checkout identity owned by its remote assignment", () => {
@@ -58,12 +58,12 @@ it("requires a complete immutable checkout identity owned by its remote assignme
     { ...checkout, gitIdentity: { ...checkout.gitIdentity, email: "invalid" } },
   ])
     expect(Schema.is(RepositoryCheckout)(invalid)).toBe(false)
-  const placement = { _tag: "E2BPlacement", templateBuildId: "build-1", providerScope: "scope-1" }
-  expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "e2b", placement, checkout })).toBe(true)
+  const placement = { _tag: "OrbPlacement", templateBuildId: "build-1", providerScope: "scope-1" }
+  expect(Schema.is(ExecutorAssignment)({ ...base, executorKind: "orb", placement, checkout })).toBe(true)
   expect(
     Schema.is(ExecutorAssignment)({
       ...base,
-      executorKind: "e2b",
+      executorKind: "orb",
       placement,
       checkout: { ...checkout, ownerId: "owner-2" },
     }),
@@ -71,8 +71,8 @@ it("requires a complete immutable checkout identity owned by its remote assignme
   expect(
     Schema.is(ExecutorAssignment)({
       ...base,
-      executorKind: "local_device",
-      placement: { _tag: "LocalDevicePlacement", deviceId: "device-1" },
+      executorKind: "runner",
+      placement: { _tag: "RunnerPlacement", deviceId: "device-1" },
       checkout,
     }),
   ).toBe(false)

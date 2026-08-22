@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 import { matchesRole, roleRuntimes } from "../src/platform/performance-platform"
-import { localExecutorProcessRole, tuiControllerProcessRole } from "../src/private-runtime-role"
+import { runnerExecutorProcessRole, tuiControllerProcessRole } from "../src/private-runtime-role"
 
 describe("performance role runtime resolution", () => {
   test("locates source role entrypoints from the performance source directory", () => {
@@ -14,9 +14,9 @@ describe("performance role runtime resolution", () => {
       arguments: ["/repo/apps/rika/src/interactive-main.ts"],
       evidencePath: "/repo/apps/rika/src/interactive-main.ts",
     })
-    expect(runtimes["local-executor"]).toEqual({
+    expect(runtimes["runner-executor"]).toEqual({
       executable: "/usr/bin/bun",
-      arguments: ["/repo/apps/rika/src/client-main.ts", localExecutorProcessRole],
+      arguments: ["/repo/apps/rika/src/client-main.ts", runnerExecutorProcessRole],
       evidencePath: "/repo/apps/rika/src/client-main.ts",
     })
   })
@@ -32,9 +32,9 @@ describe("performance role runtime resolution", () => {
       arguments: [tuiControllerProcessRole],
       evidencePath: "/install/bin/rika",
     })
-    expect(runtimes["local-executor"]).toEqual({
+    expect(runtimes["runner-executor"]).toEqual({
       executable: "/install/bin/rika",
-      arguments: [localExecutorProcessRole],
+      arguments: [runnerExecutorProcessRole],
       evidencePath: "/install/bin/rika",
     })
     expect(runtimes.launcher.executable).toBe("/install/bin/rika")
@@ -53,15 +53,15 @@ describe("performance role runtime resolution", () => {
     expect(
       matchesRole({ command: `/install/bin/rika ${tuiControllerProcessRole}`, runtime: runtimes.interactive }),
     ).toBe(true)
-    expect(matchesRole({ command: `/install/bin/rika ${localExecutorProcessRole}`, runtime: runtimes.launcher })).toBe(
+    expect(matchesRole({ command: `/install/bin/rika ${runnerExecutorProcessRole}`, runtime: runtimes.launcher })).toBe(
       false,
     )
     expect(
       matchesRole({
-        command: `/install/bin/rika ${localExecutorProcessRole}`,
-        runtime: runtimes["local-executor"],
+        command: `/install/bin/rika ${runnerExecutorProcessRole}`,
+        runtime: runtimes["runner-executor"],
       }),
     ).toBe(true)
-    expect(matchesRole({ command: "/install/bin/rika", runtime: runtimes["local-executor"] })).toBe(false)
+    expect(matchesRole({ command: "/install/bin/rika", runtime: runtimes["runner-executor"] })).toBe(false)
   })
 })

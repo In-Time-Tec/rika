@@ -46,7 +46,7 @@ describe("hosted authorization policy", () => {
       const subject: AuthorizationSubject = {
         memberId,
         threadRole: role,
-        executorKind: "local_device",
+        executorKind: "runner",
         inheritProjectGrants: false,
       }
       expect(threadActions.map((action) => isAuthorized(subject, action))).toEqual(threadExpected[role])
@@ -57,7 +57,7 @@ describe("hosted authorization policy", () => {
     const subject: AuthorizationSubject = {
       memberId,
       threadCreatorMemberId: memberId,
-      executorKind: "local_device",
+      executorKind: "runner",
       inheritProjectGrants: false,
     }
     expect(threadActions.every((action) => isAuthorized(subject, action))).toBe(true)
@@ -65,10 +65,8 @@ describe("hosted authorization policy", () => {
 
   it("inherits project grants only for remote threads that opted in", () => {
     const base = { memberId, threadCreatorMemberId: creatorId, projectRole: "operator" as const }
-    expect(isAuthorized({ ...base, executorKind: "e2b", inheritProjectGrants: true }, "thread:operate")).toBe(true)
-    expect(isAuthorized({ ...base, executorKind: "e2b", inheritProjectGrants: false }, "thread:view")).toBe(false)
-    expect(isAuthorized({ ...base, executorKind: "local_device", inheritProjectGrants: true }, "thread:view")).toBe(
-      false,
-    )
+    expect(isAuthorized({ ...base, executorKind: "orb", inheritProjectGrants: true }, "thread:operate")).toBe(true)
+    expect(isAuthorized({ ...base, executorKind: "orb", inheritProjectGrants: false }, "thread:view")).toBe(false)
+    expect(isAuthorized({ ...base, executorKind: "runner", inheritProjectGrants: true }, "thread:view")).toBe(false)
   })
 })

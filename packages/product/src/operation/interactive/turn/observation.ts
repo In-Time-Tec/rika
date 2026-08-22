@@ -213,7 +213,7 @@ export interface InteractiveSupervisionInput {
   readonly notifyTurnChanged: InteractiveSessionInput["notifyTurnChanged"]
   readonly claimTurnObserver: InteractiveSessionInput["claimTurnObserver"]
   readonly observeTurn: ReturnType<typeof makeInteractiveFollowing>["observeTurn"]
-  readonly serverOwner: boolean
+  readonly recoveryOwner: boolean
   readonly sessionThreadViews: Map<number, () => string | undefined>
   readonly sessionId: number
   readonly getSelectedThreadId: () => string | undefined
@@ -237,7 +237,7 @@ export const makeInteractiveSupervision = (
     settleThread,
     notifyTurnChanged,
     observeTurn,
-    serverOwner,
+    recoveryOwner,
     sessionThreadViews,
     sessionId,
     getSelectedThreadId,
@@ -246,7 +246,7 @@ export const makeInteractiveSupervision = (
     queueMutationEvent,
     initialized,
   } = input
-  const observedDispatch = serverOwner ? (_event: InteractiveEvent) => {} : operationFeed.sessionDispatch
+  const observedDispatch = recoveryOwner ? (_event: InteractiveEvent) => {} : operationFeed.sessionDispatch
   const publishObserved = (event: InteractiveEvent) => operationFeed.emit(observedDispatch, event)
   const publishSteeringRejection = (rejection: SteeringAdmissionRejection) => {
     if (rejection.queue !== undefined) publishObserved(queueMutationEvent(rejection.queue))
@@ -370,7 +370,7 @@ export const makeInteractiveSupervision = (
           ),
         )
       const recover = Effect.gen(function* () {
-        if (serverOwner) {
+        if (recoveryOwner) {
           yield* rootTurnOwner.recoverExecutionAdmissions
           yield* launchSteeringRecovery
         }
@@ -398,7 +398,7 @@ export const makeInteractiveSupervision = (
         }
       })
       const scanDirty = Effect.gen(function* () {
-        if (serverOwner) yield* launchSteeringRecovery
+        if (recoveryOwner) yield* launchSteeringRecovery
         const dirty = [...dirtyTurnObservers]
         dirtyTurnObservers.clear()
         for (const turnId of dirty) {
@@ -435,8 +435,8 @@ export const makeInteractiveSupervision = (
       ),
     ),
   )
-  if (serverOwner !== true) sessionThreadViews.set(sessionId, () => getSelectedThreadId())
-  if (serverOwner !== true)
+  if (recoveryOwner !== true) sessionThreadViews.set(sessionId, () => getSelectedThreadId())
+  if (recoveryOwner !== true)
     interactiveSinks.set(sessionId, (_origin: number, event: InteractiveEvent) => {
       const threadId = interactiveEventThreadId(event)
       if (threadId !== undefined && operationFeed.bufferSelectionEvent(event) === true) return

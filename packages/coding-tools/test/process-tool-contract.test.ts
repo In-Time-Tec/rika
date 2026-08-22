@@ -9,7 +9,9 @@ describe("process tool contracts", () => {
       properties: {
         timeout_ms: {
           type: "integer",
-          allOf: [{ minimum: 0 }, { maximum: 60_000, description: expect.stringContaining("start in the background") }],
+          minimum: 0,
+          maximum: 60_000,
+          description: expect.stringContaining("start in the background"),
         },
       },
     })
@@ -19,7 +21,9 @@ describe("process tool contracts", () => {
           anyOf: [
             {
               type: "integer",
-              allOf: [{ minimum: 0 }, { maximum: 10_000, description: expect.stringContaining("blind long wait") }],
+              minimum: 0,
+              maximum: 10_000,
+              description: expect.stringContaining("blind long wait"),
             },
             { type: "null" },
           ],

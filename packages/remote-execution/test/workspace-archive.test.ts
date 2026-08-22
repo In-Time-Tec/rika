@@ -62,13 +62,10 @@ describe("Workspace archive", () => {
           yield* fileSystem.writeFileString(`${source}/output.txt`, "safe")
           const archive = yield* createArchive(source)
           expect(
-            (yield* Effect.flip(
-              restoreArchive(source, { ...archive, contentDigest: `sha256:${"0".repeat(64)}` }, []),
-            )).kind,
+            (yield* Effect.flip(restoreArchive(source, { ...archive, contentDigest: `sha256:${"0".repeat(64)}` }, [])))
+              .kind,
           ).toBe("archive")
-        }).pipe(
-          Effect.ensuring(fileSystem.remove(source, { recursive: true, force: true }).pipe(Effect.ignore)),
-        )
+        }).pipe(Effect.ensuring(fileSystem.remove(source, { recursive: true, force: true }).pipe(Effect.ignore)))
       }),
     ),
   )

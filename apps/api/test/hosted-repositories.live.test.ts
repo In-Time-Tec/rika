@@ -195,12 +195,12 @@ it.effect.skipIf(databaseUrl === undefined)(
         yield* Effect.promise(() =>
           pool.query(`INSERT INTO rika_hosted_workspaces
               (id, owner_id, project_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
-              VALUES ('workspace-personal', 'owner-personal', 'project-personal', 'user-1', 'e2b', true, now());
+              VALUES ('workspace-personal', 'owner-personal', 'project-personal', 'user-1', 'orb', true, now());
             INSERT INTO rika_hosted_threads
               (id, owner_id, project_id, workspace_id, created_by_user_id, executor_kind,
                 inherit_project_grants, created_at)
               VALUES ('thread-personal', 'owner-personal', 'project-personal', 'workspace-personal',
-                'user-1', 'e2b', true, now())`),
+                'user-1', 'orb', true, now())`),
         )
         yield* Effect.promise(() =>
           pool.query(
@@ -208,8 +208,8 @@ it.effect.skipIf(databaseUrl === undefined)(
               (id, owner_id, thread_id, workspace_id, executor_kind, placement, checkout, generation, revision,
                 last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
                 session_digest, lease_epoch, lease_expires_at)
-              VALUES ('assignment-personal', 'owner-personal', 'thread-personal', 'workspace-personal', 'e2b',
-                '{"_tag":"E2BPlacement","templateBuildId":"build-personal"}'::jsonb, $1::jsonb,
+              VALUES ('assignment-personal', 'owner-personal', 'thread-personal', 'workspace-personal', 'orb',
+                '{"_tag":"OrbPlacement","templateBuildId":"build-personal"}'::jsonb, $1::jsonb,
                 1, 1, 1, 'active', 'provider-personal', 'executor-personal', 'process-personal',
                 'session-personal', 1, now() + interval '5 minutes')`,
             [personalCheckout],

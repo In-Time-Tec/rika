@@ -7,12 +7,12 @@ import {
   FilesystemCheckpoint,
   ExecutorMessage,
   BranchPushRequest,
-  LocalExecutorMessage,
+  RunnerMessage,
 } from "../src/protocol"
 import { workspaceCapabilities } from "./support/workspace-capabilities"
 
 const fence = {
-  target: "e2b" as const,
+  target: "orb" as const,
   assignmentId: "assignment-1",
   assignmentGeneration: 1,
   instanceId: "sandbox-1",
@@ -24,7 +24,7 @@ describe("executor protocol v1", () => {
   it.effect("accepts both execution targets and rejects every other protocol version", () =>
     Effect.gen(function* () {
       const decode = Schema.decodeUnknownEffect(ExecutorMessage)
-      for (const target of ["local_device", "e2b"] as const) {
+      for (const target of ["runner", "orb"] as const) {
         for (const lifecycle of ["fresh", "resume", "replacement"] as const) {
           const message = yield* decode({
             _tag: "ExecutorHello",
@@ -34,7 +34,7 @@ describe("executor protocol v1", () => {
               minimumVersion: 1,
               maximumVersion: 1,
               fence: { ...fence, target },
-              templateBuildId: target === "e2b" ? "build-1" : null,
+              templateBuildId: target === "orb" ? "build-1" : null,
               capabilities: { cells: true, checkpoints: true, pty: true },
               workspaceCapabilities,
               cursors: { command: 0, event: 0, pty: 0 },
@@ -169,8 +169,8 @@ describe("executor protocol v1", () => {
 
   it.effect("keeps local admission frames out of the E2B executor decoder", () =>
     Effect.gen(function* () {
-      const local = LocalExecutorMessage.make({
-        _tag: "LocalExecutorHello",
+      const local = RunnerMessage.make({
+        _tag: "RunnerHello",
         hello: {
           admissionId: "admission-1",
           ticket: "one-use-ticket",
@@ -180,7 +180,7 @@ describe("executor protocol v1", () => {
           cursors: { command: 0, event: 0, pty: 0 },
         },
       })
-      expect(yield* Schema.decodeUnknownEffect(LocalExecutorMessage)(local)).toEqual(local)
+      expect(yield* Schema.decodeUnknownEffect(RunnerMessage)(local)).toEqual(local)
       expect((yield* Effect.flip(Schema.decodeUnknownEffect(ExecutorMessage)(local))).issue).toBeDefined()
     }),
   )
@@ -244,12 +244,12 @@ describe("executor protocol v1", () => {
     Effect.gen(function* () {
       const localAccess = {
         version: 1 as const,
-        fence: { ...fence, target: "local_device" as const },
+        fence: { ...fence, target: "runner" as const },
         leaseEpoch: 1,
         sessionToken: "session",
       }
       const goodbye = {
-        _tag: "LocalExecutorGoodbye" as const,
+        _tag: "RunnerGoodbye" as const,
         access: localAccess,
       }
       const receipt = {
@@ -258,11 +258,11 @@ describe("executor protocol v1", () => {
         operationKey: "operation-1",
         attempt: 0,
       }
-      expect(yield* Schema.decodeUnknownEffect(LocalExecutorMessage)(goodbye)).toEqual(goodbye)
+      expect(yield* Schema.decodeUnknownEffect(RunnerMessage)(goodbye)).toEqual(goodbye)
       expect(yield* Schema.decodeUnknownEffect(ApiMessage)(receipt)).toEqual(receipt)
       expect(
         (yield* Effect.flip(
-          Schema.decodeUnknownEffect(LocalExecutorMessage)({
+          Schema.decodeUnknownEffect(RunnerMessage)({
             _tag: "PtyOpened",
             access: localAccess,
             pty: { ptyId: "pty-1", command: "bash", cwd: "/tmp", cols: 80, rows: 24 },

@@ -31,6 +31,21 @@ const layout = (title: string, page: string, content: string, attributes: Readon
 </html>`
 }
 
+export const threadsPage = () => `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Threads · Rika</title>
+  <link rel="stylesheet" href="/assets/thread-client.css">
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/assets/thread-client.js"></script>
+</body>
+</html>`
+
 const field = (input: {
   readonly id: string
   readonly label: string
@@ -196,6 +211,7 @@ export const accountPage = () =>
     "Account",
     "account",
     `<h1>Your account</h1>
+<p><a href="/threads">Open Threads</a></p>
 <section id="account">Loading account…</section>
 <button id="logout" class="secondary" type="button">Log out</button>`,
   )

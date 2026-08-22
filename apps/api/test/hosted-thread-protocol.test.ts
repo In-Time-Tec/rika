@@ -29,7 +29,7 @@ import {
 } from "@rika/product/thread-protocol-store"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId } from "@rika/product/turn-record"
-import { HostedOperations, type HostedOperationsService } from "../src/hosted-operations"
+import { HostedThreadApplication, type HostedThreadApplicationService } from "../src/hosted-thread-application"
 import { HostedProduct, type HostedProductService, type OwnerSelection } from "../src/hosted-product"
 import { HostedThreadProtocol, layer as hostedThreadProtocolLayer } from "../src/hosted-thread-protocol"
 import { layer as hostedStoreLayer } from "@rika/product-store/memory-store"
@@ -177,9 +177,11 @@ it.effect("derives personal authority, admits a retried submission once, and res
   const admittedRuns: Array<Parameters<HostedProductService["admitRun"]>[0]> = []
   const authorizedActions: Array<AuthorizationAction> = []
   const workspaceRequests: Array<string> = []
+  const workspaceLifecycle: Array<"paused" | "resumed"> = []
   const product: HostedProductService = {
     ready: Effect.void,
     projects: () => Effect.succeed([]),
+    createProject: () => Effect.die("unused"),
     activatePrincipal: () => Effect.void,
     authorizeThread: (_principal, _threadId, action) =>
       Effect.sync(() => {
@@ -190,11 +192,11 @@ it.effect("derives personal authority, admits a retried submission once, and res
       Effect.succeed({
         repository: { identity: "repository-1", branch: "main" },
         branch: "main",
-        executor: { assignmentId, kind: "local_device", generation: "1" },
+        executor: { assignmentId, kind: "runner", generation: "1" },
       }),
-    registerLocalRunner: () => Effect.die("unused"),
+    registerRunner: () => Effect.die("unused"),
     setRemoteThreadCreation: () => Effect.die("unused"),
-    pollLocalRunner: () => Effect.die("unused"),
+    pollRunner: () => Effect.die("unused"),
     createConnection: (input) => {
       selectedOwner = input.owner
       return Effect.succeed({ threadId })
@@ -205,8 +207,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
         return { commandId: input.operationKey, turnId: `turn-${input.operationKey}`, status: "queued" as const }
       }),
   }
-  const operations: HostedOperationsService = {
-    run: () => Effect.void,
+  const operations: HostedThreadApplicationService = {
     thread: () => Effect.succeed(snapshot.thread),
     snapshot: () => Effect.succeed(snapshot),
     interactive: (input) => {
@@ -216,7 +217,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
   }
   const dependencies = Layer.mergeAll(
     Layer.succeed(HostedProduct, product),
-    Layer.succeed(HostedOperations, operations),
+    Layer.succeed(HostedThreadApplication, operations),
     Layer.succeed(
       HostedWorkspace,
       HostedWorkspace.of({
@@ -240,6 +241,9 @@ it.effect("derives personal authority, admits a retried submission once, and res
               serviceId: request._tag === "RepositoryServiceEnsure" ? request.service.serviceId : request.serviceId,
             }
           }),
+        pause: () => Effect.sync(() => void workspaceLifecycle.push("paused")),
+        resume: () => Effect.sync(() => void workspaceLifecycle.push("resumed")),
+        portal: (_threadId, port) => Effect.succeed(`https://${port}-orb.e2b.app`),
       }),
     ),
     Layer.succeed(ThreadProtocolStore, store),
@@ -263,8 +267,8 @@ it.effect("derives personal authority, admits a retried submission once, and res
           idempotencyKey: "create-key" as never,
           expectedThreadVersion: ThreadVersion.make("0"),
           owner: { kind: "personal" },
-          executorKind: "local_device",
-          localRunnerTarget: { deviceId: "device-1" as never, checkoutFingerprint: "checkout-1" as never },
+          executorKind: "runner",
+          runnerTarget: { deviceId: "device-1" as never, checkoutFingerprint: "checkout-1" as never },
         },
       })
       expect(created[0]?.payload).toMatchObject({ _tag: "CommandAccepted", threadVersion: "1" })
@@ -384,6 +388,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
           },
         },
         { payload: { _tag: "ThreadEvent", event: { cursor: "2", event: { _tag: "ExecutionControlled" } } } },
+        { payload: { _tag: "PresenceSnapshot", participants: [] } },
       ])
       expect(
         (yield* second.receive({
@@ -444,6 +449,43 @@ it.effect("derives personal authority, admits a retried submission once, and res
       ).toMatchObject({ _tag: "CommandAccepted", threadVersion: "5" })
       expect(authorizedActions).toContain("workspace:service:control")
       expect(workspaceRequests).toEqual(["WorkspaceFileInspect", "RepositoryServiceEnsure"])
+      const pauseOrb = {
+        protocolVersion: 1 as const,
+        requestId: "request-pause-orb" as never,
+        command: {
+          _tag: "PauseOrb" as const,
+          commandId: CommandId.make("pause-orb-1"),
+          idempotencyKey: "pause-orb-key" as never,
+          expectedThreadVersion: ThreadVersion.make("5"),
+        },
+      }
+      expect((yield* first.receive(pauseOrb))[0]?.payload).toMatchObject({
+        _tag: "CommandAccepted",
+        threadVersion: "6",
+      })
+      expect(
+        (yield* first.receive({
+          protocolVersion: 1,
+          requestId: "request-resume-orb" as never,
+          command: {
+            _tag: "ResumeOrb",
+            commandId: CommandId.make("resume-orb-1"),
+            idempotencyKey: "resume-orb-key" as never,
+            expectedThreadVersion: ThreadVersion.make("6"),
+          },
+        }))[0]?.payload,
+      ).toMatchObject({ _tag: "CommandAccepted", threadVersion: "7" })
+      expect(
+        (yield* first.receive({
+          protocolVersion: 1,
+          requestId: "request-portal" as never,
+          command: { _tag: "OpenPortal", port: 3000 },
+        }))[0]?.payload,
+      ).toMatchObject({
+        _tag: "PortalOpened",
+        port: 3000,
+        url: "https://3000-orb.e2b.app",
+      })
     }),
   )
 })
@@ -475,6 +517,7 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
   const product: HostedProductService = {
     ready: Effect.void,
     projects: () => Effect.succeed([]),
+    createProject: () => Effect.die("unused"),
     activatePrincipal: () => Effect.void,
     createConnection: () => Effect.die("unused"),
     authorizeThread: () => Effect.succeed({ ownerId, actor }),
@@ -482,15 +525,14 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
       Effect.succeed({
         repository: { identity: "In-Time-Tec/rika", branch: "feature/thread-controls" },
         branch: "feature/thread-controls",
-        executor: { assignmentId, kind: "e2b", generation: "7" },
+        executor: { assignmentId, kind: "orb", generation: "7" },
       }),
-    registerLocalRunner: () => Effect.die("unused"),
+    registerRunner: () => Effect.die("unused"),
     setRemoteThreadCreation: () => Effect.die("unused"),
-    pollLocalRunner: () => Effect.die("unused"),
+    pollRunner: () => Effect.die("unused"),
     admitRun: () => Effect.die("unused"),
   }
-  const operations: HostedOperationsService = {
-    run: () => Effect.void,
+  const operations: HostedThreadApplicationService = {
     thread: () => Effect.succeed(currentSnapshot.thread),
     interactive: (input: { readonly command: InteractiveCommand }) =>
       Effect.sync(() => {
@@ -503,8 +545,16 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
 
   const dependencies = Layer.mergeAll(
     Layer.succeed(HostedProduct, product),
-    Layer.succeed(HostedOperations, operations),
-    Layer.succeed(HostedWorkspace, HostedWorkspace.of({ execute: () => Effect.die("unused") })),
+    Layer.succeed(HostedThreadApplication, operations),
+    Layer.succeed(
+      HostedWorkspace,
+      HostedWorkspace.of({
+        execute: () => Effect.die("unused"),
+        pause: () => Effect.void,
+        resume: () => Effect.void,
+        portal: () => Effect.die("unused"),
+      }),
+    ),
     Layer.succeed(ThreadProtocolStore, store),
     hostedStoreLayer,
     Layer.succeed(HostedToolPolicy, {
@@ -525,7 +575,10 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
         requestId: RequestId.make("attach-authorization"),
         command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
       })
-      expect(attached).toMatchObject([{ payload: { _tag: "ThreadSnapshot", snapshot: currentSnapshot } }])
+      expect(attached).toMatchObject([
+        { payload: { _tag: "ThreadSnapshot", snapshot: currentSnapshot } },
+        { payload: { _tag: "PresenceSnapshot", participants: [] } },
+      ])
 
       const approve = {
         protocolVersion: 1 as const,
@@ -566,7 +619,7 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
           arguments: '{"exact":"request"}',
           repository: { identity: "In-Time-Tec/rika", branch: "feature/thread-controls" },
           branch: "feature/thread-controls",
-          executor: { assignmentId, kind: "e2b", generation: "7" },
+          executor: { assignmentId, kind: "orb", generation: "7" },
           decision: "approve",
           result: { _tag: "Delivered" },
         },

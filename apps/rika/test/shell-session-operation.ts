@@ -1,9 +1,8 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as InteractiveSession from "@rika/product/interactive-session"
-import * as Database from "@rika/product-store/product-database-layer"
-import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
-import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
-import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as ThreadRepository from "@rika/product-store/postgres-thread-repository"
+import * as TranscriptRepository from "@rika/product-store/postgres-transcript-repository"
+import * as TurnRepository from "@rika/product-store/postgres-turn-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
@@ -28,27 +27,18 @@ export const startShellOperation = Effect.fn("ShellSession.startOperation")(func
   readonly fileSystem: FileSystem.FileSystem
   readonly path: Path.Path
 }) {
-  const { fileSystem, path } = input
+  const { fileSystem } = input
 
   const temporaryDirectory = yield* Config.string("TMPDIR").pipe(Config.withDefault("/tmp"))
   const workspace = yield* fileSystem.makeTempDirectoryScoped({
     directory: temporaryDirectory,
     prefix: "rika-shell-session-",
   })
-  const filename = path.join(workspace, "rika.db")
-  const database = Database.layer(filename)
-  const repositoryLayer: Layer.Layer<ThreadRepository.Service, never, never> = ThreadRepository.layer.pipe(
-    Layer.provide(database),
-    Layer.provide(BunServices.layer),
+  const repositoryLayer: Layer.Layer<ThreadRepository.Service> = ThreadRepository.memoryLayer().pipe(Layer.orDie)
+  const turnRepositoryLayer: Layer.Layer<TurnRepository.Service> = TurnRepository.memoryLayer().pipe(Layer.orDie)
+  const transcriptRepositoryLayer: Layer.Layer<TranscriptRepository.Service> = TranscriptRepository.memoryLayer().pipe(
     Layer.orDie,
   )
-  const turnRepositoryLayer: Layer.Layer<TurnRepository.Service, never, never> = TurnRepository.layer.pipe(
-    Layer.provide(database),
-    Layer.provide(BunServices.layer),
-    Layer.orDie,
-  )
-  const transcriptRepositoryLayer: Layer.Layer<TranscriptRepository.Service, never, never> =
-    TranscriptRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer), Layer.orDie)
   const sessionReady = yield* Deferred.make<InteractiveSession.InteractiveSession>()
   const releaseSession = yield* Deferred.make<void>()
   let nextTurn = 0
@@ -66,11 +56,16 @@ export const startShellOperation = Effect.fn("ShellSession.startOperation")(func
         return { status: "unavailable" as const }
       }),
   })
+  const repositories: RepositoryContext = yield* Layer.buildWithScope(
+    Layer.mergeAll(repositoryLayer, turnRepositoryLayer, transcriptRepositoryLayer),
+    yield* Effect.scope,
+  )
+  const sharedRepositories = Layer.succeedContext(repositories)
   const operationLayer: Layer.Layer<Service, never, never> = productLayer({
     executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
-    repositoryLayer,
-    turnRepositoryLayer,
-    transcriptRepositoryLayer,
+    repositoryLayer: sharedRepositories,
+    turnRepositoryLayer: sharedRepositories,
+    transcriptRepositoryLayer: sharedRepositories,
     backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
     toolRuntimeLayer: (directory) =>
       ToolRuntime.layer(directory).pipe(
@@ -92,10 +87,6 @@ export const startShellOperation = Effect.fn("ShellSession.startOperation")(func
   const operation: OperationServiceInterface = Context.get(
     yield* Layer.buildWithScope(operationLayer, yield* Effect.scope),
     Service,
-  )
-  const repositories: RepositoryContext = yield* Layer.buildWithScope(
-    Layer.mergeAll(repositoryLayer, turnRepositoryLayer, transcriptRepositoryLayer),
-    yield* Effect.scope,
   )
   const operationFiber = yield* Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }))
   const session = yield* Deferred.await(sessionReady)

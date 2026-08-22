@@ -4,7 +4,7 @@ import { Cells, layer, type State } from "../src/cells"
 import { CellRequest } from "../src/protocol"
 
 const fence = {
-  target: "e2b" as const,
+  target: "orb" as const,
   assignmentId: "assignment-1",
   assignmentGeneration: 1,
   instanceId: "sandbox-1",

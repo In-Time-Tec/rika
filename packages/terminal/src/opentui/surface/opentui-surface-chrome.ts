@@ -117,12 +117,13 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
             : undefined,
         ) ??
         panelLoading(current)
-      if (label !== undefined)
+      if (label !== undefined) {
         this.statusLabel.content = new StyledText([
           fg(toOpenColor(colors.text))(" "),
           fg(toOpenColor(colors.blue))(loaderFrame(label, current.animationTick + this.loaderController.phase)),
           dim(fg(toOpenColor(colors.text))(` ${label} `)),
         ])
+      }
       const glyph = this.toolSpinner.toBraille()
       if (current.busy) this.publishWorkingFrame(glyph)
       if (current.usageDisplay === "time" && current.usageTime?._tag === "Available") this.renderModeLabel(current)
