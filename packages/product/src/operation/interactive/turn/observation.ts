@@ -389,6 +389,13 @@ export const makeInteractiveSupervision = (
           setTurnStatus: setSettledStatus,
         }).pipe(Effect.mapError((error) => operationError(String(error), error)))
         for (const turn of reconciled.active) yield* launch(turn)
+        const threads = yield* ThreadRepository.Service
+        for (const threadId of new Set(reconciled.settledThreads)) {
+          const thread = yield* threads
+            .get(threadId)
+            .pipe(Effect.mapError((error) => operationError(String(error), error)))
+          if (thread !== undefined) yield* settleThread(thread, publishObserved)
+        }
       })
       const scanDirty = Effect.gen(function* () {
         if (serverOwner) yield* launchSteeringRecovery

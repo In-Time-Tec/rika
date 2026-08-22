@@ -64,10 +64,10 @@ it.effect("settles every stale nonterminal Turn whose durable execution is missi
 
     const first = yield* reconcile()
     expect(first.active).toEqual([])
-    const settled = staleTurns.slice(1)
-    const untouched = staleTurns[0]!
+    expect(first.settledThreads).toEqual(staleTurns.map((turn) => turn.threadId))
+    const settled = staleTurns
     expect((yield* Effect.forEach(staleTurns, (turn) => turns.get(turn.id))).map((turn) => turn?.status)).toEqual([
-      "accepted",
+      "failed",
       "failed",
       "failed",
       "failed",
@@ -100,13 +100,13 @@ it.effect("settles every stale nonterminal Turn whose durable execution is missi
 
     const second = yield* reconcile()
     expect(second.active).toEqual([])
+    expect(second.settledThreads).toEqual([])
     expect(yield* Ref.get(inspectCount)).toBe(inspected)
     for (const turn of settled) {
       const projection = yield* transcripts.get(turn.id)
       const failures = projection?.units.filter((unit) => unit.executionOutcome?.status === "failed") ?? []
       expect(failures).toHaveLength(1)
     }
-    expect((yield* transcripts.get(untouched.id))?.units ?? []).toHaveLength(0)
   }),
 )
 

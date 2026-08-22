@@ -1,5 +1,6 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionStatus from "@rika/product/execution-status"
+import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
@@ -11,6 +12,7 @@ export const missingExecutionMessage = "The durable execution for this Turn is u
 
 export interface Result {
   readonly active: ReadonlyArray<Turn.AgentExecutionTurn>
+  readonly settledThreads: ReadonlyArray<Thread.ThreadId>
 }
 
 export interface Input {
@@ -82,6 +84,7 @@ export const make = Effect.fn("ExecutionAuthorityReconciliation.make")(function*
   })
   const reconcile = Effect.gen(function* () {
     const active = new Array<Turn.AgentExecutionTurn>()
+    const settledThreads = new Array<Thread.ThreadId>()
     const candidates = new Map<string, Turn.AgentExecutionTurn>()
     for (const turn of yield* input.turns.listNonterminal) {
       if (turn._tag === "AgentExecution" && turn.status !== "queued") candidates.set(String(turn.id), turn)
@@ -92,9 +95,11 @@ export const make = Effect.fn("ExecutionAuthorityReconciliation.make")(function*
       if (turn?._tag === "AgentExecution") candidates.set(String(turn.id), turn)
     }
     for (const turn of candidates.values()) {
-      // A Turn without an execution link (for example a forked copy of an active thread) has no
-      // TenetKit authority to reconcile against; leave it untouched so fork semantics stay intact.
-      if (turn.executionLink === undefined) continue
+      if (turn.executionLink === undefined) {
+        yield* settleMissing(turn, "execution-link-missing")
+        settledThreads.push(turn.threadId)
+        continue
+      }
       const inspected = yield* Effect.result(input.backend.inspectTurn(turn.executionLink))
       if (inspected._tag === "Failure") {
         yield* Effect.logWarning("execution.authority.inspect_failed").pipe(
@@ -103,15 +108,19 @@ export const make = Effect.fn("ExecutionAuthorityReconciliation.make")(function*
             "rika.failure.kind": String(inspected.failure),
           }),
         )
+        active.push(turn)
         continue
       }
       if (inspected.success.status === "unavailable") {
-        if (!ExecutionStatus.isTerminalStatus(turn.status)) yield* settleMissing(turn, "execution-run-missing")
+        if (!ExecutionStatus.isTerminalStatus(turn.status)) {
+          yield* settleMissing(turn, "execution-run-missing")
+          settledThreads.push(turn.threadId)
+        }
         continue
       }
       active.push(turn)
     }
-    return { active } satisfies Result
+    return { active, settledThreads } satisfies Result
   }).pipe(Effect.withSpan("ExecutionAuthorityReconciliation.reconcile"))
   return yield* admission.withPermits(1)(reconcile)
 })

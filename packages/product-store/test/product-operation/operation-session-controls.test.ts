@@ -6,7 +6,7 @@ import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import { Deferred, Effect, Layer, Ref, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
 import { executionRoute } from "../support/product-test-current-state"
@@ -377,6 +377,88 @@ describe("Operation", () => {
       })
       expect(yield* turns.get(Turn.TurnId.make("queued-control-2"))).toBeUndefined()
       expect(yield* turns.get(Turn.TurnId.make("submitted-control"))).toMatchObject({ status: "completed" })
+    }),
+  )
+
+  it.effect("force-settles a timed-out cancellation and drains the queued successor", () =>
+    Effect.gen(function* () {
+      const thread: Thread.Thread = {
+        id: Thread.ThreadId.make("timed-out-cancellation"),
+        lineage: threadLineage,
+        workspace: "/work",
+        title: "Timed out cancellation",
+        labels: [],
+        pinned: false,
+        archived: false,
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      const activeId = Turn.TurnId.make("timed-out-active")
+      const queuedId = Turn.TurnId.make("after-timed-out-cancel")
+      const turns = yield* TurnRepository.makeMemory([
+        {
+          id: activeId,
+          ...turnProvenance,
+          threadId: thread.id,
+          prompt: "active",
+          executionRoute: executionRoute(),
+          executionLink: { runId: "timed-out-run", turnId: activeId, threadId: thread.id },
+          status: "running",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: queuedId,
+          ...turnProvenance,
+          threadId: thread.id,
+          prompt: "run after cancellation",
+          executionRoute: executionRoute(),
+          status: "queued",
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const cancellationStarted = yield* Deferred.make<void>()
+      const timedOutBackend = ExecutionGateway.Service.of({
+        ...backend,
+        inspectTurn: (link) =>
+          link.turnId === activeId
+            ? Effect.succeed({ status: "running", cursor: "timed-out-running" })
+            : backend.inspectTurn(link),
+        watchTurn: (link, input) => (link.turnId === activeId ? Stream.never : backend.watchTurn(link, input)),
+        cancelTurn: () => Deferred.succeed(cancellationStarted, undefined).pipe(Effect.andThen(Effect.never)),
+      })
+      const scenario = Effect.gen(function* () {
+        const session = yield* openInteractiveSession(sessions, {
+          _tag: "Interactive",
+          prompt: [],
+          ephemeral: false,
+        })
+        yield* session.selectThread(thread.id)
+        const cancellation = yield* Effect.forkChild(session.cancel)
+        yield* Deferred.await(cancellationStarted)
+        yield* TestClock.adjust("11 seconds")
+        yield* Fiber.join(cancellation)
+      }).pipe(
+        provideLayer(
+          productLayer({
+            executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
+            repositoryLayer: ThreadRepository.memoryLayer([thread]),
+            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+            backendLayer: Layer.succeed(ExecutionGateway.Service, timedOutBackend),
+            defaultWorkspace: "/work",
+            makeThreadId: Effect.die("unused"),
+            makeTurnId: Effect.die("unused"),
+            interactive: holdSession(sessions),
+          }),
+        ),
+      )
+
+      yield* scenario
+      expect(yield* turns.get(activeId)).toMatchObject({ status: "cancelled" })
+      expect(yield* turns.get(queuedId)).toMatchObject({ status: "completed" })
+      expect(yield* turns.readQueue(thread.id)).toMatchObject({ queuedCount: 0 })
     }),
   )
 

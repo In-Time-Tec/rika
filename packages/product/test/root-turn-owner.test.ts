@@ -521,7 +521,7 @@ it.effect("recovers every dual-database admission crash window into one idempote
   }),
 )
 
-it.effect("continues execution admission recovery after an unrelated admission fails", () =>
+it.effect("retries a failed execution admission without blocking unrelated recovery", () =>
   Effect.gen(function* () {
     const admission = (id: string): ExecutionGateway.StartTurn => ({
       threadId: `thread-${id}`,
@@ -557,8 +557,11 @@ it.effect("continues execution admission recovery after an unrelated admission f
         }),
     } as unknown as ExecutionGateway.Interface
     const owner = yield* make(repository, {} as TranscriptRepository.Interface, gateway)
-    yield* owner.recoverExecutionAdmissions
-    expect(attempts).toEqual(["turn-stale", "turn-current"])
+    const recovery = yield* Effect.forkChild(owner.recoverExecutionAdmissions)
+    yield* TestClock.adjust("1 second")
+    yield* Fiber.join(recovery)
+    expect(attempts.filter((turnId) => turnId === stale.turnId)).toHaveLength(4)
+    expect(attempts.filter((turnId) => turnId === current.turnId)).toHaveLength(1)
     expect(attached).toEqual(["turn-current"])
   }),
 )

@@ -251,6 +251,11 @@ describe("Operation", () => {
           threadId: source.id,
           prompt: "source active",
           executionRoute: executionRoute(),
+          executionLink: {
+            runId: "atomic-fork-active-run",
+            turnId: "atomic-fork-active",
+            threadId: source.id,
+          },
           status: "running",
           createdAt: 1,
           updatedAt: 1,

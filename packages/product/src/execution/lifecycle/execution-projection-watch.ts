@@ -9,6 +9,29 @@ import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Cause, Clock, Effect, Stream } from "effect"
 
 export const DefectMaxConsecutiveAttempts = 3
+export const StallMaxSilenceMs = 15 * 60_000
+
+const stalledUnit = (turn: Turn.AgentExecutionTurn, revision: number, silenceMs: number): TranscriptUnit.Unit => {
+  const key = `turn:${turn.id}:execution-stalled`
+  return {
+    key,
+    turnId: turn.id,
+    order: TranscriptOrdering.unitOrder(key, Number.MAX_SAFE_INTEGER),
+    revision,
+    executionOutcome: { status: "failed", reason: "The durable Execution stopped reporting progress." },
+    content: {
+      _tag: "Block",
+      block: {
+        _tag: "Error",
+        title: "Execution stalled",
+        detail: `No execution progress for ${Math.round(silenceMs / 1_000)} seconds; Rika settled this Turn as failed.`,
+        turnId: turn.id,
+        category: "execution-stalled",
+        retryable: false,
+      },
+    },
+  }
+}
 
 const defectUnit = (turn: Turn.AgentExecutionTurn, revision: number, detail: string): TranscriptUnit.Unit => {
   const key = `turn:${turn.id}:projection-defect`
@@ -39,9 +62,12 @@ export const watch = (input: {
   readonly backend: ExecutionGateway.Interface
   readonly onChange?: (change: ExecutionProjection.Change) => void
   readonly onPreview?: (preview: ExecutionGateway.ModelPreviewEvent) => void
+  readonly stallSilenceMs?: number | undefined
 }) =>
   Effect.gen(function* () {
     const { backend, onChange, onPreview, transcripts, turnId, turns } = input
+    const stallSilenceMs = input.stallSilenceMs ?? StallMaxSilenceMs
+    const clock = yield* Clock.Clock
     const turn = yield* turns.get(turnId)
     if (turn === undefined || turn._tag !== "AgentExecution" || turn.executionLink === undefined)
       return yield* ExecutionGateway.WatchTurnFailure.make({
@@ -56,8 +82,28 @@ export const watch = (input: {
     let latestChange: ExecutionProjection.Change | undefined
     let retryDelay = 100
     let consecutiveDefects = 0
+    let lastProgressAt = yield* clock.currentTimeMillis
+    const settleStalled = Effect.fn("ExecutionProjectionWatch.settleStalled")(function* (silenceMs: number) {
+      const projection = yield* transcripts.get(turnId)
+      const now = yield* clock.currentTimeMillis
+      const revision = (projection?.units.reduce((maximum, unit) => Math.max(maximum, unit.revision), -1) ?? -1) + 1
+      const units = [...(projection?.units ?? []), stalledUnit(turn, revision, silenceMs)]
+      yield* transcripts.replaceUnits({ ...turn, status: "failed", updatedAt: now }, units)
+      return {
+        turnId: String(turnId),
+        status: "failed" as const,
+        state: {
+          status: "failed" as const,
+          usage: ExecutionProjection.emptyUsageState(),
+          steering: { steeringMessages: 0, followUpMessages: 0 },
+        },
+        units,
+        ...(projection?.projectorCheckpoint === undefined ? {} : { checkpoint: projection.projectorCheckpoint }),
+      }
+    })
     while (true) {
       let progressed = false
+      let previewed = false
       let callbackCause: Cause.Cause<never> | undefined
       const attempt = yield* Effect.exit(
         Effect.gen(function* () {
@@ -87,14 +133,16 @@ export const watch = (input: {
               prompt: turn.prompt,
               pricing,
               ...(projection === undefined ? {} : { units: projection.units }),
-              ...(projection?.projectorCheckpoint === undefined
-                ? {}
-                : { checkpoint: projection.projectorCheckpoint }),
+              ...(projection?.projectorCheckpoint === undefined ? {} : { checkpoint: projection.projectorCheckpoint }),
             })
             .pipe(
+              Stream.timeout(stallSilenceMs),
               Stream.runForEach((event) => {
                 if (event._tag === "ModelPreview" || event._tag === "ModelPreviewCleared")
-                  return notify(() => onPreview?.(event))
+                  return notify(() => {
+                    previewed = true
+                    onPreview?.(event)
+                  })
                 if (pendingTerminal.length > 0 && !ExecutionStatus.isTerminalStatus(event.state.status))
                   return TranscriptRepository.RepositoryError.make({
                     message: `Turn ${turnId} projected a nonterminal change after terminal revision ${pendingTerminal.at(-1)!.revision}`,
@@ -135,9 +183,20 @@ export const watch = (input: {
           return { stored, inspection, hasUncommittedTerminal: pendingTerminal.length > 0 }
         }),
       )
+      if (progressed || previewed) lastProgressAt = yield* clock.currentTimeMillis
       if (attempt._tag === "Failure") {
         if (callbackCause !== undefined) return yield* Effect.failCause(callbackCause)
         if (Cause.hasInterrupts(attempt.cause)) return yield* Effect.interrupt
+        const silence = (yield* clock.currentTimeMillis) - lastProgressAt
+        if (silence >= stallSilenceMs && consecutiveDefects === 0 && !Cause.hasDies(attempt.cause)) {
+          yield* Effect.logWarning("execution-projection-watch.stalled").pipe(
+            Effect.annotateLogs({
+              "rika.turn.id": String(turnId),
+              "rika.stall.silence.ms": silence,
+            }),
+          )
+          return yield* settleStalled(silence)
+        }
         if (Cause.hasDies(attempt.cause)) {
           consecutiveDefects += 1
           if (consecutiveDefects >= DefectMaxConsecutiveAttempts) {
@@ -164,9 +223,7 @@ export const watch = (input: {
                 steering: { steeringMessages: 0, followUpMessages: 0 },
               },
               units,
-              ...(projection?.projectorCheckpoint === undefined
-                ? {}
-                : { checkpoint: projection.projectorCheckpoint }),
+              ...(projection?.projectorCheckpoint === undefined ? {} : { checkpoint: projection.projectorCheckpoint }),
             }
           }
         } else {
@@ -187,12 +244,23 @@ export const watch = (input: {
       const { hasUncommittedTerminal, inspection, stored } = attempt.value
       consecutiveDefects = 0
       if (hasUncommittedTerminal || inspection.status === "running") {
+        const silence = (yield* clock.currentTimeMillis) - lastProgressAt
+        if (silence >= stallSilenceMs) {
+          yield* Effect.logWarning("execution-projection-watch.stalled").pipe(
+            Effect.annotateLogs({
+              "rika.turn.id": String(turnId),
+              "rika.stall.silence.ms": silence,
+            }),
+          )
+          return yield* settleStalled(silence)
+        }
         const delay = progressed ? 100 : retryDelay
         retryDelay = Math.min(delay * 2, 5_000)
         yield* Effect.sleep(delay)
         continue
       }
-      const storedIsNewest = stored !== undefined && (latestChange === undefined || stored.revision >= latestChange.revision)
+      const storedIsNewest =
+        stored !== undefined && (latestChange === undefined || stored.revision >= latestChange.revision)
       const checkpoint = storedIsNewest ? stored.projectorCheckpoint : latestChange?.checkpoint
       const projectedState = storedIsNewest ? stored.state : latestChange?.state
       const fallbackStatus = turn.status === "waiting" || turn.status === "cancelling" ? turn.status : "running"

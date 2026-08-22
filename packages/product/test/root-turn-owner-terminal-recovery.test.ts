@@ -142,7 +142,9 @@ it.effect("replays a stale running cursor before returning a coherent terminal p
       } as ExecutionGateway.Interface,
     )
     const fiber = yield* Effect.forkChild(owner.watchTurn(turn.id))
+    yield* Effect.yieldNow
     yield* TestClock.adjust("100 millis")
+    yield* Effect.yieldNow
     const result = yield* Fiber.join(fiber)
 
     expect(cursors).toEqual([undefined, "running"])
@@ -363,11 +365,13 @@ it.effect("reconnects after watcher failures and replays from the newest committ
     yield* TestClock.adjust("199 millis")
     expect(attempts).toBe(2)
     yield* TestClock.adjust("1 millis")
+    yield* Effect.yieldNow
     expect(attempts).toBe(3)
     expect(inspections).toBe(1)
     yield* TestClock.adjust("99 millis")
     expect(attempts).toBe(3)
     yield* TestClock.adjust("1 millis")
+    yield* Effect.yieldNow
 
     const result = yield* Fiber.join(fiber)
     expect(attempts).toBe(4)

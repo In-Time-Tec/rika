@@ -23,8 +23,8 @@ const backend = ExecutionGateway.Service.of({
   steerTurn: () => Effect.die("unused"),
   approveTurn: () => Effect.void,
   denyTurn: () => Effect.void,
-  watchTurn: () => Stream.die("unused"),
-  inspectTurn: () => Effect.succeed({ status: "unavailable" }),
+  watchTurn: () => Stream.never,
+  inspectTurn: () => Effect.succeed({ status: "running", cursor: "live" }),
 })
 
 const thread = (id: string, overrides: Partial<Thread.Thread> = {}): Thread.Thread => ({
@@ -66,6 +66,9 @@ describe("Operation thread actions", () => {
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
             executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
+            ...(status !== "queued" && !ExecutionStatus.isTerminalStatus(status)
+              ? { executionLink: { runId: `${status}-run`, turnId: status, threadId: alpha.id } }
+              : {}),
             status,
             createdAt: index + 1,
             updatedAt: index + 1,

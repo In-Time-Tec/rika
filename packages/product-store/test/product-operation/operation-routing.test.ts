@@ -163,6 +163,7 @@ describe("Operation", () => {
           prompt: "active",
           ...turnProvenance,
           executionRoute: executionRoute(),
+          executionLink: { runId: "active-run", turnId: "active", threadId: thread.id },
           status: "running",
           createdAt: 1,
           updatedAt: 1,

@@ -400,6 +400,7 @@ export const promotePendingTurns = (input: {
         }).pipe(
           Effect.map((value) => ({ _tag: "Success" as const, value })),
           Effect.catch((error) => Effect.succeed({ _tag: "Failure" as const, error })),
+          Effect.onError(() => input.turns.releaseQueuedClaim(claim).pipe(Effect.ignore)),
           Effect.onInterrupt(() => input.turns.releaseQueuedClaim(claim)),
         )
         if (outcome._tag === "Failure") {

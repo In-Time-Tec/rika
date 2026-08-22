@@ -64,10 +64,7 @@ export interface Interface {
   readonly startTurn: (
     input: ExecutionGateway.StartTurn,
   ) => Effect.Effect<ExecutionGateway.ExecutionLink, ExecutionGateway.StartTurnFailure | TurnRepository.RepositoryError>
-  readonly recoverExecutionAdmissions: Effect.Effect<
-    void,
-    ExecutionGateway.StartTurnFailure | TurnRepository.RepositoryError
-  >
+  readonly recoverExecutionAdmissions: Effect.Effect<void, TurnRepository.RepositoryError>
   readonly prepareSteering: (
     target: ExecutionGateway.ExecutionLink,
     input: ExecutionGateway.SteeringInput,
@@ -208,6 +205,23 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
         .pipe(Effect.mapError((failure) => ExecutionGateway.StartTurnFailure.make({ message: failure.message })))
     return link
   })
+  const recoverPrepared = (input: ExecutionGateway.StartTurn, attempts = 4, delay = 100): Effect.Effect<void, never> =>
+    admitPrepared(input).pipe(
+      Effect.asVoid,
+      Effect.catch((error) =>
+        attempts > 1
+          ? Effect.sleep(delay).pipe(Effect.andThen(recoverPrepared(input, attempts - 1, delay * 2)))
+          : Effect.logWarning("turn.execution-admission.recovery.failed").pipe(
+              Effect.annotateLogs({
+                "rika.thread.id": input.threadId,
+                "rika.turn.id": input.turnId,
+                "rika.failure.kind": error.name,
+                "rika.failure.message": error.message,
+                "rika.recovery.attempts": 4,
+              }),
+            ),
+      ),
+    )
   const isSteeringFailure = Schema.is(ExecutionGateway.SteeringFailure)
   const rejection = (
     admission: TurnRepositorySteering.SteeringAdmission,
@@ -291,23 +305,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
       Effect.suspend(() =>
         turns.listUnlinkedExecutionAdmissions.pipe(
           Effect.flatMap((admissions) =>
-            Effect.forEach(
-              admissions,
-              (admission) =>
-                admitPrepared(admission).pipe(
-                  Effect.catch((error) =>
-                    Effect.logWarning("turn.execution-admission.recovery.failed").pipe(
-                      Effect.annotateLogs({
-                        "rika.thread.id": admission.threadId,
-                        "rika.turn.id": admission.turnId,
-                        "rika.failure.kind": error.name,
-                        "rika.failure.message": error.message,
-                      }),
-                    ),
-                  ),
-                ),
-              { discard: true },
-            ),
+            Effect.forEach(admissions, (admission) => recoverPrepared(admission), { concurrency: 8, discard: true }),
           ),
         ),
       ),

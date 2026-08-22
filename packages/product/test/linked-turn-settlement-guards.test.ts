@@ -8,7 +8,7 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import type * as TurnQueuePromotion from "../src/thread/repository/turn-repository-queue"
 import type * as RootTurnOwner from "../src/thread/queue/root-turn-owner"
 import { describe, expect, it } from "@effect/vitest"
-import { Context, Effect, Exit } from "effect"
+import { Cause, Context, Effect, Exit } from "effect"
 import { OperationError } from "../src/operation/operation-error"
 import {
   settleInteractiveSubmission,
@@ -197,6 +197,48 @@ describe("linked Turn settlement authority", () => {
       expect(persisted.get("queued-second")).toMatchObject({ status: "queued" })
       expect(persisted.get("queued-second")).not.toHaveProperty("executionLink")
       expect(events.filter((event) => event._tag === "ExecutionFailed")).toEqual([])
+    }),
+  )
+
+  it.effect("releases a durable queue claim when promotion defects before consuming it", () =>
+    Effect.gen(function* () {
+      const queued = turn("defective-promotion", "queued")
+      const claim = { turn: queued, token: "defective-claim" }
+      let released = 0
+      const turns = {
+        readQueue: () => Effect.succeed({ threadId: thread.id, revision: 0, queuedCount: 1, turns: [queued] }),
+        releaseQueuedClaim: (candidate: TurnQueuePromotion.QueueClaim) =>
+          Effect.sync(() => {
+            expect(candidate).toEqual(claim)
+            released += 1
+            return true
+          }),
+      } as unknown as TurnRepository.Interface
+
+      const result = yield* Effect.exit(
+        promotePendingTurns({
+          thread,
+          dispatch: () => undefined,
+          turns,
+          backend: {} as ExecutionGateway.Interface,
+          pendingCapacity: 1,
+          prepareExecution: () => Effect.die("promotion defect"),
+          owner: {} as RootTurnOwner.Interface,
+          notifyThreadSummaries: Effect.void,
+          notifyTurnChanged: () => Effect.void,
+          setTurnStatus: () => Effect.die("unused"),
+          queueMutationEvent: () => Effect.die("unused"),
+          claimQueuedTurn: () => Effect.succeed(claim),
+          releaseTurnObserver: () => Effect.void,
+          emit: () => undefined,
+          makeTurnId: () => Effect.die("unused"),
+          failureMessage: "promotion failed",
+        }),
+      )
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") expect(Cause.hasDies(result.cause)).toBe(true)
+      expect(released).toBe(1)
     }),
   )
 
