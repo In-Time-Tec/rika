@@ -528,6 +528,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
             snapshot: { pendingAuthorizations: [{ authorizationId: "authorization-1", checkpoint }] },
           },
         },
+        { payload: { _tag: "PresenceSnapshot", threadId } },
       ])
       const approval = {
         protocolVersion: 1 as const,
@@ -707,6 +708,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
             event: { cursor: "4", event: { _tag: "ExecutionControlled", action: "cancelled" } },
           },
         },
+        { payload: { _tag: "PresenceSnapshot", threadId } },
       ])
     }),
   ),
