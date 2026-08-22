@@ -59,7 +59,7 @@
     "build": "bun turbo build",
     "check": "bun turbo run --continue typecheck \"//#ast-grep-check\" \"//#lint\"",
     "dev": "bun --cwd apps/rika start",
-    "format": "prettier --write .",
+    "format": "prettier --write --cache .",
     "install-local": "bun run scripts/installation/install-local.ts",
     "lint": "bun node_modules/oxlint/dist/cli.js apps packages scripts",
     "local-tenetkit-smoke": "bun run scripts/release/local-tenetkit-smoke.ts",
