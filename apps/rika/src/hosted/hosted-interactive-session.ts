@@ -580,15 +580,17 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     archiveThread: unsupported("InteractiveSession.archiveThread"),
     archiveAndNewThread: unsupported("InteractiveSession.archiveAndNewThread"),
     selectThread: (threadId) =>
-      commandAdmission
-        .withPermits(1)(
-          Effect.gen(function* () {
-            selected = threadId
-            const physical = yield* awaitConnection
-            yield* physical.attach(threadId, cursors.get(threadId) ?? "0")
-          }),
-        )
-        .pipe(Effect.mapError((error) => unavailable("InteractiveSession.selectThread", error))),
+      threadId === selected
+        ? Effect.void
+        : commandAdmission
+            .withPermits(1)(
+              Effect.gen(function* () {
+                selected = threadId
+                const physical = yield* awaitConnection
+                yield* physical.attach(threadId, cursors.get(threadId) ?? "0")
+              }),
+            )
+            .pipe(Effect.mapError((error) => unavailable("InteractiveSession.selectThread", error))),
     readQueue: (threadId) =>
       commandAdmission
         .withPermits(1)(

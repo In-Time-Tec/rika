@@ -45,6 +45,7 @@ export interface TuiAppOptions {
   readonly subagents?: ExecutionRouteSnapshot.ExecutionRouteSnapshot["subagents"]
   readonly root?: string
   readonly initialThreadId?: string
+  readonly initialThreadSelected?: boolean
   readonly idStart?: number
   readonly inspectTranscript?: boolean
   readonly workspaceFiles?: Readonly<Record<string, string>>
@@ -242,25 +243,29 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     },
     interactive: (settings, current) => {
       session = current
-      return runInteractive(
-        settings,
-        {
-          ...current,
-          submit: (prompt, mode, parts, tuning, submissionId) => {
-            const submitted = current.submit(prompt, mode, parts, tuning, submissionId)
-            return options.holdSubmissionAdmission === undefined
-              ? submitted
-              : Deferred.await(options.holdSubmissionAdmission).pipe(Effect.andThen(submitted))
-          },
-          events: (dispatch) =>
-            current.events((event) => {
-              const delivered = options.mapInteractiveEvent?.(event) ?? event
-              dispatch(delivered)
-              if (delivered._tag === "ThreadViewSnapshot") selectionsLoaded += 1
-            }),
+      const tuiSession: InteractiveSession.InteractiveSession = {
+        ...current,
+        submit: (prompt, mode, parts, tuning, submissionId) => {
+          const submitted = current.submit(prompt, mode, parts, tuning, submissionId)
+          return options.holdSubmissionAdmission === undefined
+            ? submitted
+            : Deferred.await(options.holdSubmissionAdmission).pipe(Effect.andThen(submitted))
         },
-        interactiveConnection,
-      )
+        events: (dispatch) =>
+          current.events((event) => {
+            const delivered = options.mapInteractiveEvent?.(event) ?? event
+            dispatch(delivered)
+            if (delivered._tag === "ThreadViewSnapshot") selectionsLoaded += 1
+          }),
+        selectThread: (threadId) =>
+          options.initialThreadSelected === true && threadId === settings.threadId
+            ? Effect.void
+            : current.selectThread(threadId),
+      }
+      const open = runInteractive(settings, tuiSession, interactiveConnection)
+      return options.initialThreadSelected === true && settings.threadId !== undefined
+        ? current.selectThread(settings.threadId).pipe(Effect.andThen(open))
+        : open
     },
   })
   const operation = Context.get(yield* Layer.buildWithScope(operationLayer, resourceScope), Service)

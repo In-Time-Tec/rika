@@ -1,8 +1,25 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
-import { Cause, Clock, Context, Effect, Exit, Fiber, Layer, Option, Redacted, Ref } from "effect"
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import * as BunPath from "@effect/platform-bun/BunPath"
+import {
+  Cause,
+  Clock,
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Redacted,
+  Ref,
+} from "effect"
 import { TestClock, TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
 import {
+  authenticated,
   createRemoteThread,
   listOrganizations,
   login,
@@ -28,6 +45,7 @@ import {
   type Profile,
 } from "../src/hosted/hosted-contract"
 
+const platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer)
 const key: PrivateJwk = { kty: "EC", crv: "P-256", x: "x", y: "y", d: "d" }
 const profile: Profile = {
   origin: "https://hosted.example.test",
@@ -81,6 +99,7 @@ it.effect("defaults a first login with zero organizations to Personal", () =>
             load: () => Effect.succeed(Option.none()),
             save: (_origin, _device, value) => Ref.set(savedCredential, Option.some(value)),
             remove: () => Effect.succeed(false),
+            serialized: (effect) => effect,
           }),
         ),
         Layer.succeed(
@@ -190,6 +209,7 @@ it.effect("rotates the refresh token while keeping access tokens in memory", () 
         load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("old-refresh"), privateJwk: key })),
         save: (_origin, _device, value) => Ref.set(saved, Option.some(value)),
         remove: () => Effect.succeed(true),
+        serialized: (effect) => effect,
       })
       const http = Http.of({
         ...unusedHttp,
@@ -227,40 +247,118 @@ it.effect("rotates the refresh token while keeping access tokens in memory", () 
   ),
 )
 
-it.effect("uses Bun secrets and fails closed when platform credential storage is unavailable", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const values = new Map<string, string>()
-      const vault: SecretVault = {
-        get: ({ service, name }) => Promise.resolve(values.get(`${service}:${name}`) ?? null),
-        set: ({ service, name, value }) => {
-          values.set(`${service}:${name}`, value)
-          return Promise.resolve()
-        },
-        delete: ({ service, name }) => Promise.resolve(values.delete(`${service}:${name}`)),
-      }
-      const context = yield* Layer.build(credentialLayer(vault))
-      const store = Context.get(context, CredentialStore)
-      const credential = { refreshToken: Redacted.make("refresh"), privateJwk: key }
-      yield* store.save(profile.origin, profile.deviceId, credential)
-      expect(Redacted.value(Option.getOrThrow(yield* store.load(profile.origin, profile.deviceId)).refreshToken)).toBe(
-        "refresh",
-      )
-      const unavailable: SecretVault = {
-        get: () => Promise.reject(new Error("no secret service")),
-        set: () => Promise.reject(new Error("no secret service")),
-        delete: () => Promise.reject(new Error("no secret service")),
-      }
-      const unavailableContext = yield* Layer.build(credentialLayer(unavailable))
-      const unavailableStore = Context.get(unavailableContext, CredentialStore)
-      expect((yield* Effect.flip(unavailableStore.save(profile.origin, profile.deviceId, credential))).kind).toBe(
-        "storage",
-      )
-      expect((yield* Effect.flip(unavailableStore.load(profile.origin, profile.deviceId))).kind).toBe("storage")
-      expect((yield* Effect.flip(unavailableStore.remove(profile.origin, profile.deviceId))).kind).toBe("storage")
-    }),
-  ),
-)
+it.layer(platform)((test) => {
+  test.effect("serializes rotating refresh tokens across independent credential stores", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-hosted-refresh-" })
+        const values = new Map<string, string>()
+        const vault: SecretVault = {
+          get: ({ service, name }) => Promise.resolve(values.get(`${service}:${name}`) ?? null),
+          set: ({ service, name, value }) => {
+            values.set(`${service}:${name}`, value)
+            return Promise.resolve()
+          },
+          delete: ({ service, name }) => Promise.resolve(values.delete(`${service}:${name}`)),
+        }
+        const lockPath = path.join(root, "refresh.lock")
+        const first = Context.get(
+          yield* Layer.build(credentialLayer({ vault, lockPath, lockRetry: 0 })),
+          CredentialStore,
+        )
+        const second = Context.get(
+          yield* Layer.build(credentialLayer({ vault, lockPath, lockRetry: 0 })),
+          CredentialStore,
+        )
+        yield* first.save(profile.origin, profile.deviceId, {
+          refreshToken: Redacted.make("refresh-0"),
+          privateJwk: key,
+        })
+        let serverToken = "refresh-0"
+        let revision = 0
+        const firstRefresh = yield* Deferred.make<void>()
+        const releaseFirstRefresh = yield* Deferred.make<void>()
+        const http = Http.of({
+          ...unusedHttp,
+          refresh: (_origin, _client, token) =>
+            Effect.gen(function* () {
+              const presented = Redacted.value(token)
+              if (presented !== serverToken)
+                return yield* HostedError.make({ kind: "denied", message: "refresh token was already rotated" })
+              if (revision === 0) {
+                yield* Deferred.succeed(firstRefresh, undefined)
+                yield* Deferred.await(releaseFirstRefresh)
+              }
+              if (presented !== serverToken)
+                return yield* HostedError.make({ kind: "denied", message: "refresh token was already rotated" })
+              revision += 1
+              serverToken = `refresh-${revision}`
+              return { accessToken: `access-${revision}`, refreshToken: serverToken, expiresIn: 600 }
+            }),
+        })
+        const authenticate = (store: CredentialStore["Service"]) =>
+          authenticated(profile, (session) => Effect.succeed(Redacted.value(session.accessToken))).pipe(
+            Effect.provideService(CredentialStore, store),
+            Effect.provideService(Http, http),
+          )
+        const firstFiber = yield* Effect.forkChild(authenticate(first))
+        yield* Deferred.await(firstRefresh)
+        const secondFiber = yield* Effect.forkChild(authenticate(second))
+        yield* Effect.yieldNow
+        yield* Deferred.succeed(releaseFirstRefresh, undefined)
+        expect((yield* Effect.all([Fiber.join(firstFiber), Fiber.join(secondFiber)])).toSorted()).toEqual([
+          "access-1",
+          "access-2",
+        ])
+        expect(
+          Redacted.value(Option.getOrThrow(yield* first.load(profile.origin, profile.deviceId)).refreshToken),
+        ).toBe("refresh-2")
+      }),
+    ),
+  )
+
+  test.effect("uses Bun secrets and fails closed when platform credential storage is unavailable", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-hosted-vault-" })
+        const values = new Map<string, string>()
+        const vault: SecretVault = {
+          get: ({ service, name }) => Promise.resolve(values.get(`${service}:${name}`) ?? null),
+          set: ({ service, name, value }) => {
+            values.set(`${service}:${name}`, value)
+            return Promise.resolve()
+          },
+          delete: ({ service, name }) => Promise.resolve(values.delete(`${service}:${name}`)),
+        }
+        const context = yield* Layer.build(credentialLayer({ vault, lockPath: path.join(root, "refresh.lock") }))
+        const store = Context.get(context, CredentialStore)
+        const credential = { refreshToken: Redacted.make("refresh"), privateJwk: key }
+        yield* store.save(profile.origin, profile.deviceId, credential)
+        expect(
+          Redacted.value(Option.getOrThrow(yield* store.load(profile.origin, profile.deviceId)).refreshToken),
+        ).toBe("refresh")
+        const unavailable: SecretVault = {
+          get: () => Promise.reject(new Error("no secret service")),
+          set: () => Promise.reject(new Error("no secret service")),
+          delete: () => Promise.reject(new Error("no secret service")),
+        }
+        const unavailableContext = yield* Layer.build(
+          credentialLayer({ vault: unavailable, lockPath: path.join(root, "unavailable-refresh.lock") }),
+        )
+        const unavailableStore = Context.get(unavailableContext, CredentialStore)
+        expect((yield* Effect.flip(unavailableStore.save(profile.origin, profile.deviceId, credential))).kind).toBe(
+          "storage",
+        )
+        expect((yield* Effect.flip(unavailableStore.load(profile.origin, profile.deviceId))).kind).toBe("storage")
+        expect((yield* Effect.flip(unavailableStore.remove(profile.origin, profile.deviceId))).kind).toBe("storage")
+      }),
+    ),
+  )
+})
 
 it.effect("keeps local credentials when all-device revocation fails so retry can complete", () =>
   Effect.gen(function* () {
@@ -270,6 +368,7 @@ it.effect("keeps local credentials when all-device revocation fails so retry can
       load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("old-refresh"), privateJwk: key })),
       save: () => Effect.void,
       remove: () => Ref.update(removed, (value) => value + 1).pipe(Effect.as(true)),
+      serialized: (effect) => effect,
     })
     const http = Http.of({
       ...unusedHttp,
@@ -313,6 +412,7 @@ it.effect("treats logout as idempotent before a profile exists", () =>
             load: () => Effect.die("unused"),
             save: () => Effect.die("unused"),
             remove: () => Effect.die("unused"),
+            serialized: (effect) => effect,
           }),
         ),
         Layer.succeed(ProfileStore, ProfileStore.of({ load: Effect.succeed(Option.none()), save: () => Effect.void })),
@@ -344,6 +444,7 @@ it.effect("lists Personal, switches owners, clears projects, and returns to Pers
               load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })),
               save: () => Effect.void,
               remove: () => Effect.succeed(true),
+              serialized: (effect) => effect,
             }),
           ),
           Layer.succeed(
@@ -394,6 +495,7 @@ it.effect("creates for Personal with zero organizations and fails closed for a s
             load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })),
             save: () => Effect.void,
             remove: () => Effect.succeed(true),
+            serialized: (effect) => effect,
           }),
         ),
         Layer.succeed(

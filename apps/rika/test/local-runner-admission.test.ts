@@ -94,6 +94,7 @@ it.effect("registers the authenticated checkout, waits for admission, and revoke
           load: () => Effect.succeed(Option.some(credential)),
           save: () => Effect.void,
           remove: () => Effect.succeed(true),
+          serialized: (effect) => effect,
         }),
       ),
     )

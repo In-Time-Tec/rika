@@ -30,20 +30,37 @@ test(
         yield* app.waitGone("Reconnecting")
         yield* app.waitFrame("WORK_CONTINUED")
 
-        for (const [status, label] of [
-          ["personal-owner", "Owner: Personal"],
-          ["local-placement", "Placement: this local checkout"],
-          ["executor-waiting", "Waiting for the selected executor; placement will not change"],
-          ["workspace-setup", "Setting up Workspace"],
-          ["workspace-resuming", "Resuming Workspace"],
-          ["lease-active", "Executor lease active"],
-          ["retrying", "Retry available"],
-          ["approval-required", "Approval required"],
-          ["unknown-operation", "Operation outcome unknown"],
-          ["terminal", "Thread terminal"],
+        yield* app.setConnectionStatus("authenticating")
+        yield* app.waitFrame("Connecting")
+
+        const hidden = [
+          "Owner:",
+          "Placement:",
+          "selected executor",
+          "Workspace",
+          "lease",
+          "Retry",
+          "Approval",
+          "outcome unknown",
+          "Thread terminal",
+        ]
+        for (const status of [
+          "personal-owner",
+          "local-placement",
+          "executor-waiting",
+          "workspace-setup",
+          "workspace-resuming",
+          "lease-active",
+          "retrying",
+          "approval-required",
+          "unknown-operation",
+          "terminal",
         ] as const) {
           yield* app.setConnectionStatus(status)
-          yield* app.waitFrame(label)
+          const frame = yield* app.waitGone("Connecting")
+          for (const label of hidden) expect(frame).not.toContain(label)
+          yield* app.setConnectionStatus("connecting")
+          yield* app.waitFrame("Connecting")
         }
         yield* app.quit
       }),

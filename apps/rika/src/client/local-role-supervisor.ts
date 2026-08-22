@@ -38,7 +38,7 @@ export const processRoleLaunch = Effect.fn("ClientMain.processRoleLaunch")(funct
         .spawn(
           ChildProcess.make(commands[role].executable, commands[role].arguments, {
             stdin: role === "tui-controller" ? "inherit" : "ignore",
-            stdout: "inherit",
+            stdout: role === "tui-controller" ? "inherit" : "pipe",
             stderr: "pipe",
             extendEnv: true,
             env: commands[role].environment,
@@ -50,9 +50,13 @@ export const processRoleLaunch = Effect.fn("ClientMain.processRoleLaunch")(funct
               {
                 exitCode: handle.exitCode.pipe(Effect.map(Number)),
                 errorOutput: Stream.mkString(Stream.decodeText(handle.stderr)),
+                output: role === "local-executor" ? Stream.runDrain(handle.stdout) : Effect.void,
               },
-              { concurrency: 2 },
-            ).pipe(Effect.mapError(() => LocalRoleProcessError.make({ role, message: `${role} process failed` }))),
+              { concurrency: 3 },
+            ).pipe(
+              Effect.map(({ exitCode, errorOutput }) => ({ exitCode, errorOutput })),
+              Effect.mapError(() => LocalRoleProcessError.make({ role, message: `${role} process failed` })),
+            ),
             stop: handle.kill({ killSignal: "SIGTERM", forceKillAfter: "1 second" }).pipe(Effect.ignore),
           })),
           Effect.mapError(() => LocalRoleProcessError.make({ role, message: `${role} process could not start` })),

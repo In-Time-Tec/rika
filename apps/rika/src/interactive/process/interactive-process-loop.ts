@@ -28,29 +28,8 @@ export interface InteractiveTuiOptions {
 }
 
 const connectionLabel = (status: InteractiveConnection.Status): string | undefined => {
-  if (status === "connected") return undefined
-  if (status === "connecting") return "Connecting to hosted Rika"
-  if (status === "reconnecting") return "Reconnecting to hosted Rika"
-  const labels: Record<Exclude<InteractiveConnection.Status, "connected" | "connecting" | "reconnecting">, string> = {
-    authenticating: "Authenticating with hosted Rika",
-    "personal-owner": "Owner: Personal",
-    "organization-owner": "Owner: Organization",
-    "local-placement": "Placement: this local checkout",
-    "e2b-placement": "Placement: E2B",
-    "executor-waiting": "Waiting for the selected executor; placement will not change",
-    "executor-connecting": "Connecting the selected executor",
-    "executor-connected": "Selected executor connected",
-    "workspace-preparing": "Preparing Workspace",
-    "workspace-setup": "Setting up Workspace",
-    "workspace-resuming": "Resuming Workspace",
-    "lease-active": "Executor lease active",
-    retrying: "Retry available",
-    "approval-required": "Approval required",
-    "unknown-operation": "Operation outcome unknown",
-    terminal: "Thread terminal",
-    presence: "Another controller is attached",
-  }
-  return labels[status]
+  if (status === "connecting" || status === "authenticating") return "Connecting"
+  return status === "reconnecting" ? "Reconnecting" : undefined
 }
 
 export const interactiveTui =

@@ -412,6 +412,7 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
                   credential = value
                 }),
               remove: () => Effect.succeed(true),
+              serialized: (effect) => effect,
             }),
           ),
           Layer.succeed(Browser, Browser.of({ open: () => Effect.void })),

@@ -60,10 +60,24 @@ const providers = (route: ExecutionRouteSnapshot): ReadonlyArray<HostedModelProv
   ),
 ]
 
-const settingsWithCredentials = (credentials: ReadonlyMap<HostedModelProvider, string>): ConfigurationSettings => ({
+const hostedSettings: ConfigurationSettings = {
   ...Defaults.settingsDefaults,
+  models: Object.fromEntries(
+    Object.entries(Defaults.settingsDefaults.models).map(([alias, model]) => [
+      alias,
+      {
+        ...model,
+        provider: "openrouter",
+        candidates: model.candidates.map((candidate) => `${model.provider}/${candidate}`),
+      },
+    ]),
+  ),
+}
+
+const settingsWithCredentials = (credentials: ReadonlyMap<HostedModelProvider, string>): ConfigurationSettings => ({
+  ...hostedSettings,
   providers: Object.fromEntries(
-    Object.entries(Defaults.settingsDefaults.providers).map(([provider, connection]) => {
+    Object.entries(hostedSettings.providers).map(([provider, connection]) => {
       const credentialIdentity = credentials.get(provider as HostedModelProvider)
       return [
         provider,
@@ -80,9 +94,9 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const credentials = yield* HostedProviderCredentials
     const resolve = Effect.fn("HostedModelRegistry.resolve")(function* (ownerId: string, requestedMode?: string) {
-      const mode = (requestedMode ?? Defaults.settingsDefaults.defaultMode) as ModeId
+      const mode = (requestedMode ?? hostedSettings.defaultMode) as ModeId
       const preliminary = yield* Effect.try({
-        try: () => ExecutionRouteResolution.resolve(Defaults.settingsDefaults, mode),
+        try: () => ExecutionRouteResolution.resolve(hostedSettings, mode),
         catch: invalid,
       })
       const requiredProviders = providers(preliminary)
@@ -105,18 +119,17 @@ export const layer = Layer.effect(
         catch: invalid,
       })
     })
-    return HostedModelRegistry.of({ modes: Object.keys(Defaults.settingsDefaults.modes), resolve })
+    return HostedModelRegistry.of({ modes: Object.keys(hostedSettings.modes), resolve })
   }),
 )
 
 export const testLayer = Layer.succeed(
   HostedModelRegistry,
   HostedModelRegistry.of({
-    modes: Object.keys(Defaults.settingsDefaults.modes),
+    modes: Object.keys(hostedSettings.modes),
     resolve: (_ownerId, mode) =>
       Effect.try({
-        try: () =>
-          ExecutionRouteResolution.resolve(Defaults.settingsDefaults, mode ?? Defaults.settingsDefaults.defaultMode),
+        try: () => ExecutionRouteResolution.resolve(hostedSettings, mode ?? hostedSettings.defaultMode),
         catch: invalid,
       }),
   }),

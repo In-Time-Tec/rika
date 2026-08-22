@@ -219,6 +219,7 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
             load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })),
             save: () => Effect.void,
             remove: () => Effect.succeed(true),
+            serialized: (effect) => effect,
           }),
         ),
         Layer.succeed(
@@ -243,6 +244,7 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
       }).pipe(Effect.provide(context))
       const firstEvents: Array<string> = []
       const statuses: Array<string> = []
+      yield* first.session.selectThread("thread-1")
       yield* first.connection.statusChanges.pipe(
         Stream.runForEach((status) =>
           Effect.sync(() => {

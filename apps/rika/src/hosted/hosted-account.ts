@@ -110,9 +110,13 @@ export const authenticated = Effect.fn("HostedAccount.authenticated")(function* 
   request: (session: Session) => Effect.Effect<A, HostedError>,
 ) {
   const store = yield* CredentialStore
-  const current = yield* store.load(profile.origin, profile.deviceId)
-  if (Option.isNone(current)) return yield* failure("login-required", "Run rika auth login first")
-  const session = yield* refresh(profile, current.value)
+  const session = yield* store.serialized(
+    Effect.gen(function* () {
+      const current = yield* store.load(profile.origin, profile.deviceId)
+      if (Option.isNone(current)) return yield* failure("login-required", "Run rika auth login first")
+      return yield* refresh(profile, current.value)
+    }),
+  )
   return yield* request(session)
 })
 

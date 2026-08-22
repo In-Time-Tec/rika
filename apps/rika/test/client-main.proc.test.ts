@@ -27,6 +27,7 @@ test("plain rika starts only sibling hosted TUI-controller and local-executor ro
             HOME: root,
             RIKA_TEST_RUNTIME_EXECUTABLE: fixture,
             RIKA_TEST_ROLE_LOG: roleLog,
+            RIKA_TEST_LOCAL_EXECUTOR_STDOUT: "1",
           },
           extendEnv: true,
         }),
@@ -40,6 +41,7 @@ test("plain rika starts only sibling hosted TUI-controller and local-executor ro
         { concurrency: 3 },
       )
       expect(Number(exitCode), `${stdout}\n${stderr}`).toBe(0)
+      expect(stdout).toBe("")
       /**
        * The executor's TERM trap appends its stopped marker as the client exits, so the log can
        * lack it the instant the exit code resolves. Poll briefly; a genuinely unstopped executor

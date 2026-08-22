@@ -15,7 +15,7 @@ export const liveLayer = (home: string) =>
     HostedHttp.layer,
     HostedThreadClient.layer.pipe(Layer.provide(BunSocket.layerWebSocketConstructor)),
     HostedProfileStore.layer({ home }),
-    HostedCredentialStore.layer(),
+    HostedCredentialStore.layer({ lockPath: `${home}/.config/rika/hosted-refresh.lock` }),
     HostedBrowser.layer(),
   )
 

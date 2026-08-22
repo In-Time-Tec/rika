@@ -233,6 +233,7 @@ export interface CredentialStoreInterface {
   readonly load: (origin: string, deviceId: string) => Effect.Effect<Option.Option<Credential>, HostedError>
   readonly save: (origin: string, deviceId: string, credential: Credential) => Effect.Effect<void, HostedError>
   readonly remove: (origin: string, deviceId: string) => Effect.Effect<boolean, HostedError>
+  readonly serialized: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | HostedError, R>
 }
 
 export class CredentialStore extends Context.Service<CredentialStore, CredentialStoreInterface>()(
