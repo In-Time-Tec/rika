@@ -19,6 +19,7 @@
     "./skill-registry-model": "./src/skill/skill-registry-model.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "catalog:",
     "tenetkit": "catalog:",
     "effect": "catalog:"
   },

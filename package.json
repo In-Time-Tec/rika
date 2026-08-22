@@ -28,6 +28,7 @@
       "@opentui/core-linux-arm64-musl": "0.4.3",
       "@opentui/core-linux-x64": "0.4.3",
       "@opentui/core-linux-x64-musl": "0.4.3",
+      "@modelcontextprotocol/sdk": "1.29.0",
       "@opentui/core-win32-arm64": "0.4.3",
       "@opentui/core-win32-x64": "0.4.3",
       "@opencode-ai/models": "0.0.18",
