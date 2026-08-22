@@ -53,6 +53,7 @@ export interface TuiAppOptions {
   readonly height?: number
   readonly initialConnectionStatus?: InteractiveConnectionStatus
   readonly holdSubmissionAdmission?: Deferred.Deferred<void>
+  readonly holdCancellation?: Deferred.Deferred<void>
   readonly mapInteractiveEvent?: (event: SessionEvent) => SessionEvent
   readonly historicalTranscriptFixture?: HistoricalTranscriptFixture
   readonly prepareRuntimeState?: RuntimeStatePreparation
@@ -251,6 +252,10 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
             ? submitted
             : Deferred.await(options.holdSubmissionAdmission).pipe(Effect.andThen(submitted))
         },
+        cancel:
+          options.holdCancellation === undefined
+            ? current.cancel
+            : Deferred.await(options.holdCancellation).pipe(Effect.andThen(current.cancel)),
         events: (dispatch) =>
           current.events((event) => {
             const delivered = options.mapInteractiveEvent?.(event) ?? event

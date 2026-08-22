@@ -131,12 +131,16 @@ test(
   () =>
     TuiApp.run(
       Effect.gen(function* () {
-        const admission = yield* Deferred.make<void>()
-        const app = yield* TuiApp.tuiApp({ holdSubmissionAdmission: admission })
+        const cancellation = yield* Deferred.make<void>()
+        const app = yield* TuiApp.tuiApp({
+          script: [model.text("LATE_CANCELLED_RESPONSE", 20_000)],
+          holdCancellation: cancellation,
+        })
 
-        yield* Effect.promise(() => app.type("Keep submission admission pending."))
+        yield* Effect.promise(() => app.type("Keep cancellation pending."))
         app.pressEnter()
-        expect(yield* app.nextFrame).toContain("Sending")
+        yield* app.waitModelRequests(1)
+        yield* app.waitFrame("Waiting")
         app.pressKey("c", { ctrl: true })
         expect(yield* app.nextFrame).toContain("Waiting")
         app.pressKey("c", { ctrl: true })
