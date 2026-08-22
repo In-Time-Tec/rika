@@ -1,4 +1,4 @@
-import * as InteractiveFeed from "@rika/product/server-interactive-feed"
+import * as InteractiveFeed from "@rika/product/interactive-feed"
 import * as ProductOperation from "@rika/product/product-operation"
 import { create as createTui } from "@rika/terminal/opentui-surface"
 import { execute, type Adapter } from "@rika/terminal/terminal-session"

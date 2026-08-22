@@ -36,7 +36,7 @@ export const performanceEvaluation = Effect.gen(function* () {
   const processes: ProcessObservation = yield* observeProcesses().pipe(
     Effect.orElseSucceed(() => ({
       roles: [],
-      executableBytes: { launcher: 0, interactive: 0, server: 0 },
+      executableBytes: { launcher: 0, interactive: 0, "local-executor": 0 },
       unsupportedReason: "The platform process observer failed before it could collect reliable evidence.",
     })),
   )
@@ -81,7 +81,7 @@ export const performanceEvaluation = Effect.gen(function* () {
     measured("process.heap-after", "mebibytes", heap.get("completed")!),
     measured("evaluation.cpu", "percent", cpuPercent),
     measured("evaluation.duration", "milliseconds", wallMilliseconds),
-    ...(["launcher", "interactive", "server"] as const).map((role) => {
+    ...(["launcher", "interactive", "local-executor"] as const).map((role) => {
       const observation = processes.roles.find((candidate) => candidate.role === role)
       let target = 250
       if (role === "launcher") target = 75
@@ -100,7 +100,7 @@ export const performanceEvaluation = Effect.gen(function* () {
           })
     }),
     processes.roles.some((role) => role.role === "interactive") &&
-    processes.roles.some((role) => role.role === "server")
+    processes.roles.some((role) => role.role === "local-executor")
       ? measured(
           "process.combined-idle-rss",
           "mebibytes",
@@ -126,7 +126,7 @@ export const performanceEvaluation = Effect.gen(function* () {
           processes.unsupportedReason ?? "No process samples were available.",
         )
       : measured("process.idle-cpu.peak", "percent", processes.idleCpuPeakPercent, { operator: "lte", value: 3 }),
-    ...(["launcher", "interactive", "server"] as const).map((role) =>
+    ...(["launcher", "interactive", "local-executor"] as const).map((role) =>
       measured(`executable.${role}.file-bytes`, "count", processes.executableBytes[role]),
     ),
     processes.startupToRolePresenceMilliseconds === undefined
@@ -138,7 +138,6 @@ export const performanceEvaluation = Effect.gen(function* () {
       : measured("process.startup-to-role-presence", "milliseconds", processes.startupToRolePresenceMilliseconds),
     unsupported("process.active-navigation-cpu", "percent", "The deterministic workload runs without user pacing."),
     unsupported("tui.real-terminal-frame", "milliseconds", "A real PTY evidence capture was not supplied."),
-    unsupported("server.restart-recovery", "milliseconds", "The in-process renderer does not start a server."),
     unsupported("process.cold-launch.p95", "milliseconds", "One isolated launch cannot honestly establish a p95."),
     unsupported(
       "process.warm-launch.p95",

@@ -114,7 +114,7 @@ it.effect("creates, attaches, and submits through the authenticated Thread WebSo
           ticket,
           commandId: "create-1",
           owner: { kind: "personal" },
-          placement: "e2b",
+          executorKind: "e2b",
         }),
       ).toBe("thread-1")
       expect(
@@ -186,7 +186,7 @@ it.effect("returns a hosted rejection instead of accepting a failed command", ()
           },
           commandId: "create-1",
           owner: { kind: "personal" },
-          placement: "e2b",
+          executorKind: "e2b",
         }),
       )
       expect(result).toMatchObject({ _tag: "Failure", failure: { kind: "denied", message: "owner denied" } })

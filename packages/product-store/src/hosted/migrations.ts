@@ -6,6 +6,11 @@ export interface Migration {
 
 export const migrations: ReadonlyArray<Migration> = [
   {
+    id: "product/0000_hosted_authority_reset",
+    checksum: "4c8195f614af79caacc5d628aeea2856795d42a66520964e17aa69956388d9bd",
+    url: new URL("../../migrations/postgres/0000-hosted-authority-reset.sql", import.meta.url),
+  },
+  {
     id: "product/0001_hosted_authority",
     checksum: "9e9385f2865144ed34684ba13fa3f5100772635af24d50293a2936dfe86b0dcd",
     url: new URL("../../migrations/postgres/0001-hosted-authority.sql", import.meta.url),
@@ -104,5 +109,10 @@ export const migrations: ReadonlyArray<Migration> = [
     id: "product/0020_tool_policy_audit",
     checksum: "bc29391d7b468ab7500ebea279ef917da2e42259879041231aba3aea0a86d3f1",
     url: new URL("../../migrations/postgres/0020-tool-policy-audit.sql", import.meta.url),
+  },
+  {
+    id: "product/0021_independent_assignment_identity",
+    checksum: "e41396ab9b388fe0120f76c798cc59313684c7b7481b6fe7269802438bf3dc98",
+    url: new URL("../../migrations/postgres/0021-independent-assignment-identity.sql", import.meta.url),
   },
 ]

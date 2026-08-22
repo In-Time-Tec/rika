@@ -61,7 +61,7 @@ const seed = (pool: Pool) =>
       (id, owner_id, thread_id, workspace_id, executor_kind, placement, generation, revision,
         last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
         session_digest, lease_epoch, lease_expires_at)
-      VALUES ('recovery-thread', 'recovery-owner', 'recovery-thread', 'recovery-workspace', 'e2b',
+      VALUES ('recovery-assignment', 'recovery-owner', 'recovery-thread', 'recovery-workspace', 'e2b',
         '{"_tag":"E2BPlacement","templateBuildId":"build-recovery"}'::jsonb, 1, 1, 1, 'active',
         'provider-recovery', 'executor-recovery', 'process-recovery', 'session-recovery', 1,
         now() + interval '5 minutes');
@@ -95,17 +95,17 @@ const seed = (pool: Pool) =>
         dispatched_process_incarnation, response, workspace_id, session_id, thread_id, turn_id,
         run_id, root_run_id, tool_call_id, replay_policy, started_at, resolution_state)
       VALUES
-        ('recovery-thread', 'recovery-owner', 'operation-retry', 'retry-digest', 'retry()', 0, 'unknown',
+        ('recovery-assignment', 'recovery-owner', 'operation-retry', 'retry-digest', 'retry()', 0, 'unknown',
           1, 1, 'executor-recovery', 'process-recovery',
           '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"unknown"}}'::jsonb,
           'recovery-workspace', 'session-recovery', 'recovery-thread', 'turn-retry', 'run-retry',
           'run-retry', 'call-retry', 'pure', now(), 'pending'),
-        ('recovery-thread', 'recovery-owner', 'operation-accept', 'accept-digest', 'accept()', 0, 'unknown',
+        ('recovery-assignment', 'recovery-owner', 'operation-accept', 'accept-digest', 'accept()', 0, 'unknown',
           1, 1, 'executor-recovery', 'process-recovery',
           '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"unknown"}}'::jsonb,
           'recovery-workspace', 'session-recovery', 'recovery-thread', 'turn-accept', 'run-accept',
           'run-accept', 'call-accept', 'never', now(), 'pending'),
-        ('recovery-thread', 'recovery-owner', 'operation-abort', 'abort-digest', 'abort()', 0, 'unknown',
+        ('recovery-assignment', 'recovery-owner', 'operation-abort', 'abort-digest', 'abort()', 0, 'unknown',
           1, 1, 'executor-recovery', 'process-recovery',
           '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"unknown"}}'::jsonb,
           'recovery-workspace', 'session-recovery', 'recovery-thread', 'turn-abort', 'run-abort',

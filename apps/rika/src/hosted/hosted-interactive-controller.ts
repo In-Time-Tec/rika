@@ -1,4 +1,4 @@
-import type * as InteractiveFeed from "@rika/product/server-interactive-feed"
+import type * as InteractiveFeed from "@rika/product/interactive-feed"
 import { Crypto, Effect, Schema } from "effect"
 import { OperationUnavailable } from "@rika/product/product-operation"
 import { CredentialStore, HostedError, ThreadClient, Http } from "./hosted-contract"
@@ -36,7 +36,7 @@ const run = Effect.fn("HostedInteractiveController.run")(function* (
       commandId,
       owner: profile.owner,
       ...(profile.project === undefined ? {} : { project: profile.project }),
-      placement: "local",
+      executorKind: "local_device",
       localRunnerTarget: {
         deviceId: prepared.checkout.registration.deviceId,
         checkoutFingerprint: prepared.checkout.registration.checkoutFingerprint,
@@ -54,7 +54,7 @@ const run = Effect.fn("HostedInteractiveController.run")(function* (
   const threadId = input.threadId ?? (yield* createThread)
   const hosted = yield* makeHostedInteractiveSession({
     threadId,
-    placement: "local",
+    executorKind: "local_device",
     createThread: createThread.pipe(Effect.map(String)),
   })
   yield* interactiveTui(options)(

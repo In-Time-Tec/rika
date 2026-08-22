@@ -8,7 +8,7 @@ import * as ExecutionPins from "@rika/kernel/execution-pins"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Context, Effect, FileSystem, Function, Layer } from "effect"
 import { Response } from "effect/unstable/ai"
-import * as ServerKernel from "../src/server/composition/server-kernel-layer"
+import * as Kernel from "./kernel-layer"
 import { GoalService, layer as goalServiceLayer } from "@rika/product/goal-service"
 import * as GoalRepository from "@rika/product/goal-repository"
 
@@ -68,7 +68,7 @@ const cellContext = (sessionId: string) =>
 it.effect("mounts the rika surface as a dependency of the pool, so a cell can reach it", () =>
   Effect.gen(function* () {
     const roots = yield* temporaryRoots
-    const layer = ServerKernel.layer(kernelOptions(roots))
+    const layer = Kernel.layer(kernelOptions(roots))
     const built = yield* Layer.build(layer)
     // Both halves are present: the pool a cell runs in, and the per-call identity seam.
     expect(Context.get(built, KernelPool.KernelPool)).toBeDefined()

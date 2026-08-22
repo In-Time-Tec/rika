@@ -366,7 +366,7 @@ export const createRemoteThread = Effect.fn("HostedAccount.createRemoteThread")(
           commandId,
           owner: profile.owner,
           ...(profile.project === undefined ? {} : { project: profile.project }),
-          placement: "e2b",
+          executorKind: "e2b",
         }),
       ),
     ),

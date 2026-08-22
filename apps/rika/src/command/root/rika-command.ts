@@ -1,18 +1,12 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Console, Effect, FileSystem, Option, Stdio } from "effect"
-import { Argument, Command, Flag } from "effect/unstable/cli"
+import { Argument, CliError, Command, Flag } from "effect/unstable/cli"
 import type { ModeId } from "@rika/configuration/behavior-mode"
 import { authCommand } from "../product/auth-command"
-import { configurationCommand } from "../product/configuration-command"
 import { credentialCommand } from "../product/credential-command"
 import { diagnosticsCommand } from "../product/diagnostics-command"
-import { extensionCommand } from "../product/extension-command"
-import { mcpCommand } from "../product/mcp-command"
 import { organizationCommand } from "../product/organization-command"
-import { skillCommand } from "../product/skill-command"
 import { threadCommand } from "../product/thread-command"
-import { toolCatalogCommand } from "../product/tool-catalog-command"
-import { reviewCommand } from "../product/review-command"
 import { dispatch, type CliOperationService } from "./cli-operation-dispatch"
 import { executeRun, runCommand } from "./noninteractive-run-command"
 import * as LocalRunnerCommand from "./local-runner-command"
@@ -41,9 +35,7 @@ const updateCommand = Command.make("update", {}, () =>
     host: { platform: process.platform, architecture: process.arch },
   }).pipe(
     Effect.flatMap((outcome) => Console.log(ReleaseUpdate.updateReport(outcome))),
-    Effect.mapError((error) =>
-      ProductOperation.OperationUnavailable.make({ operation: "Update", message: error.message }),
-    ),
+    Effect.mapError((error) => CliError.UserError.make({ cause: error, userMessage: error.message })),
   ),
 ).pipe(Command.withDescription("Replace this Rika install with the latest published release"))
 
@@ -70,7 +62,11 @@ const interactiveCommand = (values: {
     Effect.flatMap((fileSystem) => Effect.result(fileSystem.stat(selectedWorkspace))),
     Effect.filterOrFail(
       (result) => result._tag === "Success" && result.success.type === "Directory",
-      () => ProductOperation.InvalidInput.make({ message: `Workspace is not a directory: ${selectedWorkspace}` }),
+      () =>
+        CliError.UserError.make({
+          cause: ProductOperation.InvalidInput.make({ message: `Workspace is not a directory: ${selectedWorkspace}` }),
+          userMessage: `Workspace is not a directory: ${selectedWorkspace}`,
+        }),
     ),
     Effect.flatMap(() => dispatch(input)),
   )
@@ -92,22 +88,20 @@ export const command = Command.make(
     ...streamFlags,
     prompt,
   },
-  (
-    values,
-  ): Effect.Effect<
-    void,
-    ProductOperation.InvalidInput | ProductOperation.OperationUnavailable,
-    FileSystem.FileSystem | CliOperationService | Stdio.Stdio
-  > => {
+  (values): Effect.Effect<void, CliError.UserError, FileSystem.FileSystem | CliOperationService | Stdio.Stdio> => {
     if (values.allowRemoteThreadCreation && values.denyRemoteThreadCreation)
       return Effect.fail(
-        ProductOperation.InvalidInput.make({
-          message: "--allow-remote-thread-creation and --deny-remote-thread-creation are mutually exclusive",
+        CliError.UserError.make({
+          cause: "Conflicting remote Thread admission flags",
+          userMessage: "--allow-remote-thread-creation and --deny-remote-thread-creation are mutually exclusive",
         }),
       )
     if ((values.allowRemoteThreadCreation || values.denyRemoteThreadCreation) && !values.noTui)
       return Effect.fail(
-        ProductOperation.InvalidInput.make({ message: "remote Thread admission flags require --no-tui" }),
+        CliError.UserError.make({
+          cause: "Remote Thread admission flags require headless mode",
+          userMessage: "remote Thread admission flags require --no-tui",
+        }),
       )
     if (values.noTui) {
       let remoteThreadCreation: "allowed" | "denied" | undefined
@@ -121,7 +115,10 @@ export const command = Command.make(
     if (values.execute) return executeRun(values)
     if (values.streamJson || values.streamJsonInput || values.streamJsonThinking)
       return Effect.fail(
-        ProductOperation.InvalidInput.make({ message: "stream flags require --execute or the run command" }),
+        CliError.UserError.make({
+          cause: "Stream flags require non-interactive execution",
+          userMessage: "stream flags require --execute or the run command",
+        }),
       )
     return interactiveCommand(values)
   },
@@ -129,20 +126,11 @@ export const command = Command.make(
   Command.withDescription("Hosted durable coding agent"),
   Command.withSubcommands([
     runCommand,
-    reviewCommand,
     threadCommand,
-    Command.make("last", {}, () => dispatch({ _tag: "Thread", action: "last" })),
-    Command.make("top", {}, () => dispatch({ _tag: "Thread", action: "top" })),
-    configurationCommand,
     organizationCommand,
     authCommand,
     credentialCommand,
     diagnosticsCommand,
-    toolCatalogCommand,
-    skillCommand,
-    mcpCommand,
-    extensionCommand,
-    Command.make("doctor", {}, () => dispatch({ _tag: "Doctor" })),
     updateCommand,
     Command.make("version", {}, () => Console.log(version)),
   ]),

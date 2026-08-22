@@ -1,6 +1,6 @@
 import { KernelStateStore, type KernelPool } from "tenetkit/repl"
-import type { Options } from "./server-kernel-options"
-import { discoverServers, discoverSkills, harnessStoreLayer, workspaceDigest } from "./server-kernel-harness"
+import type { Options } from "./kernel-options"
+import { discoverServers, discoverSkills, harnessStoreLayer, workspaceDigest } from "./kernel-harness"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry"
 import * as McpRuntime from "@rika/extensions/mcp-runtime"
@@ -12,8 +12,8 @@ import * as GoalService from "@rika/product/goal-service"
 import { Effect, FileSystem, Function, Layer, Path, Scope } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 
-export { workspaceDigest, harnessStoreLayer, effectiveHarness } from "./server-kernel-harness"
-export type { Options } from "./server-kernel-options"
+export { workspaceDigest, harnessStoreLayer, effectiveHarness } from "./kernel-harness"
+export type { Options } from "./kernel-options"
 
 /** Every executable skill the Execution pins its identity to. */
 /**

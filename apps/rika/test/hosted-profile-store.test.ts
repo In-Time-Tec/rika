@@ -4,7 +4,7 @@ import { expect, it } from "@effect/vitest"
 import { ProfileStore, type Profile } from "../src/hosted/hosted-contract"
 import { layer } from "../src/hosted/hosted-profile-store"
 
-it.effect("persists only the version 3 owner format and rejects the old organization format", () =>
+it.effect("persists the current owner format and rejects stale profiles", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const bunContext = yield* Layer.build(BunServices.layer)
@@ -37,10 +37,10 @@ it.effect("persists only the version 3 owner format and rejects the old organiza
       yield* fileSystem.writeFileString(
         filename,
         yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
-          ...profile,
           formatVersion: 2,
-          owner: undefined,
-          organization: "org-1",
+          origin: profile.origin,
+          deviceId: profile.deviceId,
+          clientId: profile.clientId,
         }),
       )
       expect((yield* Effect.flip(store.load)).message).toBe("Hosted profile is corrupt")

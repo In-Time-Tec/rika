@@ -132,7 +132,9 @@ it.effect("maps stdin failures and dispatch failures", () =>
       ),
     )
     expect(
-      (yield* Effect.exit(execute(run(["doctor"]).pipe(Effect.mapError((error) => String(error))), layer)))._tag,
+      (yield* Effect.exit(
+        execute(run([tuiControllerProcessRole]).pipe(Effect.mapError((error) => String(error))), layer),
+      ))._tag,
     ).toBe("Failure")
   }),
 )
@@ -169,7 +171,6 @@ it.effect("renders client help without creating the configured data root", () =>
         const provider = ConfigProvider.fromEnv({
           env: {
             HOME: path.join(root, "home"),
-            RIKA_DATABASE: path.join(dataRoot, "rika.db"),
           },
         })
         yield* runClient(["--help"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
@@ -200,7 +201,7 @@ it.effect("inspects and exports malformed crash evidence without dispatching an 
           const fileSystem = yield* FileSystem.FileSystem
           const path = yield* Path.Path
           const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-diagnostics-command-" })
-          const dataRoot = path.join(root, "state")
+          const dataRoot = path.join(root, "home", ".config", "rika")
           const diagnostics = path.join(dataRoot, "diagnostics")
           const destination = path.join(root, "export")
           yield* fileSystem.makeDirectory(diagnostics, { recursive: true, mode: 0o700 })
@@ -210,7 +211,6 @@ it.effect("inspects and exports malformed crash evidence without dispatching an 
           const provider = ConfigProvider.fromEnv({
             env: {
               HOME: path.join(root, "home"),
-              RIKA_DATABASE: path.join(dataRoot, "rika.db"),
             },
           })
           yield* run(["diagnostics", "path"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
@@ -255,12 +255,6 @@ it.effect("updates the install in this process instead of dispatching to the ser
   }),
 )
 
-it.effect("dispatches a parsed doctor operation", () =>
-  Effect.gen(function* () {
-    expect(yield* capture(["doctor"])).toEqual([{ _tag: "Doctor" }])
-  }),
-)
-
 it.effect("rejects stream input without stream output", () =>
   Effect.gen(function* () {
     yield* failsWithoutDispatch(["run", "--stream-json-input", "hello"])
@@ -276,9 +270,12 @@ it.effect("exposes only the supported model credential providers", () =>
   }),
 )
 
-it.effect("normalizes optional thread-list values", () =>
+it.effect("requires a hosted Thread for non-interactive execution", () =>
   Effect.gen(function* () {
-    expect(yield* capture(["thread", "list", "--limit", "5"])).toEqual([{ _tag: "Thread", action: "list", limit: 5 }])
+    yield* failsWithoutDispatch(["run", "hello"])
+    yield* failsWithoutDispatch(["--execute", "hello"])
+    yield* failsWithoutDispatch(["run", "hello", "--thread", "thread-1", "--workspace", "."])
+    yield* failsWithoutDispatch(["run", "hello", "--thread", "thread-1", "--ephemeral"])
   }),
 )
 
@@ -294,43 +291,25 @@ it.effect("routes headless runner mode and keeps remote Thread creation opt in",
   }),
 )
 
-it.effect("dispatches interactive and execute inputs", () =>
+it.effect("dispatches interactive inputs and hosted non-interactive execution", () =>
   Effect.gen(function* () {
     expect(yield* capture([tuiControllerProcessRole])).toEqual([{ _tag: "Interactive", prompt: [], ephemeral: false }])
     expect(yield* capture([localExecutorProcessRole, "--no-tui", "--workspace", "."])).toEqual([{ workspace }])
     expect(yield* capture(["hello", "world", "--mode", "high", "--ephemeral"])).toEqual([
       { _tag: "Interactive", prompt: ["hello", "world"], mode: "high", ephemeral: true },
     ])
-    expect(
-      yield* capture([
-        "-x",
-        "hello",
-        "--workspace",
-        ".",
-        "--stream-json",
-        "--stream-json-input",
-        "--stream-json-thinking",
-      ]),
-    ).toEqual([
+    expect(yield* capture(["-x", "hello", "--thread", "thread-1", "--mode", "high"])).toEqual([
       {
-        _tag: "Run",
-        prompt: ["hello"],
-        workspace,
-        ephemeral: false,
-        streamJson: true,
-        streamJsonInput: true,
-        streamJsonThinking: true,
+        _tag: "RemoteRun",
+        threadId: "thread-1",
+        request: { prompt: ["hello"], mode: "high" },
       },
     ])
-    expect(yield* capture(["run", "hello", "--mode", "low"])).toEqual([
+    expect(yield* capture(["run", "hello", "--mode", "low", "--thread", "thread-2"])).toEqual([
       {
-        _tag: "Run",
-        prompt: ["hello"],
-        mode: "low",
-        ephemeral: false,
-        streamJson: false,
-        streamJsonInput: false,
-        streamJsonThinking: false,
+        _tag: "RemoteRun",
+        threadId: "thread-2",
+        request: { prompt: ["hello"], mode: "low" },
       },
     ])
     expect(yield* capture(["hello", "--workspace", ".", "--thread", "thread-2"])).toEqual([
@@ -343,38 +322,12 @@ it.effect("rejects an invalid interactive workspace before dispatch", () =>
   failsWithoutDispatch(["--workspace", `${workspace}/missing-interactive-workspace`]),
 )
 
-it.effect("dispatches every thread operation", () =>
+it.effect("creates and continues hosted Threads without a local Thread operation", () =>
   Effect.gen(function* () {
     const cases: ReadonlyArray<readonly [ReadonlyArray<string>, Input]> = [
-      [["thread", "new"], { _tag: "Thread", action: "new" }],
+      [["thread", "new"], { _tag: "RemoteThread", action: "new" }],
       [["thread", "continue", "--last"], { _tag: "Interactive", prompt: [], last: true, ephemeral: false }],
       [["thread", "continue", "a"], { _tag: "Interactive", prompt: [], threadId: "a", ephemeral: false }],
-      [["thread", "list", "--include-archived"], { _tag: "Thread", action: "list", includeArchived: true }],
-      [["thread", "list"], { _tag: "Thread", action: "list" }],
-      [["thread", "search", "hello"], { _tag: "Thread", action: "search", query: ["hello"] }],
-      [
-        ["thread", "search", "hello", "world", "--include-archived", "--limit", "2"],
-        { _tag: "Thread", action: "search", query: ["hello", "world"], includeArchived: true, limit: 2 },
-      ],
-      [["thread", "rename", "a", "Title"], { _tag: "Thread", action: "rename", threadId: "a", title: "Title" }],
-      [
-        ["thread", "label", "a", "one", "two"],
-        { _tag: "Thread", action: "label", threadId: "a", labels: ["one", "two"] },
-      ],
-      [["thread", "pin", "a"], { _tag: "Thread", action: "pin", threadId: "a" }],
-      [["thread", "archive", "a"], { _tag: "Thread", action: "archive", threadId: "a" }],
-      [["thread", "unarchive", "a"], { _tag: "Thread", action: "unarchive", threadId: "a" }],
-      [["thread", "delete", "a"], { _tag: "Thread", action: "delete", threadId: "a" }],
-      [["thread", "usage", "a"], { _tag: "Thread", action: "usage", threadId: "a" }],
-      [["thread", "fork", "a"], { _tag: "Thread", action: "fork", threadId: "a" }],
-      [["thread", "fork", "a", "--at-turn", "t"], { _tag: "Thread", action: "fork", threadId: "a", atTurn: "t" }],
-      [["thread", "export", "a"], { _tag: "Thread", action: "export", threadId: "a", format: "json" }],
-      [
-        ["thread", "export", "a", "--format", "markdown"],
-        { _tag: "Thread", action: "export", threadId: "a", format: "markdown" },
-      ],
-      [["last"], { _tag: "Thread", action: "last" }],
-      [["top"], { _tag: "Thread", action: "top" }],
     ]
     for (const [argv, expected] of cases) expect(yield* capture(argv)).toEqual([expected])
   }),
@@ -385,71 +338,7 @@ it.effect("rejects invalid thread relationships", () =>
     yield* failsWithoutDispatch(["thread", "continue"])
     yield* failsWithoutDispatch(["thread", "continue", "--last", "a"])
     yield* failsWithoutDispatch(["thread", "continue", "a", "b"])
-    yield* failsWithoutDispatch(["thread", "search"])
-    yield* failsWithoutDispatch(["thread", "label", "a"])
-    yield* failsWithoutDispatch(["thread", "rename"])
-    yield* failsWithoutDispatch(["thread", "pin"])
-    yield* failsWithoutDispatch(["thread", "archive"])
-    yield* failsWithoutDispatch(["thread", "unarchive"])
-    yield* failsWithoutDispatch(["thread", "delete"])
-    yield* failsWithoutDispatch(["thread", "usage"])
-    yield* failsWithoutDispatch(["thread", "fork"])
-    yield* failsWithoutDispatch(["thread", "export"])
-    yield* failsWithoutDispatch(["thread", "export", "a", "--format", "xml"])
-  }),
-)
-
-it.effect("dispatches catalog, extension, and maintenance operations", () =>
-  Effect.gen(function* () {
-    const cases: ReadonlyArray<readonly [ReadonlyArray<string>, Input]> = [
-      [["config", "list"], { _tag: "Config", action: "list" }],
-      [["config", "edit", "--workspace"], { _tag: "Config", action: "edit", workspace: true }],
-      [["config", "keymap"], { _tag: "Config", action: "keymap" }],
-      [["credential", "list", "openai"], { _tag: "Credential", action: "list", provider: "openai" }],
-      [["credential", "revoke", "openai"], { _tag: "Credential", action: "revoke", provider: "openai" }],
-      [["tools", "list"], { _tag: "ToolCatalog", action: "list" }],
-      [["tools", "list", "--mode", "ultra"], { _tag: "ToolCatalog", action: "list", mode: "ultra" }],
-      [["tools", "list", "--mode", "deep-review"], { _tag: "ToolCatalog", action: "list", mode: "deep-review" }],
-      [["tools", "show", "read"], { _tag: "ToolCatalog", action: "show", name: "read" }],
-      [["skills", "list"], { _tag: "Skill", action: "list" }],
-      [["skills", "inspect", "x"], { _tag: "Skill", action: "inspect", name: "x" }],
-      [["skills", "add", "source"], { _tag: "Skill", action: "add", source: "source" }],
-      [["skills", "remove", "x"], { _tag: "Skill", action: "remove", name: "x" }],
-      [["extensions", "create-skill", "x"], { _tag: "Extension", action: "create-skill", name: "x" }],
-      [["extensions", "create-plugin", "x"], { _tag: "Extension", action: "create-plugin", name: "x" }],
-      [["extensions", "list"], { _tag: "Extension", action: "list" }],
-      [["extensions", "enable", "x"], { _tag: "Extension", action: "enable", name: "x" }],
-      [["extensions", "disable", "x"], { _tag: "Extension", action: "disable", name: "x" }],
-      [["extensions", "rollback", "x"], { _tag: "Extension", action: "rollback", name: "x" }],
-    ]
-    for (const [argv, expected] of cases) expect(yield* capture(argv)).toEqual([expected])
-  }),
-)
-
-it.effect("dispatches every MCP operation and validates add transport", () =>
-  Effect.gen(function* () {
-    const cases: ReadonlyArray<readonly [ReadonlyArray<string>, Input]> = [
-      [["mcp", "list"], { _tag: "Mcp", action: "list" }],
-      [
-        ["mcp", "add", "local", "bun", "server.ts"],
-        { _tag: "Mcp", action: "add", name: "local", command: ["bun", "server.ts"] },
-      ],
-      [
-        ["mcp", "add", "remote", "--url", "https://example.com"],
-        { _tag: "Mcp", action: "add", name: "remote", url: "https://example.com" },
-      ],
-      [["mcp", "remove", "x"], { _tag: "Mcp", action: "remove", name: "x" }],
-      [["mcp", "enable", "x"], { _tag: "Mcp", action: "enable", name: "x" }],
-      [["mcp", "disable", "x"], { _tag: "Mcp", action: "disable", name: "x" }],
-      [["mcp", "doctor"], { _tag: "Mcp", action: "doctor" }],
-      [["mcp", "oauth", "login", "x"], { _tag: "Mcp", action: "oauth-login", name: "x" }],
-      [["mcp", "oauth", "logout", "x"], { _tag: "Mcp", action: "oauth-logout", name: "x" }],
-      [["mcp", "oauth", "status"], { _tag: "Mcp", action: "oauth-status" }],
-      [["mcp", "oauth", "status", "x"], { _tag: "Mcp", action: "oauth-status", name: "x" }],
-    ]
-    for (const [argv, expected] of cases) expect(yield* capture(argv)).toEqual([expected])
-    yield* failsWithoutDispatch(["mcp", "add", "x"])
-    yield* failsWithoutDispatch(["mcp", "add", "x", "bun", "--url", "https://example.com"])
+    yield* failsWithoutDispatch(["thread", "new", "--remote"])
   }),
 )
 
@@ -461,17 +350,12 @@ it.effect("renders version and branch help without dispatching", () =>
       Effect.gen(function* () {
         yield* run(["version"])
         yield* run(["thread", "--help"])
-        yield* run(["config", "--help"])
-        yield* run(["tools", "--help"])
-        yield* run(["skills", "--help"])
-        yield* run(["mcp", "--help"])
-        yield* run(["extensions", "--help"])
         return yield* TestConsole.logLines
       }),
       layer,
     )
     expect(output.join("\n")).toContain("0.0.0")
-    expect(output.join("\n")).toContain("Manage local and remote durable threads")
+    expect(output.join("\n")).toContain("Create or continue hosted durable Threads")
     expect(yield* Ref.get(calls)).toEqual([])
   }),
 )

@@ -1,8 +1,7 @@
 import { Schema } from "effect"
-import { InteractiveCommand } from "../operation/interactive/command"
-import { InteractiveEventSchema } from "../operation/interactive/event"
-import { Input } from "../operation/contract/product-operation"
-import { OperationUnavailable } from "../operation/contract/product-operation"
+import { Input, OperationUnavailable } from "../contract/product-operation"
+import { InteractiveCommand } from "./command"
+import { InteractiveEventSchema } from "./event"
 
 type InteractiveInput = Extract<Input, { readonly _tag: "Interactive" }>
 const PositiveSequence = Schema.Int.check(Schema.isGreaterThan(0))

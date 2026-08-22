@@ -21,6 +21,7 @@ import {
   ExecutorAssignmentId,
   ExecutorInstanceId,
   FencingGeneration,
+  ThreadId,
   WorkspaceId,
 } from "@rika/product/hosted-model"
 import { WorkspacePreparations } from "@rika/product/workspace-preparation"
@@ -792,9 +793,8 @@ export const service = Layer.effect(
       localGateway,
       admitLocal: (input) => local.admit(input),
       admitRun: Effect.fn("Executor.admitRun")(function* (input) {
-        const assignmentId = ExecutorAssignmentId.make(input.threadId)
         const initial = yield* assignments
-          .get(assignmentId)
+          .getForThread(ThreadId.make(input.threadId))
           .pipe(Effect.mapError((cause) => ControllerError.make({ kind: "repository", message: cause.message })))
         if (initial === undefined)
           return yield* ControllerError.make({
@@ -814,8 +814,8 @@ export const service = Layer.effect(
               const phase =
                 initial.lifecycle._tag === "Paused" || initial.lifecycle._tag === "Active" ? "runtime" : "setup"
               yield* environment
-                .usePhase({ assignmentId: input.threadId, phase }, (resolved) =>
-                  controller.provision(input.threadId, {
+                .usePhase({ assignmentId: initial.id, phase }, (resolved) =>
+                  controller.provision(initial.id, {
                     egress: resolved.egress,
                     environmentDigest: resolved.manifest.digest,
                   }),
@@ -831,7 +831,7 @@ export const service = Layer.effect(
                   ),
                 )
             }
-            const active = yield* Effect.suspend(() => assignments.get(assignmentId)).pipe(
+            const active = yield* Effect.suspend(() => assignments.get(initial.id)).pipe(
               Effect.flatMap((current) =>
                 current?.lifecycle._tag === "Active" &&
                 current.capabilityGeneration === current.generation &&
@@ -908,7 +908,7 @@ export const service = Layer.effect(
       }),
       run: Effect.fn("Executor.run")(function* (input) {
         const assignment = yield* assignments
-          .get(ExecutorAssignmentId.make(input.threadId))
+          .getForThread(ThreadId.make(input.threadId))
           .pipe(Effect.mapError((cause) => ControllerError.make({ kind: "repository", message: cause.message })))
         if (assignment === undefined)
           return yield* ControllerError.make({
@@ -959,7 +959,7 @@ export const service = Layer.effect(
               const authority = yield* bindings(input, localGateway.machine)
               const execute = localGateway
                 .execute({
-                  assignmentId: input.threadId,
+                  assignmentId: assignment.id,
                   ...input,
                   bindings: authority,
                 })
@@ -993,8 +993,8 @@ export const service = Layer.effect(
             ? "runtime"
             : "setup"
         yield* environment
-          .usePhase({ assignmentId: input.threadId, phase }, (resolved) =>
-            controller.provision(input.threadId, {
+          .usePhase({ assignmentId: assignment.id, phase }, (resolved) =>
+            controller.provision(assignment.id, {
               egress: resolved.egress,
               environmentDigest: resolved.manifest.digest,
             }),
@@ -1015,7 +1015,7 @@ export const service = Layer.effect(
               "cell",
               correlation,
               gateway.execute({
-                assignmentId: input.threadId,
+                assignmentId: assignment.id,
                 ...input,
                 bindings: authority,
               }),

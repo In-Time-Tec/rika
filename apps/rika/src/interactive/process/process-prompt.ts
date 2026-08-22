@@ -1,5 +1,4 @@
 import * as ExecutionRequest from "@rika/product/execution-request"
-import { maxClientMessageBytes } from "../../transport/protocol/server-message-codec"
 import { promptParts } from "@rika/terminal/terminal-session"
 type PromptPart = ReturnType<ReturnType<typeof promptParts>>[number]
 import { Effect, FileSystem, Function, Schema } from "effect"
@@ -25,7 +24,7 @@ export class PromptAttachmentError extends Schema.TaggedError<PromptAttachmentEr
 }) {}
 
 export const maxAttachmentBytes = 5_000_000
-const maxPromptPartsBytes = maxClientMessageBytes - 65_536
+const maxPromptPartsBytes = 16_777_216 - 65_536
 const attachmentMegabytes = formatBytes
 
 const materializePromptPartsImpl = (parts: ReadonlyArray<PromptPart>, workspace: string) =>

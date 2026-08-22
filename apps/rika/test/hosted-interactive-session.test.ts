@@ -238,7 +238,7 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
       const context = yield* Layer.build(layer)
       const first = yield* makeHostedInteractiveSession({
         threadId: "thread-1",
-        placement: "local",
+        executorKind: "local_device",
         createThread: Effect.succeed("thread-2"),
       }).pipe(Effect.provide(context))
       const firstEvents: Array<string> = []
@@ -277,7 +277,7 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
       yield* first.session.submit("hello", undefined, undefined, undefined, "submission-1")
       const second = yield* makeHostedInteractiveSession({
         threadId: "thread-1",
-        placement: "local",
+        executorKind: "local_device",
         createThread: Effect.succeed("thread-2"),
       }).pipe(Effect.provide(context))
       const secondEvents: Array<string> = []

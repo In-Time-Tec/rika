@@ -315,7 +315,7 @@ export const layer = Layer.effect(
                 principal,
                 owner,
                 ...(command.projectId === undefined ? {} : { projectId: command.projectId }),
-                placement: command.placement,
+                executorKind: command.executorKind,
                 ...(command.localRunnerTarget === undefined ? {} : { localRunnerTarget: command.localRunnerTarget }),
                 threadId: command.commandId,
               })

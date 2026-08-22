@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, Schema } from "effect"
 import { BetterAuthUserId, OrganizationId, ThreadId } from "@rika/product/hosted-model"
+import { IdentityContext } from "@rika/product/hosted-identity-context"
 import { ClientTicketResponse } from "@rika/product/client-protocol"
 import {
   CheckoutFingerprint,
@@ -49,25 +50,6 @@ export class ServiceUnavailable extends Schema.TaggedError<ServiceUnavailable>()
 
 const Status = Schema.Struct({ status: Schema.String })
 const strict = <S extends Schema.Top>(schema: S) => schema.annotate({ parseOptions: { onExcessProperty: "error" } })
-const WireOwner = Schema.Union([
-  strict(Schema.Struct({ kind: Schema.Literal("personal"), userId: Schema.String })),
-  strict(Schema.Struct({ kind: Schema.Literal("organization"), organizationId: Schema.String })),
-])
-const ContextResponse = Schema.Struct({
-  account: Schema.Struct({ id: Schema.String, email: Schema.String, name: Schema.String }),
-  organizations: Schema.Array(
-    Schema.Struct({ id: Schema.String, name: Schema.String, slug: Schema.String, logo: Schema.NullOr(Schema.String) }),
-  ),
-  projects: Schema.Array(
-    Schema.Struct({
-      id: Schema.String,
-      ownerId: Schema.String,
-      owner: WireOwner,
-      name: Schema.String,
-      slug: Schema.String,
-    }),
-  ),
-})
 const ConnectionOwner = Schema.Union([
   strict(Schema.Struct({ kind: Schema.Literal("personal") })),
   strict(Schema.Struct({ kind: Schema.Literal("organization"), organization_id: Schema.NonEmptyString })),
@@ -215,7 +197,7 @@ class ProductGroup extends HttpApiGroup.make("product", { topLevel: true })
       error: ServiceUnavailable,
     }),
     HttpApiEndpoint.get("context", "/api/v1/me/context", {
-      success: ContextResponse,
+      success: IdentityContext,
       error: ServiceUnavailable,
     }),
     HttpApiEndpoint.post("issueThreadTicket", "/api/v1/thread-sessions", {

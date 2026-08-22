@@ -1,26 +1,15 @@
 import { Config, Effect, Option, Path } from "effect"
-import { localExecutorProcessRole, serverProcessRuntime, tuiControllerProcessRole } from "../private-runtime-role"
+import { localExecutorProcessRole, tuiControllerProcessRole } from "../private-runtime-role"
 
 export interface RuntimeLaunch {
   readonly executable: string
   readonly prefixArguments: ReadonlyArray<string>
 }
 
-export const privateRuntime = Effect.fn("ClientProcess.privateRuntime")(function* (
-  role: "client" | "interactive" | "server",
-) {
+export const privateRuntime = Effect.fn("ClientProcess.privateRuntime")(function* (role: "client" | "interactive") {
   const path = yield* Path.Path
   const testExecutable = yield* Config.option(Config.string("RIKA_TEST_RUNTIME_EXECUTABLE"))
   if (Option.isSome(testExecutable)) return { executable: testExecutable.value, prefixArguments: [] }
-  if (role === "server") {
-    const runtime = serverProcessRuntime({
-      packaged: import.meta.path.startsWith("/$bunfs/"),
-      executable: process.execPath,
-      packagedEntrypoint: path.join(path.dirname(process.execPath), "rika"),
-      sourceEntrypoint: path.join(import.meta.dir, "..", "client-main.ts"),
-    })
-    return { executable: runtime.executable, prefixArguments: runtime.arguments }
-  }
   if (role === "client")
     return import.meta.path.startsWith("/$bunfs/")
       ? { executable: process.execPath, prefixArguments: [localExecutorProcessRole] }

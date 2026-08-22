@@ -5,21 +5,23 @@ import { Context, Effect, FileSystem, Layer } from "effect"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as GoalRepository from "@rika/product/goal-repository"
 import * as ThreadQuery from "@rika/product/thread-query-service"
-import * as ServerKernel from "../src/server/composition/server-kernel-layer"
+import * as Kernel from "./kernel-layer"
 
+/**
+ * The composed kernel spawns a real Bun worker, so this is a process test rather than a unit one.
+ *
+ * Every layer of this surface can be correct while the product is dead: TenetKit mounts each binding
+ * module as its own flat global, Rika assembles them into `rika`, and until a cell actually names
+ * `rika` nothing proves the assembly ever ran. A cell is the only place that fact is observable.
+ */
 layer(BunServices.layer)("composed kernel", (it) => {
-  /**
-   * The kernel is persistent, so a value one cell declares is still bound for the next cell of the
-   * same Session. That only holds while the pool outlives a single turn: a pool rebuilt per Run
-   * would answer the second cell from a fresh worker, and the binding would be gone.
-   */
-  it.effect("keeps a Session's namespace across cells", () =>
+  it.effect("assembles the rika surface in a real worker so a cell can name it", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
-      const dataRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-persist-" })
-      const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-persist-ws-" })
+      const dataRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-kernel-live-" })
+      const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-kernel-ws-" })
       const context = yield* Layer.build(
-        ServerKernel.layer({
+        Kernel.layer({
           workspace,
           home: dataRoot,
           dataRoot,
@@ -36,14 +38,14 @@ layer(BunServices.layer)("composed kernel", (it) => {
         }),
       )
       const pool = Context.get(context, KernelPool.KernelPool)
-      const run = (cellId: string, code: string) =>
-        Effect.flatMap(
-          pool.execute({ sessionId: "persist", cellId, code, signal: AbortSignal.any([]) }),
-          (execution) => execution.result,
-        )
-      yield* run("c1", "globalThis.remembered = 41")
-      const second = yield* run("c2", "remembered + 1")
-      expect(second.value).toBe("42")
+      const execution = yield* pool.execute({
+        sessionId: "live-session",
+        cellId: "c1",
+        code: `typeof rika + ":" + typeof rika.goal.create + ":" + typeof rika.harness.snapshot`,
+        signal: AbortSignal.any([]),
+      })
+      const result = yield* execution.result
+      expect(result.value).toBe("object:function:function")
     }),
   )
 })

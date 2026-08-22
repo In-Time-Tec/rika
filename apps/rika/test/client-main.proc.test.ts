@@ -61,3 +61,68 @@ test("plain rika starts only sibling hosted TUI-controller and local-executor ro
       expect(files.some((file) => /(?:^|\/)(?:rika\.db|.*\.sqlite|server\.json|.*\.sock)$/u.test(file))).toBe(false)
     }),
   ))
+
+test("the hosted TUI controller returns one unformatted error for its parent process", () =>
+  run(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-hosted-controller-failure-" })
+      const workspace = path.join(root, "missing")
+      const client = fileURLToPath(new URL("../src/client-main.ts", import.meta.url))
+      const child = yield* spawner.spawn(
+        ChildProcess.make(process.execPath, [client, "--workspace", workspace], {
+          stdout: "pipe",
+          stderr: "pipe",
+          env: { HOME: root, RIKA_INTERNAL_CLIENT_RUNTIME: "1" },
+          extendEnv: true,
+        }),
+      )
+      const [exitCode, stderr] = yield* Effect.all([child.exitCode, Stream.mkString(Stream.decodeText(child.stderr))], {
+        concurrency: 2,
+      })
+      expect(Number(exitCode)).not.toBe(0)
+      expect(stderr.trim()).toBe(`Workspace is not a directory: ${workspace}`)
+    }),
+  ))
+
+test("plain rika exposes a hosted controller failure and does not fall back to local authority", () =>
+  run(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-hosted-failure-" })
+      const roleLog = path.join(root, "roles.log")
+      const fixture = fileURLToPath(new URL("fixtures/hosted-role.sh", import.meta.url))
+      const client = fileURLToPath(new URL("../src/client-main.ts", import.meta.url))
+      const child = yield* spawner.spawn(
+        ChildProcess.make(process.execPath, [client], {
+          stdout: "pipe",
+          stderr: "pipe",
+          env: {
+            HOME: root,
+            RIKA_TEST_RUNTIME_EXECUTABLE: fixture,
+            RIKA_TEST_ROLE_LOG: roleLog,
+            RIKA_TEST_TUI_FAILURE: "1",
+            RIKA_TEST_LOCAL_EXECUTOR_FAILURE: "1",
+          },
+          extendEnv: true,
+        }),
+      )
+      const [exitCode, stderr] = yield* Effect.all([child.exitCode, Stream.mkString(Stream.decodeText(child.stderr))], {
+        concurrency: 2,
+      })
+      expect(Number(exitCode)).not.toBe(0)
+      expect(stderr.trim().split("\n")).toEqual(["ERROR", "  Run rika auth login first"])
+      expect((yield* fileSystem.readFileString(roleLog)).trim().split("\n")).toEqual([
+        `local-executor|--no-tui --workspace ${process.cwd()}`,
+        "tui-controller|",
+      ])
+      const files = yield* Effect.promise(() =>
+        Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: root, onlyFiles: true })),
+      )
+      expect(files.some((file) => /(?:^|\/)(?:rika\.db|.*\.sqlite|server\.json|.*\.sock)$/u.test(file))).toBe(false)
+    }),
+  ))

@@ -1,5 +1,7 @@
 import { Context, Effect, Option, Redacted, Schema } from "effect"
 import type { ClientTicketResponse } from "@rika/product/client-protocol"
+import type { ExecutorKind } from "@rika/product/hosted-model"
+import * as HostedIdentity from "@rika/product/hosted-identity-context"
 import type {
   LocalRunnerTarget,
   LocalRunnerPollResult,
@@ -75,46 +77,20 @@ export interface Session {
   readonly privateJwk: PrivateJwk
 }
 
-export const Account = Schema.Struct({
-  id: Schema.String,
-  email: Schema.String,
-  name: Schema.optionalKey(Schema.String),
-})
-export type Account = typeof Account.Type
-
-export const Organization = Schema.Struct({
-  id: Schema.String,
-  slug: Schema.String,
-  name: Schema.String,
-})
-export type Organization = typeof Organization.Type
+export const Account = HostedIdentity.Account
+export type Account = HostedIdentity.Account
+export const Organization = HostedIdentity.Organization
+export type Organization = HostedIdentity.Organization
+export const Project = HostedIdentity.Project
+export type Project = HostedIdentity.Project
+export const IdentityContext = HostedIdentity.IdentityContext
+export type IdentityContext = HostedIdentity.IdentityContext
 
 export const OwnerSelection = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("personal") }),
   Schema.Struct({ kind: Schema.Literal("organization"), organizationId: Schema.String }),
 ])
 export type OwnerSelection = typeof OwnerSelection.Type
-
-const ProjectOwner = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("personal"), userId: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal("organization"), organizationId: Schema.String }),
-])
-
-export const Project = Schema.Struct({
-  id: Schema.String,
-  ownerId: Schema.String,
-  owner: ProjectOwner,
-  slug: Schema.String,
-  name: Schema.String,
-})
-export type Project = typeof Project.Type
-
-export const IdentityContext = Schema.Struct({
-  account: Account,
-  organizations: Schema.Array(Organization),
-  projects: Schema.optionalKey(Schema.Array(Project)),
-})
-export type IdentityContext = typeof IdentityContext.Type
 
 export const Invitation = Schema.Struct({
   id: Schema.String,
@@ -154,7 +130,7 @@ export interface ThreadClientInterface {
     readonly commandId: string
     readonly owner: OwnerSelection
     readonly project?: string
-    readonly placement: "local" | "e2b"
+    readonly executorKind: ExecutorKind
     readonly localRunnerTarget?: LocalRunnerTarget
   }) => Effect.Effect<HostedThreadId, HostedError>
   readonly submit: (input: {

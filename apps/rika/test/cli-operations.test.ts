@@ -1,7 +1,5 @@
 import { InvalidInput, OperationUnavailable } from "@rika/product/product-operation"
 import * as ConfigurationService from "@rika/configuration/configuration-service"
-import * as SettingsDecoder from "@rika/configuration/configuration-settings"
-import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as ConfigOperations from "@rika/product/configuration-operation"
 import { executionSessionLifecycleLayerTest, productLayer, Service } from "./product-operation-test-layer"
@@ -18,35 +16,6 @@ import { TestConsole } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { expect, it } from "@effect/vitest"
 import { run } from "../src/command/root/rika-command"
-
-const NamedItemsJson = Schema.fromJsonString(Schema.Array(Schema.Struct({ name: Schema.String })))
-const NamedItemJson = Schema.fromJsonString(Schema.Struct({ name: Schema.String }))
-const ThreadStruct = Schema.Struct({
-  id: Schema.String,
-  title: Schema.String,
-  pinned: Schema.Boolean,
-  archived: Schema.Boolean,
-  labels: Schema.Array(Schema.String),
-})
-const ThreadJson = Schema.fromJsonString(ThreadStruct)
-const ThreadsJson = Schema.fromJsonString(Schema.Array(ThreadStruct))
-const PresenceStatus = Schema.Literals(["present", "missing"])
-const CredentialStatus = Schema.Literals(["present", "missing", "not-configured"])
-const DoctorReport = Schema.fromJsonString(
-  Schema.Struct({
-    databases: Schema.Struct({ product: PresenceStatus }),
-    config: Schema.Struct({
-      diagnostics: Schema.Array(Schema.Struct({ path: Schema.String, source: Schema.String, message: Schema.String })),
-      global: PresenceStatus,
-      workspace: PresenceStatus,
-    }),
-    credentials: Schema.Struct({ webSearch: Schema.Record(Schema.String, PresenceStatus) }),
-    model: Schema.Struct({
-      route: Schema.Struct({ selection: Schema.String, providerId: Schema.String, model: Schema.String }),
-      apiKey: CredentialStatus,
-    }),
-  }),
-)
 
 const backend = ExecutionGateway.Service.of({
   startTurn: (input) =>
@@ -97,28 +66,13 @@ const sandbox = Effect.gen(function* () {
 
 let identifierSequence = 0
 
-const configServiceLayer = (input: {
-  readonly workspace?: ConfigurationSettingsInput.Input.ConfigurationSettingsInput
-  readonly env?: Readonly<Record<string, string>>
-}) =>
-  ConfigurationService.liveConfigurationLayer({
-    webProviders: WebSearchProvider.providerRegistry,
-    global: {},
-    workspace: input.workspace ?? {},
-  }).pipe(
-    Layer.provide(Layer.succeed(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: input.env ?? {} }))),
-    Layer.orDie,
-  )
+const configServiceLayer = ConfigurationService.liveConfigurationLayer({
+  webProviders: WebSearchProvider.providerRegistry,
+  global: {},
+  workspace: {},
+}).pipe(Layer.provide(Layer.succeed(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: {} }))), Layer.orDie)
 
-const operationLayer = (
-  context: CliSandbox,
-  options: {
-    readonly config?: {
-      readonly workspace?: ConfigurationSettingsInput.Input.ConfigurationSettingsInput
-      readonly env?: Readonly<Record<string, string>>
-    }
-  } = {},
-) => {
+const operationLayer = (context: CliSandbox) => {
   const database = Database.layer(context.databasePath)
   const repositoryLayer = ThreadRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
   const turnRepositoryLayer = TurnRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
@@ -136,11 +90,7 @@ const operationLayer = (
     makeThreadId: Effect.sync(() => Thread.ThreadId.make(`cli-thread-${(identifierSequence += 1)}`)),
     makeTurnId: Effect.sync(() => Turn.TurnId.make(`cli-turn-${(identifierSequence += 1)}`)),
     configOperations: {
-      layer: Layer.mergeAll(
-        ConfigOperations.testLayer(context.adapter),
-        configServiceLayer(options.config ?? {}),
-        BunServices.layer,
-      ),
+      layer: Layer.mergeAll(ConfigOperations.testLayer(context.adapter), configServiceLayer, BunServices.layer),
       options: {
         globalConfigPath: context.globalConfigPath,
         workspaceConfigPath: context.workspaceConfigPath,
@@ -176,12 +126,6 @@ const openCli = <E>(layer: Layer.Layer<Service, E>) =>
     return { invoke }
   })
 
-const jsonOutput = (result: CliResult) => {
-  const line = result.lines.findLast((candidate) => candidate.startsWith("{") || candidate.startsWith("["))
-  expect(line, result.lines.join("\n")).toBeDefined()
-  return line!
-}
-
 const expectSuccess = (result: CliResult) => {
   expect(Exit.isSuccess(result.exit), String(result.exit)).toBe(true)
   return result
@@ -214,44 +158,6 @@ it.effect(
 )
 
 it.effect(
-  "review dispatches the immutable three-lane product policy",
-  () =>
-    withServices(
-      Effect.gen(function* () {
-        const dispatched: Array<import("@rika/product/product-operation").Input> = []
-        const cli = yield* openCli(
-          Layer.succeed(
-            Service,
-            Service.of({ run: (input) => Effect.sync(() => dispatched.push(input)).pipe(Effect.asVoid) }),
-          ),
-        )
-        expectSuccess(yield* cli.invoke(["review", "inspect", "the", "change"]))
-        expect(dispatched).toEqual([{ _tag: "Review", prompt: ["inspect", "the", "change"], ephemeral: false }])
-      }),
-    ).pipe(Effect.scoped),
-  20_000,
-)
-
-it.effect(
-  "tools list and show expose the catalog and reject unknown tools",
-  () =>
-    withServices(
-      Effect.gen(function* () {
-        const context = yield* sandbox
-        const cli = yield* openCli(operationLayer(context))
-        const listed = expectSuccess(yield* cli.invoke(["tools", "list"]))
-        const tools = yield* Schema.decodeUnknownEffect(NamedItemsJson)(jsonOutput(listed))
-        expect(tools.some((tool) => tool.name === "read")).toBe(true)
-        const shown = expectSuccess(yield* cli.invoke(["tools", "show", "read"]))
-        expect((yield* Schema.decodeUnknownEffect(NamedItemJson)(jsonOutput(shown))).name).toBe("read")
-        const missing = yield* cli.invoke(["tools", "show", "missing-tool"])
-        expect(expectFailureMessage(missing)).toContain("Tool missing-tool does not exist")
-      }),
-    ),
-  20_000,
-)
-
-it.effect(
   "rejects an unknown initial interactive thread",
   () =>
     withServices(
@@ -263,112 +169,4 @@ it.effect(
       }),
     ),
   20_000,
-)
-
-it.effect(
-  "doctor reports databases, config, credentials, and model with a stable shape",
-  () =>
-    withServices(
-      Effect.gen(function* () {
-        const context = yield* sandbox
-        const cli = yield* openCli(operationLayer(context))
-        const result = expectSuccess(yield* cli.invoke(["doctor"]))
-        const report = yield* Schema.decodeUnknownEffect(DoctorReport)(jsonOutput(result))
-        expect(Object.keys(report).toSorted()).toEqual(["config", "credentials", "databases", "model"])
-        expect(report.databases).toEqual({ product: "present" })
-        expect(report.config).toMatchObject({ diagnostics: [], global: "missing", workspace: "missing" })
-      }),
-    ),
-  20_000,
-)
-
-it.effect(
-  "doctor reports credential presence without disclosing configured secrets",
-  () =>
-    withServices(
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const context = yield* sandbox
-        const settingsInput = {
-          providers: { openai: { baseUrl: "http://127.0.0.1:1/v1", apiKeyEnv: "DOCTOR_MODEL_KEY" } },
-        }
-        const settingsJson = yield* Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(settingsInput)
-        yield* fileSystem.makeDirectory(path.dirname(context.workspaceConfigPath), { recursive: true })
-        yield* fileSystem.writeFileString(context.workspaceConfigPath, settingsJson)
-        const workspaceSettings = SettingsDecoder.Decoder.decodeSettingsInput(
-          context.workspaceConfigPath,
-          settingsInput,
-        )
-        const cli = yield* openCli(
-          operationLayer(context, {
-            config: {
-              workspace: workspaceSettings,
-              env: {
-                DOCTOR_MODEL_KEY: "doctor-model-secret",
-                PARALLEL_API_KEY: "doctor-parallel-secret",
-              },
-            },
-          }),
-        )
-        const result = expectSuccess(yield* cli.invoke(["doctor"]))
-        const report = yield* Schema.decodeUnknownEffect(DoctorReport)(jsonOutput(result))
-        expect(report.config.workspace).toBe("present")
-        expect(report.config.diagnostics.map((diagnostic) => diagnostic.path)).toEqual([
-          "providers",
-          "webSearchCredentials.parallel",
-          "providerCredentials.DOCTOR_MODEL_KEY",
-        ])
-        expect(report.credentials.webSearch).toEqual({ parallel: "present" })
-        expect(report.model).toMatchObject({
-          route: { selection: "terra", providerId: "openai", model: "gpt-5.6-terra" },
-          apiKey: "present",
-        })
-        const output = [...result.lines, ...result.errors].join("\n")
-        expect(output).not.toContain("doctor-model-secret")
-        expect(output).not.toContain("doctor-parallel-secret")
-      }),
-    ),
-  20_000,
-)
-
-it.effect(
-  "thread new and list round-trip through the product database",
-  () =>
-    withServices(
-      Effect.gen(function* () {
-        const context = yield* sandbox
-        const created = yield* Effect.scoped(
-          Effect.gen(function* () {
-            const cli = yield* openCli(operationLayer(context))
-            const first = yield* Schema.decodeUnknownEffect(ThreadJson)(
-              jsonOutput(expectSuccess(yield* cli.invoke(["thread", "new"]))),
-            )
-            const second = yield* Schema.decodeUnknownEffect(ThreadJson)(
-              jsonOutput(expectSuccess(yield* cli.invoke(["thread", "new"]))),
-            )
-            expect(second.id).not.toBe(first.id)
-            const listed = yield* Schema.decodeUnknownEffect(ThreadsJson)(
-              jsonOutput(expectSuccess(yield* cli.invoke(["thread", "list"]))),
-            )
-            expect(listed.map((thread) => thread.id).toSorted()).toEqual([first.id, second.id].toSorted())
-            return [first.id, second.id]
-          }),
-        )
-        const relisted = yield* Effect.scoped(
-          Effect.gen(function* () {
-            const cli = yield* openCli(operationLayer(context))
-            return yield* Schema.decodeUnknownEffect(ThreadsJson)(
-              jsonOutput(expectSuccess(yield* cli.invoke(["thread", "list"]))),
-            )
-          }),
-        )
-        expect(relisted.map((thread) => thread.id).toSorted()).toEqual(created.toSorted())
-        for (const thread of relisted) {
-          expect(thread.title).toBe("New thread")
-          expect(thread.archived).toBe(false)
-        }
-      }),
-    ),
-  30_000,
 )

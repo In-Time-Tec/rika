@@ -94,7 +94,12 @@ it.effect("defaults a first login with zero organizations to Personal", () =>
                 _tag: "Complete",
                 tokens: { accessToken: "access", refreshToken: "refresh", expiresIn: 600 },
               }),
-            context: () => Effect.succeed({ account: { id: "user-1", email: "dev@example.test" }, organizations: [] }),
+            context: () =>
+              Effect.succeed({
+                account: { id: "user-1", email: "dev@example.test", name: "Dev" },
+                organizations: [],
+                projects: [],
+              }),
           }),
         ),
         Layer.succeed(Browser, Browser.of({ open: () => Effect.die("unused") })),
@@ -197,8 +202,9 @@ it.effect("rotates the refresh token while keeping access tokens in memory", () 
         context: (_origin, session) =>
           Ref.update(observedAccess, (values) => [...values, Redacted.value(session.accessToken)]).pipe(
             Effect.as({
-              account: { id: "account-1", email: "dev@example.test" },
-              organizations: [{ id: "org-1", slug: "engineering", name: "Engineering" }],
+              account: { id: "account-1", email: "dev@example.test", name: "Dev" },
+              organizations: [{ id: "org-1", slug: "engineering", name: "Engineering", logo: null }],
+              projects: [],
             }),
           ),
       })
@@ -347,8 +353,9 @@ it.effect("lists Personal, switches owners, clears projects, and returns to Pers
               refresh: () => Effect.succeed({ accessToken: "access", refreshToken: "refresh", expiresIn: 600 }),
               context: () =>
                 Effect.succeed({
-                  account: { id: "user-1", email: "dev@example.test" },
-                  organizations: [{ id: "org-1", slug: "engineering", name: "Engineering" }],
+                  account: { id: "user-1", email: "dev@example.test", name: "Dev" },
+                  organizations: [{ id: "org-1", slug: "engineering", name: "Engineering", logo: null }],
+                  projects: [],
                 }),
             }),
           ),
@@ -394,7 +401,12 @@ it.effect("creates for Personal with zero organizations and fails closed for a s
           Http.of({
             ...unusedHttp,
             refresh: () => Effect.succeed({ accessToken: "access", refreshToken: "refresh", expiresIn: 600 }),
-            context: () => Effect.succeed({ account: { id: "user-1", email: "dev@example.test" }, organizations: [] }),
+            context: () =>
+              Effect.succeed({
+                account: { id: "user-1", email: "dev@example.test", name: "Dev" },
+                organizations: [],
+                projects: [],
+              }),
             issueThreadTicket: () =>
               Effect.succeed({
                 ticket: "ticket-1",

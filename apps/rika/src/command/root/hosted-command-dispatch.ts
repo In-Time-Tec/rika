@@ -1,5 +1,6 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Context, Effect } from "effect"
+import { CliError } from "effect/unstable/cli"
 import type { ModelProvider, RunRequest } from "../../hosted/hosted-contract"
 
 export type Input =
@@ -43,5 +44,7 @@ export const Service = Context.Reference<Interface>("@rika/cli/command/HostedCom
 
 export const dispatch = Effect.fn("HostedCommand.dispatch")(function* (input: Input) {
   const service = yield* Service
-  yield* service.run(input)
+  yield* service
+    .run(input)
+    .pipe(Effect.mapError((error) => CliError.UserError.make({ cause: error, userMessage: error.message })))
 })

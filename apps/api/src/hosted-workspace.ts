@@ -1,5 +1,5 @@
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
-import { ExecutorAssignmentId } from "@rika/product/hosted-model"
+import { ThreadId } from "@rika/product/hosted-model"
 import type { WorkspaceRequest, WorkspaceResponse } from "@rika/product/workspace-capability"
 import { Context, Effect, Layer, Schema } from "effect"
 import { Executor } from "./executor"
@@ -29,7 +29,7 @@ export const layer = Layer.effect(
     const environment = yield* HostedEnvironment
     const execute = Effect.fn("HostedWorkspace.execute")(function* (threadId: string, request: WorkspaceRequest) {
       const assignment = yield* assignments
-        .get(ExecutorAssignmentId.make(threadId))
+        .getForThread(ThreadId.make(threadId))
         .pipe(
           Effect.mapError(() =>
             HostedWorkspaceError.make({ kind: "unavailable", message: "Workspace assignment is unavailable" }),
@@ -43,8 +43,8 @@ export const layer = Layer.effect(
       const phase =
         assignment.lifecycle._tag === "Paused" || assignment.lifecycle._tag === "Active" ? "runtime" : "setup"
       yield* environment
-        .usePhase({ assignmentId: threadId, phase }, (resolved) =>
-          executor.controller.provision(threadId, {
+        .usePhase({ assignmentId: assignment.id, phase }, (resolved) =>
+          executor.controller.provision(assignment.id, {
             egress: resolved.egress,
             environmentDigest: resolved.manifest.digest,
           }),
@@ -55,7 +55,7 @@ export const layer = Layer.effect(
           ),
         )
       return yield* executor.gateway
-        .workspace(threadId, request)
+        .workspace(assignment.id, request)
         .pipe(
           Effect.mapError(() =>
             HostedWorkspaceError.make({ kind: "unavailable", message: "Workspace executor is unavailable" }),

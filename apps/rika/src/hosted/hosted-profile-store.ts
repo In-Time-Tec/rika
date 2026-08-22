@@ -22,25 +22,6 @@ export const layer = (options: { readonly home: string; readonly filename?: stri
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const target = options.filename ?? path.join(options.home, ".config", "rika", "hosted.json")
-      const load = Effect.gen(function* () {
-        if (
-          !(yield* fileSystem.exists(target).pipe(Effect.mapError(() => failure("Hosted profile could not be read"))))
-        )
-          return Option.none<Profile>()
-        const text = yield* fileSystem
-          .readFileString(target)
-          .pipe(Effect.mapError(() => failure("Hosted profile could not be read")))
-        const profile = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ProfileDisk))(text).pipe(
-          Effect.mapError(() => failure("Hosted profile is corrupt")),
-        )
-        return Option.some({
-          origin: profile.origin,
-          deviceId: profile.deviceId,
-          clientId: profile.clientId,
-          owner: profile.owner,
-          ...(profile.project === undefined ? {} : { project: profile.project }),
-        })
-      })
       const save = Effect.fn("HostedProfileStore.save")(function* (profile: Profile) {
         const text = yield* Schema.encodeEffect(Schema.fromJsonString(ProfileDisk))({
           formatVersion: 3,
@@ -60,6 +41,25 @@ export const layer = (options: { readonly home: string; readonly filename?: stri
           Effect.ensuring(fileSystem.remove(temporary, { force: true }).pipe(Effect.ignore)),
           Effect.mapError(() => failure("Hosted profile could not be saved")),
         )
+      })
+      const load = Effect.gen(function* () {
+        if (
+          !(yield* fileSystem.exists(target).pipe(Effect.mapError(() => failure("Hosted profile could not be read"))))
+        )
+          return Option.none<Profile>()
+        const text = yield* fileSystem
+          .readFileString(target)
+          .pipe(Effect.mapError(() => failure("Hosted profile could not be read")))
+        const profile = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ProfileDisk))(text).pipe(
+          Effect.mapError(() => failure("Hosted profile is corrupt")),
+        )
+        return Option.some<Profile>({
+          origin: profile.origin,
+          deviceId: profile.deviceId,
+          clientId: profile.clientId,
+          owner: profile.owner,
+          ...(profile.project === undefined ? {} : { project: profile.project }),
+        })
       })
       return ProfileStore.of({ load, save })
     }),

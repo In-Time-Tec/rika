@@ -28,7 +28,10 @@ it.effect("starts the TUI controller and local executor as sibling processes", (
       })
       const executor = yield* launch.start("local-executor")
       const tui = yield* launch.start("tui-controller")
-      expect(yield* Effect.all([executor.exitCode, tui.exitCode], { concurrency: 2 })).toEqual([0, 0])
+      expect(yield* Effect.all([executor.exit, tui.exit], { concurrency: 2 })).toEqual([
+        { exitCode: 0, errorOutput: "" },
+        { exitCode: 0, errorOutput: "" },
+      ])
       for (const event of ["local-executor-started", "tui-controller-started", "tui-controller-exited"])
         expect(yield* fileSystem.exists(`${root}-${event}`)).toBe(true)
     }),

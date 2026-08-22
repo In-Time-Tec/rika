@@ -40,6 +40,7 @@ const timestamp = Timestamp.make("2026-08-21T00:00:00.000Z")
 const userId = BetterAuthUserId.make("user-1")
 const ownerId = OwnerId.make("owner-1")
 const threadId = ThreadId.make("thread-1")
+const assignmentId = "assignment-1"
 const clientId = ClientId.make("client-1")
 const deviceId = DeviceId.make("device-1")
 const actor = {
@@ -191,7 +192,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
       Effect.succeed({
         repository: { identity: "repository-1", branch: "main" },
         branch: "main",
-        executor: { assignmentId: threadId, kind: "local_device", generation: "1" },
+        executor: { assignmentId, kind: "local_device", generation: "1" },
       }),
     registerLocalRunner: () => Effect.die("unused"),
     setRemoteThreadCreation: () => Effect.die("unused"),
@@ -260,7 +261,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
           idempotencyKey: "create-key" as never,
           expectedThreadVersion: ThreadVersion.make("0"),
           owner: { kind: "personal" },
-          placement: "local",
+          executorKind: "local_device",
           localRunnerTarget: { deviceId: "device-1" as never, checkoutFingerprint: "checkout-1" as never },
         },
       })
@@ -424,7 +425,7 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
       Effect.succeed({
         repository: { identity: "In-Time-Tec/rika", branch: "feature/thread-controls" },
         branch: "feature/thread-controls",
-        executor: { assignmentId: threadId, kind: "e2b", generation: "7" },
+        executor: { assignmentId, kind: "e2b", generation: "7" },
       }),
     registerLocalRunner: () => Effect.die("unused"),
     setRemoteThreadCreation: () => Effect.die("unused"),
@@ -511,7 +512,7 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
           arguments: '{"exact":"request"}',
           repository: { identity: "In-Time-Tec/rika", branch: "feature/thread-controls" },
           branch: "feature/thread-controls",
-          executor: { assignmentId: threadId, kind: "e2b", generation: "7" },
+          executor: { assignmentId, kind: "e2b", generation: "7" },
           decision: "approve",
           result: { _tag: "Delivered" },
         },

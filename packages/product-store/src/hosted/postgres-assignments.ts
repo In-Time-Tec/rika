@@ -15,7 +15,7 @@ import {
   type Fence,
   type Version,
 } from "@rika/product/executor-assignments"
-import { JsonObject } from "@rika/product/hosted-model"
+import { ExecutorAssignmentId, JsonObject } from "@rika/product/hosted-model"
 
 type AssignmentLifecycle = "active" | "awaiting_bootstrap" | "paused" | "pending" | "provisioning" | "terminated"
 
@@ -264,8 +264,6 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
   })
 
   const create: AssignmentsService["create"] = Effect.fn("PostgresAssignments.create")(function* (input) {
-    if (String(input.id) !== String(input.threadId))
-      return yield* failure("invalid-authority", "Executor assignment identity must equal its thread identity")
     return yield* transaction(
       sql,
       Effect.gen(function* () {
@@ -615,6 +613,14 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
     return row === undefined ? undefined : yield* decodeAssignment(row)
   })
 
+  const getForThread: AssignmentsService["getForThread"] = Effect.fn("PostgresAssignments.getForThread")(
+    function* (threadId) {
+      const rows = yield* query(sql<{ readonly id: string }>`SELECT id
+        FROM rika_hosted_executor_assignments WHERE thread_id = ${threadId}`)
+      return rows[0] === undefined ? undefined : yield* get(ExecutorAssignmentId.make(rows[0].id))
+    },
+  )
+
   const latestCheckpoint: AssignmentsService["latestCheckpoint"] = Effect.fn("PostgresAssignments.latestCheckpoint")(
     function* (assignmentId) {
       const rows = yield* query(sql<CheckpointRow>`SELECT checkpoint.id, checkpoint.owner_id AS "ownerId",
@@ -659,6 +665,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
   return ExecutorAssignments.of({
     create,
     get,
+    getForThread,
     beginProvisioning,
     beginReplacement,
     bindProviderInstance,

@@ -51,6 +51,7 @@ const userId = BetterAuthUserId.make("protocol-user")
 const ownerId = OwnerId.make("protocol-owner")
 const workspaceId = WorkspaceId.make("protocol-workspace")
 const threadId = ThreadId.make("protocol-thread")
+const assignmentId = "protocol-assignment"
 const clientId = ClientId.make("protocol-client")
 const deviceId = DeviceId.make("protocol-device")
 const actor = {
@@ -346,7 +347,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
             },
             branch: "feature/thread-controls",
             executor: {
-              assignmentId: threadId,
+              assignmentId,
               kind: "e2b",
               generation: "7",
               lifecycle: "active",
@@ -628,7 +629,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
               },
               branch: "feature/thread-controls",
               executor: {
-                assignmentId: threadId,
+                assignmentId,
                 kind: "e2b",
                 generation: "7",
                 lifecycle: "active",
@@ -659,7 +660,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
               arguments: '{"path":"README.md"}',
               repository: { repositoryId: "repository-1", branch: "feature/thread-controls" },
               branch: "feature/thread-controls",
-              executor: { assignmentId: threadId, generation: "7", executorInstanceId: "executor-1" },
+              executor: { assignmentId, generation: "7", executorInstanceId: "executor-1" },
               decision: "deny",
               result: { _tag: "Delivered" },
             },

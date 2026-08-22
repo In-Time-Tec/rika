@@ -100,15 +100,15 @@ const seed = (pool: Pool) =>
       (id, owner_id, thread_id, workspace_id, executor_kind, placement, checkout, generation, revision,
        last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
        session_digest, lease_epoch, lease_expires_at) VALUES
-      ('personal-thread', 'personal-owner', 'personal-thread', 'personal-workspace', 'e2b',
+      ('personal-assignment', 'personal-owner', 'personal-thread', 'personal-workspace', 'e2b',
        '{"_tag":"E2BPlacement","templateBuildId":"build","providerScope":"scope"}',
        '{"ownerId":"personal-owner","projectId":"personal-project","repositoryId":"repository-personal","installationId":"installation","owner":"owner","name":"repo","ref":"main","commitSha":"1111111111111111111111111111111111111111","private":true,"gitIdentity":{"name":"Personal User","email":"personal@example.test"}}',
-       1, 0, 1, 'active', 'personal-instance', 'personal-thread-executor', 'personal-thread-process',
+       1, 0, 1, 'active', 'personal-instance', 'personal-assignment-executor', 'personal-assignment-process',
        'personal-session-digest', 1, now() + interval '4 minutes'),
-      ('organization-thread', 'organization-owner', 'organization-thread', 'organization-workspace', 'e2b',
+      ('organization-assignment', 'organization-owner', 'organization-thread', 'organization-workspace', 'e2b',
        '{"_tag":"E2BPlacement","templateBuildId":"build","providerScope":"scope"}',
        '{"ownerId":"organization-owner","projectId":"organization-project","repositoryId":"repository-organization","installationId":"installation","owner":"owner","name":"repo","ref":"main","commitSha":"2222222222222222222222222222222222222222","private":true,"gitIdentity":{"name":"Organization User","email":"organization@example.test"}}',
-       1, 0, 1, 'active', 'organization-instance', 'organization-thread-executor', 'organization-thread-process',
+       1, 0, 1, 'active', 'organization-instance', 'organization-assignment-executor', 'organization-assignment-process',
        'organization-session-digest', 1, now() + interval '4 minutes');
      INSERT INTO rika_hosted_thread_protocol_state (owner_id, thread_id) VALUES
       ('personal-owner', 'personal-thread'),
@@ -167,7 +167,7 @@ it.effect.skipIf(databaseUrl === undefined)(
             operationKey: "personal-operation",
             callId: "personal-call",
             request,
-            access: access("personal-thread", "personal-instance"),
+            access: access("personal-assignment", "personal-instance"),
             policy: policyFor(request),
             argumentsDigest: yield* argumentsDigest(request.input).pipe(Effect.provideService(Crypto.Crypto, crypto)),
           })
@@ -175,7 +175,7 @@ it.effect.skipIf(databaseUrl === undefined)(
             actor: personalActor,
             repository: { identity: "repository-personal" },
             branch: `detached:${"1".repeat(40)}`,
-            executor: { assignmentId: "personal-thread", kind: "e2b" },
+            executor: { assignmentId: "personal-assignment", kind: "e2b" },
             policy: { capability: "publishing.execute", approval: "exact" },
           })
           yield* policy.outcome({ ...admission, authorizationId: "internal-approval", outcome: "suspended" })
@@ -290,7 +290,7 @@ it.effect.skipIf(databaseUrl === undefined)(
                 operationKey: "revoked-operation",
                 callId: "revoked-call",
                 request,
-                access: access("personal-thread", "personal-instance"),
+                access: access("personal-assignment", "personal-instance"),
                 policy: policyFor(request),
                 argumentsDigest: admission.argumentsDigest,
               }),
@@ -311,7 +311,7 @@ it.effect.skipIf(databaseUrl === undefined)(
             operationKey: "organization-operation",
             callId: "organization-call",
             request: organizationRequest,
-            access: access("organization-thread", "organization-instance"),
+            access: access("organization-assignment", "organization-instance"),
             policy: policyFor(organizationRequest),
             argumentsDigest: yield* argumentsDigest(organizationRequest.input).pipe(
               Effect.provideService(Crypto.Crypto, crypto),

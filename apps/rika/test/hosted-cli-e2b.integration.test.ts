@@ -284,7 +284,7 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
         const connection = yield* product.createConnection({
           principal: { userId: account.user.id, deviceId, clientId, dpopJkt: "dpop-thumbprint" },
           owner: { _tag: "PersonalOwner", userId: BetterAuthUserId.make(account.user.id) },
-          placement: "e2b",
+          executorKind: "e2b",
         })
         const environment = Context.get(yield* Layer.build(environmentLayer), HostedEnvironment)
         const environmentPrincipal = { userId: account.user.id, deviceId, clientId }
@@ -468,7 +468,9 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
           ]),
         )
         expect(thread.rows).toEqual([{ executor_kind: "e2b" }])
-        expect(assignment.rows).toEqual([{ id: connection.threadId, thread_id: connection.threadId }])
+        expect(assignment.rows).toHaveLength(1)
+        expect(assignment.rows[0]).toMatchObject({ thread_id: connection.threadId })
+        expect(assignment.rows[0]?.id).not.toBe(connection.threadId)
         expect(helloAccepted).toBe(0)
         expect(closes).toEqual([])
         expect(commands.rows).toHaveLength(1)

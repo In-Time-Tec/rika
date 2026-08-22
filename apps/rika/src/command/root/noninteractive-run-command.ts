@@ -1,10 +1,8 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Effect, Option, Schema, Stdio, Stream } from "effect"
-import { Argument, Command, Flag } from "effect/unstable/cli"
+import { Argument, CliError, Command, Flag } from "effect/unstable/cli"
 import type { ModeId } from "@rika/configuration/behavior-mode"
-import { dispatch } from "./cli-operation-dispatch"
 import { dispatch as dispatchHosted } from "./hosted-command-dispatch"
-import { isHostedThreadId } from "../../hosted/hosted-contract"
 
 const mode = Flag.string("mode").pipe(Flag.withAlias("m"), Flag.optional)
 const workspace = Flag.directory("workspace").pipe(Flag.optional)
@@ -47,14 +45,24 @@ const runInput = (values: {
 }
 
 const validateRunInput = (input: RunOperation) => {
+  if (input.threadId === undefined)
+    return Effect.fail(
+      ProductOperation.InvalidInput.make({ message: "Hosted execution requires --thread <thread-id>" }),
+    )
   if (input.streamJsonInput && !input.streamJson)
     return Effect.fail(ProductOperation.InvalidInput.make({ message: "--stream-json-input requires --stream-json" }))
   if (input.streamJsonThinking && !input.streamJson)
     return Effect.fail(ProductOperation.InvalidInput.make({ message: "--stream-json-thinking requires --stream-json" }))
-  if (input.threadId !== undefined && isHostedThreadId(input.threadId) && input.streamJson)
+  if (input.streamJson)
     return Effect.fail(
       ProductOperation.InvalidInput.make({ message: "Hosted execution does not support stream output" }),
     )
+  if (input.workspace !== undefined)
+    return Effect.fail(
+      ProductOperation.InvalidInput.make({ message: "Hosted execution uses the Thread workspace; remove --workspace" }),
+    )
+  if (input.ephemeral)
+    return Effect.fail(ProductOperation.InvalidInput.make({ message: "Hosted Threads do not support --ephemeral" }))
   return Effect.succeed(input)
 }
 
@@ -129,21 +137,22 @@ export function readStreamInput(
   )
 }
 
-const dispatchRun = (input: RunOperation) => {
-  if (input.threadId !== undefined && isHostedThreadId(input.threadId))
-    return dispatchHosted({
-      _tag: "RemoteRun",
-      threadId: input.threadId,
-      request: {
-        prompt: input.prompt,
-        ...(input.mode === undefined ? {} : { mode: input.mode }),
-      },
-    })
-  return dispatch(input)
-}
+const dispatchRun = (input: RunOperation) =>
+  dispatchHosted({
+    _tag: "RemoteRun",
+    threadId: input.threadId!,
+    request: {
+      prompt: input.prompt,
+      ...(input.mode === undefined ? {} : { mode: input.mode }),
+    },
+  })
 
 export const executeRun = (values: Parameters<typeof runInput>[0]) =>
-  validateRunInput(runInput(values)).pipe(Effect.flatMap(readStreamInput), Effect.flatMap(dispatchRun))
+  validateRunInput(runInput(values)).pipe(
+    Effect.flatMap(readStreamInput),
+    Effect.mapError((error) => CliError.UserError.make({ cause: error, userMessage: error.message })),
+    Effect.flatMap(dispatchRun),
+  )
 
 export const runCommand = Command.make(
   "run",
