@@ -519,35 +519,60 @@ export const captureVisuals = Effect.fn("Visual.captureVisuals")(function* (dire
   const path = yield* Path.Path
   yield* fileSystem.makeDirectory(directory, { recursive: true })
   yield* fileSystem.writeFileString(path.join(directory, "metadata.json"), `${prettyJson(visualMetadata)}\n`)
-  yield* Effect.forEach(scenarios(), ([name, source, width, height]) =>
-    Effect.gen(function* () {
-      const setup = yield* Effect.acquireRelease(
-        Effect.tryPromise(() => createTestRenderer({ width, height })),
-        (value) => Effect.sync(() => value.renderer.destroy()),
-      )
-      const surface = yield* Effect.acquireRelease(
-        Effect.sync(
-          () => new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { animate: false }),
-        ),
-        (value) => Effect.sync(() => value.destroy()),
-      )
-      setup.resize(width, height)
-      surface.update({ ...source, width, height })
-      yield* Effect.tryPromise(() => setup.flush())
-      yield* Effect.tryPromise(() => setup.renderOnce())
-      const frame = stableFrame(setup.captureCharFrame())
-      const styles = setup.captureSpans()
-      yield* Effect.all(
-        [
-          fileSystem.writeFileString(
-            path.join(directory, `${name}.frame.txt`),
-            `${frame.replaceAll(/ +$/gm, "").trimEnd()}\n`,
-          ),
-          fileSystem.writeFileString(path.join(directory, `${name}.ppm`), screenshot(styles, width, height)),
-          fileSystem.writeFileString(path.join(directory, `${name}.styles.json`), `${prettyJson(styles)}\n`),
-        ],
-        { concurrency: 3 },
-      )
-    }).pipe(Effect.scoped),
+  /** Independent renderers let scenarios render concurrently without sharing frame state. */
+  const all = scenarios()
+  const lanes = Math.min(4, all.length)
+  yield* Effect.forEach(
+    Array.from({ length: lanes }, (_, lane) => lane),
+    (lane) =>
+      Effect.gen(function* () {
+        const setup = yield* Effect.acquireRelease(
+          Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24 })),
+          (value) => Effect.sync(() => value.renderer.destroy()),
+        )
+        for (const [name, source, width, height] of all.filter((_, index) => index % lanes === lane)) {
+          const rootBefore = new Set(setup.renderer.root.getChildren())
+          /** A frozen clock pins animation phase so frames stay deterministic under concurrency. */
+          const surface = new Surface(
+            setup.renderer,
+            { key: () => undefined, resize: () => undefined },
+            {
+              animate: false,
+              clock: {
+                now: () => 0,
+                setTimeout: () => 0 as unknown as ReturnType<typeof setTimeout>,
+                clearTimeout: () => {},
+                setInterval: () => 0 as unknown as ReturnType<typeof setTimeout>,
+                clearInterval: () => {},
+              },
+            },
+          )
+          try {
+            setup.resize(width, height)
+            surface.update({ ...source, width, height })
+            yield* Effect.tryPromise(() => setup.flush())
+            yield* Effect.tryPromise(() => setup.renderOnce())
+            const frame = stableFrame(setup.captureCharFrame())
+            const styles = setup.captureSpans()
+            yield* Effect.all(
+              [
+                fileSystem.writeFileString(
+                  path.join(directory, `${name}.frame.txt`),
+                  `${frame.replaceAll(/ +$/gm, "").trimEnd()}\n`,
+                ),
+                fileSystem.writeFileString(path.join(directory, `${name}.ppm`), screenshot(styles, width, height)),
+                fileSystem.writeFileString(path.join(directory, `${name}.styles.json`), `${prettyJson(styles)}\n`),
+              ],
+              { concurrency: 3 },
+            )
+          } finally {
+            surface.destroy()
+            /** Surface.destroy releases controllers but leaves its renderables attached. */
+            for (const child of setup.renderer.root.getChildren())
+              if (!rootBefore.has(child)) setup.renderer.root.remove(child)
+          }
+        }
+      }),
+    { concurrency: lanes },
   )
 })

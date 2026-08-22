@@ -46,14 +46,12 @@ test("plain rika starts only sibling hosted TUI-controller and local-executor ro
        * still fails the assertions below with the log contents as evidence.
        */
       let roles: ReadonlyArray<string> = []
-      yield* Effect.gen(function* () {
-        for (let attempt = 0; attempt < 100; attempt += 1) {
-          const text = yield* fileSystem.readFileString(roleLog).pipe(Effect.orElseSucceed(() => ""))
-          roles = text.trim().split("\n")
-          if (roles.includes("local-executor-stopped")) return
-          yield* Effect.sleep("50 millis")
-        }
-      })
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const text = yield* fileSystem.readFileString(roleLog).pipe(Effect.orElseSucceed(() => ""))
+        roles = text.trim().split("\n")
+        if (roles.includes("local-executor-stopped")) break
+        yield* Effect.sleep("50 millis")
+      }
       expect(roles).toContain("tui-controller|hello")
       expect(roles).toContain(`local-executor|--no-tui --workspace ${process.cwd()}`)
       expect(roles).toContain("local-executor-stopped")
