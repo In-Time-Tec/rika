@@ -157,6 +157,7 @@ export const layer = Layer.effect(
         }),
       )
     }
+    const ownerRepositories = yield* LayerMap.make((ownerId: OwnerId) => ProductRepositories.layer(ownerId))
     const owners = yield* LayerMap.make((ownerId: OwnerId) =>
       ownerLayer(
         ownerId,
@@ -177,7 +178,7 @@ export const layer = Layer.effect(
         ),
       thread: (ownerId, threadId) =>
         Effect.scoped(
-          owners.contextEffect(ownerId).pipe(
+          ownerRepositories.contextEffect(ownerId).pipe(
             Effect.flatMap((context) => Context.get(context, ThreadRepository.Service).get(threadId)),
             Effect.mapError((error) =>
               Schema.is(HostedOperationsError)(error) ? error : HostedOperationsError.make({ message: String(error) }),
@@ -241,7 +242,7 @@ export const layer = Layer.effect(
         ),
       snapshot: (ownerId, threadId) =>
         Effect.scoped(
-          owners.contextEffect(ownerId).pipe(
+          ownerRepositories.contextEffect(ownerId).pipe(
             Effect.flatMap((context) =>
               Effect.gen(function* () {
                 const threads = Context.get(context, ThreadRepository.Service)
