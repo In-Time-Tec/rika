@@ -136,9 +136,9 @@ test(
 
         yield* Effect.promise(() => app.type("Keep submission admission pending."))
         app.pressEnter()
-        yield* app.waitFrame("Sending")
+        expect(yield* app.nextFrame).toContain("Sending")
         app.pressKey("c", { ctrl: true })
-        yield* app.waitFrame("Waiting")
+        expect(yield* app.nextFrame).toContain("Waiting")
         app.pressKey("c", { ctrl: true })
 
         yield* app.done.pipe(Effect.timeout("1 second"))
