@@ -10,6 +10,9 @@ describe("E2B image source contract", () => {
   test("uses the repository root frozen workspace and ships executor kernel assets", async () => {
     const dockerfile = await text("e2b.Dockerfile")
     const lock = await text("bun.lock", root)
+    const manifest = JSON.parse(await text("package.json", root)) as {
+      workspaces: { catalog: { tenetkit: string } }
+    }
 
     expect(dockerfile).toContain("COPY package.json bun.lock ./")
     expect(dockerfile).toContain("COPY packages ./packages")
@@ -19,7 +22,7 @@ describe("E2B image source contract", () => {
     expect(dockerfile).toContain("packages/kernel/src/executor-runtime.ts")
     expect(dockerfile).toContain('import { workerModule } from "tenetkit/repl/bun"')
     expect(await text("start.sh")).toContain("packages/remote-execution/src/host.ts")
-    expect(lock).toContain('"tenetkit": "0.33.0"')
+    expect(lock).toContain(`"tenetkit": "${manifest.workspaces.catalog.tenetkit}"`)
   })
 
   test("pins the base, snapshot, downloads, packages, and complete executable manifest", async () => {

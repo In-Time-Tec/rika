@@ -66,7 +66,7 @@
     },
     "apps/rika": {
       "name": "@rika/cli",
-      "version": "0.6.11",
+      "version": "0.6.15",
       "bin": {
         "rika": "./dist/client-main.js",
       },
@@ -191,7 +191,7 @@
         "@rika/coding-tools": "workspace:*",
         "@rika/kernel": "workspace:*",
         "@rika/product": "workspace:*",
-        "@tenetkit/pg": "0.33.0",
+        "@tenetkit/pg": "0.34.2",
         "effect": "catalog:",
         "tenetkit": "catalog:",
       },
@@ -400,7 +400,7 @@
     "prettier": "3.6.2",
     "prismjs": "1.30.0",
     "string-width": "7.2.0",
-    "tenetkit": "0.33.0",
+    "tenetkit": "0.34.2",
     "turbo": "2.8.13",
     "typescript": "7.0.2",
     "vitest": "4.1.11",
@@ -912,7 +912,7 @@
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
-    "@tenetkit/pg": ["@tenetkit/pg@0.33.0", "", { "dependencies": { "@effect/sql-pg": "4.0.0-rc.109", "tenetkit": "0.33.0" }, "peerDependencies": { "effect": "4.0.0-rc.109" } }, "sha512-fSfLs8C6QQ5NNCmKOfBLyVKyQrRgSJWkNChc0RhMI3e3baoDrBT4fSCe3L7X30N9JkTxYRWxkL+Vx3+nl+ZEyw=="],
+    "@tenetkit/pg": ["@tenetkit/pg@0.34.2", "", { "dependencies": { "@effect/sql-pg": "4.0.0-rc.109", "tenetkit": "0.34.2" }, "peerDependencies": { "effect": "4.0.0-rc.109" } }, "sha512-R8V+ZNZh2M4HDWcxu0+inm6Wg+IaIRp23H7NLTYQkHH6V6UupF+2xaftPrl6QiDvmVztTm6xCjrKXBsrXiAR9Q=="],
 
     "@tsconfig/bun": ["@tsconfig/bun@1.0.9", "", {}, "sha512-4M0/Ivfwcpz325z6CwSifOBZYji3DFOEpY6zEUt0+Xi2qRhzwvmqQN9XAHJh3OVvRJuAqVTLU2abdCplvp6mwQ=="],
 
@@ -1420,7 +1420,7 @@
 
     "tar": ["tar@7.5.22", "", { "dependencies": { "@isaacs/fs-minipass": "^4.0.0", "chownr": "^3.0.0", "minipass": "^7.1.2", "minizlib": "^3.1.0", "yallist": "^5.0.0" } }, "sha512-MFO/QzvtAOmJbkhOaCTvbGcFN9L9b+JunIsDwaKljSOdcLMea3NJ1k9Usz/rjdfSXTq4dfzfeS7W4p4YOAAHeA=="],
 
-    "tenetkit": ["tenetkit@0.33.0", "", { "dependencies": { "@a2a-js/sdk": "1.0.1", "@ag-ui/core": "0.0.57", "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@effect/ai-anthropic": "4.0.0-rc.109", "@effect/ai-openai": "4.0.0-rc.109", "@effect/ai-openai-compat": "4.0.0-rc.109", "@effect/ai-openrouter": "4.0.0-rc.109", "@effect/sql-sqlite-bun": "4.0.0-rc.109", "@modelcontextprotocol/sdk": "1.29.0", "@smithy/types": "4.3.1" }, "peerDependencies": { "effect": "4.0.0-rc.109", "foldkit": ">=0.148.0 <1" }, "optionalPeers": ["foldkit"] }, "sha512-elJct6/jqIELgpzWub6TlGU5dvdf6qdFcx5WM1tQlpwN4RLBjikEFDPUDpa1txXZ16cRIq3DgR3Jrqk1RuvxnA=="],
+    "tenetkit": ["tenetkit@0.34.2", "", { "dependencies": { "@a2a-js/sdk": "1.0.1", "@ag-ui/core": "0.0.57", "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@effect/ai-anthropic": "4.0.0-rc.109", "@effect/ai-openai": "4.0.0-rc.109", "@effect/ai-openai-compat": "4.0.0-rc.109", "@effect/ai-openrouter": "4.0.0-rc.109", "@effect/sql-sqlite-bun": "4.0.0-rc.109", "@modelcontextprotocol/sdk": "1.29.0", "@smithy/types": "4.3.1" }, "peerDependencies": { "effect": "4.0.0-rc.109", "foldkit": ">=0.148.0 <1" }, "optionalPeers": ["foldkit"] }, "sha512-VTj/ppGR19i2MlLS5khko9KrZWuiO+OnNhPIjCwmPrOKJgUFWni8tD+8gYwfbFXfcl0UHsN1YZwdVT4nLftuAA=="],
 
     "tinybench": ["tinybench@2.9.0", "", {}, "sha512-0+DUvqWMValLmha6lr4kD8iAMK1HzV0/aKnCtWb9v9641TnP/MFb7Pc2bxoxQjTXAErryXVgUOfv2YqNllqGeg=="],
 

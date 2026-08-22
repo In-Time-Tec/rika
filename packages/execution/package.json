@@ -13,7 +13,7 @@
     "./test-harness": "./src/test-harness.ts"
   },
   "dependencies": {
-    "@tenetkit/pg": "0.33.0",
+    "@tenetkit/pg": "0.34.2",
     "tenetkit": "catalog:",
     "@rika/coding-tools": "workspace:*",
     "@rika/kernel": "workspace:*",
