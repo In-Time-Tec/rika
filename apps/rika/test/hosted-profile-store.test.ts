@@ -4,7 +4,7 @@ import { expect, it } from "@effect/vitest"
 import { ProfileStore, type Profile } from "../src/hosted/hosted-contract"
 import { layer } from "../src/hosted/hosted-profile-store"
 
-it.effect("persists the owner format and migrates version 2 profiles", () =>
+it.effect("persists the current owner format and rejects stale profiles", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const bunContext = yield* Layer.build(BunServices.layer)
@@ -38,45 +38,6 @@ it.effect("persists the owner format and migrates version 2 profiles", () =>
         filename,
         yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
           formatVersion: 2,
-          origin: profile.origin,
-          deviceId: profile.deviceId,
-          clientId: profile.clientId,
-          organization: "org-1",
-          project: profile.project,
-        }),
-      )
-      expect(Option.getOrThrow(yield* store.load)).toEqual(profile)
-      expect(
-        yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
-          yield* fileSystem.readFileString(filename),
-        ),
-      ).toEqual({
-        formatVersion: 3,
-        origin: profile.origin,
-        deviceId: profile.deviceId,
-        clientId: profile.clientId,
-        owner: { kind: "organization", organizationId: "org-1" },
-        project: "project-1",
-      })
-      yield* fileSystem.writeFileString(
-        filename,
-        yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
-          formatVersion: 2,
-          origin: profile.origin,
-          deviceId: profile.deviceId,
-          clientId: profile.clientId,
-        }),
-      )
-      expect(Option.getOrThrow(yield* store.load)).toEqual({
-        origin: profile.origin,
-        deviceId: profile.deviceId,
-        clientId: profile.clientId,
-        owner: { kind: "personal" },
-      })
-      yield* fileSystem.writeFileString(
-        filename,
-        yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
-          formatVersion: 1,
           origin: profile.origin,
           deviceId: profile.deviceId,
           clientId: profile.clientId,

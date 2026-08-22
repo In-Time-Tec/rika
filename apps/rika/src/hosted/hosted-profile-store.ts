@@ -1,7 +1,7 @@
 import { Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { HostedError, ProfileStore, type Profile } from "./hosted-contract"
 
-const ProfileDiskV3 = Schema.Struct({
+const ProfileDisk = Schema.Struct({
   formatVersion: Schema.Literal(3),
   origin: Schema.String,
   deviceId: Schema.String,
@@ -13,17 +13,6 @@ const ProfileDiskV3 = Schema.Struct({
   project: Schema.optionalKey(Schema.String),
 })
 
-const ProfileDiskV2 = Schema.Struct({
-  formatVersion: Schema.Literal(2),
-  origin: Schema.String,
-  deviceId: Schema.String,
-  clientId: Schema.String,
-  organization: Schema.optionalKey(Schema.String),
-  project: Schema.optionalKey(Schema.String),
-})
-
-const ProfileDisk = Schema.Union([ProfileDiskV3, ProfileDiskV2])
-
 const failure = (message: string) => HostedError.make({ kind: "storage", message })
 
 export const layer = (options: { readonly home: string; readonly filename?: string | undefined }) =>
@@ -34,7 +23,7 @@ export const layer = (options: { readonly home: string; readonly filename?: stri
       const path = yield* Path.Path
       const target = options.filename ?? path.join(options.home, ".config", "rika", "hosted.json")
       const save = Effect.fn("HostedProfileStore.save")(function* (profile: Profile) {
-        const text = yield* Schema.encodeEffect(Schema.fromJsonString(ProfileDiskV3))({
+        const text = yield* Schema.encodeEffect(Schema.fromJsonString(ProfileDisk))({
           formatVersion: 3,
           origin: profile.origin,
           deviceId: profile.deviceId,
@@ -64,19 +53,13 @@ export const layer = (options: { readonly home: string; readonly filename?: stri
         const profile = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ProfileDisk))(text).pipe(
           Effect.mapError(() => failure("Hosted profile is corrupt")),
         )
-        let owner: Profile["owner"]
-        if (profile.formatVersion === 3) owner = profile.owner
-        else if (profile.organization === undefined) owner = { kind: "personal" }
-        else owner = { kind: "organization", organizationId: profile.organization }
-        const current: Profile = {
+        return Option.some<Profile>({
           origin: profile.origin,
           deviceId: profile.deviceId,
           clientId: profile.clientId,
-          owner,
+          owner: profile.owner,
           ...(profile.project === undefined ? {} : { project: profile.project }),
-        }
-        if (profile.formatVersion === 2) yield* save(current)
-        return Option.some(current)
+        })
       })
       return ProfileStore.of({ load, save })
     }),
