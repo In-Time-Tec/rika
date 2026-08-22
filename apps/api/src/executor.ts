@@ -67,6 +67,16 @@ const OperationIdentity = Schema.Struct({
   deadline: Schema.NullOr(Schema.String),
 })
 const encodeOperationIdentity = Schema.encodeSync(Schema.fromJsonString(OperationIdentity))
+const requiredWorkspaceCapabilities = [
+  "filesystem",
+  "typescriptKernel",
+  "git",
+  "process",
+  "workspaceLifecycle",
+] as const
+const encodeRequiredWorkspaceCapabilities = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Array(Schema.NonEmptyString)),
+)
 
 const cellOutcome = (outcome: "completed" | "failed" | "cancelled" | "unknown"): HostedObservability.Outcome => {
   switch (outcome) {
@@ -848,14 +858,7 @@ export const service = Layer.effect(
               ),
             )
             const capabilities = active.capabilities!
-            const requiredCapabilities = [
-              "filesystem",
-              "typescriptKernel",
-              "git",
-              "process",
-              "workspaceLifecycle",
-            ] as const
-            const unavailable = requiredCapabilities.flatMap((name) => {
+            const unavailable = requiredWorkspaceCapabilities.flatMap((name) => {
               const capability = capabilities[name]
               return capability._tag === "Ready" ? [] : [`${name}: ${capability.reason}`]
             })
@@ -868,7 +871,8 @@ export const service = Layer.effect(
                 (thread_id, turn_id, assignment_id, workspace_id, assignment_generation,
                  environment_digest, required_capabilities)
               VALUES (${input.threadId}, ${input.turnId}, ${active.id}, ${input.workspaceId},
-                ${active.generation}::bigint, ${capabilities.environmentDigest}, ${sql.json(requiredCapabilities)})
+                ${active.generation}::bigint, ${capabilities.environmentDigest},
+                ${encodeRequiredWorkspaceCapabilities(requiredWorkspaceCapabilities)}::jsonb)
               ON CONFLICT (thread_id, turn_id) DO NOTHING`.pipe(
               Effect.mapError(() =>
                 ControllerError.make({

@@ -1,5 +1,6 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
+import { Controller, type Interface as ControllerService } from "@rika/e2b-executor/controller"
 import { identityMigrations, runMigration } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import { CheckoutFingerprint } from "@rika/product/local-runner-registration"
@@ -9,10 +10,14 @@ import { layer as productPostgres } from "@rika/product-store/postgres-layer"
 import type { Access, LocalExecutorHelloWire } from "@rika/remote-execution/protocol"
 import { Effect, Layer, Random, Redacted } from "effect"
 import { Pool } from "pg"
+import { Executor, service as executorLayer } from "../src/executor"
+import { HostedEnvironment, type HostedEnvironmentService } from "../src/hosted-environment"
 import { testLayer as hostedModelRegistryTestLayer } from "../src/hosted-model-registry"
 import { HostedProduct, layer as hostedProductLayer, type AuthenticatedPrincipal } from "../src/hosted-product"
 import { testLayer as hostedRepositoriesTestLayer } from "../src/hosted-repositories"
+import { HostedToolPolicy } from "../src/hosted-tool-policy"
 import { LocalExecutor, layer as localExecutorLayer } from "../src/local-executor"
+import { testToolPolicy } from "./hosted-tool-policy-fixture"
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined
@@ -32,6 +37,15 @@ const helloReadiness = {
   },
   cursors: { command: 0, event: 0, pty: 0 },
 } satisfies Omit<LocalExecutorHelloWire, "admissionId" | "ticket" | "processIncarnation">
+const unusedHostedEnvironment: HostedEnvironmentService = {
+  put: () => Effect.die("unused"),
+  revoke: () => Effect.die("unused"),
+  putOrganizationPolicy: () => Effect.die("unused"),
+  approveSource: () => Effect.die("unused"),
+  revokeSourceApproval: () => Effect.die("unused"),
+  putEgress: () => Effect.die("unused"),
+  usePhase: () => Effect.die("unused"),
+}
 
 const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
   Effect.promise(() => pool.query(text, [...values]))
@@ -119,7 +133,7 @@ const failureKind = <A>(effect: Effect.Effect<A, { readonly kind: string }>) =>
 
 const isolated = <A, E, R>(
   label: string,
-  use: (pool: Pool) => Effect.Effect<A, E, R | HostedProduct | LocalExecutor>,
+  use: (pool: Pool) => Effect.Effect<A, E, R | Executor | HostedProduct | LocalExecutor>,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -142,16 +156,21 @@ const isolated = <A, E, R>(
           BunCrypto.layer,
           hostedModelRegistryTestLayer,
           hostedRepositoriesTestLayer,
+          Layer.succeed(Controller, { cleanupOrphans: Effect.succeed([]) } as unknown as ControllerService),
+          Layer.succeed(HostedEnvironment, unusedHostedEnvironment),
+          Layer.succeed(HostedToolPolicy, testToolPolicy),
         )
+        const localExecutor = localExecutorLayer.pipe(Layer.provide(base))
         const context = yield* Layer.build(
-          Layer.merge(
+          Layer.mergeAll(
             hostedProductLayer({
               templateBuildId: "local-authority-live",
               providerScope: "local-authority-live",
               provision: () => Effect.void,
-            }),
-            localExecutorLayer,
-          ).pipe(Layer.provide(base)),
+            }).pipe(Layer.provide(base)),
+            localExecutor,
+            executorLayer.pipe(Layer.provide(localExecutor), Layer.provide(base)),
+          ),
         )
         return yield* use(pool).pipe(Effect.provide(context))
       } finally {
@@ -199,10 +218,39 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
         access: { ...access, leaseEpoch: reconnected.leaseEpoch },
         cursor: reconnected.cursor,
       })
+      const admitted = yield* product.admitRun({
+        principal: owner,
+        threadId: connection.threadId,
+        operationKey: "personal-turn",
+        prompt: "personal prompt",
+      })
+      const workspace = yield* query(pool, `SELECT workspace_id FROM rika_hosted_threads WHERE id = $1`, [
+        connection.threadId,
+      ])
+      yield* Executor.pipe(
+        Effect.flatMap((executor) =>
+          executor.admitRun({
+            threadId: connection.threadId,
+            turnId: admitted.turnId,
+            workspaceId: workspace.rows[0].workspace_id,
+          }),
+        ),
+      )
       expect(
         (yield* query(pool, `SELECT consumed_at IS NOT NULL AS consumed FROM rika_hosted_local_executor_admissions`))
           .rows,
       ).toEqual([{ consumed: true }])
+      expect(
+        (yield* query(
+          pool,
+          `SELECT required_capabilities FROM rika_hosted_workspace_capability_admissions WHERE turn_id = $1`,
+          [admitted.turnId],
+        )).rows,
+      ).toEqual([
+        {
+          required_capabilities: ["filesystem", "typescriptKernel", "git", "process", "workspaceLifecycle"],
+        },
+      ])
     }),
   ),
 )

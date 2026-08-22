@@ -431,7 +431,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       expect(runs.filter((input) => input.operationKey === "duplicate-submit")).toHaveLength(1)
       expect(
         yield* controllerA.receive({ ...duplicate, requestId: "duplicate-after-completion" as never }),
-      ).toMatchObject([{ payload: { _tag: "CommandAccepted", threadVersion: "1", cursor: "0" } }])
+      ).toMatchObject([{ payload: { _tag: "CommandAccepted", threadVersion: "1", cursor: "1" } }])
       expect(effects).toHaveLength(0)
 
       const contender = (id: string, requestId: string) => ({
@@ -460,7 +460,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
         reason: "stale-version",
         currentThreadVersion: "2",
       })
-      expect(stale?.currentCursor).toBe("0")
+      expect(stale?.currentCursor).toBe("1")
       const staleIndex = stale?.requestId === "controller-a-request" ? 0 : 1
       const delayed = contenders[staleIndex]!
       const delayedSession = staleIndex === 0 ? controllerA : controllerB
@@ -470,7 +470,18 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
           requestId: "delayed-resync" as never,
           command: { ...delayed.command, expectedThreadVersion: ThreadVersion.make("2") },
         }),
-      ).toMatchObject([{ payload: { _tag: "CommandAccepted", threadVersion: "3", cursor: "0" } }])
+      ).toMatchObject([
+        { payload: { _tag: "CommandAccepted", threadVersion: "3", cursor: "3" } },
+        {
+          payload: {
+            _tag: "ThreadEvent",
+            event: {
+              cursor: "3",
+              event: { _tag: "SubmissionAdmitted", submissionId: delayed.command.commandId },
+            },
+          },
+        },
+      ])
       expect(
         runs.filter((input) => input.operationKey === "controller-a" || input.operationKey === "controller-b"),
       ).toHaveLength(2)
@@ -495,14 +506,14 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
         yield* approvalController.receive({
           protocolVersion: 1,
           requestId: "approval-attach" as never,
-          command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
+          command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("3") },
         }),
       ).toMatchObject([
         {
           payload: {
             _tag: "ThreadSnapshot",
             threadVersion: "3",
-            cursor: "0",
+            cursor: "3",
             snapshot: { pendingAuthorizations: [{ authorizationId: "authorization-1", checkpoint }] },
           },
         },
@@ -677,7 +688,15 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
         requestId: "replay-attach" as never,
         command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
       })
-      expect(replay).toMatchObject([{ payload: { _tag: "ThreadSnapshot", threadVersion: "6", cursor: "1" } }])
+      expect(replay).toMatchObject([
+        { payload: { _tag: "ThreadSnapshot", threadVersion: "6", cursor: "3" } },
+        {
+          payload: {
+            _tag: "ThreadEvent",
+            event: { cursor: "4", event: { _tag: "ExecutionControlled", action: "cancelled" } },
+          },
+        },
+      ])
     }),
   ),
 )

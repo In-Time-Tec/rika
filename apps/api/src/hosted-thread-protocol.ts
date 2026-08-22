@@ -28,6 +28,7 @@ import {
 } from "@rika/product/client-protocol"
 import { ThreadProtocolStore, type ThreadProtocolCommand } from "@rika/product/thread-protocol-store"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
+import { TurnId as ProductTurnId } from "@rika/product/turn-record"
 import { HostedOperations, HostedOperationsError } from "./hosted-operations"
 import { type AuthenticatedPrincipal, HostedProduct, HostedProductError, type ThreadAuthority } from "./hosted-product"
 import { HostedToolPolicy } from "./hosted-tool-policy"
@@ -550,7 +551,7 @@ export const layer = Layer.effect(
 
           const applied = yield* Effect.gen(function* () {
             if (command._tag === "SubmitPrompt") {
-              yield* product
+              const admitted = yield* product
                 .admitRun({
                   principal,
                   threadId: attached!.threadId,
@@ -569,7 +570,18 @@ export const layer = Layer.effect(
                   ...(command.mode === undefined ? {} : { mode: command.mode }),
                 })
                 .pipe(Effect.mapError(productFailure))
-              return { result: { _tag: "Applied" as const }, events: [] as ReadonlyArray<InteractiveEvent> }
+              return {
+                result: { _tag: "Applied" as const },
+                events: [
+                  {
+                    _tag: "SubmissionAdmitted" as const,
+                    threadId: ProductThreadId.make(attached!.threadId),
+                    turnId: ProductTurnId.make(admitted.turnId),
+                    status: admitted.status,
+                    submissionId: command.commandId,
+                  },
+                ],
+              }
             }
             let authorization:
               | {
@@ -720,6 +732,7 @@ export const layer = Layer.effect(
           const latestSnapshot = yield* operations
             .snapshot(authority.ownerId, ProductThreadId.make(attached.threadId))
             .pipe(Effect.result)
+          const completedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
           const completed = yield* store
             .completeCommand({
               ownerId: authority.ownerId,
@@ -728,10 +741,26 @@ export const layer = Layer.effect(
               result: applied.result,
               events: applied.events,
               ...(latestSnapshot._tag === "Success" ? { snapshot: latestSnapshot.success } : {}),
-              completedAt: DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis)),
+              completedAt,
             })
             .pipe(Effect.mapError(storeFailure))
-          return [frame(commandResult(completed, message.requestId))]
+          return [
+            frame(commandResult(completed, message.requestId)),
+            ...applied.events.map((event, index) => {
+              const cursor = String(BigInt(completed.cursor ?? zeroCursor) - BigInt(applied.events.length - index - 1))
+              return frame({
+                _tag: "ThreadEvent",
+                event: {
+                  threadId: attached!.threadId,
+                  sequence: Sequence.make(cursor),
+                  cursor: ThreadEventCursor.make(cursor),
+                  threadVersion: completed.threadVersion,
+                  event,
+                  createdAt: completed.completedAt ?? completedAt,
+                },
+              })
+            }),
+          ]
         })
 
         return {

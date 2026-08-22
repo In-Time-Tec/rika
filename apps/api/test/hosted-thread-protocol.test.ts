@@ -20,6 +20,7 @@ import { StoreError } from "@rika/product/hosted-store"
 import type { AuthorizationAction } from "@rika/product/hosted-authorization"
 import type { HostedThreadSnapshot } from "@rika/product/client-protocol"
 import type { InteractiveCommand } from "@rika/product/interactive-command"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
 import {
   ThreadProtocolStore,
   type CommandAdmission,
@@ -75,11 +76,7 @@ const memoryStore = () => {
   const keys = new Map<string, string>()
   let latestSnapshot: HostedThreadSnapshot | undefined
   const events: Array<{
-    readonly event: {
-      readonly _tag: "ExecutionControlled"
-      readonly selectionEpoch: number
-      readonly action: "cancelled"
-    }
+    readonly event: InteractiveEvent
     readonly cursor: string
     readonly threadVersion: string
   }> = []
@@ -112,7 +109,7 @@ const memoryStore = () => {
         for (const event of input.events) {
           cursor += 1n
           events.push({
-            event: event as (typeof events)[number]["event"],
+            event,
             cursor: String(cursor),
             threadVersion: admitted.threadVersion,
           })
@@ -298,12 +295,35 @@ it.effect("derives personal authority, admits a retried submission once, and res
           attachments: [{ mediaType: "image/png", data: "aW1hZ2U=", filename: "evidence.png" }],
         },
       }
-      expect((yield* first.receive(submit))[0]?.payload).toMatchObject({ _tag: "CommandAccepted", threadVersion: "2" })
-      expect((yield* first.receive({ ...submit, requestId: "request-retry" as never }))[0]?.payload).toMatchObject({
+      const submitted = yield* first.receive(submit)
+      expect(submitted[0]?.payload).toMatchObject({
         _tag: "CommandAccepted",
-        requestId: "request-retry",
         threadVersion: "2",
+        cursor: "1",
       })
+      expect(submitted[1]?.payload).toMatchObject({
+        _tag: "ThreadEvent",
+        event: {
+          cursor: "1",
+          event: {
+            _tag: "SubmissionAdmitted",
+            threadId,
+            turnId: "turn-submit-1",
+            status: "queued",
+            submissionId: "submit-1",
+          },
+        },
+      })
+      expect(yield* first.receive({ ...submit, requestId: "request-retry" as never })).toMatchObject([
+        {
+          payload: {
+            _tag: "CommandAccepted",
+            requestId: "request-retry",
+            threadVersion: "2",
+            cursor: "1",
+          },
+        },
+      ])
       expect(admittedRuns).toEqual([
         {
           principal: { userId, clientId, deviceId },
@@ -340,11 +360,31 @@ it.effect("derives personal authority, admits a retried submission once, and res
       expect(applied).toEqual(["cancel-1"])
 
       const second = yield* protocol.connect("ticket-2", "/api/v1/threads/socket")
-      yield* second.receive({
-        protocolVersion: 1,
-        requestId: "request-attach" as never,
-        command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
-      })
+      expect(
+        yield* second.receive({
+          protocolVersion: 1,
+          requestId: "request-attach" as never,
+          command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
+        }),
+      ).toMatchObject([
+        { payload: { _tag: "ThreadSnapshot", cursor: "2" } },
+        {
+          payload: {
+            _tag: "ThreadEvent",
+            event: {
+              cursor: "1",
+              event: {
+                _tag: "SubmissionAdmitted",
+                threadId,
+                turnId: "turn-submit-1",
+                status: "queued",
+                submissionId: "submit-1",
+              },
+            },
+          },
+        },
+        { payload: { _tag: "ThreadEvent", event: { cursor: "2", event: { _tag: "ExecutionControlled" } } } },
+      ])
       expect(
         (yield* second.receive({
           ...submit,
@@ -355,7 +395,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
         _tag: "CommandRejected",
         reason: "stale-version",
         currentThreadVersion: "3",
-        currentCursor: "1",
+        currentCursor: "2",
       })
 
       const approval = {
