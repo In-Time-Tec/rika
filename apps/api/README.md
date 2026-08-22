@@ -25,6 +25,10 @@ Set these API service variables in Railway. `PORT=3000` is also the private port
 - `E2B_TEMPLATE_ID`: the commit-qualified E2B template ID.
 - `E2B_TEMPLATE_BUILD_ID`: the successful build receipt UUID; creation pins `<template-id>:<build-id>` and also uses it for assignment identity and fencing.
 - `RIKA_EXECUTOR_API_URL`: the public proxy `wss://` origin with `/api/v1/executors`.
+- `RIKA_WORKSPACE_CHECKPOINT_BUCKET`, `RIKA_WORKSPACE_CHECKPOINT_REGION`, and `RIKA_WORKSPACE_CHECKPOINT_ENDPOINT`: references to a Railway Storage Bucket's `BUCKET`, `REGION`, and `ENDPOINT` variables.
+- `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`: references to that bucket's `ACCESS_KEY_ID` and `SECRET_ACCESS_KEY` variables for the AWS SDK credential chain.
+- `RIKA_WORKSPACE_ENCRYPTION_KEY`: a base64-encoded 32-byte key generated once for encrypting Workspace checkpoints. Keep the same key while stored checkpoints must remain recoverable.
+- `RIKA_WORKSPACE_SETUP_CACHE`: `true` to reuse encrypted setup archives from the checkpoint bucket, otherwise `false`.
 - `RIKA_PROXY_PUBLIC_DOMAIN`: a reference to the proxy service's Railway public domain. Non-production Railway environments derive their callback, trusted-origin, resource, and executor URLs from this value.
 
 Keep all credentials in Railway variables. Do not put them in the repository, Docker build arguments, or image files.
