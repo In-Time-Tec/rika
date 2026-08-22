@@ -138,6 +138,10 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       render()
     },
     key: (key) => {
+      if (key.ctrl && key.name === "c" && loop.model.busy && loop.model.cancelPending) {
+        close()
+        return
+      }
       if (loop.model.busy && loop.ctrlCMenuVisible) showCtrlCMenu(false)
       if (key.ctrl && key.name === "c" && !loop.model.busy) {
         if (loop.ctrlCMenuVisible) {

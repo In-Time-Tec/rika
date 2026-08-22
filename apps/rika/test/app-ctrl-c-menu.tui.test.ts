@@ -1,7 +1,7 @@
 import { TextAttributes } from "@opentui/core"
 import * as Turn from "@rika/product/turn-record"
 import { expect, test } from "vitest"
-import { Effect } from "effect"
+import { Deferred, Effect } from "effect"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
@@ -121,6 +121,27 @@ test(
         expect(app.frame()).not.toContain("Ctrl+N Archive and new thread")
 
         yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)
+
+test(
+  "quits on a second Ctrl+C while cancellation is still pending",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const admission = yield* Deferred.make<void>()
+        const app = yield* TuiApp.tuiApp({ holdSubmissionAdmission: admission })
+
+        yield* Effect.promise(() => app.type("Keep submission admission pending."))
+        app.pressEnter()
+        yield* app.waitFrame("Sending")
+        app.pressKey("c", { ctrl: true })
+        yield* app.waitFrame("Waiting")
+        app.pressKey("c", { ctrl: true })
+
+        yield* app.done.pipe(Effect.timeout("1 second"))
       }),
     ),
   tuiTestTimeout,
