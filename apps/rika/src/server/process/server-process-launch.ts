@@ -371,7 +371,7 @@ export const start = () => {
   process.on("SIGTERM", terminate)
   fiber.addObserver((exit) => {
     removeSigintIsolation()
-    process.off("SIGTERM", terminate)
+    ;(process as NodeJS.EventEmitter).off("SIGTERM", terminate)
     process.exit(exit._tag === "Success" ? 0 : 1)
   })
 }
@@ -380,5 +380,5 @@ const isolateSigint = () => {}
 
 export const installServerSigintIsolation = (): (() => void) => {
   process.on("SIGINT", isolateSigint)
-  return () => process.off("SIGINT", isolateSigint)
+  return () => (process as NodeJS.EventEmitter).off("SIGINT", isolateSigint)
 }

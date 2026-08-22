@@ -74,7 +74,7 @@ export const installClientSigintHandler = (input: {
     if (input.inputMode() === "root") input.rootFiber()?.interruptUnsafe()
   }
   process.on("SIGINT", handler)
-  return () => process.off("SIGINT", handler)
+  return () => (process as NodeJS.EventEmitter).off("SIGINT", handler)
 }
 
 const dispatcherLayer = (argv?: ReadonlyArray<string>) =>

@@ -66,22 +66,11 @@ const isolatedEnvironment = (home: string, path: Path.Path) => ({
 })
 
 const ptyLauncher = (repositoryRoot: string, home: string, path: Path.Path) =>
-  Bun.spawn(
-    [
-      "python3",
-      path.join(repositoryRoot, "apps", "rika", "test", "fixtures", "idle-pty.py"),
-      process.execPath,
-      path.join(repositoryRoot, "apps", "rika", "src", "client-main.ts"),
-    ],
-    {
-      cwd: home,
-      env: isolatedEnvironment(home, path),
-      stdin: "pipe",
-      stdout: "ignore",
-      stderr: "ignore",
-      detached: true,
-    },
-  )
+  Bun.spawn([process.execPath, path.join(repositoryRoot, "apps", "rika", "src", "client-main.ts")], {
+    cwd: home,
+    env: isolatedEnvironment(home, path),
+    terminal: { cols: 120, rows: 36 },
+  })
 
 export interface IdleTurnSeries {
   readonly role: IdleRole
@@ -130,6 +119,7 @@ export const observeIdleProcessTree = Effect.fn("IdleGate.observe")(function* (i
       Effect.gen(function* () {
         const executableName = process.execPath.slice(process.execPath.lastIndexOf("/") + 1)
         const track = Effect.gen(function* () {
+          owned.add(launcher.pid)
           const rows = descendants(yield* readProcessRows, launcher.pid)
           for (const row of rows) owned.add(row.pid)
           return observedRoles(rows, owned, executableName)
@@ -146,8 +136,7 @@ export const observeIdleProcessTree = Effect.fn("IdleGate.observe")(function* (i
           })
         const perTurn = new Map<IdleRole, { rss: Array<number>; physicalFootprint: Array<number> }>()
         for (const turn of input.turns) {
-          yield* Effect.sync(() => launcher.stdin.write(`${turn}\r`))
-          yield* Effect.sync(() => launcher.stdin.flush())
+          launcher.terminal!.write(`${turn}\r`)
           yield* Effect.sleep(input.turnSettleMillis)
           for (const [role, row] of yield* track) {
             const entry = perTurn.get(role) ?? { rss: [], physicalFootprint: [] }

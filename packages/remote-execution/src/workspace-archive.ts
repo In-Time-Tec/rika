@@ -55,6 +55,23 @@ interface CommandResult {
   readonly exitCode: number
 }
 
+/**
+ * Deterministic archives need GNU flags (--sort=name, --mtime=@0, --numeric-owner) that bsdtar rejects.
+ * Homebrew installs GNU tar as gtar; Linux distributions ship GNU tar as tar.
+ */
+const gnuTar = (() => {
+  const candidate = Bun.which("gtar") ?? Bun.which("tar")
+  if (candidate == null) return undefined
+  return Bun.spawnSync([candidate, "--version"]).stdout.toString().includes("GNU tar") ? candidate : undefined
+})()
+
+const tarArguments = (
+  arguments_: ReadonlyArray<string>,
+): Effect.Effect<ReadonlyArray<string>, WorkspaceArchiveError> => {
+  if (gnuTar === undefined) return Effect.fail(failure("archive", "Workspace archiving requires GNU tar (install gnu-tar on macOS)"))
+  return Effect.succeed([gnuTar, ...arguments_])
+}
+
 const run = (input: {
   readonly command: ReadonlyArray<string>
   readonly cwd?: string
@@ -146,8 +163,9 @@ const inspectSecretValues = Effect.fn("WorkspaceArchive.inspectSecretValues")(fu
 })
 
 const safeArchiveEntries = Effect.fn("WorkspaceArchive.safeEntries")(function* (bytes: Uint8Array) {
+  const tar = yield* tarArguments(["--zstd", "--list", "--file", "-"])
   const output = yield* command(
-    { command: ["tar", "--zstd", "--list", "--file", "-"], stdin: bytes },
+    { command: tar, stdin: bytes },
     "archive",
     "Workspace archive is invalid",
   )
@@ -220,10 +238,7 @@ export const createArchive = Effect.fn("WorkspaceArchive.create")(function* (
 ) {
   yield* inspectSecrets(workspace)
   yield* inspectSecretValues(workspace, secretValues)
-  const bytes = yield* command(
-    {
-      command: [
-        "tar",
+  const tar = yield* tarArguments([
         "--zstd",
         "--create",
         "--file",
@@ -237,7 +252,10 @@ export const createArchive = Effect.fn("WorkspaceArchive.create")(function* (
         workspace,
         ...excluded.flatMap((path) => ["--exclude", `./${path}`, "--exclude", `./${path}/**`]),
         ".",
-      ],
+      ])
+  const bytes = yield* command(
+    {
+      command: tar,
     },
     "archive",
     "Could not create Workspace archive",
@@ -262,8 +280,7 @@ export const inspectArchive = Effect.fn("WorkspaceArchive.inspect")(function* (a
     Effect.gen(function* () {
       yield* command(
         {
-          command: [
-            "tar",
+          command: yield* tarArguments([
             "--zstd",
             "--extract",
             "--file",
@@ -272,7 +289,7 @@ export const inspectArchive = Effect.fn("WorkspaceArchive.inspect")(function* (a
             directory,
             "--no-same-owner",
             "--no-same-permissions",
-          ],
+          ]),
           stdin: archive.bytes,
         },
         "archive",
@@ -296,8 +313,7 @@ export const restoreArchive = Effect.fn("WorkspaceArchive.restore")(function* (
     Effect.gen(function* () {
       yield* command(
         {
-          command: [
-            "tar",
+          command: yield* tarArguments([
             "--zstd",
             "--extract",
             "--file",
@@ -306,7 +322,7 @@ export const restoreArchive = Effect.fn("WorkspaceArchive.restore")(function* (
             directory,
             "--no-same-owner",
             "--no-same-permissions",
-          ],
+          ]),
           stdin: archive.bytes,
         },
         "archive",

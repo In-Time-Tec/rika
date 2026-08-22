@@ -2,12 +2,18 @@ import { expect, test } from "vitest"
 
 const root = process.cwd()
 const image = `rika-proxy-topology-${process.pid}-${Date.now()}`
+const containerReady = async (command: string[]) =>
+  (await Bun.spawn([...command, "version"], { stdout: "ignore", stderr: "ignore" }).exited) === 0
 const containerCommand = Bun.which("docker")
-  ? ["docker"]
+  ? (await containerReady(["docker"]))
+    ? ["docker"]
+    : undefined
   : Bun.which("podman")
-    ? (await Bun.spawn(["sudo", "-n", "podman", "version"], { stdout: "ignore", stderr: "ignore" }).exited) === 0
+    ? (await containerReady(["sudo", "-n", "podman"]))
       ? ["sudo", "podman", "--cgroup-manager=cgroupfs"]
-      : ["podman"]
+      : (await containerReady(["podman"]))
+        ? ["podman"]
+        : undefined
     : undefined
 const usesDocker = containerCommand?.length === 1 && containerCommand[0] === "docker"
 const containerHost = usesDocker ? "host.docker.internal" : "host.containers.internal"

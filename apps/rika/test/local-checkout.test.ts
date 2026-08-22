@@ -45,7 +45,8 @@ it.effect("binds opaque, distinct checkout identities to the authenticated devic
       expect(first.registration.repository.remoteUrl).toBe("https://example.test/owner/repo.git")
       expect(serialized).not.toContain(root)
       expect(serialized).not.toContain("secret")
-      expect(first.workspacePath).toBe(firstPath)
+      /** inspectLocalCheckout resolves the checkout through realPath, so compare resolved to resolved. */
+      expect(first.workspacePath).toBe(yield* fileSystem.realPath(firstPath))
     }),
   ),
 )

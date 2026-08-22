@@ -4,12 +4,18 @@ import { describe, expect, it } from "vitest"
 
 const root = new URL("../..", import.meta.url)
 const imageRoot = new URL("../../infra/e2b/executor-v1/", import.meta.url)
+const containerReady = async (command: string[]) =>
+  (await Bun.spawn([...command, "version"], { stdout: "ignore", stderr: "ignore" }).exited) === 0
 const containerCommand = Bun.which("docker")
-  ? ["docker"]
+  ? (await containerReady(["docker"]))
+    ? ["docker"]
+    : undefined
   : Bun.which("podman")
-    ? (await Bun.spawn(["sudo", "-n", "podman", "version"], { stdout: "ignore", stderr: "ignore" }).exited) === 0
+    ? (await containerReady(["sudo", "-n", "podman"]))
       ? ["sudo", "podman", "--cgroup-manager=cgroupfs"]
-      : ["podman"]
+      : (await containerReady(["podman"]))
+        ? ["podman"]
+        : undefined
     : undefined
 const run = async (parts: string[]) => {
   const process = Bun.spawn(parts, { cwd: root.pathname, stdout: "pipe", stderr: "pipe" })

@@ -113,7 +113,8 @@ type Marker = typeof Marker.Type
 const encodeMarker = Schema.encodeSync(Schema.fromJsonString(Marker))
 const decodeMarker = Schema.decodeUnknownEffect(Schema.fromJsonString(Marker))
 const maximumOutputBytes = 64 * 1024
-const ghExecutable = Bun.which("gh", { PATH: "/usr/local/bin:/usr/bin:/bin" }) ?? "/usr/bin/gh"
+const ghExecutable =
+  Bun.which("gh") ?? Bun.which("gh", { PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" }) ?? "/usr/bin/gh"
 
 const readOnlyGhWrapper = (executable = ghExecutable, credentialClient?: string) =>
   `#!/bin/sh\nset -eu\nauthenticate() {\n${credentialClient === undefined ? "  :\n" : `  token="$(${credentialClient} github-read)"\n  [ -n "$token" ] || exit 1\n  export GH_TOKEN="$token"\n`}}\ncase "\${1:-}:\${2:-}" in\n  --version:|version:) exec ${executable} "$@" ;;\n  auth:status|repo:view|repo:list|issue:view|issue:list|issue:status|pr:view|pr:list|pr:checks|pr:status|pr:diff|search:*) authenticate; exec ${executable} "$@" ;;\n  api:*)\n    shift\n    for value in "$@"; do\n      case "$value" in graphql|-X*|--method*|-f*|-F*|--field*|--raw-field*|--input*|--hostname*) echo 'write-capable gh api arguments are disabled' >&2; exit 2 ;; esac\n    done\n    authenticate\n    exec ${executable} api --method GET "$@" ;;\n  *) echo 'only read-only gh operations are enabled' >&2; exit 2 ;;\nesac\n`

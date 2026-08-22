@@ -969,3 +969,17 @@ Only after the vertical slice is deployed and measured, continue the original ho
 - Add multi-replica dispatch ownership after measuring the single-replica MVP.
 
 Do not pull these follow-ups into the first Railway acceptance unless they are required to make the stated smoke path correct.
+
+## PLAN: Test stack — Bun 1.4, parallel lanes, and the idle-gate resurrection
+
+Landed on `perf/test-stack-bun14`: Bun 1.4.0 runtime and types, vitest file parallelism on
+the tui (3 workers) and proc (4 workers) lanes, the Python PTY fixtures replaced by native
+`Bun.Terminal` in `idle-process-observation`, GNU-tar detection for deterministic workspace
+archives on macOS, and Docker-daemon probing so container gates skip cleanly without a daemon.
+
+Unfinished: the Darwin-only resource-measurement gates (`idle-resource-ceilings`,
+`performance-platform`) are skipped unless `RIKA_IDLE_GATE=1` / `RIKA_PERFORMANCE_GATE=1`
+because the hosted-account shift made the interactive client exit before it spawns its
+client/interactive/server role tree, which is exactly what those gates measure. They come back
+when a test double hosts the authenticated interactive flow locally; until then no local gate
+measures idle CPU or physical footprint of a running Rika process tree.

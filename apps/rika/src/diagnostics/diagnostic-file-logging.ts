@@ -8,6 +8,9 @@ const activeSettlers = new Set<() => void>()
 
 const settlingSignals = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"] as const
 
+/** bun-types 1.4 shadows process.removeListener with its memoryPressure overload; the EventEmitter surface still takes signals. */
+const processEvents: NodeJS.EventEmitter = process
+
 type DiagnosticAnnotation = string | number | boolean
 
 type AnnotationSchema = (value: unknown) => DiagnosticAnnotation | undefined
@@ -272,7 +275,7 @@ export const layer = (options: {
       const onSignal = () => {
         settle()
         if (process.listenerCount(signal) === 1) {
-          process.removeListener(signal, onSignal)
+          processEvents.removeListener(signal, onSignal)
           process.kill(process.pid, signal)
         }
       }
@@ -286,9 +289,9 @@ export const layer = (options: {
         Effect.ignore,
         Effect.andThen(
           Effect.sync(() => {
-            process.removeListener("exit", settle)
-            process.removeListener("beforeExit", settle)
-            for (const [signal, onSignal] of signalSettlers) process.removeListener(signal, onSignal)
+            processEvents.removeListener("exit", settle)
+            processEvents.removeListener("beforeExit", settle)
+            for (const [signal, onSignal] of signalSettlers) processEvents.removeListener(signal, onSignal)
             activeSettlers.delete(settle)
           }),
         ),
