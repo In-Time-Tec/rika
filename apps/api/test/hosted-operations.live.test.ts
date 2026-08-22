@@ -11,6 +11,7 @@ import { ThreadId } from "@rika/product/thread-record"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { Context, Effect, Layer, Random, Redacted, Schema } from "effect"
 import { Pool } from "pg"
+import { testLayer as hostedModelRegistryTestLayer } from "../src/hosted-model-registry"
 import { HostedOperations, layer as hostedOperationsLayer } from "../src/hosted-operations"
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
@@ -50,6 +51,7 @@ it.effect.skipIf(databaseUrl === undefined)("encodes an owner-scoped snapshot wi
           BunCrypto.layer,
           ExecutionGateway.layerTest(),
           ExecutionSessionLifecycle.layerTest(),
+          hostedModelRegistryTestLayer,
           Layer.succeed(ThreadProtocolStore, {
             initializeThread: () => Effect.die("unused"),
             admitCommand: () => Effect.die("unused"),

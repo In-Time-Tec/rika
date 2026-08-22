@@ -117,30 +117,12 @@ const commandResult = (command: ThreadProtocolCommand, requestId: RequestId): Se
 
 type InteractiveMutatingCommand = Exclude<
   MutatingThreadCommand,
-  { readonly _tag: "EnsureRepositoryService" | "StopRepositoryService" }
+  { readonly _tag: "SubmitPrompt" | "EnsureRepositoryService" | "StopRepositoryService" }
 >
 
 const productCommand = (command: InteractiveMutatingCommand) => {
   let value: unknown
   switch (command._tag) {
-    case "SubmitPrompt":
-      value = {
-        _tag: "Submit",
-        prompt: command.text,
-        submissionId: command.commandId,
-        ...(command.mode === undefined ? {} : { mode: command.mode }),
-        ...(command.attachments === undefined
-          ? {}
-          : {
-              promptParts: command.attachments.map((attachment) => ({
-                type: "image",
-                mediaType: attachment.mediaType,
-                data: attachment.data,
-                ...(attachment.filename === undefined ? {} : { filename: attachment.filename }),
-              })),
-            }),
-      }
-      break
     case "Steer":
       value = {
         _tag: "Steer",
@@ -557,15 +539,38 @@ export const layer = Layer.effect(
               ),
             )
           if (admission._tag === "Duplicate") {
-            if (admission.command.state !== "completed")
+            if (admission.command.state === "completed")
+              return [frame(commandResult(admission.command, message.requestId))]
+            if (command._tag !== "SubmitPrompt")
               return yield* HostedThreadProtocolError.make({
                 kind: "conflict",
                 message: "Command is still being applied",
               })
-            return [frame(commandResult(admission.command, message.requestId))]
           }
 
           const applied = yield* Effect.gen(function* () {
+            if (command._tag === "SubmitPrompt") {
+              yield* product
+                .admitRun({
+                  principal,
+                  threadId: attached!.threadId,
+                  operationKey: command.commandId,
+                  prompt: command.text,
+                  ...(command.attachments === undefined
+                    ? {}
+                    : {
+                        promptParts: command.attachments.map((attachment) => ({
+                          type: "image" as const,
+                          mediaType: attachment.mediaType,
+                          data: attachment.data,
+                          ...(attachment.filename === undefined ? {} : { filename: attachment.filename }),
+                        })),
+                      }),
+                  ...(command.mode === undefined ? {} : { mode: command.mode }),
+                })
+                .pipe(Effect.mapError(productFailure))
+              return { result: { _tag: "Applied" as const }, events: [] as ReadonlyArray<InteractiveEvent> }
+            }
             let authorization:
               | {
                   readonly actor: ThreadAuthority["actor"]

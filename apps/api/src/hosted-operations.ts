@@ -6,6 +6,7 @@ import { ThreadId as HostedThreadId, type OwnerId } from "@rika/product/hosted-m
 import { executeInteractiveCommand, type InteractiveCommand } from "@rika/product/interactive-command"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import type { InteractiveSession } from "@rika/product/interactive-session"
+import { operationError } from "@rika/product/operation-error"
 import * as ProductOperation from "@rika/product/product-operation"
 import * as ProductOperationService from "@rika/product/product-operation-service"
 import { ThreadId, type Thread } from "@rika/product/thread-record"
@@ -16,6 +17,7 @@ import * as TranscriptRepository from "@rika/product/transcript-repository"
 import { isDurableThreadEvent, type HostedThreadSnapshot } from "@rika/product/client-protocol"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
 import * as ProductRepositories from "@rika/product-store/postgres-product-repositories"
+import { HostedModelRegistry } from "./hosted-model-registry"
 
 export class HostedOperationsError extends Schema.TaggedError<HostedOperationsError>()("HostedOperationsError", {
   message: Schema.String,
@@ -58,6 +60,9 @@ interface HostedInteractiveSession {
 const ownerLayer = (
   ownerId: OwnerId,
   currentInvocation: () => InteractiveInvocation,
+  resolveExecutionRoute: NonNullable<
+    Parameters<typeof ProductOperationService.productLayer>[0]["resolveExecutionRoute"]
+  >,
   runInteractive: (
     input: Extract<ProductOperation.Input, { readonly _tag: "Interactive" }>,
     session: InteractiveSession,
@@ -83,6 +88,7 @@ const ownerLayer = (
         backendLayer: Layer.succeed(ExecutionGateway.Service, gateway),
         executionSessionLifecycleLayer: Layer.succeed(ExecutionSessionLifecycle.Service, lifecycle),
         defaultWorkspace: "hosted",
+        resolveExecutionRoute,
         makeThreadId: crypto.randomUUIDv4.pipe(Effect.orDie, Effect.map(ThreadId.make)),
         makeTurnId: Effect.sync(() => TurnId.make(currentInvocation().commandId)),
         interactive: runInteractive,
@@ -100,6 +106,7 @@ export const layer = Layer.effect(
   HostedOperations,
   Effect.gen(function* () {
     const store = yield* ThreadProtocolStore
+    const modelRegistry = yield* HostedModelRegistry
     const ownerScope = yield* Effect.scope
     const invocations = new Map<OwnerId, InteractiveInvocation>()
     const interactiveAdmissions = new Map<OwnerId, Semaphore.Semaphore>()
@@ -166,6 +173,8 @@ export const layer = Layer.effect(
           if (invocation === undefined) throw new Error("Hosted interactive invocation is unavailable")
           return invocation
         },
+        (mode) =>
+          modelRegistry.resolve(ownerId, mode).pipe(Effect.mapError((error) => operationError(error.message, error))),
         (input, session) => runInteractive(ownerId, input, session),
       ),
     )

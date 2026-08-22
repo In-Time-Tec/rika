@@ -331,6 +331,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       }
       let currentSnapshot: HostedThreadSnapshot = snapshot
       const effects: Array<InteractiveCommand> = []
+      const runs: Array<Parameters<HostedProductService["admitRun"]>[0]> = []
       const product: HostedProductService = {
         ready: Effect.void,
         projects: () => Effect.succeed([]),
@@ -357,7 +358,11 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
         registerLocalRunner: () => Effect.die("unused"),
         setRemoteThreadCreation: () => Effect.die("unused"),
         pollLocalRunner: () => Effect.die("unused"),
-        admitRun: () => Effect.die("unused"),
+        admitRun: (input) =>
+          Effect.sync(() => {
+            if (!runs.some((run) => run.operationKey === input.operationKey)) runs.push(input)
+            return { commandId: input.operationKey, turnId: `turn-${input.operationKey}`, status: "queued" as const }
+          }),
       }
       const operations: HostedOperationsService = {
         run: () => Effect.void,
@@ -376,10 +381,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       const dependencies = Layer.mergeAll(
         Layer.succeed(HostedProduct, product),
         Layer.succeed(HostedOperations, operations),
-        Layer.succeed(
-          HostedWorkspace,
-          HostedWorkspace.of({ execute: () => Effect.die("unused") }),
-        ),
+        Layer.succeed(HostedWorkspace, HostedWorkspace.of({ execute: () => Effect.die("unused") })),
         Layer.succeed(ThreadProtocolStore, protocolStore),
         Layer.succeed(HostedToolPolicy, testToolPolicy),
         BunCrypto.layer,
@@ -426,13 +428,11 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
           .flat()
           .filter((frame) => frame.payload._tag === "CommandAccepted" || frame.payload._tag === "CommandRejected"),
       ).toHaveLength(2)
-      expect(
-        effects.filter((input) => input._tag === "Submit" && input.submissionId === "duplicate-submit"),
-      ).toHaveLength(1)
+      expect(runs.filter((input) => input.operationKey === "duplicate-submit")).toHaveLength(1)
       expect(
         yield* controllerA.receive({ ...duplicate, requestId: "duplicate-after-completion" as never }),
-      ).toMatchObject([{ payload: { _tag: "CommandAccepted", threadVersion: "1", cursor: "1" } }])
-      expect(effects).toHaveLength(1)
+      ).toMatchObject([{ payload: { _tag: "CommandAccepted", threadVersion: "1", cursor: "0" } }])
+      expect(effects).toHaveLength(0)
 
       const contender = (id: string, requestId: string) => ({
         protocolVersion: 1 as const,
@@ -460,7 +460,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
         reason: "stale-version",
         currentThreadVersion: "2",
       })
-      expect(["1", "2"]).toContain(stale?.currentCursor)
+      expect(stale?.currentCursor).toBe("0")
       const staleIndex = stale?.requestId === "controller-a-request" ? 0 : 1
       const delayed = contenders[staleIndex]!
       const delayedSession = staleIndex === 0 ? controllerA : controllerB
@@ -470,12 +470,9 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
           requestId: "delayed-resync" as never,
           command: { ...delayed.command, expectedThreadVersion: ThreadVersion.make("2") },
         }),
-      ).toMatchObject([{ payload: { _tag: "CommandAccepted", threadVersion: "3", cursor: "3" } }])
+      ).toMatchObject([{ payload: { _tag: "CommandAccepted", threadVersion: "3", cursor: "0" } }])
       expect(
-        effects.filter(
-          (input) =>
-            input._tag === "Submit" && (input.submissionId === "controller-a" || input.submissionId === "controller-b"),
-        ),
+        runs.filter((input) => input.operationKey === "controller-a" || input.operationKey === "controller-b"),
       ).toHaveLength(2)
 
       currentSnapshot = {
@@ -498,14 +495,14 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
         yield* approvalController.receive({
           protocolVersion: 1,
           requestId: "approval-attach" as never,
-          command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("3") },
+          command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
         }),
       ).toMatchObject([
         {
           payload: {
             _tag: "ThreadSnapshot",
             threadVersion: "3",
-            cursor: "3",
+            cursor: "0",
             snapshot: { pendingAuthorizations: [{ authorizationId: "authorization-1", checkpoint }] },
           },
         },
@@ -680,10 +677,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
         requestId: "replay-attach" as never,
         command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
       })
-      expect(replay).toMatchObject([
-        { payload: { _tag: "ThreadSnapshot", threadVersion: "6", cursor: "3" } },
-        { payload: { _tag: "ThreadEvent", event: { cursor: "4", threadVersion: "6" } } },
-      ])
+      expect(replay).toMatchObject([{ payload: { _tag: "ThreadSnapshot", threadVersion: "6", cursor: "1" } }])
     }),
   ),
 )

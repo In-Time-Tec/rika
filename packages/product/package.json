@@ -51,6 +51,7 @@
     "./openai-auth-service": "./src/authentication/openai-auth-service.ts",
     "./openrouter-auth-contract": "./src/authentication/openrouter-auth-contract.ts",
     "./openrouter-auth-service": "./src/authentication/openrouter-auth-service.ts",
+    "./operation-error": "./src/operation/operation-error.ts",
     "./operation-failure": "./src/operation/operation-failure.ts",
     "./pending-turn": "./src/thread/model/pending-turn.ts",
     "./product-operation": "./src/operation/contract/product-operation.ts",

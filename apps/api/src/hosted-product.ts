@@ -21,6 +21,7 @@ import {
   WorkspaceId,
 } from "@rika/product/hosted-model"
 import { HostedStore, StoreError } from "@rika/product/hosted-store"
+import type { PromptPart } from "@rika/product/execution-request"
 import { TurnId } from "@rika/product/turn-record"
 import type {
   LocalRunnerProfile,
@@ -127,6 +128,7 @@ export interface HostedProductService {
     readonly threadId: string
     readonly operationKey: string
     readonly prompt: string
+    readonly promptParts?: ReadonlyArray<PromptPart>
     readonly mode?: string
   }) => Effect.Effect<AdmittedRun, HostedProductError>
   readonly authorizeThread: (
@@ -681,6 +683,7 @@ export const layer = (options: {
             turnId,
             actor: authority.actor,
             prompt: input.prompt,
+            ...(input.promptParts === undefined ? {} : { promptParts: input.promptParts }),
             executionRoute,
             admittedAt: DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis)),
             queueCapacity: 32,

@@ -177,6 +177,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
   const store = memoryStore()
   let selectedOwner: OwnerSelection | undefined
   const applied: Array<string> = []
+  const admittedRuns: Array<Parameters<HostedProductService["admitRun"]>[0]> = []
   const authorizedActions: Array<AuthorizationAction> = []
   const workspaceRequests: Array<string> = []
   const product: HostedProductService = {
@@ -201,7 +202,11 @@ it.effect("derives personal authority, admits a retried submission once, and res
       selectedOwner = input.owner
       return Effect.succeed({ threadId })
     },
-    admitRun: () => Effect.die("unused"),
+    admitRun: (input) =>
+      Effect.sync(() => {
+        if (!admittedRuns.some((admitted) => admitted.operationKey === input.operationKey)) admittedRuns.push(input)
+        return { commandId: input.operationKey, turnId: `turn-${input.operationKey}`, status: "queued" as const }
+      }),
   }
   const operations: HostedOperationsService = {
     run: () => Effect.void,
@@ -289,6 +294,8 @@ it.effect("derives personal authority, admits a retried submission once, and res
           idempotencyKey: "submit-key" as never,
           expectedThreadVersion: ThreadVersion.make("1"),
           text: "queued while busy",
+          mode: "high",
+          attachments: [{ mediaType: "image/png", data: "aW1hZ2U=", filename: "evidence.png" }],
         },
       }
       expect((yield* first.receive(submit))[0]?.payload).toMatchObject({ _tag: "CommandAccepted", threadVersion: "2" })
@@ -297,7 +304,17 @@ it.effect("derives personal authority, admits a retried submission once, and res
         requestId: "request-retry",
         threadVersion: "2",
       })
-      expect(applied).toEqual(["submit-1"])
+      expect(admittedRuns).toEqual([
+        {
+          principal: { userId, clientId, deviceId },
+          threadId,
+          operationKey: "submit-1",
+          prompt: "queued while busy",
+          promptParts: [{ type: "image", mediaType: "image/png", data: "aW1hZ2U=", filename: "evidence.png" }],
+          mode: "high",
+        },
+      ])
+      expect(applied).toEqual([])
 
       const cancel = {
         protocolVersion: 1 as const,
@@ -320,7 +337,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
         requestId: "request-cancel-retry",
         threadVersion: "3",
       })
-      expect(applied).toEqual(["submit-1", "cancel-1"])
+      expect(applied).toEqual(["cancel-1"])
 
       const second = yield* protocol.connect("ticket-2", "/api/v1/threads/socket")
       yield* second.receive({
@@ -338,7 +355,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
         _tag: "CommandRejected",
         reason: "stale-version",
         currentThreadVersion: "3",
-        currentCursor: "2",
+        currentCursor: "1",
       })
 
       const approval = {
@@ -365,7 +382,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
         requestId: "request-approval-retry",
         reason: "conflict",
       })
-      expect(applied).toEqual(["submit-1", "cancel-1"])
+      expect(applied).toEqual(["cancel-1"])
 
       const ensureService = {
         protocolVersion: 1 as const,
@@ -447,10 +464,7 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
   const dependencies = Layer.mergeAll(
     Layer.succeed(HostedProduct, product),
     Layer.succeed(HostedOperations, operations),
-    Layer.succeed(
-      HostedWorkspace,
-      HostedWorkspace.of({ execute: () => Effect.die("unused") }),
-    ),
+    Layer.succeed(HostedWorkspace, HostedWorkspace.of({ execute: () => Effect.die("unused") })),
     Layer.succeed(ThreadProtocolStore, store),
     hostedStoreLayer,
     Layer.succeed(HostedToolPolicy, {

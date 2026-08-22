@@ -90,6 +90,7 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "execution-authority-reconciliation",
     "failure-message",
     "failure-policy",
+    "operation-error",
     "operation-failure",
     "openai-auth-contract",
     "openai-auth-service",

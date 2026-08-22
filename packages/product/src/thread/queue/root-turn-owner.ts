@@ -290,7 +290,25 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
     recoverExecutionAdmissions: Effect.uninterruptible(
       Effect.suspend(() =>
         turns.listUnlinkedExecutionAdmissions.pipe(
-          Effect.flatMap((admissions) => Effect.forEach(admissions, admitPrepared, { discard: true })),
+          Effect.flatMap((admissions) =>
+            Effect.forEach(
+              admissions,
+              (admission) =>
+                admitPrepared(admission).pipe(
+                  Effect.catch((error) =>
+                    Effect.logWarning("turn.execution-admission.recovery.failed").pipe(
+                      Effect.annotateLogs({
+                        "rika.thread.id": admission.threadId,
+                        "rika.turn.id": admission.turnId,
+                        "rika.failure.kind": error.name,
+                        "rika.failure.message": error.message,
+                      }),
+                    ),
+                  ),
+                ),
+              { discard: true },
+            ),
+          ),
         ),
       ),
     ),

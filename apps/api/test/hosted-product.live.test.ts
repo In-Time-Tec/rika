@@ -1,14 +1,21 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import { identityMigrations, runMigration } from "@rika/identity"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
+import { PromptPart } from "@rika/product/execution-request"
+import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import { BetterAuthUserId, OrganizationId } from "@rika/product/hosted-model"
+import { CheckoutFingerprint } from "@rika/product/local-runner-registration"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
-import { Effect, Layer, Random, Redacted } from "effect"
+import { Effect, Layer, Random, Redacted, Schema } from "effect"
 import { Pool, type QueryResult } from "pg"
 import { HostedProduct, HostedProductError, postgresTest, type AuthenticatedPrincipal } from "../src/hosted-product"
 
 const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
 const live = databaseUrl !== undefined
+const decodeExecutionRoute = Schema.decodeUnknownSync(Schema.fromJsonString(ExecutionRouteSnapshot))
+const decodePromptParts = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(PromptPart)))
+const encodeStartTurn = Schema.encodeSync(Schema.fromJsonString(ExecutionGateway.StartTurn))
 
 const principal = (userId: string): AuthenticatedPrincipal => ({
   userId,
@@ -132,6 +139,103 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
         queued_count: 1,
         actor: { _tag: "PersonalActor", userId: "personal-user", owner: personal("personal-user") },
       })
+    }),
+  ),
+)
+
+it.effect.skipIf(!live)("admits a current local Thread without recovering an unrelated stale admission", () =>
+  withDatabase("local-admission", (pool) =>
+    Effect.gen(function* () {
+      const authenticated = principal("local-user")
+      const fingerprint = CheckoutFingerprint.make("local-checkout")
+      yield* user(pool, authenticated.userId)
+      const product = yield* HostedProduct
+      yield* product.registerLocalRunner({
+        principal: authenticated,
+        checkoutFingerprint: fingerprint,
+        registration: {
+          workspaceIdentity: "local-workspace" as never,
+          repository: { identity: "In-Time-Tec/rika", branch: "main" },
+          kernel: { runtime: "bun", runtimeVersion: Bun.version, trustMode: "trusted-local" },
+          capabilities: { cells: true, checkpoints: false, pty: false },
+        },
+      })
+      const createLocal = () =>
+        product.createConnection({
+          principal: authenticated,
+          owner: personal(authenticated.userId),
+          executorKind: "local_device",
+          localRunnerTarget: { deviceId: authenticated.deviceId as never, checkoutFingerprint: fingerprint },
+        })
+      const staleThread = yield* createLocal()
+      const staleRun = yield* product.admitRun({
+        principal: authenticated,
+        threadId: staleThread.threadId,
+        operationKey: "stale-operation",
+        prompt: "stale prompt",
+      })
+      const staleRows = yield* query(
+        pool,
+        `SELECT hosted.workspace_id, turn.execution_route_json
+          FROM rika_turns turn
+          JOIN rika_hosted_threads hosted ON hosted.id = turn.thread_id
+          WHERE turn.id = $1`,
+        [staleRun.turnId],
+      )
+      const staleInput = {
+        threadId: staleThread.threadId,
+        turnId: staleRun.turnId,
+        workspaceId: staleRows.rows[0].workspace_id,
+        prompt: "stale prompt",
+        executionRoute: decodeExecutionRoute(staleRows.rows[0].execution_route_json),
+      }
+      yield* query(pool, `UPDATE rika_turns SET status = 'running' WHERE id = $1`, [staleRun.turnId])
+      yield* query(pool, `UPDATE rika_thread_queue_state SET queued_count = 0 WHERE thread_id = $1`, [
+        staleThread.threadId,
+      ])
+      yield* query(
+        pool,
+        `INSERT INTO rika_turn_admission_outbox (turn_id, start_input_json, prepared_at) VALUES ($1, $2, 1)`,
+        [staleRun.turnId, encodeStartTurn(staleInput)],
+      )
+      yield* query(pool, `DELETE FROM rika_hosted_executor_assignments WHERE thread_id = $1`, [staleThread.threadId])
+
+      const currentThread = yield* createLocal()
+      const promptParts = [
+        { type: "image" as const, mediaType: "image/png", data: "aW1hZ2U=", filename: "evidence.png" },
+      ]
+      const currentRun = yield* product.admitRun({
+        principal: authenticated,
+        threadId: currentThread.threadId,
+        operationKey: "current-operation",
+        prompt: "current prompt",
+        promptParts,
+        mode: "high",
+      })
+      const turns = yield* query(
+        pool,
+        `SELECT id, status, prompt_parts_json, execution_route_json
+          FROM rika_turns WHERE id IN ($1, $2) ORDER BY id`,
+        [staleRun.turnId, currentRun.turnId],
+      )
+      const stale = turns.rows.find((row) => row.id === staleRun.turnId)
+      const current = turns.rows.find((row) => row.id === currentRun.turnId)
+      expect(stale).toMatchObject({ status: "running" })
+      expect(current).toMatchObject({ status: "queued" })
+      expect(decodePromptParts(current.prompt_parts_json)).toEqual(promptParts)
+      const route = decodeExecutionRoute(current.execution_route_json)
+      expect(route.mode).toBe("high")
+      expect(
+        route.main.candidates.every(
+          (candidate: { providerConnection: { provider: string } }) =>
+            candidate.providerConnection.provider === "openrouter",
+        ),
+      ).toBe(true)
+      expect(
+        yield* query(pool, `SELECT count(*)::int AS count FROM rika_turn_admission_outbox WHERE turn_id = $1`, [
+          staleRun.turnId,
+        ]),
+      ).toMatchObject({ rows: [{ count: 1 }] })
     }),
   ),
 )

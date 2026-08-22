@@ -1,6 +1,7 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { Effect, Layer, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql/SqlClient"
+import { PromptPart } from "@rika/product/execution-request"
 import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import {
@@ -65,6 +66,7 @@ const limit = (value: number) => Math.min(Math.max(Math.trunc(value), 1), 1_000)
 const transaction = <A>(sql: SqlClient, effect: Effect.Effect<A, StoreError>) =>
   sql.withTransaction(effect).pipe(Effect.catchTag("SqlError", databaseError))
 const ExecutionRouteJson = Schema.fromJsonString(ExecutionRouteSnapshot)
+const PromptPartsJson = Schema.fromJsonString(Schema.Array(PromptPart))
 const commandEquivalent = Schema.toEquivalence(
   Schema.Struct({
     ownerId: ThreadCommand.fields.ownerId,
@@ -444,13 +446,22 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
     const executionRoute = yield* Schema.encodeEffect(ExecutionRouteJson)(input.executionRoute).pipe(
       Effect.mapError(databaseError),
     )
+    const promptParts =
+      input.promptParts === undefined
+        ? undefined
+        : yield* Schema.encodeEffect(PromptPartsJson)(input.promptParts).pipe(Effect.mapError(databaseError))
     const commandInput: AdmitCommandInput = {
       ownerId: input.ownerId,
       threadId: input.threadId,
       commandId: input.commandId,
       idempotencyKey: input.idempotencyKey,
       actor: input.actor,
-      command: { _tag: "SubmitPrompt", prompt: input.prompt, mode: input.executionRoute.mode },
+      command: {
+        _tag: "SubmitPrompt",
+        prompt: input.prompt,
+        ...(input.promptParts === undefined ? {} : { promptParts: input.promptParts }),
+        mode: input.executionRoute.mode,
+      },
       admittedAt: input.admittedAt,
     }
     return yield* transaction(
@@ -485,8 +496,9 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
         const collidingTurn = yield* query(sql`SELECT 1 FROM rika_turns WHERE id = ${input.turnId}`)
         if (collidingTurn[0] !== undefined) return yield* failure("conflict", "Turn identity is already in use")
         yield* query(sql`INSERT INTO rika_turns
-          (id, thread_id, turn_kind, prompt, execution_route_json, author_json, lineage_json, status, created_at, updated_at)
-          VALUES (${input.turnId}, ${input.threadId}, 'AgentExecution', ${input.prompt}, ${executionRoute},
+          (id, thread_id, turn_kind, prompt, prompt_parts_json, execution_route_json, author_json, lineage_json,
+            status, created_at, updated_at)
+          VALUES (${input.turnId}, ${input.threadId}, 'AgentExecution', ${input.prompt}, ${promptParts}, ${executionRoute},
             '{"_tag":"Human"}', '{"_tag":"Original"}', 'queued', ${admittedAtMillis}, ${admittedAtMillis})`)
         yield* query(sql`INSERT INTO rika_thread_queue_state (thread_id)
           VALUES (${input.threadId}) ON CONFLICT (thread_id) DO NOTHING`)

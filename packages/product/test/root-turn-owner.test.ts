@@ -521,6 +521,48 @@ it.effect("recovers every dual-database admission crash window into one idempote
   }),
 )
 
+it.effect("continues execution admission recovery after an unrelated admission fails", () =>
+  Effect.gen(function* () {
+    const admission = (id: string): ExecutionGateway.StartTurn => ({
+      threadId: `thread-${id}`,
+      turnId: `turn-${id}`,
+      workspaceId: `/workspace-${id}`,
+      prompt: id,
+      executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
+    })
+    const stale = admission("stale")
+    const current = admission("current")
+    const attempts: Array<string> = []
+    const attached: Array<string> = []
+    const repository = {
+      listUnlinkedExecutionAdmissions: Effect.succeed([stale, current]),
+      attachExecutionLink: (turnId: Turn.TurnId, executionLink: ExecutionGateway.ExecutionLink) =>
+        Effect.sync(() => {
+          attached.push(turnId)
+          return {
+            ...turn,
+            id: turnId,
+            threadId: Thread.ThreadId.make(executionLink.threadId),
+            executionLink,
+          }
+        }),
+    } as unknown as TurnRepository.Interface
+    const gateway = {
+      startTurn: (input: ExecutionGateway.StartTurn) =>
+        Effect.gen(function* () {
+          attempts.push(input.turnId)
+          if (input.turnId === stale.turnId)
+            return yield* ExecutionGateway.StartTurnFailure.make({ message: "stale assignment" })
+          return { runId: `run-${input.turnId}`, turnId: input.turnId, threadId: input.threadId }
+        }),
+    } as unknown as ExecutionGateway.Interface
+    const owner = yield* make(repository, {} as TranscriptRepository.Interface, gateway)
+    yield* owner.recoverExecutionAdmissions
+    expect(attempts).toEqual(["turn-stale", "turn-current"])
+    expect(attached).toEqual(["turn-current"])
+  }),
+)
+
 it.effect("retries unknown steering admissions with one identity and journals definitive rejection", () =>
   Effect.gen(function* () {
     const queued = (id: string): Turn.AgentExecutionTurn => {

@@ -196,6 +196,18 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
                       },
                     }),
                   )
+                  socket.send(
+                    encode({
+                      protocolVersion: 1,
+                      payload: {
+                        _tag: "ThreadSnapshot",
+                        threadId: "thread-1" as never,
+                        threadVersion: "2" as never,
+                        cursor: cursor as never,
+                        snapshot: snapshot(3),
+                      },
+                    }),
+                  )
                 }
               },
             },
@@ -243,6 +255,7 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
         createThread: Effect.succeed("thread-2"),
       }).pipe(Effect.provide(context))
       const firstEvents: Array<string> = []
+      const firstSnapshotUpdates: Array<number> = []
       const statuses: Array<string> = []
       yield* first.session.selectThread("thread-1")
       yield* first.connection.statusChanges.pipe(
@@ -257,6 +270,7 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
       const firstFiber = yield* first.session
         .events((event) => {
           firstEvents.push(event._tag)
+          if (event._tag === "ThreadViewSnapshot") firstSnapshotUpdates.push(event.snapshot.thread.updatedAt)
           if (event._tag === "ExecutionControlled") Deferred.doneUnsafe(firstEvent, Effect.void)
         })
         .pipe(Effect.forkScoped)
@@ -297,7 +311,8 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
       yield* Fiber.join(secondFiber)
       expect(afterCursors.slice(0, 3)).toEqual(["0", "1", "0"])
       expect(firstEvents.filter((tag) => tag === "ExecutionControlled")).toEqual(["ExecutionControlled"])
-      expect(firstEvents.filter((tag) => tag === "ThreadViewSnapshot")).toHaveLength(2)
+      expect(firstSnapshotUpdates.filter((updatedAt) => updatedAt === 2)).toHaveLength(1)
+      expect(firstSnapshotUpdates.filter((updatedAt) => updatedAt === 3)).toHaveLength(1)
       expect(statuses).toEqual(
         expect.arrayContaining(["authenticating", "executor-waiting", "workspace-setup", "reconnecting"]),
       )

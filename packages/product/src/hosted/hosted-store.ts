@@ -1,4 +1,5 @@
 import { Context, Effect, Schema } from "effect"
+import type { PromptPart } from "../execution/contract/execution-request"
 import type { ExecutionRouteSnapshot } from "../execution/contract/execution-route-snapshot"
 import type { TurnId } from "../thread/model/turn-record"
 import type { AuthorizationAction } from "./authorization"
@@ -155,7 +156,12 @@ export interface AdmitCommandInput {
   readonly idempotencyKey: IdempotencyKey
   readonly actor: ActorAttribution
   readonly command:
-    | { readonly _tag: "SubmitPrompt"; readonly prompt: string; readonly mode?: string }
+    | {
+        readonly _tag: "SubmitPrompt"
+        readonly prompt: string
+        readonly promptParts?: ReadonlyArray<PromptPart>
+        readonly mode?: string
+      }
     | { readonly _tag: "Steer"; readonly text: string }
     | { readonly _tag: "Cancel" }
     | {
@@ -175,6 +181,7 @@ export interface AdmitPromptInput {
   readonly turnId: TurnId
   readonly actor: ActorAttribution
   readonly prompt: string
+  readonly promptParts?: ReadonlyArray<PromptPart>
   readonly executionRoute: ExecutionRouteSnapshot
   readonly admittedAt: Timestamp
   readonly queueCapacity: number

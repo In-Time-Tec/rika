@@ -2,7 +2,7 @@ import * as ExecutionProjection from "@rika/product/execution-projection"
 import {
   type ClientCommand,
   type ClientMessage,
-  type HostedThreadSnapshot,
+  HostedThreadSnapshot,
   protocolVersion,
   type ServerFrame,
 } from "@rika/product/client-protocol"
@@ -25,13 +25,14 @@ import type { Unit } from "@rika/transcript/transcript-unit"
 import { CredentialStore, HostedError, Http, ProfileStore, type Profile } from "./hosted-contract"
 import { authenticated, selectedProfile } from "./hosted-account"
 import { connect } from "./hosted-thread-client"
-import { Crypto, Deferred, Effect, Semaphore, SubscriptionRef } from "effect"
+import { Crypto, Deferred, Effect, Schema, Semaphore, SubscriptionRef } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 
 type Payload = ServerFrame["payload"]
 type Accepted = Extract<Payload, { readonly _tag: "CommandAccepted" }>
 type Rejected = Extract<Payload, { readonly _tag: "CommandRejected" }>
 type Snapshot = Extract<Payload, { readonly _tag: "ThreadSnapshot" }>
+const encodeHostedSnapshot = Schema.encodeSync(Schema.fromJsonString(HostedThreadSnapshot))
 type CommandOutcome = Accepted | Rejected
 
 const failure = (message: string) => HostedError.make({ kind: "network", message })
@@ -299,7 +300,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         authorizations.clear()
         for (const pending of payload.snapshot.pendingAuthorizations)
           authorizations.set(`${pending.turnId}:${pending.authorizationId}`, pending)
-        const renderVersion = `${payload.threadVersion}:${payload.cursor}`
+        const renderVersion = `${payload.threadVersion}:${payload.cursor}:${encodeHostedSnapshot(payload.snapshot)}`
         if (rendered.get(threadId) !== renderVersion) {
           rendered.set(threadId, renderVersion)
           dispatch({ _tag: "ThreadViewSnapshot", snapshot: threadViewFromHostedSnapshot(payload.snapshot) })
