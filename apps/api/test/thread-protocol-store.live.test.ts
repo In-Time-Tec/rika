@@ -414,7 +414,10 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
             requestId: requestId as never,
             command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
           }),
-        ).toMatchObject([{ payload: { _tag: "ThreadSnapshot", threadVersion: "0", cursor: "0" } }])
+        ).toMatchObject([
+          { payload: { _tag: "ThreadSnapshot", threadVersion: "0", cursor: "0" } },
+          { payload: { _tag: "PresenceSnapshot", threadId, participants: [{ status: "viewing" }] } },
+        ])
 
       const duplicate = {
         protocolVersion: 1 as const,
