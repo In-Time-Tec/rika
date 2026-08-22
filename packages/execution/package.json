@@ -13,6 +13,8 @@
     "./test-harness": "./src/test-harness.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "catalog:",
+    "@aws-sdk/credential-provider-node": "catalog:",
     "@tenetkit/pg": "0.36.0",
     "tenetkit": "catalog:",
     "@rika/coding-tools": "workspace:*",
