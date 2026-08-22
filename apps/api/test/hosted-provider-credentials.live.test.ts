@@ -90,13 +90,13 @@ it.effect.skipIf(databaseUrl === undefined)(
           const credentials = Context.get(context, HostedProviderCredentials)
           const store = Context.get(context, ProviderCredentialStore)
           const models = Context.get(context, HostedModelRegistry)
-          expect(yield* failureKind(credentials.require(OwnerId.make("personal-owner"), "openai"))).toBe("missing")
+          expect(yield* failureKind(credentials.require(OwnerId.make("personal-owner"), "openrouter"))).toBe("missing")
           expect(
             yield* failureKind(
               credentials.put({
                 principal: principal("other-user"),
                 owner: personal("owner-user"),
-                provider: "openai",
+                provider: "openrouter",
                 apiKey: Redacted.make("must-not-write"),
               }),
             ),
@@ -121,10 +121,10 @@ it.effect.skipIf(databaseUrl === undefined)(
           const first = yield* credentials.put({
             principal: principal("owner-user"),
             owner: personal("owner-user"),
-            provider: "openai",
+            provider: "openrouter",
             apiKey: Redacted.make("provider-secret-one"),
           })
-          expect(first).toMatchObject({ provider: "openai", state: "active", revision: "1" })
+          expect(first).toMatchObject({ provider: "openrouter", state: "active", revision: "1" })
           const firstLoaded = yield* store.load(first.credentialIdentity)
           expect(Option.isSome(firstLoaded) && Redacted.value(firstLoaded.value)).toBe("provider-secret-one")
           const route = yield* models.resolve("personal-owner", "medium")
@@ -144,7 +144,7 @@ it.effect.skipIf(databaseUrl === undefined)(
           const rotated = yield* credentials.put({
             principal: principal("owner-user"),
             owner: personal("owner-user"),
-            provider: "openai",
+            provider: "openrouter",
             apiKey: Redacted.make("provider-secret-two"),
           })
           expect(rotated).toMatchObject({
@@ -160,11 +160,11 @@ it.effect.skipIf(databaseUrl === undefined)(
           const revoked = yield* credentials.revoke({
             principal: principal("owner-user"),
             owner: personal("owner-user"),
-            provider: "openai",
+            provider: "openrouter",
           })
           expect(revoked).toMatchObject({ state: "revoked", revision: "3" })
           expect(Option.isNone(yield* store.load(revoked.credentialIdentity))).toBe(true)
-          expect(yield* failureKind(credentials.require("personal-owner", "openai"))).toBe("revoked")
+          expect(yield* failureKind(credentials.require("personal-owner", "openrouter"))).toBe("revoked")
           const cleared = yield* query(
             pool,
             `SELECT ciphertext, nonce, authentication_tag FROM rika_hosted_provider_credentials
