@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import * as ProductOperation from "@rika/product/product-operation"
 import * as Operation from "@rika/product/product-operation-service"
-import { Config, Console, Context, Crypto, Effect, FileSystem, Layer, Path, Schema, Stdio } from "effect"
+import { Config, Context, Crypto, Effect, FileSystem, Layer, Path, Schema, Stdio } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { Command } from "effect/unstable/cli"
@@ -90,20 +90,14 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                       environment: { RIKA_INTERNAL_LOCAL_EXECUTOR: "1" },
                     },
                   })
-                  const exitCode = yield* superviseLocalRoles({
+                  const result = yield* superviseLocalRoles({
                     headless: false,
                     launch,
-                    status: {
-                      localExecutorWaiting: Console.error(
-                        "Local executor disconnected. The hosted Thread is waiting for this checkout; no E2B fallback was selected.",
-                      ),
-                    },
                   })
-                  if (cleanInteractiveRuntimeExit(exitCode)) return
+                  if (cleanInteractiveRuntimeExit(result.exitCode)) return
                   return yield* ProductOperation.OperationUnavailable.make({
                     operation: "Interactive",
-                    message:
-                      "Rika closed unexpectedly. Run rika again. If it keeps happening, run rika diagnostics status.",
+                    message: result.errorOutput.trim() || "Rika could not start. Run rika diagnostics status.",
                   })
                 }
               }),
@@ -183,12 +177,6 @@ export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<s
   const program = (
     argv === undefined ? Command.run(command, { version }) : Command.runWith(command, { version })(argv)
   ).pipe(
-    Effect.catchTags({
-      OperationUnavailable: (error: ProductOperation.OperationUnavailable) =>
-        Console.error(error.message).pipe(Effect.andThen(Effect.fail(error))),
-      InvalidInput: (error: ProductOperation.InvalidInput) =>
-        Console.error(error.message).pipe(Effect.andThen(Effect.fail(error))),
-    }),
     Effect.annotateLogs({
       "rika.process.role": "client",
       "rika.process.pid": process.pid,

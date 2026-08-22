@@ -49,8 +49,17 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and local-runne
         if (path === "/api/v1/me/context")
           return Effect.succeed(
             response(request, {
-              account: { id: "account-1", email: "dev@example.test" },
-              organizations: [{ id: "org-1", slug: "engineering", name: "Engineering" }],
+              account: { id: "account-1", email: "dev@example.test", name: "Dev" },
+              organizations: [{ id: "org-1", slug: "engineering", name: "Engineering", logo: null }],
+              projects: [
+                {
+                  id: "project-1",
+                  ownerId: "owner-1",
+                  owner: { kind: "organization", organizationId: "org-1" },
+                  slug: "api",
+                  name: "API",
+                },
+              ],
             }),
           )
         if (path === "/api/v1/auth/cli/devices")
@@ -91,7 +100,19 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and local-runne
         refreshToken: "refresh",
         expiresIn: 600,
       })
-      expect((yield* http.context(origin, session)).account.email).toBe("dev@example.test")
+      expect(yield* http.context(origin, session)).toEqual({
+        account: { id: "account-1", email: "dev@example.test", name: "Dev" },
+        organizations: [{ id: "org-1", slug: "engineering", name: "Engineering", logo: null }],
+        projects: [
+          {
+            id: "project-1",
+            ownerId: "owner-1",
+            owner: { kind: "organization", organizationId: "org-1" },
+            slug: "api",
+            name: "API",
+          },
+        ],
+      })
       expect((yield* http.devices(origin, session))[0]?.id).toBe("device-1")
       expect((yield* http.invite(origin, "org-1", "new@example.test", session)).id).toBe("invite-1")
       yield* http.revokeDevice(origin, "device-1", session)

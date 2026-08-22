@@ -1,6 +1,6 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Effect, Option, Schema, Stdio, Stream } from "effect"
-import { Argument, Command, Flag } from "effect/unstable/cli"
+import { Argument, CliError, Command, Flag } from "effect/unstable/cli"
 import type { ModeId } from "@rika/configuration/behavior-mode"
 import { dispatch as dispatchHosted } from "./hosted-command-dispatch"
 
@@ -148,7 +148,11 @@ const dispatchRun = (input: RunOperation) =>
   })
 
 export const executeRun = (values: Parameters<typeof runInput>[0]) =>
-  validateRunInput(runInput(values)).pipe(Effect.flatMap(readStreamInput), Effect.flatMap(dispatchRun))
+  validateRunInput(runInput(values)).pipe(
+    Effect.flatMap(readStreamInput),
+    Effect.mapError((error) => CliError.UserError.make({ cause: error, userMessage: error.message })),
+    Effect.flatMap(dispatchRun),
+  )
 
 export const runCommand = Command.make(
   "run",

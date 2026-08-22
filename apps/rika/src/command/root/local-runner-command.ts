@@ -1,5 +1,6 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Context, Effect } from "effect"
+import { CliError } from "effect/unstable/cli"
 import type { RemoteThreadCreation } from "../../local-executor/local-runner-contract"
 
 export interface Input {
@@ -25,5 +26,7 @@ export const Service = Context.Reference<Interface>("@rika/cli/command/LocalRunn
 
 export const dispatch = Effect.fn("LocalRunnerCommand.dispatch")(function* (input: Input) {
   const service = yield* Service
-  yield* service.run(input)
+  yield* service
+    .run(input)
+    .pipe(Effect.mapError((error) => CliError.UserError.make({ cause: error, userMessage: error.message })))
 })

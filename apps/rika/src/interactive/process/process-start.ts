@@ -6,7 +6,7 @@ import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as Operation from "@rika/product/product-operation-service"
 import * as ProductOperation from "@rika/product/product-operation"
 import { probeNativeAsset } from "@rika/terminal/opentui-surface"
-import { Config, Console, Effect, Layer, Option } from "effect"
+import { Config, Console, Effect, Layer, Option, Runtime } from "effect"
 import { Command } from "effect/unstable/cli"
 import { FetchHttpClient } from "effect/unstable/http"
 import * as Socket from "effect/unstable/socket/Socket"
@@ -18,13 +18,17 @@ import { LocalRunnerAdmission } from "../../local-executor/local-runner-contract
 import * as LocalRunner from "../../local-executor/local-runner"
 import { provideLayerScoped } from "./process-layer"
 
-const main = Command.run(command, { version }).pipe(
-  Effect.catchTags({
-    OperationUnavailable: (error: ProductOperation.OperationUnavailable) =>
-      Console.error(error.message).pipe(Effect.andThen(Effect.fail(error))),
-    InvalidInput: (error: ProductOperation.InvalidInput) =>
-      Console.error(error.message).pipe(Effect.andThen(Effect.fail(error))),
-  }),
+const main = Command.run(command, { version, renderErrors: false }).pipe(
+  Effect.catchTag("UserError", (error) =>
+    Console.error(error.message).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          error[Runtime.errorReported] = false
+        }),
+      ),
+      Effect.andThen(Effect.fail(error)),
+    ),
+  ),
 )
 
 const dispatcherLayer = (editor: string | undefined) =>
