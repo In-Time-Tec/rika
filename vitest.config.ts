@@ -1,5 +1,12 @@
 import { readFile } from "node:fs/promises"
+import * as os from "node:os"
 import { dirname, resolve } from "node:path"
+
+/**
+ * Half the machine's cores, bounded so a laptop gets real parallelism while a four-core CI
+ * runner never oversubscribes into starvation timeouts on timing-sensitive tests.
+ */
+const laneWorkers = (cap: number) => Math.min(cap, Math.max(2, Math.ceil(os.cpus().length / 2)))
 import { defineConfig } from "vitest/config"
 import { CompletionReporter } from "./test/support/vitest-run-completeness-reporter"
 
@@ -47,7 +54,7 @@ export default defineConfig({
           include: ["apps/*/test/**/*.tui.test.ts"],
           passWithNoTests: true,
           fileParallelism: true,
-          maxWorkers: 3,
+          maxWorkers: laneWorkers(5),
           testTimeout: 60_000,
         },
       },
@@ -62,7 +69,7 @@ export default defineConfig({
             "test/release/**/*.proc.test.ts",
           ],
           fileParallelism: true,
-          maxWorkers: 4,
+          maxWorkers: laneWorkers(6),
         },
       },
     ],

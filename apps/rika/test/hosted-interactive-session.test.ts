@@ -261,8 +261,19 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
       yield* Deferred.await(firstEvent)
       yield* Deferred.await(setupStatus)
       yield* Deferred.await(firstClosed)
-      yield* TestClock.adjust("250 millis")
-      yield* Deferred.await(reattached)
+      /**
+       * The reconnect backoff runs on the TestClock, but the timer is scheduled when the close
+       * event lands, so one blind adjust can fire before the timer exists and starve it forever.
+       * Keep adjusting until the reattach lands.
+       */
+      const pumpReattach = Effect.gen(function* () {
+        for (let attempt = 0; attempt < 200 && !(yield* Deferred.isDone(reattached)); attempt += 1) {
+          yield* TestClock.adjust("50 millis")
+          yield* Effect.yieldNow
+        }
+        return yield* Deferred.await(reattached)
+      })
+      yield* pumpReattach
       yield* first.session.submit("hello", undefined, undefined, undefined, "submission-1")
       const second = yield* makeHostedInteractiveSession({
         threadId: "thread-1",

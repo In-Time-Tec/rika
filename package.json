@@ -70,6 +70,7 @@
     "test-proc": "bun --bun vitest run --project proc",
     "test-tui": "bun --bun vitest run --project tui --passWithNoTests",
     "test-unit": "bun --bun vitest run --project unit",
+    "test-changed": "bun --bun vitest run --changed HEAD",
     "typecheck": "bun turbo run typecheck",
     "uninstall-local": "bun run scripts/installation/uninstall-local.ts",
     "prepare": "effect-tsgo patch --no-typescript --oxlint"

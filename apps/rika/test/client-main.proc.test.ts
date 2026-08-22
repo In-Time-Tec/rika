@@ -40,7 +40,20 @@ test("plain rika starts only sibling hosted TUI-controller and local-executor ro
         { concurrency: 3 },
       )
       expect(Number(exitCode), `${stdout}\n${stderr}`).toBe(0)
-      const roles = (yield* fileSystem.readFileString(roleLog)).trim().split("\n")
+      /**
+       * The executor's TERM trap appends its stopped marker as the client exits, so the log can
+       * lack it the instant the exit code resolves. Poll briefly; a genuinely unstopped executor
+       * still fails the assertions below with the log contents as evidence.
+       */
+      let roles: ReadonlyArray<string> = []
+      yield* Effect.gen(function* () {
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const text = yield* fileSystem.readFileString(roleLog).pipe(Effect.orElseSucceed(() => ""))
+          roles = text.trim().split("\n")
+          if (roles.includes("local-executor-stopped")) return
+          yield* Effect.sleep("50 millis")
+        }
+      })
       expect(roles).toContain("tui-controller|hello")
       expect(roles).toContain(`local-executor|--no-tui --workspace ${process.cwd()}`)
       expect(roles).toContain("local-executor-stopped")
