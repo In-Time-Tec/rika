@@ -982,3 +982,11 @@ the hosted-account shift makes the interactive client exit before it spawns its
 client/interactive/server role tree, which is exactly what those gates measure. They come back
 when a test double hosts the authenticated interactive flow locally; until then no local gate
 measures idle CPU or physical footprint of a running Rika process tree.
+
+## PLAN: Bun 1.4 Linux renderer stall in the 50k-line virtualization test
+
+`opentui-transcript-row-virtualization.test.ts` hangs inside `setup.flush()` on Linux under
+Bun 1.4 (the same test passes on Bun 1.3 and on macOS under 1.4); it is skipped on Linux with
+a documented reason until OpenTUI names the regression. Unfinished: reproduce in a Linux
+container, bisect Bun 1.3 → 1.4, and either fix the environment interaction upstream or lift
+the skip.
