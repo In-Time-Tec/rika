@@ -19,6 +19,7 @@ Set these API service variables in Railway. `PORT=3000` is also the private port
 - `BETTER_AUTH_SECRET`: a unique value with at least 32 high-entropy characters and 16 distinct characters.
 - `BETTER_AUTH_TRUSTED_ORIGINS`: comma-separated HTTPS browser origins, including `BETTER_AUTH_URL`.
 - `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`: OAuth application credentials.
+- `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`: the repository GitHub App's numeric ID and PKCS#8 private key.
 - `RESEND_API_KEY` and `EMAIL_FROM`: an authorized Resend API key and sender.
 - `E2B_API_KEY`: the API-only E2B provider key.
 - `E2B_APP_ID` and `E2B_DEPLOYMENT_ID`: stable ownership labels for managed sandbox inventory.
@@ -29,13 +30,14 @@ Set these API service variables in Railway. `PORT=3000` is also the private port
 - `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`: references to that bucket's `ACCESS_KEY_ID` and `SECRET_ACCESS_KEY` variables for the AWS SDK credential chain.
 - `RIKA_WORKSPACE_ENCRYPTION_KEY`: a base64-encoded 32-byte key generated once for encrypting Workspace checkpoints. Keep the same key while stored checkpoints must remain recoverable.
 - `RIKA_WORKSPACE_SETUP_CACHE`: `true` to reuse encrypted setup archives from the checkpoint bucket, otherwise `false`.
+- `RIKA_PROVIDER_CREDENTIAL_KEY`: a base64-encoded 32-byte key generated once for encrypting model-provider credentials.
 - `RIKA_PROXY_PUBLIC_DOMAIN`: a reference to the proxy service's Railway public domain. Non-production Railway environments derive their callback, trusted-origin, resource, and executor URLs from this value.
 
 Keep all credentials in Railway variables. Do not put them in the repository, Docker build arguments, or image files.
 
 ## Configure locally
 
-Copy `.env.example` into the deployment environment. `BETTER_AUTH_URL` and every comma-separated `BETTER_AUTH_TRUSTED_ORIGINS` entry must be HTTPS origins in production. Generate `BETTER_AUTH_SECRET` with at least 32 high-entropy characters and 16 distinct characters.
+Copy the repository-root `.env.example` into the deployment environment. `BETTER_AUTH_URL` and every comma-separated `BETTER_AUTH_TRUSTED_ORIGINS` entry must be HTTPS origins in production. Generate `BETTER_AUTH_SECRET` with at least 32 high-entropy characters and 16 distinct characters.
 
 Set `DATABASE_SSL=verify-full` when PostgreSQL presents a certificate chaining to a trusted CA, `require` only when the provider encrypts with a private CA, or `disable` only on a trusted private Railway network.
 
