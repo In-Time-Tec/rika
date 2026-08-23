@@ -969,7 +969,7 @@ const make = (options: Options) =>
         } else {
           const created = yield* runAsWorkspace(
             "checkout",
-            ["mkdir", "-p", root],
+            ["install", "-d", "-m", "0750", root],
             30_000,
             workspaceParent,
           )
