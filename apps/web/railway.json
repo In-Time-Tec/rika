@@ -13,7 +13,6 @@
     ]
   },
   "deploy": {
-    "startCommand": "bun /app/main.js",
     "healthcheckPath": "/healthz",
     "healthcheckTimeout": 60,
     "restartPolicyType": "ON_FAILURE",
