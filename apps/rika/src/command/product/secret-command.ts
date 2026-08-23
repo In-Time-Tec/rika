@@ -1,5 +1,5 @@
-import { Console, Effect, Option } from "effect"
-import { Argument, Command, Flag } from "effect/unstable/cli"
+import { Effect, Option } from "effect"
+import { Argument, CliError, Command, Flag } from "effect/unstable/cli"
 import { dispatch } from "../root/hosted-command-dispatch"
 import { readSecret } from "./read-secret"
 
@@ -10,7 +10,10 @@ const nameArgument = Argument.string("name")
 const set = Command.make("set", { name: nameArgument, scope: scopeFlag, phase: phaseFlag }, ({ name, scope, phase }) =>
   Effect.flatMap(readSecret(`Paste ${name}: `), (value) =>
     Option.match(value, {
-      onNone: () => Console.error("A secret value is required"),
+      onNone: () =>
+        Effect.fail(
+          CliError.UserError.make({ cause: "Missing secret value", userMessage: "A secret value is required" }),
+        ),
       onSome: (secret) =>
         dispatch({
           _tag: "Secret",

@@ -216,17 +216,7 @@ const liveSdk: Sdk = {
 
 const managedMetadata = { "rika.managed": "e2b-executor" } as const
 const bootstrapUrl = (sandboxId: string, domain = "e2b.app") => `https://7070-${sandboxId}.${domain}/.rika/bootstrap`
-const protectedNetworks = [
-  "0.0.0.0/8",
-  "10.0.0.0/8",
-  "100.64.0.0/10",
-  "127.0.0.0/8",
-  "169.254.0.0/16",
-  "172.16.0.0/12",
-  "192.168.0.0/16",
-  "224.0.0.0/4",
-  ALL_TRAFFIC,
-] as const
+const protectedNetworks = [ALL_TRAFFIC] as const
 const networkPolicy = (allowedEgress: ReadonlyArray<string>): SandboxNetworkUpdate => ({
   allowInternetAccess: true,
   allowOut: [...allowedEgress],

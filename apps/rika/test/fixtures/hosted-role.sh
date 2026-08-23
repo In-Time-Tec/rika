@@ -7,7 +7,7 @@ fi
 printf '%s|%s\n' "$role" "$*" >> "$RIKA_TEST_ROLE_LOG"
 if [ "$role" = "tui-controller" ]; then
   if [ "$RIKA_TEST_TUI_FAILURE" = "1" ]; then
-    printf '%s\n' 'Run rika auth login first' >&2
+    printf '\nERROR\n  %s\n' 'Run rika auth login first' >&2
     exit 1
   fi
   sleep 0.1

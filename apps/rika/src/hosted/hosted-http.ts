@@ -205,7 +205,14 @@ export const layer = Layer.effect(
           Effect.flatMap((response) =>
             response.status >= 200 && response.status < 300
               ? decode(response, DeviceAuthorizationWire, "Device authorization returned an invalid response")
-              : Effect.fail(responseError(response.status, "Device authorization")),
+              : Effect.gen(function* () {
+                  const oauth = yield* decode(response, OAuthErrorWire, "Device authorization failed").pipe(
+                    Effect.option,
+                  )
+                  if (Option.isSome(oauth) && oauth.value.error === "invalid_client")
+                    return yield* failure("registration-required", "CLI registration is no longer valid")
+                  return yield* responseError(response.status, "Device authorization")
+                }),
           ),
           Effect.flatMap((wire) =>
             Schema.decodeUnknownEffect(DeviceAuthorization)({
