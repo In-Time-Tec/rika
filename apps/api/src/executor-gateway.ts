@@ -1121,7 +1121,12 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           workspaceSession.environmentDigest === null
         )
           return yield* GatewayError.make({ kind: "fenced", message: "Workspace proof is stale" })
-        yield* controller.ready(redactAccess(message.access), message.proof, workspaceSession.environmentDigest)
+        yield* controller.ready(
+          redactAccess(message.access),
+          message.proof,
+          message.capabilities,
+          workspaceSession.environmentDigest,
+        )
         const session = yield* Ref.modify(sessions, (active) => {
           const current = active.get(message.access.fence.assignmentId)
           if (current === undefined || current.socket !== socket || !sameAccess(current.access, message.access)) {
