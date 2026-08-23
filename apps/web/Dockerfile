@@ -2,7 +2,7 @@ FROM oven/bun:1.4.0-slim AS build
 
 WORKDIR /app
 COPY --chown=bun:bun . .
-RUN bun install --frozen-lockfile --production --ignore-scripts \
+RUN bun install --frozen-lockfile --ignore-scripts \
   && bun --cwd apps/web build
 
 FROM oven/bun:1.4.0-slim
