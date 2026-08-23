@@ -1,8 +1,13 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Effect, Option } from "effect"
-import { Argument, Command, Flag } from "effect/unstable/cli"
+import { Argument, CliError, Command, Flag } from "effect/unstable/cli"
 import { dispatch as dispatchHosted } from "../root/hosted-command-dispatch"
 import { dispatch } from "../root/cli-operation-dispatch"
+const invalid = (message: string) => {
+  const cause = ProductOperation.InvalidInput.make({ message })
+  return CliError.UserError.make({ cause, userMessage: message })
+}
+
 
 const continueCommand = Command.make(
   "continue",
@@ -12,19 +17,12 @@ const continueCommand = Command.make(
   },
   ({ last, threadIds }) =>
     Effect.gen(function* () {
-      if (last && threadIds.length > 0) {
-        return yield* ProductOperation.InvalidInput.make({
-          message: "thread continue accepts --last or a thread id, not both",
-        })
-      }
-      if (!last && threadIds.length === 0) {
-        return yield* ProductOperation.InvalidInput.make({
-          message: "thread continue requires --last or a thread id",
-        })
-      }
-      if (threadIds.length > 1) {
-        return yield* ProductOperation.InvalidInput.make({ message: "thread continue accepts exactly one thread id" })
-      }
+      if (last && threadIds.length > 0)
+        return yield* invalid("thread continue accepts --last or a thread id, not both")
+      if (!last && threadIds.length === 0)
+        return yield* invalid("thread continue requires --last or a thread id")
+      if (threadIds.length > 1)
+        return yield* invalid("thread continue accepts exactly one thread id")
       if (last) {
         yield* dispatch({ _tag: "Interactive", prompt: [], last: true, ephemeral: false })
         return

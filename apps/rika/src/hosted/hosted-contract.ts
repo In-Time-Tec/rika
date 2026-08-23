@@ -21,6 +21,7 @@ export class HostedError extends Schema.TaggedError<HostedError>()("HostedError"
     "host",
     "invalid-input",
     "login-required",
+    "registration-required",
     "network",
     "protocol",
     "storage",

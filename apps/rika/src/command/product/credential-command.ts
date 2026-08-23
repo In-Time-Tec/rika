@@ -1,5 +1,5 @@
-import { Console, Effect, Option } from "effect"
-import { Argument, Command } from "effect/unstable/cli"
+import { Effect, Option } from "effect"
+import { Argument, CliError, Command } from "effect/unstable/cli"
 import { dispatch } from "../root/hosted-command-dispatch"
 import { readSecret } from "./read-secret"
 
@@ -9,7 +9,10 @@ const put = (action: "set" | "rotate") =>
   Command.make(action, { provider: providerArgument }, ({ provider: selectedProvider }) =>
     Effect.flatMap(readSecret(`Paste your ${selectedProvider} API key: `), (apiKey) =>
       Option.match(apiKey, {
-        onNone: () => Console.error("An API key is required"),
+        onNone: () =>
+          Effect.fail(
+            CliError.UserError.make({ cause: "Missing API key", userMessage: "An API key is required" }),
+          ),
         onSome: (value) => dispatch({ _tag: "Credential", action: "put", provider: selectedProvider, apiKey: value }),
       }),
     ),

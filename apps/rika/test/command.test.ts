@@ -183,6 +183,7 @@ it.effect("renders client help without creating the configured data root", () =>
         yield* runClient(["--help"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
         yield* runClient(["auth", "--help"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
         yield* runClient(["credential", "--help"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
+        yield* runClient(["provider", "--help"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
         yield* runClient(["org", "--help"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
         yield* runClient(["thread", "new", "--help"]).pipe(
           Effect.provideService(ConfigProvider.ConfigProvider, provider),
@@ -278,6 +279,8 @@ it.effect("exposes only the supported model credential providers", () =>
   Effect.gen(function* () {
     yield* failsWithoutDispatch(["credential", "set", "chatgpt"])
     yield* failsWithoutDispatch(["credential", "list", "codex"])
+    yield* failsWithoutDispatch(["provider", "login", "openai"])
+    yield* failsWithoutDispatch(["provider", "login", "openrouter"])
   }),
 )
 
@@ -325,6 +328,20 @@ it.effect("dispatches interactive inputs and hosted non-interactive execution", 
     ])
     expect(yield* capture(["hello", "--workspace", ".", "--thread", "thread-2"])).toEqual([
       { _tag: "Interactive", prompt: ["hello"], workspace, threadId: "thread-2", ephemeral: false },
+    ])
+  }),
+)
+
+it.effect("dispatches Codex provider authentication", () =>
+  Effect.gen(function* () {
+    expect(yield* capture(["provider", "login", "codex", "--device-code"])).toEqual([
+      { _tag: "Auth", action: "login", provider: "openai", deviceCode: true },
+    ])
+    expect(yield* capture(["provider", "status", "codex"])).toEqual([
+      { _tag: "Auth", action: "status", provider: "openai" },
+    ])
+    expect(yield* capture(["provider", "logout", "codex"])).toEqual([
+      { _tag: "Auth", action: "logout", provider: "openai" },
     ])
   }),
 )

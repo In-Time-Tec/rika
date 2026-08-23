@@ -7,6 +7,7 @@ import { credentialCommand } from "../product/credential-command"
 import { diagnosticsCommand } from "../product/diagnostics-command"
 import { organizationCommand } from "../product/organization-command"
 import { projectCommand } from "../product/project-command"
+import { providerCommand } from "../product/provider-command"
 import { secretCommand } from "../product/secret-command"
 import { threadCommand } from "../product/thread-command"
 import { dispatch, type CliOperationService } from "./cli-operation-dispatch"
@@ -140,6 +141,7 @@ export const command = Command.make(
     projectCommand,
     secretCommand,
     credentialCommand,
+    providerCommand,
     diagnosticsCommand,
     updateCommand,
     Command.make("version", {}, () => Console.log(version)),

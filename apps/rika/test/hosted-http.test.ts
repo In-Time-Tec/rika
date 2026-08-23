@@ -238,3 +238,30 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and runner endp
     }),
   ),
 )
+
+it.effect("identifies a stale CLI registration from device authorization", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const client = HttpClient.make((request) =>
+        Effect.succeed(
+          response(
+            request,
+            { error: "invalid_client", error_description: "The OAuth client does not exist" },
+            400,
+          ),
+        ),
+      )
+      const context = yield* Layer.build(
+        layer.pipe(Layer.provide(Layer.merge(BunCrypto.layer, Layer.succeed(HttpClient.HttpClient, client)))),
+      )
+      const http = Context.get(context, Http)
+      const result = yield* Effect.result(
+        http.startDeviceAuthorization("https://hosted.example.test", "stale-client", yield* generate()),
+      )
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: { kind: "registration-required", message: "CLI registration is no longer valid" },
+      })
+    }),
+  ),
+)

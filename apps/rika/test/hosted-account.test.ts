@@ -139,6 +139,81 @@ it.effect("defaults a first login with zero organizations to Personal", () =>
   }),
 )
 
+it.effect("re-registers when the saved OAuth client no longer exists", () =>
+  Effect.gen(function* () {
+    const savedProfile = yield* Ref.make<Option.Option<Profile>>(Option.none())
+    const savedCredential = yield* Ref.make<Option.Option<Credential>>(Option.none())
+    const removed = yield* Ref.make<ReadonlyArray<string>>([])
+    const registrations = yield* Ref.make(0)
+    const starts = yield* Ref.make<ReadonlyArray<string>>([])
+    const context = yield* Layer.build(
+      Layer.mergeAll(
+        BunCrypto.layer,
+        Layer.succeed(
+          ProfileStore,
+          ProfileStore.of({
+            load: Effect.succeed(Option.some(profile)),
+            save: (value) => Ref.set(savedProfile, Option.some(value)),
+          }),
+        ),
+        Layer.succeed(
+          CredentialStore,
+          CredentialStore.of({
+            load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("stale-refresh"), privateJwk: key })),
+            save: (_origin, _device, value) => Ref.set(savedCredential, Option.some(value)),
+            remove: (_origin, deviceId) =>
+              Ref.update(removed, (current) => [...current, deviceId]).pipe(Effect.as(true)),
+            serialized: (effect) => effect,
+          }),
+        ),
+        Layer.succeed(
+          Http,
+          Http.of({
+            ...unusedHttp,
+            register: () => Ref.update(registrations, (value) => value + 1).pipe(Effect.as({ clientId: "client-2" })),
+            startDeviceAuthorization: (_origin, clientId) =>
+              Ref.update(starts, (current) => [...current, clientId]).pipe(
+                Effect.flatMap(() =>
+                  clientId === profile.clientId
+                    ? Effect.fail(
+                        HostedError.make({
+                          kind: "registration-required",
+                          message: "CLI registration is no longer valid",
+                        }),
+                      )
+                    : Effect.succeed({ ...authorization, interval: 0 }),
+                ),
+              ),
+            pollDeviceAuthorization: () =>
+              Effect.succeed({
+                _tag: "Complete",
+                tokens: { accessToken: "access", refreshToken: "refresh", expiresIn: 600 },
+              }),
+            context: () =>
+              Effect.succeed({
+                account: { id: "user-1", email: "dev@example.test", name: "Dev" },
+                organizations: [{ id: "org-1", slug: "engineering", name: "Engineering", logo: null }],
+                projects: [],
+              }),
+          }),
+        ),
+        Layer.succeed(Browser, Browser.of({ open: () => Effect.die("unused") })),
+        TestConsole.layer,
+      ),
+    )
+    yield* login({ server: profile.origin, noOpen: true }).pipe(Effect.provide(context))
+    expect(yield* Ref.get(registrations)).toBe(1)
+    expect(yield* Ref.get(starts)).toEqual(["client-1", "client-2"])
+    expect(yield* Ref.get(removed)).toEqual(["device-1"])
+    expect(Option.getOrThrow(yield* Ref.get(savedProfile))).toMatchObject({
+      origin: profile.origin,
+      clientId: "client-2",
+      owner: profile.owner,
+    })
+    expect(Option.isSome(yield* Ref.get(savedCredential))).toBe(true)
+  }),
+)
+
 it.effect("polls pending and network failures, applies RFC slow_down, and completes", () =>
   Effect.gen(function* () {
     const polls = yield* Ref.make(0)

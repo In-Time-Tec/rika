@@ -168,40 +168,69 @@ export const login = Effect.fn("HostedAccount.login")(function* (input: {
     previous !== undefined && previous.origin === origin
       ? yield* credentials.load(previous.origin, previous.deviceId)
       : Option.none<Credential>()
-  const privateJwk = Option.isSome(reusable) ? reusable.value.privateJwk : yield* Dpop.generate()
-  const deviceId = Option.isSome(reusable)
-    ? previous!.deviceId
-    : yield* crypto.randomUUIDv4.pipe(Effect.mapError(() => failure("host", "Could not identify this installation")))
-  const clientId = Option.isSome(reusable)
-    ? previous!.clientId
-    : (yield* http.register(
+  const freshAuthorization = Effect.gen(function* () {
+    const privateJwk = yield* Dpop.generate()
+    const deviceId = yield* crypto.randomUUIDv4.pipe(
+      Effect.mapError(() => failure("host", "Could not identify this installation")),
+    )
+    const clientId = (
+      yield* http.register(
         origin,
         deviceId,
         Dpop.publicJwk(privateJwk),
         yield* Dpop.thumbprint(Dpop.publicJwk(privateJwk)),
-      )).clientId
+      )
+    ).clientId
+    const authorization = yield* http.startDeviceAuthorization(origin, clientId, privateJwk)
+    return { privateJwk, deviceId, clientId, authorization }
+  })
+  const started = yield* (
+    Option.isSome(reusable)
+      ? http.startDeviceAuthorization(origin, previous!.clientId, reusable.value.privateJwk).pipe(
+          Effect.map((authorization) => ({
+            privateJwk: reusable.value.privateJwk,
+            deviceId: previous!.deviceId,
+            clientId: previous!.clientId,
+            authorization,
+          })),
+          Effect.catch((error) =>
+            error.kind === "registration-required" ? freshAuthorization : Effect.fail(error),
+          ),
+        )
+      : freshAuthorization
+  )
   const nextProfile: Profile = {
     origin,
-    deviceId,
-    clientId,
+    deviceId: started.deviceId,
+    clientId: started.clientId,
     owner: previous !== undefined && previous.origin === origin ? previous.owner : { kind: "personal" },
     ...(previous !== undefined && previous.origin === origin ? { project: previous.project } : {}),
   }
-  const authorization = yield* http.startDeviceAuthorization(origin, clientId, privateJwk)
   const issuedAt = yield* Clock.currentTimeMillis
-  const verification = authorization.verificationUriComplete ?? authorization.verificationUri
-  yield* Console.log(`Open ${verification}\nEnter code: ${authorization.userCode}`)
+  const verification = started.authorization.verificationUriComplete ?? started.authorization.verificationUri
+  yield* Console.log(`Open ${verification}\nEnter code: ${started.authorization.userCode}`)
   if (!input.noOpen)
     yield* browser
       .open(verification)
-      .pipe(Effect.catch((error) => Console.error(`${error.message}; continue with the URL above`)))
-  const tokens = yield* pollDeviceAuthorization(nextProfile, privateJwk, authorization, issuedAt)
-  const identity = yield* http.context(origin, sessionFrom(tokens, privateJwk))
+      .pipe(Effect.catch((error) => Console.log(`${error.message}; continue with the URL above`)))
+  const tokens = yield* pollDeviceAuthorization(
+    nextProfile,
+    started.privateJwk,
+    started.authorization,
+    issuedAt,
+  )
+  const identity = yield* http.context(origin, sessionFrom(tokens, started.privateJwk))
   const selected = validOwner(nextProfile, identity)
     ? nextProfile
     : { ...nextProfile, owner: { kind: "personal" as const }, project: undefined }
+  yield* credentials.save(origin, started.deviceId, credentialFrom(tokens, started.privateJwk))
   yield* profiles.save(selected)
-  yield* credentials.save(origin, deviceId, credentialFrom(tokens, privateJwk))
+  if (
+    previous !== undefined &&
+    previous.origin === origin &&
+    previous.deviceId !== started.deviceId
+  )
+    yield* credentials.remove(previous.origin, previous.deviceId).pipe(Effect.ignore)
   yield* Console.log(`Logged in as ${identity.account.email}`)
 })
 

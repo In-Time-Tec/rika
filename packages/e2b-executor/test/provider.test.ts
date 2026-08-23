@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import type { SandboxInfo, SandboxOpts } from "e2b"
+import { ALL_TRAFFIC, type SandboxInfo, type SandboxOpts } from "e2b"
 import { Effect, Redacted, Schema } from "effect"
 import { makeWithSdk, type Sdk, testing } from "../src/provider"
 
@@ -59,6 +59,10 @@ const attestationSdk = {
 }
 
 describe("Provider", () => {
+  it("uses E2B's supported all-traffic sentinel as the deny baseline", () => {
+    expect(testing.protectedNetworks).toEqual([ALL_TRAFFIC])
+  })
+
   it.effect("attests the E2B template build before and after creation while preserving its receipt", () => {
     let template = ""
     let createOptions: SandboxOpts | undefined

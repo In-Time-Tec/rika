@@ -64,7 +64,7 @@ test("plain rika starts only sibling hosted TUI-controller and runner-executor r
     }),
   ))
 
-test("the hosted TUI controller returns one unformatted error for its parent process", () =>
+test("the hosted TUI controller renders its failure through the canonical CLI formatter", () =>
   run(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -85,7 +85,7 @@ test("the hosted TUI controller returns one unformatted error for its parent pro
         concurrency: 2,
       })
       expect(Number(exitCode)).not.toBe(0)
-      expect(stderr.trim()).toBe(`Workspace is not a directory: ${workspace}`)
+      expect(stderr.trim()).toBe(`ERROR\n  Workspace is not a directory: ${workspace}`)
     }),
   ))
 
@@ -117,7 +117,7 @@ test("plain rika exposes a hosted controller failure and does not fall back to l
         concurrency: 2,
       })
       expect(Number(exitCode)).not.toBe(0)
-      expect(stderr.trim()).toBe("Run rika auth login first")
+      expect(stderr.trim()).toBe("ERROR\n  Run rika auth login first")
       expect((yield* fileSystem.readFileString(roleLog)).trim().split("\n").toSorted()).toEqual(
         [`runner-executor|--no-tui --workspace ${process.cwd()}`, "tui-controller|"].toSorted(),
       )
