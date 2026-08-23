@@ -76,8 +76,8 @@ console.log(
 `
 
 const bootstrapIdentityProof = `
-let resolveMessage
-const message = new Promise((resolve) => { resolveMessage = resolve })
+const { promise: hello, resolve: resolveHello } = Promise.withResolvers()
+const { promise: heartbeat, resolve: resolveHeartbeat } = Promise.withResolvers()
 const sandboxId = await Bun.file("/run/e2b/.E2B_SANDBOX_ID").text().then((value) => value.trim()).catch(() => "sandbox-from-bootstrap")
 const server = Bun.serve({
   hostname: "127.0.0.1",
@@ -85,7 +85,26 @@ const server = Bun.serve({
   fetch: (request, bunServer) =>
     bunServer.upgrade(request) ? undefined : new Response("upgrade required", { status: 426 }),
   websocket: {
-    message: (_socket, frame) => resolveMessage(String(frame)),
+    message: (socket, frame) => {
+      const message = JSON.parse(String(frame))
+      if (message._tag === "ExecutorHello") {
+        resolveHello(message)
+        socket.send(JSON.stringify({
+          _tag: "ExecutorWelcome",
+          welcome: {
+            version: 1,
+            fence: message.hello.fence,
+            sessionToken: "session-token",
+            leaseEpoch: 1,
+            leaseExpiresAt: Date.now() + 60_000,
+            heartbeatIntervalMillis: 20,
+            cursor: { sequence: 0, value: "" },
+          },
+        }))
+      } else if (message._tag === "ExecutorHeartbeat") {
+        resolveHeartbeat(message)
+      }
+    },
   },
 })
 const stateDirectory = "/tmp/rika-bootstrap-identity-" + process.pid
@@ -143,14 +162,9 @@ try {
       restore: null,
     }),
   })
-  let timeout
-  const frame = await Promise.race([
-    message,
-    new Promise((_, reject) => {
-      timeout = setTimeout(() => reject(new Error("executor hello timed out")), 10000)
-    }),
-  ]).finally(() => clearTimeout(timeout))
-  console.log(JSON.stringify({ status: response.status, frame: JSON.parse(frame) }))
+  const frame = await hello
+  const heartbeatFrame = await heartbeat
+  console.log(JSON.stringify({ status: response.status, frame, heartbeat: heartbeatFrame }))
 } finally {
   host.kill()
   server.stop(true)
@@ -250,7 +264,7 @@ describe.sequential("executor host process", () => {
   )
 
   it.effect(
-    "uses the secured bootstrap identity instead of baked template readiness values",
+    "uses the secured bootstrap identity and heartbeats while workspace preparation is blocked",
     () =>
       Effect.acquireUseRelease(
         Effect.sync(() =>
@@ -283,6 +297,10 @@ describe.sequential("executor host process", () => {
                       templateBuildId: "build-from-bootstrap",
                       bootstrapToken: "one-time-bootstrap",
                     },
+                  },
+                  heartbeat: {
+                    _tag: "ExecutorHeartbeat",
+                    heartbeat: { cursor: { sequence: 0, value: "" } },
                   },
                 })
               }),

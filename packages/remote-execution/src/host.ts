@@ -1441,6 +1441,19 @@ const connect = Effect.fn("Host.connect")(function* (
     : { _tag: "ExecutorReconnect" as const, access: yield* runtime.reconnect }
   yield* writer(encodeExecutorMessage(opening))
   yield* waitForWelcome(incoming, store)
+  const session = yield* runtime.persistedSession
+  const heartbeat = Effect.sleep(session.heartbeatIntervalMillis).pipe(
+    Effect.andThen(
+      Effect.gen(function* () {
+        const cursor = yield* runtime.cursor
+        const frame = yield* runtime.heartbeat(cursor)
+        yield* writer(encodeExecutorMessage({ _tag: "ExecutorHeartbeat", heartbeat: frame }))
+      }),
+    ),
+    Effect.forever,
+    Effect.forkScoped,
+  )
+  yield* heartbeat
   const checkout = yield* HostedObservability.observe(
     config.restoredSession === undefined ? "executor_setup" : "executor_resume",
     {
@@ -1476,19 +1489,6 @@ const connect = Effect.fn("Host.connect")(function* (
     Effect.mapError((error) => HostError.make({ message: error.message })),
   )
   yield* connected
-  const session = yield* runtime.persistedSession
-  const heartbeat = Effect.sleep(session.heartbeatIntervalMillis).pipe(
-    Effect.andThen(
-      Effect.gen(function* () {
-        const cursor = yield* runtime.cursor
-        const frame = yield* runtime.heartbeat(cursor)
-        yield* writer(encodeExecutorMessage({ _tag: "ExecutorHeartbeat", heartbeat: frame }))
-      }),
-    ),
-    Effect.forever,
-    Effect.forkScoped,
-  )
-  yield* heartbeat
   const connectedSession = Effect.raceFirst(
     Effect.raceFirst(
       Fiber.join(reader).pipe(
