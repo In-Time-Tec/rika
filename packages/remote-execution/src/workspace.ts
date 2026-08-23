@@ -873,7 +873,10 @@ const make = (options: Options) =>
             retryable: true,
           })
         marker = known
-      } else if (known !== undefined || (yield* fileSystem.exists(root)))
+      } else if (
+        known !== undefined ||
+        (yield* fileSystem.stat(root).pipe(Effect.as(true), Effect.orElseSucceed(() => false)))
+      )
         return yield* WorkspaceError.make({
           phase: "checkout",
           message: "Fresh workspace contains stale or partial checkout state",

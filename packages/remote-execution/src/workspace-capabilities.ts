@@ -36,7 +36,10 @@ export const inspectWorkspaceCapabilities = Effect.fn("WorkspaceCapabilities.ins
 }) {
   const fileSystem = yield* FileSystem.FileSystem
   const crypto = yield* Crypto.Crypto
-  const workspaceExists = yield* fileSystem.exists(input.workspacePath).pipe(Effect.orElseSucceed(() => false))
+  const workspaceExists = yield* fileSystem.stat(input.workspacePath).pipe(
+    Effect.map((info) => info.type === "Directory"),
+    Effect.orElseSucceed(() => false),
+  )
   const gitExecutable = Bun.which("git")
   const browserExecutable = ["google-chrome", "chromium", "chromium-browser"]
     .map((name) => Bun.which(name))

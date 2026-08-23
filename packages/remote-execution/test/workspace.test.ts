@@ -474,6 +474,44 @@ exec "$@"
   ).pipe(provideLayer(platform)),
 )
 
+it.effect("rejects a fresh workspace directory without its durable preparation marker", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-partial-workspace-" })
+      const root = `${parent}/workspace/repo`
+      yield* fileSystem.makeDirectory(root, { recursive: true })
+      const failure = yield* Effect.flip(
+        prepare({
+          root,
+          workspaceCommandPrefix: [],
+          stateDirectory: `${parent}/state`,
+          kernel,
+          reporter: { started: () => Effect.void, output: () => Effect.void },
+          credential: () =>
+            Effect.fail(WorkspaceError.make({ phase: "checkout", message: "unexpected credential", retryable: false })),
+          revoke: () => Effect.void,
+          assignment: {
+            access,
+            workspaceId: "workspace-1",
+            wakeId: "wake-1",
+            cold: false,
+            attempt: 1,
+            retry: false,
+            templateBuildId: "build-1",
+            checkout: null,
+          },
+        }),
+      )
+      expect(failure).toMatchObject({
+        phase: "checkout",
+        message: "Fresh workspace contains stale or partial checkout state",
+        retryable: false,
+      })
+    }),
+  ).pipe(provideLayer(platform)),
+)
+
 it.effect("blocks non-executable, failed, and timed-out setup until an explicit retry", () =>
   Effect.scoped(
     Effect.gen(function* () {
