@@ -364,6 +364,17 @@ it.effect("prepares an empty workspace and runs resume exactly once per cold wak
       const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-workspace-" })
       const root = `${parent}/workspace/repo`
       const stateDirectory = `${parent}/state`
+      const command = `${parent}/workspace-command`
+      const calls = `${parent}/workspace-command-calls`
+      yield* fileSystem.writeFileString(
+        command,
+        `#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "${calls}"
+exec "$@"
+`,
+      )
+      yield* fileSystem.chmod(command, 0o700)
       const phases: Array<string> = []
       const output: Array<string> = []
       const reporter = {
@@ -373,7 +384,7 @@ it.effect("prepares an empty workspace and runs resume exactly once per cold wak
       }
       const base = {
         root,
-        workspaceCommandPrefix: [],
+        workspaceCommandPrefix: [command],
         stateDirectory,
         kernel,
         reporter,
@@ -395,6 +406,7 @@ it.effect("prepares an empty workspace and runs resume exactly once per cold wak
         },
       })
       expect(fresh.setup.outcome).toBe("missing")
+      expect(yield* fileSystem.readFileString(calls)).toContain(`mkdir -p ${root}`)
       yield* fileSystem.makeDirectory(`${root}/.agents`, { recursive: true })
       yield* fileSystem.writeFileString(
         `${root}/.agents/setup`,
