@@ -4,7 +4,7 @@ import { TestModel } from "tenetkit/test"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Layer, Random, Stream } from "effect"
-import { sqliteLayer as layer } from "./test-adapters"
+import { memoryLayer as layer } from "./test-adapters"
 
 const registryLayer = (...fixtures: ReadonlyArray<TestModel.Fixture>) =>
   ModelRegistry.layer(
@@ -49,7 +49,7 @@ const requestText = (requests: ReadonlyArray<unknown>): string =>
     .join("\n")
 
 it.live(
-  "continues a thread so each turn carries the prior conversation",
+  "continues a thread so each in-memory turn carries the prior conversation",
   () =>
     Effect.gen(function* () {
       const filename = `/tmp/rika-thread-continuity-${yield* Random.nextInt}.db`
@@ -64,36 +64,31 @@ it.live(
         { provider: "test", model: "test", registrationKey: "continuity-root" },
       )
 
+      const context = yield* Layer.build(
+        testLayer({
+          dataRoot: filename,
+          modelServices: registryLayer(rootFixture),
+        }),
+      )
+      const gateway = Context.get(context, ExecutionGateway.Service)
       const turn = (turnId: string, prompt: string) =>
-        Effect.scoped(
-          Effect.gen(function* () {
-            const context = yield* Layer.build(
-              testLayer({
-                filename,
-                modelServices: registryLayer(rootFixture),
-              }),
-            )
-            const gateway = Context.get(context, ExecutionGateway.Service)
-            const receipt = yield* gateway.startTurn({
-              threadId,
-              turnId,
-              workspaceId: "/workspace",
-              prompt,
-              executionRoute: routeWithIdentity("continuity-root", "continuity-root"),
-            })
-            yield* gateway.watchTurn(receipt).pipe(Stream.runCollect)
-            seen.push(requestText(yield* rootFixture.requests))
-          }),
-        )
+        Effect.gen(function* () {
+          const receipt = yield* gateway.startTurn({
+            threadId,
+            turnId,
+            workspaceId: "/workspace",
+            prompt,
+            executionRoute: routeWithIdentity("continuity-root", "continuity-root"),
+          })
+          yield* gateway.watchTurn(receipt).pipe(Stream.runCollect)
+          seen.push(requestText(yield* rootFixture.requests))
+        })
 
-      // Each turn opens its own gateway scope, so turns two and three cross a process boundary.
       yield* turn("turn-1", "first question")
       yield* turn("turn-2", "second question")
       yield* turn("turn-3", "third question")
 
       const third = seen.at(-1) ?? ""
-      // The defect: every turn started a new Run with an empty Chat, so the model never saw
-      // earlier turns and answered as if the thread had just begun.
       expect(third).toContain("first question")
       expect(third).toContain("ANSWER_ONE")
       expect(third).toContain("second question")
@@ -124,7 +119,7 @@ it.live(
           Effect.gen(function* () {
             const context = yield* Layer.build(
               testLayer({
-                filename,
+                dataRoot: filename,
                 modelServices: registryLayer(rootFixture, titleFixture),
               }),
             )

@@ -391,6 +391,15 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     interruptAndSend: (prompt) => run(session.interruptAndSend(prompt)),
     cancel: () => run(session.cancel),
     newThread: () => startSelection(() => session.newThread),
+    ...(session.newOrbThread === undefined ? {} : { newOrbThread: () => startSelection(() => session.newOrbThread!) }),
+    ...(session.pauseOrb === undefined ? {} : { pauseOrb: () => run(session.pauseOrb!) }),
+    ...(session.resumeOrb === undefined ? {} : { resumeOrb: () => run(session.resumeOrb!) }),
+    ...(session.enableRemoteThreadCreation === undefined
+      ? {}
+      : { enableRemoteThreadCreation: () => run(session.enableRemoteThreadCreation!) }),
+    ...(session.disableRemoteThreadCreation === undefined
+      ? {}
+      : { disableRemoteThreadCreation: () => run(session.disableRemoteThreadCreation!) }),
     selectThread: (id) => {
       loop.requestedThreadId = id
       startSelection(() => session.selectThread(id))

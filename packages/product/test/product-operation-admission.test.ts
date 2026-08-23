@@ -11,7 +11,7 @@ import type { InteractiveSessionRuntimeResult } from "../src/operation/interacti
 
 const link = { runId: "run", turnId: "turn", threadId: "thread" }
 
-it.effect("closes mutation admission and drains an interrupted mutation before replacement", () =>
+it.effect("closes mutation admission and drains an interrupted mutation before shutdown", () =>
   Effect.gen(function* () {
     const started = yield* Deferred.make<void>()
     const rawBackend = ExecutionGateway.Service.of({
@@ -28,7 +28,7 @@ it.effect("closes mutation admission and drains an interrupted mutation before r
     yield* Deferred.await(started)
     const prepared = yield* Deferred.make<void>()
     const preparation = yield* Effect.forkChild(
-      admission.prepareServerReplacement.pipe(Effect.andThen(Deferred.succeed(prepared, undefined))),
+      admission.closeAdmissions.pipe(Effect.andThen(Deferred.succeed(prepared, undefined))),
     )
     yield* Effect.yieldNow
     expect((yield* Effect.result(admission.acquiredBackend.cancelTurn(link, "late")))._tag).toBe("Failure")

@@ -8,6 +8,11 @@ export interface Command {
 
 export type PaletteAction =
   | { readonly _tag: "NewThread" }
+  | { readonly _tag: "NewOrbThread" }
+  | { readonly _tag: "PauseOrb" }
+  | { readonly _tag: "ResumeOrb" }
+  | { readonly _tag: "EnableRemoteThreadCreation" }
+  | { readonly _tag: "DisableRemoteThreadCreation" }
   | { readonly _tag: "OpenModePicker" }
   | { readonly _tag: "SwitchThread" }
   | { readonly _tag: "Quit" }
@@ -18,6 +23,21 @@ export type PaletteAction =
 
 export const commands: ReadonlyArray<Command> = [
   { id: "new-thread", category: "thread", label: "new thread", action: { _tag: "NewThread" } },
+  { id: "new-orb-thread", category: "thread", label: "new in Orb", action: { _tag: "NewOrbThread" } },
+  { id: "pause-orb", category: "orb", label: "pause", action: { _tag: "PauseOrb" } },
+  { id: "resume-orb", category: "orb", label: "resume", action: { _tag: "ResumeOrb" } },
+  {
+    id: "enable-remote-thread-creation",
+    category: "runner",
+    label: "enable remote Thread creation",
+    action: { _tag: "EnableRemoteThreadCreation" },
+  },
+  {
+    id: "disable-remote-thread-creation",
+    category: "runner",
+    label: "disable remote Thread creation",
+    action: { _tag: "DisableRemoteThreadCreation" },
+  },
   { id: "threads", category: "thread", label: "switch", keybinding: "Ctrl+T", action: { _tag: "SwitchThread" } },
   { id: "mode", category: "mode", label: "change mode", keybinding: "Ctrl+S", action: { _tag: "OpenModePicker" } },
   {

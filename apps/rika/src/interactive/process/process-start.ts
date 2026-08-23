@@ -14,8 +14,8 @@ import { command, version } from "../../command/root/rika-command"
 import { runHostedInteractive } from "../../hosted/hosted-interactive-controller"
 import { CredentialStore, Http, ProfileStore, ThreadClient } from "../../hosted/hosted-contract"
 import * as HostedCli from "../../hosted/hosted-cli"
-import { LocalRunnerAdmission } from "../../local-executor/local-runner-contract"
-import * as LocalRunner from "../../local-executor/local-runner"
+import { RunnerAdmission } from "../../runner/runner-contract"
+import * as Runner from "../../runner/runner"
 import { provideLayerScoped } from "./process-layer"
 
 const main = Command.run(command, { version, renderErrors: false }).pipe(
@@ -39,7 +39,7 @@ const dispatcherLayer = (editor: string | undefined) =>
         | BunServices.BunServices
         | CredentialStore
         | Http
-        | LocalRunnerAdmission
+        | RunnerAdmission
         | ProfileStore
         | Socket.WebSocketConstructor
         | ThreadClient
@@ -80,7 +80,7 @@ export const start = () => {
     BunSocket.layerWebSocketConstructor,
   )
   const hosted = HostedCli.liveLayer(home).pipe(Layer.provide(platform))
-  const admission = LocalRunner.liveAdmissionLayer.pipe(Layer.provide(hosted))
+  const admission = Runner.liveAdmissionLayer.pipe(Layer.provide(hosted))
   const dependencies = Layer.mergeAll(platform, hosted, admission)
   const program = main.pipe(provideLayerScoped(dispatcherLayer(editor).pipe(Layer.provideMerge(dependencies))))
   BunRuntime.runMain(program)

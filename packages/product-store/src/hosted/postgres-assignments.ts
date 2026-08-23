@@ -24,7 +24,7 @@ interface AssignmentRow {
   readonly ownerId: string
   readonly threadId: string
   readonly workspaceId: string
-  readonly executorKind: "e2b" | "local_device"
+  readonly executorKind: "orb" | "runner"
   readonly placement: unknown
   readonly checkout: unknown
   readonly generation: string
@@ -267,7 +267,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
     return yield* transaction(
       sql,
       Effect.gen(function* () {
-        const kind = input.placement._tag === "E2BPlacement" ? "e2b" : "local_device"
+        const kind = input.placement._tag === "OrbPlacement" ? "orb" : "runner"
         const threads = yield* query(sql<{ readonly executorKind: string; readonly workspaceId: string }>`SELECT
           executor_kind AS "executorKind", workspace_id AS "workspaceId"
           FROM rika_hosted_threads

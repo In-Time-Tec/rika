@@ -54,10 +54,10 @@ it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers pre
                VALUES ('worker-owner','personal','worker-user',NULL);
              INSERT INTO rika_hosted_workspaces
                (id,owner_id,project_id,created_by_user_id,executor_kind,inherit_project_grants,created_at)
-               VALUES ('workspace-1','worker-owner',NULL,'worker-user','e2b',false,now());
+               VALUES ('workspace-1','worker-owner',NULL,'worker-user','orb',false,now());
              INSERT INTO rika_hosted_threads
                (id,owner_id,project_id,workspace_id,created_by_user_id,executor_kind,inherit_project_grants,created_at)
-               VALUES ('thread-1','worker-owner',NULL,'workspace-1','worker-user','e2b',false,now());
+               VALUES ('thread-1','worker-owner',NULL,'workspace-1','worker-user','orb',false,now());
              INSERT INTO rika_workspaces (owner_id,path,created_at)
                VALUES ('worker-owner','workspace-1',1);
              INSERT INTO rika_threads (id,owner_id,workspace,title,created_at,updated_at)
@@ -82,8 +82,8 @@ it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers pre
             (id, owner_id, thread_id, workspace_id, executor_kind, placement, checkout, generation, revision,
               last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
               session_digest, lease_epoch, lease_expires_at)
-            VALUES ('assignment-1', 'worker-owner', 'thread-1', 'workspace-1', 'e2b',
-              '{"_tag":"E2BPlacement","templateBuildId":"build-1","providerScope":"test"}', NULL,
+            VALUES ('assignment-1', 'worker-owner', 'thread-1', 'workspace-1', 'orb',
+              '{"_tag":"OrbPlacement","templateBuildId":"build-1","providerScope":"test"}', NULL,
               1, 0, 1, 'active', 'sandbox-1', 'executor-1', 'process-1', 'session-1', 1,
               clock_timestamp() + interval '4 minutes')`),
         )

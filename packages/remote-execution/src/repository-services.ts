@@ -244,11 +244,13 @@ export const driverLayer = (options: {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const start = Effect.fn("RepositoryServices.Driver.start")(function* (service: RepositoryService) {
-        const root = yield* fileSystem.realPath(options.workspaceRoot).pipe(
-          Effect.mapError(() =>
-            RepositoryServiceError.make({ kind: "driver", message: "Workspace root is unavailable" }),
-          ),
-        )
+        const root = yield* fileSystem
+          .realPath(options.workspaceRoot)
+          .pipe(
+            Effect.mapError(() =>
+              RepositoryServiceError.make({ kind: "driver", message: "Workspace root is unavailable" }),
+            ),
+          )
         const candidate = path.isAbsolute(service.cwd) ? path.resolve(service.cwd) : path.resolve(root, service.cwd)
         const cwd = yield* fileSystem
           .realPath(candidate)

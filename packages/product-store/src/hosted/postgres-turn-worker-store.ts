@@ -146,7 +146,7 @@ export const layer = Layer.effect(
         JOIN rika_hosted_threads hosted_thread ON hosted_thread.id = turn_record.thread_id
           AND hosted_thread.owner_id = thread_record.owner_id
         WHERE turn_record.turn_kind = 'AgentExecution' AND turn_record.status = 'queued'
-          AND (hosted_thread.executor_kind = 'local_device' OR EXISTS (
+          AND (hosted_thread.executor_kind = 'runner' OR EXISTS (
             SELECT 1 FROM rika_hosted_executor_assignments assignment
             JOIN rika_hosted_workspace_preparations preparation
               ON preparation.assignment_id = assignment.id
@@ -185,7 +185,7 @@ export const layer = Layer.effect(
           AND hosted_thread.owner_id = thread_record.owner_id
         WHERE turn_record.turn_kind = 'AgentExecution' AND turn_record.status = 'running'
           AND turn_record.execution_link_json IS NULL
-          AND (hosted_thread.executor_kind = 'local_device' OR EXISTS (
+          AND (hosted_thread.executor_kind = 'runner' OR EXISTS (
             SELECT 1 FROM rika_hosted_executor_assignments assignment
             JOIN rika_hosted_workspace_preparations preparation
               ON preparation.assignment_id = assignment.id

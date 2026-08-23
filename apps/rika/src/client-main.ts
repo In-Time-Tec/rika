@@ -34,7 +34,13 @@ const startClient = () => {
   if (interruptedBySigint && !isInteractiveClientLaunch()) rootFiber.interruptUnsafe()
   rootFiber.addObserver((exit) => {
     removeSigintHandler()
-    process.exit(clientProcessExitCode({ exit, interruptedBySigint }))
+    process.exit(
+      clientProcessExitCode({
+        exit,
+        interruptedBySigint,
+        successfulExitCode: typeof process.exitCode === "number" ? process.exitCode : undefined,
+      }),
+    )
   })
 }
 

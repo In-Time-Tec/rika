@@ -7,7 +7,7 @@ import { bindingManifest, type CellRequest } from "../src/protocol"
 const access = {
   version: 1 as const,
   fence: {
-    target: "e2b" as const,
+    target: "orb" as const,
     assignmentId: "assignment-1",
     assignmentGeneration: 1,
     instanceId: "sandbox-1",

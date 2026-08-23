@@ -57,12 +57,16 @@ const unusedHttp: HttpInterface = {
   revokeDevice: () => Effect.die("unused"),
   revokeAllDevices: () => Effect.die("unused"),
   issueThreadTicket: () => Effect.die("unused"),
-  registerLocalRunner: () => Effect.die("unused"),
+  registerRunner: () => Effect.die("unused"),
   setRemoteThreadCreation: () => Effect.die("unused"),
-  pollLocalRunner: () => Effect.die("unused"),
+  pollRunner: () => Effect.die("unused"),
   putProviderCredential: () => Effect.die("unused"),
   listProviderCredentials: () => Effect.die("unused"),
   revokeProviderCredential: () => Effect.die("unused"),
+  createProject: () => Effect.die("unused"),
+  putEnvironment: () => Effect.die("unused"),
+  revokeEnvironment: () => Effect.die("unused"),
+  publishRepository: () => Effect.die("unused"),
 }
 
 it.effect("replays without gaps across reconnect and attaches a second controller without duplicate events", () =>
@@ -251,8 +255,9 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
       const context = yield* Layer.build(layer)
       const first = yield* makeHostedInteractiveSession({
         threadId: "thread-1",
-        executorKind: "local_device",
-        createThread: Effect.succeed("thread-2"),
+        executorKind: "runner",
+        createThread: () => Effect.succeed("thread-2"),
+        setRemoteThreadCreation: () => Effect.void,
       }).pipe(Effect.provide(context))
       const firstEvents: Array<string> = []
       const firstSnapshotUpdates: Array<number> = []
@@ -293,8 +298,9 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
       yield* first.session.submit("hello", undefined, undefined, undefined, "submission-1")
       const second = yield* makeHostedInteractiveSession({
         threadId: "thread-1",
-        executorKind: "local_device",
-        createThread: Effect.succeed("thread-2"),
+        executorKind: "runner",
+        createThread: () => Effect.succeed("thread-2"),
+        setRemoteThreadCreation: () => Effect.void,
       }).pipe(Effect.provide(context))
       const secondEvents: Array<string> = []
       const secondFiber = yield* second.session

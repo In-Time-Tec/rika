@@ -125,7 +125,7 @@ const make = Effect.gen(function* () {
         if (current.assignments.has(input.id)) return fail("conflict", "Executor assignment identity already exists")
         if ([...current.assignments.values()].some((assignment) => assignment.threadId === input.threadId))
           return fail("conflict", "Thread already has an executor assignment")
-        const executorKind = input.placement._tag === "E2BPlacement" ? "e2b" : "local_device"
+        const executorKind = input.placement._tag === "OrbPlacement" ? "orb" : "runner"
         const assignment: ExecutorAssignment = {
           id: input.id,
           ownerId: input.ownerId,

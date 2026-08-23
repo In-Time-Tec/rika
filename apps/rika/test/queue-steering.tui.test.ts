@@ -318,7 +318,11 @@ test(
             }),
         })
 
-        yield* app.waitFrame("RECOVERED_FOLLOW_UP_COMPLETE", 20_000)
+        const followUpTranscript = yield* app.waitTranscript(
+          followUpTurnId,
+          (projection) => projection.state.status === "completed",
+          20_000,
+        )
         expect((yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0, 20_000)).turns).toEqual([])
         expect(
           (yield* app.nextFrame)
@@ -344,11 +348,6 @@ test(
               unit.content._tag === "Entry" && unit.content.role === "user" && unit.content.text === request.text,
           ),
         ).toHaveLength(1)
-        const followUpTranscript = yield* app.waitTranscript(
-          followUpTurnId,
-          (projection) => projection.state.status === "completed",
-          20_000,
-        )
         expect(
           followUpTranscript.units.filter(
             (unit) =>

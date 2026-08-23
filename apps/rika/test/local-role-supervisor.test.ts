@@ -9,7 +9,7 @@ it.effect("runs sibling controller and executor roles and stops only the executo
       const stopped = yield* Ref.make<ReadonlyArray<LocalRole>>([])
       const exits = {
         "tui-controller": yield* Deferred.make<number>(),
-        "local-executor": yield* Deferred.make<number>(),
+        "runner-executor": yield* Deferred.make<number>(),
       }
       const start = (role: LocalRole) =>
         Ref.update(started, (roles) => [...roles, role]).pipe(
@@ -25,13 +25,13 @@ it.effect("runs sibling controller and executor roles and stops only the executo
       yield* Deferred.succeed(exits["tui-controller"], 0)
       const exit = yield* Fiber.await(fiber)
       expect(exit._tag === "Success" && exit.value).toEqual({ exitCode: 0, errorOutput: "" })
-      expect(yield* Ref.get(started)).toEqual(["local-executor", "tui-controller"])
-      expect(yield* Ref.get(stopped)).toEqual(["local-executor"])
+      expect(yield* Ref.get(started)).toEqual(["runner-executor", "tui-controller"])
+      expect(yield* Ref.get(stopped)).toEqual(["runner-executor"])
     }),
   ),
 )
 
-it.effect("keeps the controller alive when the local executor is lost", () =>
+it.effect("keeps the controller alive when the Runner is lost", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const tuiExit = yield* Deferred.make<number>()
@@ -69,6 +69,6 @@ it.effect("headless mode starts only the executor", () =>
       },
     })
     expect(exit).toEqual({ exitCode: 130, errorOutput: "" })
-    expect(yield* Ref.get(started)).toEqual(["local-executor"])
+    expect(yield* Ref.get(started)).toEqual(["runner-executor"])
   }),
 )

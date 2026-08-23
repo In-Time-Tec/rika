@@ -1,12 +1,10 @@
 import * as ExecutionProjection from "@rika/product/execution-projection"
-import * as BunServices from "@effect/platform-bun/BunServices"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import * as Database from "@rika/product-store/product-database-layer"
-import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
-import * as ThreadSearchRepository from "@rika/product-store/sqlite-thread-search-repository"
-import * as ThreadSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
-import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
-import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as ThreadRepository from "@rika/product-store/postgres-thread-repository"
+import * as ThreadSearchRepository from "@rika/product-store/memory-thread-search-repository"
+import * as ThreadSummaryRepository from "@rika/product-store/postgres-thread-summary-repository"
+import * as TranscriptRepository from "@rika/product-store/postgres-transcript-repository"
+import * as TurnRepository from "@rika/product-store/postgres-turn-repository"
 import type * as TurnContract from "@rika/product/turn-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
@@ -20,23 +18,17 @@ export interface HistoricalTranscriptFixture {
   readonly marker: string
 }
 
-export const makeTuiAppRepositoryLayers = (filename: string) => {
-  const database = Database.layer(filename)
+export const makeTuiAppRepositoryLayers = () => {
+  const repositoryLayer = ThreadRepository.memoryLayer()
+  const turnRepositoryLayer = TurnRepository.memoryLayer()
   return {
-    repositoryLayer: ThreadRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer)),
-    turnRepositoryLayer: TurnRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer)),
-    threadSearchRepositoryLayer: ThreadSearchRepository.layer.pipe(
-      Layer.provide(database),
-      Layer.provide(BunServices.layer),
+    repositoryLayer,
+    turnRepositoryLayer,
+    threadSearchRepositoryLayer: ThreadSearchRepository.memoryLayer,
+    threadSummaryRepositoryLayer: ThreadSummaryRepository.memoryLayer.pipe(
+      Layer.provide(Layer.merge(repositoryLayer, turnRepositoryLayer)),
     ),
-    threadSummaryRepositoryLayer: ThreadSummaryRepository.layer.pipe(
-      Layer.provide(database),
-      Layer.provide(BunServices.layer),
-    ),
-    transcriptRepositoryLayer: TranscriptRepository.layer.pipe(
-      Layer.provide(database),
-      Layer.provide(BunServices.layer),
-    ),
+    transcriptRepositoryLayer: TranscriptRepository.memoryLayer(),
   }
 }
 
@@ -53,8 +45,7 @@ export const seedHistoricalTranscript = Effect.fn("TuiApp.seedHistoricalTranscri
   fixture: HistoricalTranscriptFixture,
   workspace: string,
 ) {
-  if (fixture.entryCount <= 400)
-    return yield* Effect.die("The historical transcript fixture must exceed the interactive window")
+  if (fixture.entryCount < 2) return yield* Effect.die("The transcript fixture requires at least two entries")
   const threads = yield* ThreadRepository.Service
   const turns = yield* TurnRepository.Service
   const transcripts = yield* TranscriptRepository.Service
@@ -76,7 +67,7 @@ export const seedHistoricalTranscript = Effect.fn("TuiApp.seedHistoricalTranscri
     updatedAt: 1,
   }
   yield* turns.copy(turn, 32)
-  const markerIndex = fixture.entryCount - 400
+  const markerIndex = Math.max(0, fixture.entryCount - 400)
   const notifications = Array.from({ length: fixture.entryCount - 2 }, (_, index): TranscriptUnit.Unit => {
     const key = `${turnId}:history:${index.toString().padStart(4, "0")}`
     return {

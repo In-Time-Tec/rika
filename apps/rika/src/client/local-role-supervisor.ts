@@ -1,10 +1,10 @@
 import { Effect, Schema, Scope, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
-export type LocalRole = "tui-controller" | "local-executor"
+export type LocalRole = "tui-controller" | "runner-executor"
 
 export class LocalRoleProcessError extends Schema.TaggedError<LocalRoleProcessError>()("LocalRoleProcessError", {
-  role: Schema.Literals(["tui-controller", "local-executor"]),
+  role: Schema.Literals(["tui-controller", "runner-executor"]),
   message: Schema.String,
 }) {}
 
@@ -39,7 +39,7 @@ export const processRoleLaunch = Effect.fn("ClientMain.processRoleLaunch")(funct
           ChildProcess.make(commands[role].executable, commands[role].arguments, {
             stdin: role === "tui-controller" ? "inherit" : "ignore",
             stdout: role === "tui-controller" ? "inherit" : "pipe",
-            stderr: "pipe",
+            stderr: role === "tui-controller" ? "inherit" : "pipe",
             extendEnv: true,
             env: commands[role].environment,
           }),
@@ -50,7 +50,7 @@ export const processRoleLaunch = Effect.fn("ClientMain.processRoleLaunch")(funct
               {
                 exitCode: handle.exitCode.pipe(Effect.map(Number)),
                 errorOutput: Stream.mkString(Stream.decodeText(handle.stderr)),
-                output: role === "local-executor" ? Stream.runDrain(handle.stdout) : Effect.void,
+                output: role === "runner-executor" ? Stream.runDrain(handle.stdout) : Effect.void,
               },
               { concurrency: 3 },
             ).pipe(
@@ -68,7 +68,7 @@ export const superviseLocalRoles = Effect.fn("ClientMain.superviseLocalRoles")(f
   readonly headless: boolean
   readonly launch: RoleLaunch
 }) {
-  const executor = yield* input.launch.start("local-executor")
+  const executor = yield* input.launch.start("runner-executor")
   if (input.headless) return yield* executor.exit
   const tui = yield* input.launch.start("tui-controller").pipe(Effect.onError(() => executor.stop))
   yield* executor.exit.pipe(Effect.andThen(Effect.never), Effect.forkScoped)

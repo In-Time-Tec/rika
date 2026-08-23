@@ -5,7 +5,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { PromptPart } from "@rika/product/execution-request"
 import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import { BetterAuthUserId, OrganizationId } from "@rika/product/hosted-model"
-import { CheckoutFingerprint } from "@rika/product/local-runner-registration"
+import { CheckoutFingerprint } from "@rika/product/runner-registration"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { Effect, Layer, Random, Redacted, Schema } from "effect"
 import { Pool, type QueryResult } from "pg"
@@ -99,7 +99,7 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
       const connection = yield* product.createConnection({
         principal: principal("personal-user"),
         owner: personal("personal-user"),
-        executorKind: "e2b",
+        executorKind: "orb",
       })
       const admissionInput = {
         principal: principal("personal-user"),
@@ -150,7 +150,7 @@ it.effect.skipIf(!live)("admits a current local Thread without recovering an unr
       const fingerprint = CheckoutFingerprint.make("local-checkout")
       yield* user(pool, authenticated.userId)
       const product = yield* HostedProduct
-      yield* product.registerLocalRunner({
+      yield* product.registerRunner({
         principal: authenticated,
         checkoutFingerprint: fingerprint,
         registration: {
@@ -164,8 +164,8 @@ it.effect.skipIf(!live)("admits a current local Thread without recovering an unr
         product.createConnection({
           principal: authenticated,
           owner: personal(authenticated.userId),
-          executorKind: "local_device",
-          localRunnerTarget: { deviceId: authenticated.deviceId as never, checkoutFingerprint: fingerprint },
+          executorKind: "runner",
+          runnerTarget: { deviceId: authenticated.deviceId as never, checkoutFingerprint: fingerprint },
         })
       const staleThread = yield* createLocal()
       const staleRun = yield* product.admitRun({
@@ -250,12 +250,12 @@ it.effect.skipIf(!live)("revokes organization admission immediately without affe
       const personalConnection = yield* product.createConnection({
         principal: principal("member-user"),
         owner: personal("member-user"),
-        executorKind: "e2b",
+        executorKind: "orb",
       })
       const organizationConnection = yield* product.createConnection({
         principal: principal("member-user"),
         owner: organization("revoked-org"),
-        executorKind: "e2b",
+        executorKind: "orb",
       })
       yield* product.admitRun({
         principal: principal("member-user"),
@@ -296,7 +296,7 @@ it.effect.skipIf(!live)("requires a direct grant for a non-creator organization 
       const connection = yield* product.createConnection({
         principal: principal("creator-user"),
         owner: organization("grant-org"),
-        executorKind: "e2b",
+        executorKind: "orb",
       })
       const operate = product.admitRun({
         principal: principal("operator-user"),
@@ -340,7 +340,7 @@ it.effect.skipIf(!live)("fails closed for forged and cross-owner selections", ()
           product.createConnection({
             principal: principal("first-user"),
             owner: personal("second-user"),
-            executorKind: "e2b",
+            executorKind: "orb",
           }),
         ),
       ).toBe("forbidden")
@@ -349,14 +349,14 @@ it.effect.skipIf(!live)("fails closed for forged and cross-owner selections", ()
           product.createConnection({
             principal: principal("first-user"),
             owner: organization("foreign-org"),
-            executorKind: "e2b",
+            executorKind: "orb",
           }),
         ),
       ).toBe("forbidden")
       const secondConnection = yield* product.createConnection({
         principal: principal("second-user"),
         owner: personal("second-user"),
-        executorKind: "e2b",
+        executorKind: "orb",
       })
       expect(
         yield* failureKind(
@@ -382,7 +382,7 @@ it.effect.skipIf(!live)("fails closed for forged and cross-owner selections", ()
             principal: principal("first-user"),
             owner: personal("first-user"),
             projectId: "foreign-project",
-            executorKind: "e2b",
+            executorKind: "orb",
           }),
         ),
       ).toBe("not-found")

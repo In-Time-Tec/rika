@@ -1,5 +1,6 @@
 import * as ThreadView from "@rika/product/thread-view"
 import { steeringUnitKeyPrefix } from "@rika/product/execution-projection"
+import * as ExecutionStatus from "@rika/product/execution-status"
 import { Function, Result } from "effect"
 import { maxInMemoryTranscriptUnits, trimTranscriptTimeline } from "@rika/terminal/terminal-timeline-bounds"
 import { runningToolsActivity as transcriptActivity } from "@rika/terminal/terminal-message"
@@ -368,9 +369,44 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
       rejection: foreign ? "thread" : "gap",
     }
   }
+  const snapshotRegressesTerminalTurn = (snapshot: ThreadView.ThreadViewSnapshot) =>
+    state.view !== undefined &&
+    snapshot.turns.some((candidate) => {
+      const existing = state.view!.turn(String(candidate.turn.id))?.turn
+      return (
+        existing !== undefined &&
+        ExecutionStatus.isTerminalStatus(existing.status) &&
+        !ExecutionStatus.isTerminalStatus(candidate.turn.status)
+      )
+    })
+  const snapshotAdvancesTerminalTurn = (snapshot: ThreadView.ThreadViewSnapshot) => {
+    if (
+      state.model.activeTurnId !== undefined &&
+      !snapshot.turns.some((candidate) => ExecutionStatus.isActiveStatus(candidate.turn.status))
+    )
+      return true
+    return (
+      state.view !== undefined &&
+      snapshot.turns.some((candidate) => {
+        const existing = state.view!.turn(String(candidate.turn.id))?.turn
+        const candidateIsTerminal = ExecutionStatus.isTerminalStatus(candidate.turn.status)
+        return (
+          (state.model.activeTurnId === String(candidate.turn.id) && candidateIsTerminal) ||
+          (existing !== undefined && !ExecutionStatus.isTerminalStatus(existing.status) && candidateIsTerminal)
+        )
+      })
+    )
+  }
   if (event._tag === "ThreadViewSnapshot") {
     const sameThread = state.view?.thread.id === event.snapshot.thread.id
-    if (sameThread && state.view !== undefined && event.snapshot.revision < state.view.revision) return unchanged(state)
+    if (
+      sameThread &&
+      state.view !== undefined &&
+      event.snapshot.revision < state.view.revision &&
+      !snapshotAdvancesTerminalTurn(event.snapshot)
+    )
+      return unchanged(state)
+    if (sameThread && snapshotRegressesTerminalTurn(event.snapshot)) return unchanged(state)
     const hydrated = ThreadView.fromSnapshot(event.snapshot)
     if (Result.isFailure(hydrated))
       return {

@@ -164,6 +164,19 @@ export class GatewayError extends Schema.TaggedError<GatewayError>()("ExecutorGa
   message: Schema.String,
 }) {}
 
+export interface ExecutorDataPlane {
+  readonly receive: (socket: Socket, frame: unknown) => Effect.Effect<void>
+  readonly disconnected: (socket: Socket) => Effect.Effect<void>
+  readonly active: (socket: Socket) => Effect.Effect<boolean>
+  readonly cancel: (assignmentId: string, operationKey: string) => Effect.Effect<void, GatewayError>
+  readonly machine: (
+    assignmentId: string,
+    operationKey: string,
+    attempt: number,
+    request: MachineBindings.Request,
+  ) => Effect.Effect<MachineBindings.Outcome, GatewayError>
+}
+
 export interface ExecuteInput {
   readonly assignmentId: string
   readonly operationKey: string
@@ -183,18 +196,8 @@ export interface ExecuteInput {
   readonly recoveryAttempt?: number
 }
 
-export interface Gateway {
-  readonly receive: (socket: Socket, frame: unknown) => Effect.Effect<void>
-  readonly disconnected: (socket: Socket) => Effect.Effect<void>
-  readonly active: (socket: Socket) => Effect.Effect<boolean>
+export interface Gateway extends ExecutorDataPlane {
   readonly execute: (input: ExecuteInput) => Effect.Effect<ExecutionResult, GatewayError>
-  readonly cancel: (assignmentId: string, operationKey: string) => Effect.Effect<void, GatewayError>
-  readonly machine: (
-    assignmentId: string,
-    operationKey: string,
-    attempt: number,
-    request: MachineBindings.Request,
-  ) => Effect.Effect<MachineBindings.Outcome, GatewayError>
   readonly sendPty: (assignmentId: string, request: PtyRequest) => Effect.Effect<void, GatewayError>
   readonly ptyEvents: (assignmentId: string) => Stream.Stream<PtyEvent>
   readonly retryPreparation: (assignmentId: string) => Effect.Effect<void, GatewayError>
@@ -1347,7 +1350,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         if (assignment.workspaceId !== message.workspaceId)
           return yield* GatewayError.make({ kind: "fenced", message: "Workspace preparation identity is stale" })
         const templateBuildId =
-          assignment.placement._tag === "E2BPlacement" ? assignment.placement.templateBuildId : undefined
+          assignment.placement._tag === "OrbPlacement" ? assignment.placement.templateBuildId : undefined
         if (templateBuildId === undefined)
           return yield* GatewayError.make({ kind: "fenced", message: "Workspace preparation is not remote" })
         const bindingContractDigest = yield* bindingContract(message.workspaceId)

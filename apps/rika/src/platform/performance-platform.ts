@@ -1,6 +1,6 @@
-import { localExecutorProcessRole, tuiControllerProcessRole } from "../private-runtime-role"
+import { runnerExecutorProcessRole, tuiControllerProcessRole } from "../private-runtime-role"
 
-export type PerformanceRole = "launcher" | "interactive" | "local-executor"
+export type PerformanceRole = "launcher" | "interactive" | "runner-executor"
 
 export interface RoleObservation {
   readonly role: PerformanceRole
@@ -44,9 +44,9 @@ export const roleRuntimes = (input: {
     interactive: input.packaged
       ? { executable: sibling("rika"), arguments: [tuiControllerProcessRole], evidencePath: sibling("rika") }
       : { executable: input.executable, arguments: [source("interactive")], evidencePath: source("interactive") },
-    "local-executor": {
+    "runner-executor": {
       executable: input.packaged ? sibling("rika") : input.executable,
-      arguments: input.packaged ? [localExecutorProcessRole] : [source("client"), localExecutorProcessRole],
+      arguments: input.packaged ? [runnerExecutorProcessRole] : [source("client"), runnerExecutorProcessRole],
       evidencePath: input.packaged ? sibling("rika") : source("client"),
     },
   }
@@ -58,11 +58,11 @@ const executableName = (command: string) => {
 }
 
 const containsTuiControllerRole = (command: string) => command.trim().split(/\s+/).includes(tuiControllerProcessRole)
-const containsLocalExecutorRole = (command: string) => command.trim().split(/\s+/).includes(localExecutorProcessRole)
+const containsLocalExecutorRole = (command: string) => command.trim().split(/\s+/).includes(runnerExecutorProcessRole)
 
 export const matchesRole = (input: { readonly command: string; readonly runtime: RoleRuntime }): boolean => {
   if (input.runtime.arguments.includes(tuiControllerProcessRole)) return containsTuiControllerRole(input.command)
-  if (input.runtime.arguments.includes(localExecutorProcessRole)) return containsLocalExecutorRole(input.command)
+  if (input.runtime.arguments.includes(runnerExecutorProcessRole)) return containsLocalExecutorRole(input.command)
   if (containsTuiControllerRole(input.command) || containsLocalExecutorRole(input.command)) return false
   return input.runtime.evidencePath === input.runtime.executable
     ? executableName(input.command) === executableName(input.runtime.executable)

@@ -7,12 +7,12 @@ import { dispatch as dispatchHosted } from "./hosted-command-dispatch"
 const mode = Flag.string("mode").pipe(Flag.withAlias("m"), Flag.optional)
 const workspace = Flag.directory("workspace").pipe(Flag.optional)
 const thread = Flag.string("thread").pipe(Flag.optional)
-const ephemeral = Flag.boolean("ephemeral")
+const ephemeral = Flag.boolean("ephemeral").pipe(Flag.withDefault(false))
 const prompt = Argument.variadic(Argument.string("prompt"))
 const streamFlags = {
-  streamJson: Flag.boolean("stream-json"),
-  streamJsonInput: Flag.boolean("stream-json-input"),
-  streamJsonThinking: Flag.boolean("stream-json-thinking"),
+  streamJson: Flag.boolean("stream-json").pipe(Flag.withDefault(false)),
+  streamJsonInput: Flag.boolean("stream-json-input").pipe(Flag.withDefault(false)),
+  streamJsonThinking: Flag.boolean("stream-json-thinking").pipe(Flag.withDefault(false)),
 }
 const optionalValue = <A>(value: Option.Option<A>): A | undefined => Option.getOrUndefined(value)
 type RunOperation = Extract<ProductOperation.Input, { readonly _tag: "Run" }>

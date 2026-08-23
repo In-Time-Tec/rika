@@ -97,7 +97,7 @@ export const layer = Layer.effect(
         readonly userId: string | null
         readonly membershipId: string | null
         readonly createdByUserId: string
-        readonly executorKind: "local_device" | "e2b"
+        readonly executorKind: "runner" | "orb"
         readonly inheritProjectGrants: boolean
         readonly threadRole: "viewer" | "controller" | "operator" | "owner" | null
         readonly projectRole: "viewer" | "controller" | "operator" | "owner" | null

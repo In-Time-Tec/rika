@@ -153,12 +153,12 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
             if (
               processMatchesRole(row, "launcher") ||
               processMatchesRole(row, "interactive") ||
-              processMatchesRole(row, "local-executor")
+              processMatchesRole(row, "runner-executor")
             )
               ownedPids.add(row.pid)
           const ready =
             readyRows.some((row) => processMatchesRole(row, "interactive") && row.rss > 1024) &&
-            readyRows.some((row) => processMatchesRole(row, "local-executor") && row.rss > 1024)
+            readyRows.some((row) => processMatchesRole(row, "runner-executor") && row.rss > 1024)
           if (ready || attempt === 40) break
           yield* Effect.sleep("250 millis")
         }
@@ -166,7 +166,7 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
         yield* Effect.sleep("8 seconds")
         let previousRows = yield* readProcessRows
         const roleCpu = new Map<PerformanceRole, Array<number>>(
-          (["launcher", "interactive", "local-executor"] as const).map((role) => [role, []]),
+          (["launcher", "interactive", "runner-executor"] as const).map((role) => [role, []]),
         )
         const totalCpu: Array<number> = []
         let stableRoles = true
@@ -179,7 +179,7 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
           const previousTree = descendants(previousRows, child.pid).filter((row) => !baselinePids.has(row.pid))
           const currentTree = descendants(currentRows, child.pid).filter((row) => !baselinePids.has(row.pid))
           let total = 0
-          for (const name of ["launcher", "interactive", "local-executor"] as const) {
+          for (const name of ["launcher", "interactive", "runner-executor"] as const) {
             const before = previousTree.find((row) => processMatchesRole(row, name))
             const after = currentTree.find((row) => processMatchesRole(row, name))
             if (after !== undefined) ownedPids.add(after.pid)
@@ -197,8 +197,9 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
         const tree = descendants(currentRows, child.pid).filter((row) => !baselinePids.has(row.pid))
         const launcherRow = tree.find((row) => processMatchesRole(row, "launcher"))
         const interactiveRow = tree.find((row) => processMatchesRole(row, "interactive"))
-        const localExecutorRow = tree.find((row) => processMatchesRole(row, "local-executor"))
-        for (const row of [launcherRow, interactiveRow, localExecutorRow]) if (row !== undefined) ownedPids.add(row.pid)
+        const runnerExecutorRow = tree.find((row) => processMatchesRole(row, "runner-executor"))
+        for (const row of [launcherRow, interactiveRow, runnerExecutorRow])
+          if (row !== undefined) ownedPids.add(row.pid)
         const role = (name: PerformanceRole, row: PsRow, executable: string): RoleObservation => ({
           role: name,
           pid: row.pid,
@@ -212,11 +213,11 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
             ...(interactiveRow === undefined
               ? []
               : [role("interactive", interactiveRow, runtimes.interactive.evidencePath)]),
-            ...(localExecutorRow === undefined
+            ...(runnerExecutorRow === undefined
               ? []
-              : [role("local-executor", localExecutorRow, runtimes["local-executor"].evidencePath)]),
+              : [role("runner-executor", runnerExecutorRow, runtimes["runner-executor"].evidencePath)]),
           ],
-          ...(interactiveRow === undefined || localExecutorRow === undefined
+          ...(interactiveRow === undefined || runnerExecutorRow === undefined
             ? {}
             : {
                 sampleCount: totalCpu.length,
@@ -231,7 +232,7 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
                   : {}),
               }),
           executableBytes,
-          ...(interactiveRow === undefined || localExecutorRow === undefined
+          ...(interactiveRow === undefined || runnerExecutorRow === undefined
             ? { unsupportedReason: "The isolated PTY did not expose every expected process role before sampling." }
             : {}),
         }

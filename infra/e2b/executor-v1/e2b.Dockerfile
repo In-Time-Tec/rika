@@ -1,7 +1,7 @@
 FROM debian:12.15-slim@sha256:362e64223cc0da95422b3b13c045186fc0a81250e765d31c025fbddf257f6143
 
-ARG BUN_VERSION=1.3.14
-ARG BUN_SHA256=951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f
+ARG BUN_VERSION=1.4.0
+ARG BUN_SHA256=2d03fb5fb83ac8b567aca0a281b2ce1a1a19d488f56c2968d88c3f25e92fe452
 ARG CHROMIUM_VERSION=152.0.7977.54
 ARG CHROMIUM_SHA256=88af83664e1e5f79dc1c1378d0699b98dddd69690a748addf4ccbe322bfacedf
 ARG NODE_VERSION=24.19.0
@@ -122,7 +122,7 @@ ENV HOME=/home/rika-executor \
   PATH=/run/rika/bin:/opt/rika-python/bin:/usr/local/bin:/usr/bin:/bin \
   GH_CONFIG_DIR=/run/rika/gh \
   RIKA_IMAGE_MANIFEST=/opt/rika/tool-manifest.json \
-  RIKA_EXECUTOR_TARGET=e2b \
+  RIKA_EXECUTOR_TARGET=orb \
   RIKA_EXECUTOR_ASSIGNMENT_ID=template-readiness \
   RIKA_EXECUTOR_GENERATION=1 \
   RIKA_EXECUTOR_ID=template-readiness:g1 \

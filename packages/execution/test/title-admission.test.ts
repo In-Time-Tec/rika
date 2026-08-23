@@ -6,7 +6,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import type { Change } from "@rika/product/execution-projection"
 import { Context, Effect, Layer, Random, Stream } from "effect"
-import { sqliteLayer as layer } from "./test-adapters"
+import { memoryLayer as layer } from "./test-adapters"
 
 const registryLayer = (...fixtures: ReadonlyArray<TestModel.Fixture>) =>
   ModelRegistry.layer(
@@ -84,7 +84,7 @@ it.live(
         Effect.gen(function* () {
           const context = yield* Layer.build(
             testLayer({
-              filename,
+              dataRoot: filename,
               modelServices: registryLayer(rootFixture, titleFixture),
             }),
           )
@@ -147,7 +147,7 @@ it.live(
         Effect.gen(function* () {
           const context = yield* Layer.build(
             testLayer({
-              filename,
+              dataRoot: filename,
               modelServices: registryLayer(rootFixture, titleFixture),
             }),
           )
@@ -191,7 +191,7 @@ it.live(
         Effect.gen(function* () {
           const context = yield* Layer.build(
             testLayer({
-              filename,
+              dataRoot: filename,
               modelServices: registryLayer(rootFixture, titleFixture),
             }),
           )
@@ -259,7 +259,7 @@ it.live(
         Effect.gen(function* () {
           const context = yield* Layer.build(
             testLayer({
-              filename,
+              dataRoot: filename,
               modelServices: registryLayer(rootFixture, titleFixture),
             }),
           )
@@ -308,7 +308,7 @@ it.live(
         Effect.gen(function* () {
           const context = yield* Layer.build(
             testLayer({
-              filename,
+              dataRoot: filename,
               modelServices: registryLayer(rootFixture),
             }),
           )
@@ -350,7 +350,7 @@ it.live(
         })
         const context = yield* Layer.build(
           testLayer({
-            filename,
+            dataRoot: filename,
             modelServices: registryLayer(rootFixture, titleFixture),
           }),
         )

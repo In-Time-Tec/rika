@@ -53,16 +53,16 @@ const seed = (pool: Pool) =>
       VALUES ('recovery-owner', 'personal', 'recovery-user');
     INSERT INTO rika_hosted_workspaces
       (id, owner_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
-      VALUES ('recovery-workspace', 'recovery-owner', 'recovery-user', 'e2b', false, now());
+      VALUES ('recovery-workspace', 'recovery-owner', 'recovery-user', 'orb', false, now());
     INSERT INTO rika_hosted_threads
       (id, owner_id, workspace_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
-      VALUES ('recovery-thread', 'recovery-owner', 'recovery-workspace', 'recovery-user', 'e2b', false, now());
+      VALUES ('recovery-thread', 'recovery-owner', 'recovery-workspace', 'recovery-user', 'orb', false, now());
     INSERT INTO rika_hosted_executor_assignments
       (id, owner_id, thread_id, workspace_id, executor_kind, placement, generation, revision,
         last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
         session_digest, lease_epoch, lease_expires_at)
-      VALUES ('recovery-assignment', 'recovery-owner', 'recovery-thread', 'recovery-workspace', 'e2b',
-        '{"_tag":"E2BPlacement","templateBuildId":"build-recovery"}'::jsonb, 1, 1, 1, 'active',
+      VALUES ('recovery-assignment', 'recovery-owner', 'recovery-thread', 'recovery-workspace', 'orb',
+        '{"_tag":"OrbPlacement","templateBuildId":"build-recovery"}'::jsonb, 1, 1, 1, 'active',
         'provider-recovery', 'executor-recovery', 'process-recovery', 'session-recovery', 1,
         now() + interval '5 minutes');
     INSERT INTO tenetkit_runs

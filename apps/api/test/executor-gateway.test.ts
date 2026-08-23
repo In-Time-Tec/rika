@@ -161,7 +161,7 @@ const bindings = {
 } as unknown as BindingAuthority
 
 const fence = {
-  target: "e2b" as const,
+  target: "orb" as const,
   assignmentId: "assignment-1",
   assignmentGeneration: 1,
   instanceId: "sandbox-1",

@@ -11,7 +11,7 @@ import * as GoalRepository from "@rika/product/goal-repository"
 import * as Kernel from "./kernel-layer"
 
 export interface BackendOptions {
-  readonly filename: string
+  readonly dataRoot: string
   readonly kernelPool: Execution.LocalCellsOptions
   readonly registryLayer: LaneModels["registryLayer"]
   readonly toolRuntimeLayer: Layer.Layer<ToolRuntime.Service>
@@ -53,10 +53,9 @@ export const kernelPoolFor = (options: {
   )
 
 export const backendLayer = (options: BackendOptions) =>
-  Execution.layerLocal({
-    filename: options.filename,
+  Execution.layerMemory({
+    dataRoot: options.dataRoot,
     cells: Execution.localCells(options.kernelPool),
-
     modelServices: options.registryLayer,
   })
 

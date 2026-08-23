@@ -12,7 +12,6 @@ import {
   type HostedThread,
   type HostedOwnerRecord,
   type HostedWorkspace,
-  type LocalWorkspaceBinding,
   type Presence,
   type Project,
   type ProjectGrant,
@@ -51,7 +50,6 @@ interface State {
   readonly cursors: Map<string, ResumableCursor>
   readonly writers: Map<string, TerminalWriterLease>
   readonly presence: Map<string, Presence>
-  readonly bindings: Map<string, LocalWorkspaceBinding>
   readonly auditEvents: Map<string, AuditEvent>
   readonly credentialReferences: Map<string, CredentialReference>
   readonly ownerCounters: Map<string, bigint>
@@ -77,7 +75,6 @@ const emptyState = (): State => ({
   cursors: new Map(),
   writers: new Map(),
   presence: new Map(),
-  bindings: new Map(),
   auditEvents: new Map(),
   credentialReferences: new Map(),
   ownerCounters: new Map(),
@@ -99,7 +96,6 @@ const mutation = <A>(ref: Ref.Ref<State>, update: (state: State) => Mutation<A>)
 const projectGrantKey = (projectId: string, memberId: string) => `${projectId}\u0000${memberId}`
 const threadGrantKey = (threadId: string, memberId: string) => `${threadId}\u0000${memberId}`
 const cursorKey = (threadId: string, clientId: string) => `${threadId}\u0000${clientId}`
-const bindingKey = (threadId: string, deviceId: string) => `${threadId}\u0000${deviceId}`
 const clientAuthorityKey = (clientId: string, ownerId: string) => `${clientId}\u0000${ownerId}`
 const ownerEquivalent = Schema.toEquivalence(HostedOwner)
 const allocateCommitCursor = (current: State, ownerId: string) => {
@@ -171,7 +167,7 @@ const make = Effect.gen(function* () {
     if (input.actor._tag === "PersonalActor" || thread.createdByUserId === input.actor.userId) return true
     const direct = current.threadGrants.get(threadGrantKey(input.threadId, input.actor.membershipId))
     const inherited =
-      thread.executorKind === "e2b" && thread.inheritProjectGrants && thread.projectId !== undefined
+      thread.executorKind === "orb" && thread.inheritProjectGrants && thread.projectId !== undefined
         ? current.projectGrants.get(projectGrantKey(thread.projectId, input.actor.membershipId))
         : undefined
     return isAuthorized(
@@ -245,7 +241,7 @@ const make = Effect.gen(function* () {
             return fail("not-found", "Project does not exist for the owner")
         }
         if (current.workspaces.has(input.id)) return fail("conflict", "Workspace identity already exists")
-        if (input.executorKind === "local_device" && input.inheritProjectGrants === true) {
+        if (input.executorKind === "runner" && input.inheritProjectGrants === true) {
           return fail("invalid-authority", "Local workspaces cannot inherit project grants")
         }
         const workspace: HostedWorkspace = {
@@ -254,7 +250,7 @@ const make = Effect.gen(function* () {
           ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
           createdByUserId: input.createdByUserId,
           executorKind: input.executorKind,
-          inheritProjectGrants: input.executorKind === "e2b" ? (input.inheritProjectGrants ?? true) : false,
+          inheritProjectGrants: input.executorKind === "orb" ? (input.inheritProjectGrants ?? true) : false,
           createdAt: input.now,
         }
         return succeed(workspace, {
@@ -272,7 +268,7 @@ const make = Effect.gen(function* () {
           return fail("invalid-authority", "Thread placement must match its immutable workspace placement")
         }
         if (current.threads.has(input.id)) return fail("conflict", "Thread identity already exists")
-        if (input.executorKind === "local_device" && input.inheritProjectGrants === true) {
+        if (input.executorKind === "runner" && input.inheritProjectGrants === true) {
           return fail("invalid-authority", "Local threads cannot inherit project grants")
         }
         const thread: HostedThread = {
@@ -283,7 +279,7 @@ const make = Effect.gen(function* () {
           createdByUserId: input.createdByUserId,
           executorKind: input.executorKind,
           inheritProjectGrants:
-            input.executorKind === "e2b" ? (input.inheritProjectGrants ?? workspace.inheritProjectGrants) : false,
+            input.executorKind === "orb" ? (input.inheritProjectGrants ?? workspace.inheritProjectGrants) : false,
           createdAt: input.now,
         }
         return succeed(thread, {
@@ -699,29 +695,6 @@ const make = Effect.gen(function* () {
               ),
         ),
       ),
-    bindLocalWorkspace: (input) =>
-      mutation(state, (current) => {
-        const thread = current.threads.get(input.threadId)?.thread
-        const device = current.devices.get(input.deviceId)
-        if (
-          thread === undefined ||
-          thread.ownerId !== input.ownerId ||
-          thread.executorKind !== "local_device" ||
-          device === undefined ||
-          device.userId !== input.userId
-        ) {
-          return fail("invalid-authority", "Workspace binding requires the member's local thread and device")
-        }
-        const key = bindingKey(input.threadId, input.deviceId)
-        const previous = current.bindings.get(key)
-        const binding: LocalWorkspaceBinding = {
-          ...input,
-          id: previous?.id ?? input.id,
-          createdAt: previous?.createdAt ?? input.now,
-          lastSeenAt: input.now,
-        }
-        return succeed(binding, { ...current, bindings: replace(current.bindings, key, binding) })
-      }),
     recordAuditEvent: (input) =>
       mutation(state, (current) => {
         if (current.auditEvents.has(input.id)) return fail("conflict", "Audit event identity already exists")

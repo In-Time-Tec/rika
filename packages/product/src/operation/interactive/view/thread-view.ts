@@ -146,6 +146,16 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
   let knownThreadId: string | undefined
   const knownProjectionRevisions = new Map<string, number>()
   const knownUsage = new Map<string, ExecutionProjection.UsageState>()
+  const knownTerminalStatuses = new Map<string, "completed" | "failed" | "cancelled">()
+  const rememberTerminal = (turnId: string, status: "completed" | "failed" | "cancelled") => {
+    knownTerminalStatuses.delete(turnId)
+    knownTerminalStatuses.set(turnId, status)
+    while (knownTerminalStatuses.size > trackedProjectionLimit) {
+      const oldest = knownTerminalStatuses.keys().next().value
+      if (oldest === undefined) break
+      knownTerminalStatuses.delete(oldest)
+    }
+  }
   const rememberProjection = (turnId: string, revision: number, usage: ExecutionProjection.UsageState) => {
     knownProjectionRevisions.delete(turnId)
     knownUsage.delete(turnId)
@@ -164,8 +174,11 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       knownThreadId = threadId
       knownProjectionRevisions.clear()
       knownUsage.clear()
+      knownTerminalStatuses.clear()
     }
     for (const entry of snapshot.turns) {
+      if (entry.turn.status === "completed" || entry.turn.status === "failed" || entry.turn.status === "cancelled")
+        rememberTerminal(String(entry.turn.id), entry.turn.status)
       const turnId = String(entry.turn.id)
       const tracked =
         knownProjectionRevisions.has(turnId) ||
@@ -176,7 +189,14 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
         rememberProjection(turnId, entry.projectionRevision, entry.usage)
     }
   }
-  const replace = (snapshot: ThreadView.ThreadViewSnapshot): ReadonlyArray<ClientEvent> => {
+  const replace = (incoming: ThreadView.ThreadViewSnapshot): ReadonlyArray<ClientEvent> => {
+    const snapshot: ThreadView.ThreadViewSnapshot = {
+      ...incoming,
+      turns: incoming.turns.map((entry) => {
+        const terminal = knownTerminalStatuses.get(String(entry.turn.id))
+        return terminal === undefined ? entry : { ...entry, turn: { ...entry.turn, status: terminal } }
+      }),
+    }
     const hydrated = ThreadView.fromSnapshot(snapshot)
     if (Result.isFailure(hydrated)) {
       current = undefined
@@ -237,6 +257,7 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       const turnKey = String(turnId)
       const existing = current.turn(turnKey)
       const knownRevision = knownProjectionRevisions.get(turnKey) ?? existing?.projectionRevision
+      const projectedStatus = knownTerminalStatuses.get(turnKey) ?? change.state.status
       const isTrackedOffWindow = existing === undefined && current.hasNewer && knownRevision !== undefined
       const canInsertUnknown =
         existing === undefined && !current.hasNewer && event.turn !== undefined && change._tag === "ProjectionSnapshot"
@@ -272,7 +293,7 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
           turnChanges: [
             {
               _tag: "UpsertTurn",
-              turn: { ...ThreadView.turnRecord(event.turn!), status: change.state.status },
+              turn: { ...ThreadView.turnRecord(event.turn!), status: projectedStatus },
               projectionRevision: change.revision,
               usage: change.state.usage,
               pendingSteering: change.state.steering.pending ?? [],
@@ -284,8 +305,8 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       }
       const record =
         event.turn === undefined
-          ? { ...existing.turn, status: change.state.status, updatedAt: now() }
-          : { ...ThreadView.turnRecord(event.turn), status: change.state.status, updatedAt: event.turn.updatedAt }
+          ? { ...existing.turn, status: projectedStatus, updatedAt: now() }
+          : { ...ThreadView.turnRecord(event.turn), status: projectedStatus, updatedAt: event.turn.updatedAt }
       const nextKeys =
         change._tag === "ProjectionSnapshot" && !change.hasOlder
           ? new Set(change.units.map((unit) => unit.key))
@@ -327,7 +348,10 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
         turnChanges: [
           {
             _tag: "UpsertTurn",
-            turn: ThreadView.turnRecord(event.turn),
+            turn: {
+              ...ThreadView.turnRecord(event.turn),
+              status: knownTerminalStatuses.get(String(event.turn.id)) ?? event.turn.status,
+            },
             projectionRevision: 0,
             usage: ExecutionProjection.emptyUsageState(),
             pendingSteering: [],
@@ -338,6 +362,7 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
     }
     if (event._tag === "TurnSettled") {
       if (current === undefined || event.threadId !== current.thread.id) return []
+      rememberTerminal(String(event.turnId), event.status)
       knownProjectionRevisions.delete(String(event.turnId))
       knownUsage.delete(String(event.turnId))
       const existing = current.turn(String(event.turnId))

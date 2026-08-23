@@ -23,7 +23,7 @@ import { HostedEnvironment, layer as hostedEnvironmentLayer } from "../../api/sr
 import { HostedProduct, layer as hostedProductLayer } from "../../api/src/hosted-product"
 import { testLayer as hostedModelRegistryTestLayer } from "../../api/src/hosted-model-registry"
 import { testLayer as hostedRepositoriesTestLayer } from "../../api/src/hosted-repositories"
-import { layer as localExecutorLayer } from "../../api/src/local-executor"
+import { layer as runnerExecutorLayer } from "../../api/src/runner-executor"
 import { HostedToolPolicy, layer as hostedToolPolicyLayer } from "../../api/src/hosted-tool-policy"
 import { makeRikaApiHandler } from "../../api/src/api"
 import type { HttpDependencies } from "../../api/src/http"
@@ -191,7 +191,7 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
                         minimumVersion: 1,
                         maximumVersion: 1,
                         fence: {
-                          target: "e2b",
+                          target: "orb",
                           assignmentId: creates[0]!.assignmentId,
                           assignmentGeneration: creates[0]!.generation,
                           instanceId: request.sandboxId,
@@ -210,6 +210,7 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
                 )
               }),
             connect: (sandboxId) => Effect.succeed({ sandboxId, state: "running" as const }),
+            host: (sandboxId, port) => Effect.succeed(`${port}-${sandboxId}.e2b.app`),
             updateNetwork: () => Effect.void,
             pauseFilesystem: () => Effect.succeed(true),
             kill: () => Effect.succeed(true),
@@ -265,7 +266,7 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
           Layer.provide(controller),
           Layer.provide(environmentLayer),
           Layer.provide(toolPolicyLayer),
-          Layer.provideMerge(localExecutorLayer.pipe(Layer.provide(shared))),
+          Layer.provideMerge(runnerExecutorLayer.pipe(Layer.provide(shared))),
           Layer.provide(shared),
         )
         const context = yield* Layer.build(
@@ -284,7 +285,7 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
         const connection = yield* product.createConnection({
           principal: { userId: account.user.id, deviceId, clientId, dpopJkt: "dpop-thumbprint" },
           owner: { _tag: "PersonalOwner", userId: BetterAuthUserId.make(account.user.id) },
-          executorKind: "e2b",
+          executorKind: "orb",
         })
         const environment = Context.get(yield* Layer.build(environmentLayer), HostedEnvironment)
         const environmentPrincipal = { userId: account.user.id, deviceId, clientId }
@@ -430,6 +431,9 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
                     ...(request.mode === undefined ? {} : { mode: request.mode }),
                   })
                   .pipe(Effect.mapError((error) => HostedError.make({ kind: "protocol", message: error.message }))),
+              ensureService: () => Effect.die("unused"),
+              stopService: () => Effect.die("unused"),
+              openPortal: () => Effect.die("unused"),
             }),
           ),
         )
@@ -468,7 +472,7 @@ it.effect.skipIf(!live)("queues a routed CLI turn durably without executing tool
             migrated!.query(`SELECT event FROM rika_hosted_thread_events WHERE thread_id = $1`, [connection.threadId]),
           ]),
         )
-        expect(thread.rows).toEqual([{ executor_kind: "e2b" }])
+        expect(thread.rows).toEqual([{ executor_kind: "orb" }])
         expect(assignment.rows).toHaveLength(1)
         expect(assignment.rows[0]).toMatchObject({ thread_id: connection.threadId })
         expect(assignment.rows[0]?.id).not.toBe(connection.threadId)

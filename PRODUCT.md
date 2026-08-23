@@ -1,10 +1,10 @@
 # Rika Product
 
-Rika is a collaborative coding agent for people and organizations working in local repositories and isolated remote workspaces. It combines a clear terminal interface with durable Threads, parallel agent work, restart-safe execution, and shared control. The goal is to make substantial coding work understandable while it runs, recoverable when an executor stops, and accessible to the people an owner trusts.
+Rika is a collaborative coding agent for people and organizations working through user-controlled Runners and isolated managed Orbs. It combines terminal and web control surfaces with durable Threads, parallel agent work, restart-safe execution, and shared control. The goal is to make substantial coding work understandable while it runs, recoverable when an executor stops, and accessible to the people an owner trusts.
 
 ## Audience
 
-Rika is for technical teams that prefer a CLI and TUI, need local development to remain direct, and want an explicit remote option for durable collaborative work.
+Rika is for technical teams that prefer a CLI and TUI while needing secure browser review, direct local development, and an explicit durable remote option.
 
 ## Direction
 
@@ -24,4 +24,4 @@ Rika is for technical teams that prefer a CLI and TUI, need local development to
 
 Rika owns identity integration, organizations, access, execution placement, workspace policy, configuration, projections, tools, extensions, product persistence, and terminal behavior. TenetKit owns durable execution and the agent loop. E2B supplies remote sandbox infrastructure without becoming product authority. OpenTUI stays behind the rendering adapter.
 
-Rika is not a billing system, public agent SDK, web or IDE coding client, general sandbox platform, or social network. Local execution is not isolated from the developer's machine; remote isolation belongs to E2B. Rika does not copy another product's branding or protocol, support interchangeable remote providers, or own a local semantic code index or ast-grep outline subsystem.
+Rika is not a billing system, public agent SDK, general browser IDE, general sandbox platform, or social network. Runner execution is not isolated from the developer's machine; Orb isolation belongs to E2B. Rika does not copy another product's branding or protocol, support interchangeable remote providers, or own a local semantic code index or ast-grep outline subsystem.

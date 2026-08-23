@@ -68,15 +68,12 @@ const gnuTar = (() => {
 const tarArguments = (
   arguments_: ReadonlyArray<string>,
 ): Effect.Effect<ReadonlyArray<string>, WorkspaceArchiveError> => {
-  if (gnuTar === undefined) return Effect.fail(failure("archive", "Workspace archiving requires GNU tar (install gnu-tar on macOS)"))
+  if (gnuTar === undefined)
+    return Effect.fail(failure("archive", "Workspace archiving requires GNU tar (install gnu-tar on macOS)"))
   return Effect.succeed([gnuTar, ...arguments_])
 }
 
-const run = (input: {
-  readonly command: ReadonlyArray<string>
-  readonly cwd?: string
-  readonly stdin?: Uint8Array
-}) =>
+const run = (input: { readonly command: ReadonlyArray<string>; readonly cwd?: string; readonly stdin?: Uint8Array }) =>
   Effect.gen(function* () {
     const child = yield* Effect.try({
       try: () =>
@@ -164,11 +161,7 @@ const inspectSecretValues = Effect.fn("WorkspaceArchive.inspectSecretValues")(fu
 
 const safeArchiveEntries = Effect.fn("WorkspaceArchive.safeEntries")(function* (bytes: Uint8Array) {
   const tar = yield* tarArguments(["--zstd", "--list", "--file", "-"])
-  const output = yield* command(
-    { command: tar, stdin: bytes },
-    "archive",
-    "Workspace archive is invalid",
-  )
+  const output = yield* command({ command: tar, stdin: bytes }, "archive", "Workspace archive is invalid")
   const entries = new TextDecoder()
     .decode(output)
     .split("\n")
@@ -180,9 +173,7 @@ const safeArchiveEntries = Effect.fn("WorkspaceArchive.safeEntries")(function* (
         normalized.startsWith("/") ||
         normalized.split("/").includes("..") ||
         excluded.some((path) =>
-          path === ".env.*"
-            ? normalized.startsWith(".env.")
-            : normalized === path || normalized.startsWith(`${path}/`),
+          path === ".env.*" ? normalized.startsWith(".env.") : normalized === path || normalized.startsWith(`${path}/`),
         )
       )
     })
@@ -239,20 +230,20 @@ export const createArchive = Effect.fn("WorkspaceArchive.create")(function* (
   yield* inspectSecrets(workspace)
   yield* inspectSecretValues(workspace, secretValues)
   const tar = yield* tarArguments([
-        "--zstd",
-        "--create",
-        "--file",
-        "-",
-        "--sort=name",
-        "--mtime=@0",
-        "--owner=0",
-        "--group=0",
-        "--numeric-owner",
-        "--directory",
-        workspace,
-        ...excluded.flatMap((path) => ["--exclude", `./${path}`, "--exclude", `./${path}/**`]),
-        ".",
-      ])
+    "--zstd",
+    "--create",
+    "--file",
+    "-",
+    "--sort=name",
+    "--mtime=@0",
+    "--owner=0",
+    "--group=0",
+    "--numeric-owner",
+    "--directory",
+    workspace,
+    ...excluded.flatMap((path) => ["--exclude", `./${path}`, "--exclude", `./${path}/**`]),
+    ".",
+  ])
   const bytes = yield* command(
     {
       command: tar,

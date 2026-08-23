@@ -21,7 +21,7 @@ export const makeProductOperationFoundation = Effect.fn("ProductOperation.makeFo
     options,
     ownerScope,
   })
-  const { acquiredBackend, prepareServerReplacement } = yield* makeProductOperationAdmission({
+  const { acquiredBackend, closeAdmissions } = yield* makeProductOperationAdmission({
     rawBackend: dependencies.rawBackend,
   })
   const dependencyContext = dependencies.dependencyContext
@@ -39,7 +39,7 @@ export const makeProductOperationFoundation = Effect.fn("ProductOperation.makeFo
   return {
     pendingTurnCapacity: Math.max(0, Math.floor(options.pendingTurnCapacity ?? 64)),
     rootTurnOwner,
-    prepareServerReplacement,
+    closeAdmissions,
     extensionService: dependencies.extensionService,
     acquiredDependencies: dependencies.acquiredDependencies,
     rawBackend: dependencies.rawBackend,

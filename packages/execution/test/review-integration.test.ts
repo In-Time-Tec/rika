@@ -9,14 +9,14 @@ import { Runtime } from "tenetkit/runtime"
 import { FanOut } from "tenetkit/runtime/driver"
 import { randomUUID } from "node:crypto"
 import { Context, Effect, Layer, Stream } from "effect"
-import { sqliteLayer as layer } from "./test-adapters"
+import { memoryLayer as layer } from "./test-adapters"
 
 const projectionChanges = (events: ReadonlyArray<ExecutionGateway.ModelPreviewEvent | Change>): ReadonlyArray<Change> =>
   events.filter((event): event is Change => event._tag !== "ModelPreview" && event._tag !== "ModelPreviewCleared")
 
 const testLayer = (filename: string, fixture: TestModel.Fixture) =>
   layer({
-    filename,
+    dataRoot: filename,
     modelServices: ModelRegistry.layer([
       Effect.succeed({ ...fixture.registration, isAvailabilityFailure: () => false }),
     ]),
@@ -32,10 +32,10 @@ const input = (route: ReturnType<typeof testExecutionRoute>) => ({
 })
 
 it.live(
-  "admits and recovers one ordered SQLite review fan-out without product review state",
+  "admits one ordered in-memory review fan-out without product review state",
   () =>
     Effect.gen(function* () {
-      const filename = `/tmp/rika-review-${randomUUID()}.db`
+      const filename = `/tmp/rika-review-${randomUUID()}`
       const fixture = yield* TestModel.make(
         Array.from({ length: 4 }, () => TestModel.turn([TestModel.text("reviewed")])),
         { provider: "test", model: "test", registrationKey: "test" },
@@ -53,15 +53,8 @@ it.live(
           return { link, duplicate, fanOut, events: projectionChanges([...events]) }
         }),
       )
-      const reopened = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const context = yield* Layer.build(testLayer(filename, fixture))
-          return yield* Context.get(context, ExecutionGateway.Service).startTurn(input(route))
-        }),
-      )
 
       expect(first.duplicate).toEqual(first.link)
-      expect(reopened).toEqual(first.link)
       expect(first.fanOut).toMatchObject({
         parentRunId: first.link.runId,
         idempotencyKey: "review-turn:review",

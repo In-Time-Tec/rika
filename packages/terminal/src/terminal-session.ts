@@ -27,6 +27,11 @@ export type Action =
   | { readonly _tag: "Cancel" }
   | { readonly _tag: "Quit" }
   | { readonly _tag: "NewThread" }
+  | { readonly _tag: "NewOrbThread" }
+  | { readonly _tag: "PauseOrb" }
+  | { readonly _tag: "ResumeOrb" }
+  | { readonly _tag: "EnableRemoteThreadCreation" }
+  | { readonly _tag: "DisableRemoteThreadCreation" }
   | { readonly _tag: "SelectThread"; readonly id: string }
 
 export interface Adapter {
@@ -39,6 +44,11 @@ export interface Adapter {
   ) => void
   readonly quit: () => void
   readonly newThread?: () => void
+  readonly newOrbThread?: () => void
+  readonly pauseOrb?: () => void
+  readonly resumeOrb?: () => void
+  readonly enableRemoteThreadCreation?: () => void
+  readonly disableRemoteThreadCreation?: () => void
   readonly editQueued?: (id: string, prompt: string) => void
   readonly dequeue?: (id: string) => void
   readonly steerQueued?: (id: string, prompt: string, requestId: string) => void
@@ -93,6 +103,21 @@ export const execute: {
     case "NewThread":
       adapter.newThread?.()
       return adapter.newThread !== undefined
+    case "NewOrbThread":
+      adapter.newOrbThread?.()
+      return adapter.newOrbThread !== undefined
+    case "PauseOrb":
+      adapter.pauseOrb?.()
+      return adapter.pauseOrb !== undefined
+    case "ResumeOrb":
+      adapter.resumeOrb?.()
+      return adapter.resumeOrb !== undefined
+    case "EnableRemoteThreadCreation":
+      adapter.enableRemoteThreadCreation?.()
+      return adapter.enableRemoteThreadCreation !== undefined
+    case "DisableRemoteThreadCreation":
+      adapter.disableRemoteThreadCreation?.()
+      return adapter.disableRemoteThreadCreation !== undefined
     case "SelectThread":
       adapter.selectThread?.(action.id)
       return adapter.selectThread !== undefined

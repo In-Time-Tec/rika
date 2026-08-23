@@ -33,8 +33,6 @@ export const EventId = OpaqueId.pipe(Schema.brand("HostedEventId"))
 export type EventId = typeof EventId.Type
 export const CheckpointId = OpaqueId.pipe(Schema.brand("HostedCheckpointId"))
 export type CheckpointId = typeof CheckpointId.Type
-export const WorkspaceBindingId = OpaqueId.pipe(Schema.brand("HostedWorkspaceBindingId"))
-export type WorkspaceBindingId = typeof WorkspaceBindingId.Type
 export const AuditEventId = OpaqueId.pipe(Schema.brand("HostedAuditEventId"))
 export type AuditEventId = typeof AuditEventId.Type
 export const CredentialReferenceId = OpaqueId.pipe(Schema.brand("HostedCredentialReferenceId"))
@@ -75,7 +73,7 @@ export const CredentialReferenceMetadata = JsonObject.check(
 )
 export type CredentialReferenceMetadata = typeof CredentialReferenceMetadata.Type
 
-export const ExecutorKind = Schema.Literals(["local_device", "e2b"])
+export const ExecutorKind = Schema.Literals(["runner", "orb"])
 export type ExecutorKind = typeof ExecutorKind.Type
 export const GrantRole = Schema.Literals(["viewer", "controller", "operator", "owner"])
 export type GrantRole = typeof GrantRole.Type
@@ -257,19 +255,6 @@ export const Presence = Schema.Struct({
   expiresAt: Timestamp,
 })
 export type Presence = typeof Presence.Type
-
-export const LocalWorkspaceBinding = Schema.Struct({
-  id: WorkspaceBindingId,
-  ownerId: OwnerId,
-  threadId: ThreadId,
-  userId: BetterAuthUserId,
-  deviceId: DeviceId,
-  rootPath: Schema.NonEmptyString,
-  workspaceFingerprint: Schema.NonEmptyString,
-  createdAt: Timestamp,
-  lastSeenAt: Timestamp,
-})
-export type LocalWorkspaceBinding = typeof LocalWorkspaceBinding.Type
 
 export const AuditEvent = Schema.Struct({
   id: AuditEventId,

@@ -91,7 +91,10 @@ it.effect("projects a recovered Turn through its terminal cursor", () =>
         ),
       )
       expect(yield* Deferred.await(settled)).toMatchObject({ status: "completed" })
-      yield* HostedProjectionWorker.pipe(Effect.provide(context), Effect.flatMap((worker) => worker.ready))
+      yield* HostedProjectionWorker.pipe(
+        Effect.provide(context),
+        Effect.flatMap((worker) => worker.ready),
+      )
       expect(projection).toMatchObject({
         revision: 1,
         state: { status: "completed" },

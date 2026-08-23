@@ -35,12 +35,33 @@ const operation = (
     if (input.action === "use") return HostedAccount.useOrganization(input.organization)
     return HostedAccount.invite(input.email)
   }
+  if (input._tag === "Project") {
+    if (input.action === "list") return HostedAccount.listProjects()
+    if (input.action === "create") return HostedAccount.createProject(input.name)
+    return HostedAccount.useProject(input.project)
+  }
   if (input._tag === "RemoteRun") return HostedAccount.runThread(input.threadId, input.request)
   if (input._tag === "Credential") {
     if (input.action === "put") return HostedAccount.putProviderCredential(input.provider, input.apiKey)
     if (input.action === "list") return HostedAccount.listProviderCredentials(input.provider)
     return HostedAccount.revokeProviderCredential(input.provider)
   }
+  if (input._tag === "Secret") {
+    if (input.action === "put")
+      return HostedAccount.putSecret(
+        input.name,
+        input.value,
+        input.scope,
+        input.phase === undefined ? ["setup", "runtime"] : [input.phase],
+      )
+    return HostedAccount.revokeSecret(input.name, input.scope)
+  }
+  if (input._tag === "ThreadService") {
+    if (input.action === "ensure") return HostedAccount.ensureRepositoryService(input.threadId, input.service)
+    return HostedAccount.stopRepositoryService(input.threadId, input.serviceId)
+  }
+  if (input._tag === "ThreadPortal") return HostedAccount.openThreadPortal(input.threadId, input.port)
+  if (input._tag === "ThreadSync") return HostedAccount.syncRepository(input)
   return HostedAccount.createRemoteThread()
 }
 

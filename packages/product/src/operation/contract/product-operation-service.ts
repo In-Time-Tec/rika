@@ -5,7 +5,7 @@ import * as ThreadToolHandlers from "../../thread/tool/thread-tool-action"
 
 export interface Interface {
   readonly run: (input: Input) => Effect.Effect<void, OperationUnavailable>
-  readonly prepareServerReplacement?: Effect.Effect<void>
+  readonly closeAdmissions?: Effect.Effect<void>
   readonly stopActiveExecutionWork?: Effect.Effect<void, OperationUnavailable>
 }
 

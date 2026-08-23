@@ -28,7 +28,7 @@ CREATE TABLE rika_hosted_project_repositories (
 ALTER TABLE rika_hosted_executor_assignments
   DROP CONSTRAINT rika_hosted_executor_assignments_checkout_check,
   ADD CONSTRAINT rika_hosted_executor_assignments_checkout_check CHECK (
-    checkout IS NULL OR (executor_kind = 'e2b'
+    checkout IS NULL OR (executor_kind = 'orb'
       AND checkout ?& ARRAY['ownerId', 'projectId', 'repositoryId', 'installationId', 'owner', 'name',
         'ref', 'commitSha', 'private', 'gitIdentity']
       AND jsonb_typeof(checkout) = 'object'
@@ -53,7 +53,7 @@ DECLARE
   bound_project_id TEXT;
   bound_repository rika_hosted_project_repositories%ROWTYPE;
 BEGIN
-  IF NEW.executor_kind <> 'e2b' THEN
+  IF NEW.executor_kind <> 'orb' THEN
     RETURN NEW;
   END IF;
 

@@ -36,9 +36,9 @@ import { Clock, Context, Crypto, Effect, Encoding, Layer, Redacted, Schedule, Sc
 import { GatewayError, makeGateway, type Gateway, type LifecycleStore } from "./executor-gateway"
 import { HostedEnvironment } from "./hosted-environment"
 import type { AuthenticatedPrincipal } from "./hosted-product"
-import { LocalExecutor } from "./local-executor"
+import { RunnerExecutor, type RunnerAdmission } from "./runner-executor"
 import { HostedRepositories } from "./hosted-repositories"
-import { makeLocalGateway, type LocalGateway } from "./local-executor-gateway"
+import { makeRunnerGateway, type RunnerGateway } from "./runner-gateway"
 import { HostedToolPolicy } from "./hosted-tool-policy"
 
 export class ExecutorConfigError extends Schema.TaggedError<ExecutorConfigError>()("ExecutorConfigError", {
@@ -171,13 +171,13 @@ export const layer = (options: ExecutorConfig) =>
 export interface Runtime {
   readonly controller: ControllerService
   readonly gateway: Gateway
-  readonly localGateway: LocalGateway
-  readonly admitLocal: (input: {
+  readonly runnerGateway: RunnerGateway
+  readonly admitRunner: (input: {
     readonly threadId: string
     readonly workspaceFingerprint: string
     readonly principal: AuthenticatedPrincipal
     readonly executorUrl: string
-  }) => Effect.Effect<import("./local-executor").LocalAdmission, ControllerError>
+  }) => Effect.Effect<RunnerAdmission, ControllerError>
   readonly admitRun: (input: {
     readonly threadId: string
     readonly turnId: string
@@ -774,8 +774,8 @@ export const service = Layer.effect(
       bindingContract,
       toolPolicy,
     )
-    const local = yield* LocalExecutor
-    const localGateway = yield* makeLocalGateway(local, toolPolicy)
+    const runner = yield* RunnerExecutor
+    const runnerGateway = yield* makeRunnerGateway(runner, toolPolicy)
     const bindings = Effect.fn("Executor.bindings")(function* (
       input: Parameters<Runtime["run"]>[0],
       machine: typeof gateway.machine,
@@ -800,8 +800,8 @@ export const service = Layer.effect(
     return {
       controller,
       gateway,
-      localGateway,
-      admitLocal: (input) => local.admit(input),
+      runnerGateway,
+      admitRunner: (input) => runner.admit(input),
       admitRun: Effect.fn("Executor.admitRun")(function* (input) {
         const initial = yield* assignments
           .getForThread(ThreadId.make(input.threadId))
@@ -820,7 +820,7 @@ export const service = Layer.effect(
           "workspace_prepare",
           { ownerId: initial.ownerId, threadId: input.threadId, turnId: input.turnId, assignmentId: initial.id },
           Effect.gen(function* () {
-            if (initial.placement._tag === "E2BPlacement") {
+            if (initial.placement._tag === "OrbPlacement") {
               const phase =
                 initial.lifecycle._tag === "Paused" || initial.lifecycle._tag === "Active" ? "runtime" : "setup"
               yield* environment
@@ -955,13 +955,13 @@ export const service = Layer.effect(
           operationId: input.operationKey,
           assignmentId: assignment.id,
         }
-        if (assignment.placement._tag === "LocalDevicePlacement") {
+        if (assignment.placement._tag === "RunnerPlacement") {
           return yield* HostedObservability.observe(
             "executor_wait",
             correlation,
             Effect.gen(function* () {
-              const authority = yield* bindings(input, localGateway.machine)
-              const execute = localGateway
+              const authority = yield* bindings(input, runnerGateway.machine)
+              const execute = runnerGateway
                 .execute({
                   assignmentId: assignment.id,
                   ...input,

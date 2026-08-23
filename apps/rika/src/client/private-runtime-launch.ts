@@ -1,5 +1,5 @@
 import { Config, Effect, Option, Path } from "effect"
-import { localExecutorProcessRole, tuiControllerProcessRole } from "../private-runtime-role"
+import { runnerExecutorProcessRole, tuiControllerProcessRole } from "../private-runtime-role"
 
 export interface RuntimeLaunch {
   readonly executable: string
@@ -12,10 +12,10 @@ export const privateRuntime = Effect.fn("ClientProcess.privateRuntime")(function
   if (Option.isSome(testExecutable)) return { executable: testExecutable.value, prefixArguments: [] }
   if (role === "client")
     return import.meta.path.startsWith("/$bunfs/")
-      ? { executable: process.execPath, prefixArguments: [localExecutorProcessRole] }
+      ? { executable: process.execPath, prefixArguments: [runnerExecutorProcessRole] }
       : {
           executable: process.execPath,
-          prefixArguments: [path.join(import.meta.dir, "..", "client-main.ts"), localExecutorProcessRole],
+          prefixArguments: [path.join(import.meta.dir, "..", "client-main.ts"), runnerExecutorProcessRole],
         }
   return import.meta.path.startsWith("/$bunfs/")
     ? {

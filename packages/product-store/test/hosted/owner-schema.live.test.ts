@@ -38,11 +38,11 @@ it.effect.skipIf(databaseUrl === undefined)("creates fresh personal and organiza
             ('personal-project','personal-owner','Personal Project','personal-user',now(),now()),
             ('org-project','organization-owner','Org Project','org-user',now(),now());
           INSERT INTO rika_hosted_workspaces (id,owner_id,project_id,created_by_user_id,executor_kind,inherit_project_grants,created_at) VALUES
-            ('personal-workspace','personal-owner',NULL,'personal-user','local_device',false,now()),
-            ('org-workspace','organization-owner','org-project','org-user','e2b',true,now());
+            ('personal-workspace','personal-owner',NULL,'personal-user','runner',false,now()),
+            ('org-workspace','organization-owner','org-project','org-user','orb',true,now());
           INSERT INTO rika_hosted_threads (id,owner_id,project_id,workspace_id,created_by_user_id,executor_kind,inherit_project_grants,created_at) VALUES
-            ('personal-thread','personal-owner',NULL,'personal-workspace','personal-user','local_device',false,now()),
-            ('org-thread','organization-owner','org-project','org-workspace','org-user','e2b',true,now());
+            ('personal-thread','personal-owner',NULL,'personal-workspace','personal-user','runner',false,now()),
+            ('org-thread','organization-owner','org-project','org-workspace','org-user','orb',true,now());
           INSERT INTO rika_hosted_project_grants (owner_id,project_id,membership_id,role,granted_by_user_id,created_at,updated_at)
             VALUES ('organization-owner','org-project','org-membership','owner','org-user',now(),now());
           INSERT INTO rika_hosted_thread_grants (owner_id,thread_id,membership_id,role,granted_by_user_id,created_at,updated_at)
@@ -68,12 +68,12 @@ it.effect.skipIf(databaseUrl === undefined)("creates fresh personal and organiza
       )
       yield* rejects(
         `INSERT INTO rika_hosted_threads (id,owner_id,workspace_id,created_by_user_id,executor_kind,inherit_project_grants,created_at)
-         VALUES ('cross-owner','organization-owner','personal-workspace','org-user','local_device',false,now())`,
+         VALUES ('cross-owner','organization-owner','personal-workspace','org-user','runner',false,now())`,
         "23503",
       )
       yield* rejects(
         `INSERT INTO rika_hosted_threads (id,owner_id,project_id,workspace_id,created_by_user_id,executor_kind,inherit_project_grants,created_at)
-         VALUES ('wrong-null-project','personal-owner','personal-project','personal-workspace','personal-user','local_device',false,now())`,
+         VALUES ('wrong-null-project','personal-owner','personal-project','personal-workspace','personal-user','runner',false,now())`,
         "23503",
       )
       yield* rejects(

@@ -33,32 +33,31 @@ import {
   type CellRequest,
   emptyCursor,
   type Fence,
-  LocalExecutorAdmissionWire,
-  LocalExecutorMessage,
+  RunnerAdmissionWire,
+  RunnerMessage,
   type ResumeCursors,
   type WelcomeWire,
 } from "./protocol"
 import { inspectWorkspaceCapabilities } from "./workspace-capabilities"
 
 /** A local filesystem root. This value is never serialized or sent on the wire. */
-export interface ForegroundLocalExecutorOptions {
-  readonly admission?: LocalExecutorAdmissionWire
-  readonly resume?: ForegroundLocalExecutorSnapshot
+export interface ForegroundRunnerOptions {
+  readonly admission?: RunnerAdmissionWire
+  readonly resume?: ForegroundRunnerSnapshot
   readonly workspacePath: string
   /** Completes after the controller has authenticated the admission. */
-  readonly ready?: Deferred.Deferred<void, ForegroundLocalExecutorError>
+  readonly ready?: Deferred.Deferred<void, ForegroundRunnerError>
   /** Trusted hosted HTTPS origin used to pin the returned WSS endpoint. */
   readonly trustedOrigin?: string
   /** Optional encrypted-at-rest receipt/session persistence supplied by the host. */
-  readonly receiptStore?: ForegroundLocalExecutorReceiptStore
+  readonly receiptStore?: ForegroundRunnerReceiptStore
   /** Opaque host-local key for the receipt/session record. */
   readonly receiptScope?: string
 }
 
-export class ForegroundLocalExecutorError extends Schema.TaggedError<ForegroundLocalExecutorError>()(
-  "ForegroundLocalExecutorError",
-  { message: Schema.String },
-) {}
+export class ForegroundRunnerError extends Schema.TaggedError<ForegroundRunnerError>()("ForegroundRunnerError", {
+  message: Schema.String,
+}) {}
 
 const ReceiptState = Schema.Literals(["running", "completed"])
 const ForegroundReceipt = Schema.Struct({
@@ -71,7 +70,7 @@ const ForegroundReceipt = Schema.Struct({
 })
 export type ForegroundReceipt = typeof ForegroundReceipt.Type
 
-export const ForegroundLocalExecutorSnapshot = Schema.Struct({
+export const ForegroundRunnerSnapshot = Schema.Struct({
   version: Schema.Literal(1),
   workspaceIdentity: Schema.String.check(Schema.isMinLength(1)),
   executorUrl: Schema.String.check(Schema.isMinLength(1)),
@@ -82,17 +81,14 @@ export const ForegroundLocalExecutorSnapshot = Schema.Struct({
   receipts: Schema.Array(ForegroundReceipt),
   machines: Schema.Array(Schema.Struct({ machineId: Schema.String, state: MachineState })),
 })
-export type ForegroundLocalExecutorSnapshot = typeof ForegroundLocalExecutorSnapshot.Type
+export type ForegroundRunnerSnapshot = typeof ForegroundRunnerSnapshot.Type
 
-export interface ForegroundLocalExecutorReceiptStore {
-  readonly save: (
-    scope: string,
-    snapshot: ForegroundLocalExecutorSnapshot,
-  ) => Effect.Effect<void, ForegroundLocalExecutorError>
+export interface ForegroundRunnerReceiptStore {
+  readonly save: (scope: string, snapshot: ForegroundRunnerSnapshot) => Effect.Effect<void, ForegroundRunnerError>
 }
 
 const decodeApiMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(ApiMessage))
-const encodeLocalExecutorMessage = Schema.encodeSync(Schema.fromJsonString(LocalExecutorMessage))
+const encodeRunnerMessage = Schema.encodeSync(Schema.fromJsonString(RunnerMessage))
 const localCapabilities = { cells: true, checkpoints: false, pty: false } as const
 const initialCursors: ResumeCursors = { command: 0, event: 0, pty: 0 }
 const unknownResponse: CellResponse = {
@@ -100,7 +96,7 @@ const unknownResponse: CellResponse = {
   failure: { kind: "unknown", message: "Local operation outcome is unknown after foreground restart" },
 }
 
-const failure = (message: string) => ForegroundLocalExecutorError.make({ message })
+const failure = (message: string) => ForegroundRunnerError.make({ message })
 
 const sameFence = (left: Fence, right: Fence) =>
   left.target === right.target &&
@@ -137,34 +133,34 @@ const redactOutput = (text: string) => {
   return { text: redacted.slice(0, 16_384), truncated: redacted.length > 16_384 }
 }
 
-const localExecutorUrl = (
+const runnerUrl = (
   value: string,
   expiresAt: number | undefined,
   trustedOrigin: string | undefined,
-): Effect.Effect<string, ForegroundLocalExecutorError> =>
+): Effect.Effect<string, ForegroundRunnerError> =>
   Effect.gen(function* () {
     if (expiresAt !== undefined && expiresAt <= (yield* Clock.currentTimeMillis))
-      return yield* failure("Local executor admission has expired")
+      return yield* failure("Runner admission has expired")
     return yield* Effect.try({
       try: () => {
         const url = new URL(value)
         if (
           url.protocol !== "wss:" ||
-          url.pathname !== "/api/v1/local-executors" ||
+          url.pathname !== "/api/v1/runners" ||
           url.username.length > 0 ||
           url.password.length > 0 ||
           url.search.length > 0 ||
           url.hash.length > 0
         )
-          throw new Error("Local executor URL is not a pinned wss:// endpoint")
+          throw new Error("Runner URL is not a pinned wss:// endpoint")
         if (trustedOrigin !== undefined) {
           const origin = new URL(trustedOrigin)
           if (origin.protocol !== "https:" || `wss://${origin.host}` !== url.origin)
-            throw new Error("Local executor URL is outside the trusted hosted origin")
+            throw new Error("Runner URL is outside the trusted hosted origin")
         }
         return url.toString()
       },
-      catch: () => failure("Local executor URL must be a pinned wss:// endpoint"),
+      catch: () => failure("Runner URL must be a pinned wss:// endpoint"),
     })
   })
 
@@ -196,11 +192,11 @@ const access = (session: LocalSession): AccessWire => ({
 const sessionFromWelcome = (
   welcome: WelcomeWire,
   processIncarnation: string,
-): Effect.Effect<LocalSession, ForegroundLocalExecutorError> =>
+): Effect.Effect<LocalSession, ForegroundRunnerError> =>
   Effect.gen(function* () {
-    if (welcome.fence.target !== "local_device") return yield* failure("Local executor welcome has a non-local fence")
+    if (welcome.fence.target !== "runner") return yield* failure("Runner welcome has a non-Runner fence")
     if (welcome.fence.processIncarnation !== processIncarnation)
-      return yield* failure("Local executor welcome has a different process incarnation")
+      return yield* failure("Runner welcome has a different process incarnation")
     return {
       fence: welcome.fence,
       leaseEpoch: welcome.leaseEpoch,
@@ -214,7 +210,7 @@ const sessionFromWelcome = (
 const waitForWelcome = (
   incoming: Queue.Queue<IncomingMessage>,
   processIncarnation: string,
-): Effect.Effect<LocalSession, ForegroundLocalExecutorError> =>
+): Effect.Effect<LocalSession, ForegroundRunnerError> =>
   Effect.gen(function* () {
     const message = yield* Queue.take(incoming)
     if (message._tag === "Fenced") return yield* failure(message.message)
@@ -226,10 +222,10 @@ const sessionFromReconnect = (
   welcome: Extract<IncomingMessage, { readonly _tag: "ExecutorReconnected" }>["welcome"],
   previous: LocalSession,
   processIncarnation: string,
-): Effect.Effect<LocalSession, ForegroundLocalExecutorError> =>
+): Effect.Effect<LocalSession, ForegroundRunnerError> =>
   Effect.gen(function* () {
     if (!sameFence(welcome.fence, previous.fence) || welcome.fence.processIncarnation !== processIncarnation)
-      return yield* failure("Local executor reconnect has a different fence")
+      return yield* failure("Runner reconnect has a different fence")
     return {
       ...previous,
       leaseEpoch: welcome.leaseEpoch,
@@ -243,7 +239,7 @@ const waitForReconnect = (
   incoming: Queue.Queue<IncomingMessage>,
   previous: LocalSession,
   processIncarnation: string,
-): Effect.Effect<LocalSession, ForegroundLocalExecutorError> =>
+): Effect.Effect<LocalSession, ForegroundRunnerError> =>
   Effect.gen(function* () {
     const message = yield* Queue.take(incoming)
     if (message._tag === "Fenced") return yield* failure(message.message)
@@ -270,7 +266,7 @@ const inMemoryCells = (workspaceIdentity: string, workspacePath: string, sendBin
     })
   })
 
-const resolveCellResponse = Effect.fn("ForegroundLocalExecutor.resolveCellResponse")(function* (input: {
+const resolveCellResponse = Effect.fn("ForegroundRunner.resolveCellResponse")(function* (input: {
   readonly current: LocalSession
   readonly request: CellRequest
   readonly cells: HostedKernel.Interface
@@ -304,42 +300,40 @@ const consumeApi = (
   writer: (chunk: string) => Effect.Effect<void, Socket.SocketError>,
   session: Ref.Ref<LocalSession | undefined>,
   receipts: Ref.Ref<Map<string, PendingResult>>,
-  liveOperations: Ref.Ref<Map<string, Fiber.Fiber<void, ForegroundLocalExecutorError>>>,
+  liveOperations: Ref.Ref<Map<string, Fiber.Fiber<void, ForegroundRunnerError>>>,
   activeWriter: Ref.Ref<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>,
   cells: HostedKernel.Interface,
   machine: Machine["Service"],
-  persist: () => Effect.Effect<void, ForegroundLocalExecutorError>,
+  persist: () => Effect.Effect<void, ForegroundRunnerError>,
   lifecycle: Semaphore.Semaphore,
-  runWorker: (
-    effect: Effect.Effect<void, ForegroundLocalExecutorError>,
-  ) => Fiber.Fiber<void, ForegroundLocalExecutorError>,
+  runWorker: (effect: Effect.Effect<void, ForegroundRunnerError>) => Fiber.Fiber<void, ForegroundRunnerError>,
 ) =>
   Effect.gen(function* () {
     const message = yield* Queue.take(incoming)
     if (message._tag === "Fenced") return yield* failure(message.message)
     if (message._tag === "LeaseReceipt") {
       const current = yield* Ref.get(session)
-      if (current === undefined) return yield* failure("Local executor session is unavailable")
+      if (current === undefined) return yield* failure("Runner session is unavailable")
       if (!sameFence(current.fence, message.receipt.fence) || message.receipt.leaseEpoch !== current.leaseEpoch)
-        return yield* failure("Local executor receipt has a stale session")
+        return yield* failure("Runner receipt has a stale session")
       if (message.receipt.cursor.sequence < current.cursor.sequence)
-        return yield* failure("Local executor receipt moved the cursor backwards")
+        return yield* failure("Runner receipt moved the cursor backwards")
       if (
         message.receipt.cursor.sequence === current.cursor.sequence &&
         message.receipt.cursor.value !== current.cursor.value
       )
-        return yield* failure("Local executor receipt conflicts at the current cursor")
+        return yield* failure("Runner receipt conflicts at the current cursor")
       yield* Ref.set(session, { ...current, cursor: message.receipt.cursor })
       yield* persist()
     }
     const writeLifecycle = (frame: CellLifecycleFrame) =>
       Effect.gen(function* () {
         const current = yield* Ref.get(session)
-        if (current === undefined) return yield* failure("Local executor session is unavailable")
+        if (current === undefined) return yield* failure("Runner session is unavailable")
         const currentWriter = (yield* Ref.get(activeWriter)) ?? writer
-        yield* currentWriter(
-          encodeLocalExecutorMessage({ _tag: "CellLifecycle", access: access(current), frame }),
-        ).pipe(Effect.mapError(() => failure("Could not write local cell lifecycle")))
+        yield* currentWriter(encodeRunnerMessage({ _tag: "CellLifecycle", access: access(current), frame })).pipe(
+          Effect.mapError(() => failure("Could not write local cell lifecycle")),
+        )
       })
     const append = (operationKey: string, frame: CellLifecycleFrame, terminal?: { readonly response: CellResponse }) =>
       lifecycle.withPermits(1)(
@@ -363,8 +357,8 @@ const consumeApi = (
       )
     if (message._tag === "LocalCellReceipt") {
       const current = yield* Ref.get(session)
-      if (current === undefined) return yield* failure("Local executor session is unavailable")
-      if (!sameAccess(access(current), message.access)) return yield* failure("Local executor result receipt is stale")
+      if (current === undefined) return yield* failure("Runner session is unavailable")
+      if (!sameAccess(access(current), message.access)) return yield* failure("Runner result receipt is stale")
       const key = executionKey(message.operationKey, message.attempt)
       yield* Ref.update(receipts, (values) => {
         const pending = values.get(key)
@@ -385,7 +379,7 @@ const consumeApi = (
       if (terminal !== undefined && current !== undefined && sameAccess(access(current), message.access)) {
         const currentWriter = (yield* Ref.get(activeWriter)) ?? writer
         yield* currentWriter(
-          encodeLocalExecutorMessage({
+          encodeRunnerMessage({
             _tag: "LocalCellResult",
             access: access(current),
             operationKey: message.operationKey,
@@ -399,7 +393,7 @@ const consumeApi = (
       const receipt = (yield* Ref.get(receipts)).get(executionKey(message.operationKey, message.attempt))
       const current = yield* Ref.get(session)
       if (current === undefined || !sameAccess(access(current), message.access))
-        return yield* failure("Local executor replay has a stale session")
+        return yield* failure("Runner replay has a stale session")
       if (receipt !== undefined)
         yield* Effect.forEach(
           receipt.frames.filter((frame) => frame.cursor > message.afterCursor),
@@ -410,11 +404,11 @@ const consumeApi = (
     if (message._tag === "CellCancel") {
       const current = yield* Ref.get(session)
       if (current === undefined || !sameAccess(access(current), message.access))
-        return yield* failure("Local executor cancellation has a stale session")
+        return yield* failure("Runner cancellation has a stale session")
       const key = executionKey(message.operationKey, message.attempt)
       const receipt = (yield* Ref.get(receipts)).get(key)
       if (receipt === undefined || receipt.attempt !== message.attempt)
-        return yield* failure("Local executor cancellation has a stale attempt")
+        return yield* failure("Runner cancellation has a stale attempt")
       const operation = (yield* Ref.get(liveOperations)).get(key)
       if (operation !== undefined) yield* Fiber.interrupt(operation)
       const interrupted = (yield* Ref.get(receipts)).get(key)
@@ -461,7 +455,7 @@ const consumeApi = (
                   const currentWriter = yield* Ref.get(activeWriter)
                   if (latest === undefined || currentWriter === undefined) return
                   yield* currentWriter(
-                    encodeLocalExecutorMessage({
+                    encodeRunnerMessage({
                       _tag: "MachineResult",
                       access: access(latest),
                       operationKey: message.operationKey,
@@ -480,7 +474,7 @@ const consumeApi = (
     }
     if (message._tag === "CellExecute") {
       const current = yield* Ref.get(session)
-      if (current === undefined) return yield* failure("Local executor session is unavailable")
+      if (current === undefined) return yield* failure("Runner session is unavailable")
       const operationKey = message.request.operationKey
       const attempt = message.request.attempt
       const key = executionKey(operationKey, attempt)
@@ -570,21 +564,19 @@ const consumeApi = (
   }).pipe(Effect.forever)
 
 const connected = (
-  options: ForegroundLocalExecutorOptions,
+  options: ForegroundRunnerOptions,
   url: string,
   processIncarnation: string,
   workspaceCapabilities: WorkspaceCapabilitySnapshot,
   sessions: Ref.Ref<LocalSession | undefined>,
   receipts: Ref.Ref<Map<string, PendingResult>>,
-  liveOperations: Ref.Ref<Map<string, Fiber.Fiber<void, ForegroundLocalExecutorError>>>,
+  liveOperations: Ref.Ref<Map<string, Fiber.Fiber<void, ForegroundRunnerError>>>,
   activeWriter: Ref.Ref<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>,
   cells: HostedKernel.Interface,
   machine: Machine["Service"],
-  persist: () => Effect.Effect<void, ForegroundLocalExecutorError>,
+  persist: () => Effect.Effect<void, ForegroundRunnerError>,
   lifecycle: Semaphore.Semaphore,
-  runWorker: (
-    effect: Effect.Effect<void, ForegroundLocalExecutorError>,
-  ) => Fiber.Fiber<void, ForegroundLocalExecutorError>,
+  runWorker: (effect: Effect.Effect<void, ForegroundRunnerError>) => Fiber.Fiber<void, ForegroundRunnerError>,
 ) =>
   Effect.gen(function* () {
     const previous = yield* Ref.get(sessions)
@@ -594,17 +586,17 @@ const connected = (
     const reader = yield* socket
       .runString((frame) =>
         decodeApiMessage(frame).pipe(
-          Effect.mapError(() => failure("Controller sent an invalid local executor frame")),
+          Effect.mapError(() => failure("Controller sent an invalid Runner frame")),
           Effect.flatMap((message) => Queue.offer(incoming, message)),
         ),
       )
       .pipe(Effect.forkScoped)
     if (previous === undefined) {
       const admission = options.admission
-      if (admission === undefined) return yield* failure("Local executor admission is unavailable")
+      if (admission === undefined) return yield* failure("Runner admission is unavailable")
       yield* writer(
-        encodeLocalExecutorMessage({
-          _tag: "LocalExecutorHello",
+        encodeRunnerMessage({
+          _tag: "RunnerHello",
           hello: {
             admissionId: admission.admissionId,
             ticket: admission.ticket,
@@ -614,10 +606,10 @@ const connected = (
             cursors: initialCursors,
           },
         }),
-      ).pipe(Effect.mapError(() => failure("Could not write local executor hello")))
+      ).pipe(Effect.mapError(() => failure("Could not write Runner hello")))
     } else {
-      yield* writer(encodeLocalExecutorMessage({ _tag: "ExecutorReconnect", access: access(previous) })).pipe(
-        Effect.mapError(() => failure("Could not write local executor reconnect")),
+      yield* writer(encodeRunnerMessage({ _tag: "ExecutorReconnect", access: access(previous) })).pipe(
+        Effect.mapError(() => failure("Could not write Runner reconnect")),
       )
     }
     const session =
@@ -625,25 +617,25 @@ const connected = (
         ? yield* Effect.raceFirst(
             waitForWelcome(incoming, processIncarnation),
             Fiber.join(reader).pipe(
-              Effect.flatMap(() => failure("Local executor controller connection closed before welcome")),
-              Effect.catch(() => failure("Local executor controller connection failed before welcome")),
+              Effect.flatMap(() => failure("Runner controller connection closed before welcome")),
+              Effect.catch(() => failure("Runner controller connection failed before welcome")),
             ),
           ).pipe(
             Effect.timeoutOrElse({
               duration: "30 seconds",
-              orElse: () => failure("Local executor controller did not welcome the executor"),
+              orElse: () => failure("Runner controller did not welcome the executor"),
             }),
           )
         : yield* Effect.raceFirst(
             waitForReconnect(incoming, previous, processIncarnation),
             Fiber.join(reader).pipe(
-              Effect.flatMap(() => failure("Local executor controller connection closed before reconnect")),
-              Effect.catch(() => failure("Local executor controller connection failed before reconnect")),
+              Effect.flatMap(() => failure("Runner controller connection closed before reconnect")),
+              Effect.catch(() => failure("Runner controller connection failed before reconnect")),
             ),
           ).pipe(
             Effect.timeoutOrElse({
               duration: "30 seconds",
-              orElse: () => failure("Local executor controller did not accept the reconnect"),
+              orElse: () => failure("Runner controller did not accept the reconnect"),
             }),
           )
     yield* Ref.set(sessions, session)
@@ -657,11 +649,11 @@ const connected = (
           const current = yield* Ref.get(sessions)
           if (current === undefined) return
           yield* writer(
-            encodeLocalExecutorMessage({
+            encodeRunnerMessage({
               _tag: "ExecutorHeartbeat",
               heartbeat: { version: 1, access: access(current), cursor: current.cursor },
             }),
-          ).pipe(Effect.mapError(() => failure("Could not write local executor heartbeat")))
+          ).pipe(Effect.mapError(() => failure("Could not write Runner heartbeat")))
         }),
       ),
       Effect.forever,
@@ -669,7 +661,7 @@ const connected = (
     )
     yield* heartbeat
     return yield* Effect.raceFirst(
-      Fiber.join(reader).pipe(Effect.mapError(() => failure("Local executor controller connection closed"))),
+      Fiber.join(reader).pipe(Effect.mapError(() => failure("Runner controller connection closed"))),
       consumeApi(
         incoming,
         writer,
@@ -687,28 +679,24 @@ const connected = (
   })
 
 /**
- * Run one foreground `local_device` executor for the lifetime of the calling
- * scope. It opens one outbound WSS connection, reconnects with the persisted
- * in-process session, and keeps local execution state out of the controller.
+ * Run one foreground Runner executor for the lifetime of the calling scope.
+ * It opens one outbound WSS connection, reconnects with the persisted in-process
+ * session, and keeps workspace execution state out of the controller.
  */
-export const foregroundLocalExecutorLayer = Layer.mergeAll(
+export const foregroundRunnerLayer = Layer.mergeAll(
   BunSocket.layerWebSocketConstructor,
   BunCrypto.layer,
   BunFileSystem.layer,
 )
 
-export const runForegroundLocalExecutor = (
-  options: ForegroundLocalExecutorOptions,
-): Effect.Effect<
-  void,
-  ForegroundLocalExecutorError,
-  Crypto.Crypto | FileSystem.FileSystem | Socket.WebSocketConstructor
-> =>
+export const runForegroundRunner = (
+  options: ForegroundRunnerOptions,
+): Effect.Effect<void, ForegroundRunnerError, Crypto.Crypto | FileSystem.FileSystem | Socket.WebSocketConstructor> =>
   Effect.scoped(
     Effect.gen(function* () {
       const source = options.resume?.executorUrl ?? options.admission?.executorUrl
-      if (source === undefined) return yield* failure("Local executor endpoint is unavailable")
-      const url = yield* localExecutorUrl(
+      if (source === undefined) return yield* failure("Runner endpoint is unavailable")
+      const url = yield* runnerUrl(
         source,
         options.resume === undefined ? options.admission?.expiresAt : undefined,
         options.trustedOrigin,
@@ -741,12 +729,12 @@ export const runForegroundLocalExecutor = (
       const machineStates = yield* Ref.make(
         new Map((options.resume?.machines ?? []).map(({ machineId, state }) => [machineId, state] as const)),
       )
-      const liveOperations = yield* Ref.make(new Map<string, Fiber.Fiber<void, ForegroundLocalExecutorError>>())
+      const liveOperations = yield* Ref.make(new Map<string, Fiber.Fiber<void, ForegroundRunnerError>>())
       const activeWriter = yield* Ref.make<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>(
         undefined,
       )
       const workspaceIdentity = options.resume?.workspaceIdentity ?? options.admission?.workspaceIdentity
-      if (workspaceIdentity === undefined) return yield* failure("Local executor workspace identity is unavailable")
+      if (workspaceIdentity === undefined) return yield* failure("Runner Workspace identity is unavailable")
       const receiptStore = options.receiptStore
       const receiptScope = options.receiptScope
       const persistLock = yield* Semaphore.make(1)
@@ -781,9 +769,9 @@ export const runForegroundLocalExecutor = (
             return yield* BindingProxyError.make({
               message: "Local binding transport is unavailable",
             })
-          yield* writer(
-            encodeLocalExecutorMessage({ _tag: "BindingInvoke", ...message, access: access(session) }),
-          ).pipe(Effect.mapError(() => BindingProxyError.make({ message: "Could not write local binding request" })))
+          yield* writer(encodeRunnerMessage({ _tag: "BindingInvoke", ...message, access: access(session) })).pipe(
+            Effect.mapError(() => BindingProxyError.make({ message: "Could not write local binding request" })),
+          )
         }),
       )
       const machineContext = yield* Layer.build(
@@ -799,12 +787,12 @@ export const runForegroundLocalExecutor = (
       )
       const machine = Context.get(machineContext, Machine)
       const workspaceCapabilities = yield* inspectWorkspaceCapabilities({
-        target: "local_device",
+        target: "runner",
         workspacePath: options.workspacePath,
         typescriptKernel: true,
         pty: false,
       })
-      const workers = yield* FiberSet.make<void, ForegroundLocalExecutorError>()
+      const workers = yield* FiberSet.make<void, ForegroundRunnerError>()
       const runWorker = yield* FiberSet.runtime(workers)<never>()
       const connection = connected(
         options,
@@ -821,7 +809,7 @@ export const runForegroundLocalExecutor = (
         lifecycle,
         runWorker,
       ).pipe(
-        Effect.catch((error: ForegroundLocalExecutorError) =>
+        Effect.catch((error: ForegroundRunnerError) =>
           Effect.gen(function* () {
             if ((yield* Ref.get(sessions)) === undefined) return yield* error
             yield* Effect.sleep("250 millis")
@@ -837,9 +825,7 @@ export const runForegroundLocalExecutor = (
             const session = yield* Ref.get(sessions)
             const writer = yield* Ref.get(activeWriter)
             if (session === undefined || writer === undefined) return
-            yield* writer(encodeLocalExecutorMessage({ _tag: "LocalExecutorGoodbye", access: access(session) })).pipe(
-              Effect.ignore,
-            )
+            yield* writer(encodeRunnerMessage({ _tag: "RunnerGoodbye", access: access(session) })).pipe(Effect.ignore)
           }),
         ),
       )

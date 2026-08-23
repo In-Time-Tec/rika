@@ -17,7 +17,7 @@ const bodyText = (request: HttpClientRequest.HttpClientRequest) => {
   return new TextDecoder().decode(request.body.body)
 }
 
-it.effect("uses Better Auth DPoP and the canonical hosted Thread and local-runner endpoints", () =>
+it.effect("uses Better Auth DPoP and the canonical hosted Thread and runner endpoints", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const requests: Array<HttpClientRequest.HttpClientRequest> = []
@@ -60,6 +60,43 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and local-runne
                   name: "API",
                 },
               ],
+            }),
+          )
+        if (path === "/api/v1/projects")
+          return Effect.succeed(
+            response(request, {
+              id: "project-2",
+              ownerId: "owner-1",
+              owner: { kind: "organization", organizationId: "org-1" },
+              slug: "remote",
+              name: "Remote",
+            }),
+          )
+        if (path === "/api/v1/environment/DEPLOY_TOKEN")
+          return Effect.succeed(
+            response(request, {
+              id: "environment-1",
+              name: "DEPLOY_TOKEN",
+              scope: "project",
+              classification: "secret",
+              phases: ["runtime"],
+              revision: "2",
+              state: request.method === "DELETE" ? "revoked" : "active",
+            }),
+          )
+        if (path.endsWith("/repository-publications"))
+          return Effect.succeed(
+            response(request, {
+              publicationId: "publication-1",
+              state: "completed",
+              branch: "rika/thread-1",
+              ref: "refs/heads/rika/thread-1",
+              commitSha: "0123456789abcdef0123456789abcdef01234567",
+              targetBranch: "main",
+              targetCommitSha: "0123456789abcdef0123456789abcdef01234567",
+              targetProtected: true,
+              pushResult: {},
+              pullRequestResult: {},
             }),
           )
         if (path === "/api/v1/auth/cli/devices")
@@ -118,7 +155,7 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and local-runne
       yield* http.revokeDevice(origin, "device-1", session)
       yield* http.revokeAllDevices(origin, session)
       expect((yield* http.issueThreadTicket(origin, session)).ticket).toBe("ticket-1")
-      yield* http.registerLocalRunner(
+      yield* http.registerRunner(
         origin,
         "checkout-1",
         {
@@ -130,7 +167,44 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and local-runne
         session,
       )
       yield* http.setRemoteThreadCreation(origin, "checkout-1", "allowed", session)
-      expect((yield* http.pollLocalRunner(origin, "checkout-1", session))._tag).toBe("Waiting")
+      expect((yield* http.pollRunner(origin, "checkout-1", session))._tag).toBe("Waiting")
+      expect(
+        (yield* http.createProject(origin, { kind: "organization", organizationId: "org-1" }, "Remote", session)).id,
+      ).toBe("project-2")
+      expect(
+        (yield* http.putEnvironment(
+          origin,
+          { kind: "organization", organizationId: "org-1" },
+          "project-1",
+          "DEPLOY_TOKEN",
+          "project",
+          ["runtime"],
+          Redacted.make("secret-value"),
+          session,
+        )).state,
+      ).toBe("active")
+      expect(
+        (yield* http.revokeEnvironment(
+          origin,
+          { kind: "organization", organizationId: "org-1" },
+          "project-1",
+          "DEPLOY_TOKEN",
+          "project",
+          session,
+        )).state,
+      ).toBe("revoked")
+      expect(
+        (yield* http.publishRepository(
+          origin,
+          "thread-1",
+          "0123456789abcdef0123456789abcdef01234567",
+          "main",
+          "Synchronize",
+          "",
+          "019d1a56-286d-7000-8000-000000000001",
+          session,
+        )).state,
+      ).toBe("completed")
       expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
         "/api/v1/auth/cli/registrations",
         "/api/auth/device/code",
@@ -142,9 +216,13 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and local-runne
         "/api/v1/auth/cli/devices/device-1/revoke",
         "/api/v1/auth/cli/devices/revoke-all",
         "/api/v1/thread-sessions",
-        "/api/v1/local-runners/checkout-1",
-        "/api/v1/local-runners/checkout-1/remote-thread-creation",
-        "/api/v1/local-runners/checkout-1/admissions",
+        "/api/v1/runners/checkout-1",
+        "/api/v1/runners/checkout-1/remote-thread-creation",
+        "/api/v1/runners/checkout-1/admissions",
+        "/api/v1/projects",
+        "/api/v1/environment/DEPLOY_TOKEN",
+        "/api/v1/environment/DEPLOY_TOKEN",
+        "/api/v1/threads/thread-1/repository-publications",
       ])
       for (const request of requests.slice(1)) expect(request.headers.dpop).toEqual(expect.any(String))
       expect(requests[4]?.headers.authorization).toBe("DPoP access")
@@ -153,6 +231,10 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and local-runne
       expect(bodyText(requests[10]!)).toContain('"workspaceIdentity":"workspace-1"')
       expect(bodyText(requests[11]!)).toBe('{"preference":"allowed"}')
       expect(bodyText(requests[12]!)).toBe("")
+      expect(bodyText(requests[13]!)).toContain('"name":"Remote"')
+      expect(bodyText(requests[14]!)).toContain('"value":"secret-value"')
+      expect(bodyText(requests[15]!)).not.toContain("secret-value")
+      expect(requests[16]?.headers["idempotency-key"]).toBe("019d1a56-286d-7000-8000-000000000001")
     }),
   ),
 )

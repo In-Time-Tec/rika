@@ -80,7 +80,11 @@ it.effect("creates, attaches, and submits through the authenticated Thread WebSo
                   )
                   return
                 }
-                if (message.command._tag === "SubmitPrompt")
+                if (
+                  message.command._tag === "SubmitPrompt" ||
+                  message.command._tag === "EnsureRepositoryService" ||
+                  message.command._tag === "StopRepositoryService"
+                ) {
                   socket.send(
                     encode({
                       protocolVersion: 1,
@@ -92,6 +96,21 @@ it.effect("creates, attaches, and submits through the authenticated Thread WebSo
                         threadVersion: "2" as never,
                         cursor: "0" as never,
                         result: { _tag: "Applied" },
+                      },
+                    }),
+                  )
+                  return
+                }
+                if (message.command._tag === "OpenPortal")
+                  socket.send(
+                    encode({
+                      protocolVersion: 1,
+                      payload: {
+                        _tag: "PortalOpened",
+                        requestId: message.requestId,
+                        threadId: "thread-1" as never,
+                        port: message.command.port,
+                        url: "https://3000-orb.example.test",
                       },
                     }),
                   )
@@ -114,7 +133,7 @@ it.effect("creates, attaches, and submits through the authenticated Thread WebSo
           ticket,
           commandId: "create-1",
           owner: { kind: "personal" },
-          executorKind: "e2b",
+          executorKind: "orb",
         }),
       ).toBe("thread-1")
       expect(
@@ -125,12 +144,44 @@ it.effect("creates, attaches, and submits through the authenticated Thread WebSo
           commandId: "submit-1",
         }),
       ).toEqual({ commandId: "submit-1", status: "queued" })
-      expect(commands.map((command) => command._tag)).toEqual(["CreateThread", "AttachThread", "SubmitPrompt"])
-      expect(commands[2]).toMatchObject({ expectedThreadVersion: "1", text: "hello", mode: "low" })
-      expect(offeredProtocols).toEqual([
-        "rika.thread.v1, rika.ticket.single-use-ticket",
-        "rika.thread.v1, rika.ticket.single-use-ticket",
+      yield* threads.ensureService({
+        ticket,
+        threadId: "thread-1",
+        commandId: "service-start-1",
+        service: { serviceId: "web", command: "bun", args: ["run", "dev"], cwd: "." },
+      })
+      yield* threads.stopService({
+        ticket,
+        threadId: "thread-1",
+        commandId: "service-stop-1",
+        serviceId: "web",
+      })
+      expect(
+        yield* threads.openPortal({
+          ticket,
+          threadId: "thread-1",
+          requestId: "portal-1",
+          port: 3000,
+        }),
+      ).toBe("https://3000-orb.example.test")
+      expect(commands.map((command) => command._tag)).toEqual([
+        "CreateThread",
+        "AttachThread",
+        "SubmitPrompt",
+        "AttachThread",
+        "EnsureRepositoryService",
+        "AttachThread",
+        "StopRepositoryService",
+        "AttachThread",
+        "OpenPortal",
       ])
+      expect(commands[2]).toMatchObject({ expectedThreadVersion: "1", text: "hello", mode: "low" })
+      expect(commands[4]).toMatchObject({
+        expectedThreadVersion: "1",
+        service: { serviceId: "web", command: "bun", args: ["run", "dev"], cwd: "." },
+      })
+      expect(commands[6]).toMatchObject({ expectedThreadVersion: "1", serviceId: "web" })
+      expect(offeredProtocols).toEqual(Array.from({ length: 5 }, () => "rika.thread.v1, rika.ticket.single-use-ticket"))
     }),
   ),
 )
@@ -186,7 +237,7 @@ it.effect("returns a hosted rejection instead of accepting a failed command", ()
           },
           commandId: "create-1",
           owner: { kind: "personal" },
-          executorKind: "e2b",
+          executorKind: "orb",
         }),
       )
       expect(result).toMatchObject({ _tag: "Failure", failure: { kind: "denied", message: "owner denied" } })

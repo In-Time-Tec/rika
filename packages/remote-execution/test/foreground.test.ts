@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Deferred, Effect, Fiber, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
-import { foregroundLocalExecutorLayer, runForegroundLocalExecutor } from "../src/foreground"
+import { foregroundRunnerLayer, runForegroundRunner } from "../src/foreground"
 import type { AccessWire } from "../src/protocol"
 
 class FakeWebSocket {
@@ -89,7 +89,7 @@ const bindings = {
   descriptors: [],
 } as const
 
-describe.sequential("foreground local executor", () => {
+describe.sequential("foreground Runner", () => {
   it.effect("uses only a local admission and replays cell results in memory", () =>
     Effect.acquireUseRelease(
       Effect.sync(() => {
@@ -100,17 +100,17 @@ describe.sequential("foreground local executor", () => {
       () =>
         Effect.scoped(
           Effect.gen(function* () {
-            const foregroundContext = yield* Layer.build(foregroundLocalExecutorLayer)
+            const foregroundContext = yield* Layer.build(foregroundRunnerLayer)
             const workspacePath = yield* Effect.promise(() =>
-              import("node:fs/promises").then((fs) => fs.mkdtemp("/tmp/rika-local-executor-")),
+              import("node:fs/promises").then((fs) => fs.mkdtemp("/tmp/rika-runner-")),
             )
-            const ready = yield* Deferred.make<void, import("../src/foreground").ForegroundLocalExecutorError>()
+            const ready = yield* Deferred.make<void, import("../src/foreground").ForegroundRunnerError>()
             const runner = yield* Effect.forkScoped(
-              runForegroundLocalExecutor({
+              runForegroundRunner({
                 admission: {
                   admissionId: "admission-1",
                   ticket: "one-use-ticket",
-                  executorUrl: "wss://controller.example.test/api/v1/local-executors",
+                  executorUrl: "wss://controller.example.test/api/v1/runners",
                   workspaceIdentity: "workspace-binding-1",
                   expiresAt: 9_999_999_999_999,
                 },
@@ -120,10 +120,10 @@ describe.sequential("foreground local executor", () => {
             )
             const socket = yield* eventually(() => FakeWebSocket.current)
             const hello = yield* eventually(
-              () => socket.sent.find((message: any) => message._tag === "LocalExecutorHello") as any,
+              () => socket.sent.find((message: any) => message._tag === "RunnerHello") as any,
             )
             expect(hello).toEqual({
-              _tag: "LocalExecutorHello",
+              _tag: "RunnerHello",
               hello: {
                 admissionId: "admission-1",
                 ticket: "one-use-ticket",
@@ -139,7 +139,7 @@ describe.sequential("foreground local executor", () => {
             const access: AccessWire = {
               version: 1,
               fence: {
-                target: "local_device",
+                target: "runner",
                 assignmentId: "assignment-1",
                 assignmentGeneration: 1,
                 instanceId: "device-1",
@@ -338,14 +338,14 @@ describe.sequential("foreground local executor", () => {
       () =>
         Effect.scoped(
           Effect.gen(function* () {
-            const foregroundContext = yield* Layer.build(foregroundLocalExecutorLayer)
-            const ready = yield* Deferred.make<void, import("../src/foreground").ForegroundLocalExecutorError>()
+            const foregroundContext = yield* Layer.build(foregroundRunnerLayer)
+            const ready = yield* Deferred.make<void, import("../src/foreground").ForegroundRunnerError>()
             const runner = yield* Effect.forkScoped(
-              runForegroundLocalExecutor({
+              runForegroundRunner({
                 admission: {
                   admissionId: "admission-1",
                   ticket: "one-use-ticket",
-                  executorUrl: "wss://controller.example.test/api/v1/local-executors",
+                  executorUrl: "wss://controller.example.test/api/v1/runners",
                   workspaceIdentity: "workspace-binding-1",
                   expiresAt: 9_999_999_999_999,
                 },
@@ -355,12 +355,12 @@ describe.sequential("foreground local executor", () => {
             )
             const socket = yield* eventually(() => FakeWebSocket.instances[0])
             const hello = yield* eventually(
-              () => socket.sent.find((message: any) => message._tag === "LocalExecutorHello") as any,
+              () => socket.sent.find((message: any) => message._tag === "RunnerHello") as any,
             )
             const access: AccessWire = {
               version: 1,
               fence: {
-                target: "local_device",
+                target: "runner",
                 assignmentId: "assignment-reconnect",
                 assignmentGeneration: 1,
                 instanceId: "device-1",
@@ -491,12 +491,12 @@ describe.sequential("foreground local executor", () => {
       () =>
         Effect.scoped(
           Effect.gen(function* () {
-            const foregroundContext = yield* Layer.build(foregroundLocalExecutorLayer)
-            let latestSnapshot: import("../src/foreground").ForegroundLocalExecutorSnapshot | undefined
+            const foregroundContext = yield* Layer.build(foregroundRunnerLayer)
+            let latestSnapshot: import("../src/foreground").ForegroundRunnerSnapshot | undefined
             const access: AccessWire = {
               version: 1,
               fence: {
-                target: "local_device",
+                target: "runner",
                 assignmentId: "assignment-resume",
                 assignmentGeneration: 1,
                 instanceId: "device-1",
@@ -506,13 +506,13 @@ describe.sequential("foreground local executor", () => {
               leaseEpoch: 1,
               sessionToken: "session-1",
             }
-            const ready = yield* Deferred.make<void, import("../src/foreground").ForegroundLocalExecutorError>()
+            const ready = yield* Deferred.make<void, import("../src/foreground").ForegroundRunnerError>()
             const runner = yield* Effect.forkScoped(
-              runForegroundLocalExecutor({
+              runForegroundRunner({
                 resume: {
                   version: 1,
                   workspaceIdentity: "workspace-binding-1",
-                  executorUrl: "wss://controller.example.test/api/v1/local-executors",
+                  executorUrl: "wss://controller.example.test/api/v1/runners",
                   access,
                   leaseExpiresAt: 10_000,
                   heartbeatIntervalMillis: 60_000,
@@ -628,15 +628,15 @@ describe.sequential("foreground local executor", () => {
       () =>
         Effect.scoped(
           Effect.gen(function* () {
-            const foregroundContext = yield* Layer.build(foregroundLocalExecutorLayer)
-            let latestSnapshot: import("../src/foreground").ForegroundLocalExecutorSnapshot | undefined
-            const ready = yield* Deferred.make<void, import("../src/foreground").ForegroundLocalExecutorError>()
+            const foregroundContext = yield* Layer.build(foregroundRunnerLayer)
+            let latestSnapshot: import("../src/foreground").ForegroundRunnerSnapshot | undefined
+            const ready = yield* Deferred.make<void, import("../src/foreground").ForegroundRunnerError>()
             const runner = yield* Effect.forkScoped(
-              runForegroundLocalExecutor({
+              runForegroundRunner({
                 admission: {
                   admissionId: "admission-1",
                   ticket: "one-use-ticket",
-                  executorUrl: "wss://controller.example.test/api/v1/local-executors",
+                  executorUrl: "wss://controller.example.test/api/v1/runners",
                   workspaceIdentity: "workspace-binding-1",
                   expiresAt: 9_999_999_999_999,
                 },
@@ -653,12 +653,12 @@ describe.sequential("foreground local executor", () => {
             )
             const firstSocket = yield* eventually(() => FakeWebSocket.instances[0])
             const hello = yield* eventually(
-              () => firstSocket.sent.find((message: any) => message._tag === "LocalExecutorHello") as any,
+              () => firstSocket.sent.find((message: any) => message._tag === "RunnerHello") as any,
             )
             const access: AccessWire = {
               version: 1,
               fence: {
-                target: "local_device",
+                target: "runner",
                 assignmentId: "assignment-goodbye",
                 assignmentGeneration: 1,
                 instanceId: "device-1",
@@ -778,7 +778,7 @@ describe.sequential("foreground local executor", () => {
             yield* Fiber.interrupt(runner)
             expect(
               yield* eventually(() =>
-                reconnectedSocket.sent.find((message: any) => message._tag === "LocalExecutorGoodbye") === undefined
+                reconnectedSocket.sent.find((message: any) => message._tag === "RunnerGoodbye") === undefined
                   ? undefined
                   : true,
               ),
@@ -794,16 +794,16 @@ describe.sequential("foreground local executor", () => {
     ),
   )
 
-  it.effect("rejects a non-WSS local executor URL before it can connect", () =>
+  it.effect("rejects a non-WSS Runner URL before it can connect", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const foregroundContext = yield* Layer.build(foregroundLocalExecutorLayer)
+        const foregroundContext = yield* Layer.build(foregroundRunnerLayer)
         const exit = yield* Effect.exit(
-          runForegroundLocalExecutor({
+          runForegroundRunner({
             admission: {
               admissionId: "admission-1",
               ticket: "one-use-ticket",
-              executorUrl: "ws://controller.example.test/api/v1/local-executors",
+              executorUrl: "ws://controller.example.test/api/v1/runners",
               workspaceIdentity: "workspace-binding-1",
               expiresAt: 9_999_999_999_999,
             },

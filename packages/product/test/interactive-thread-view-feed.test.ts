@@ -77,6 +77,77 @@ describe("interactive ThreadView feed", () => {
     expect(feed.current()?.pending.map((item) => item.id)).toEqual(["head", "middle", "tail"])
   })
 
+  it("never regresses a settled Turn when delayed lifecycle events arrive", () => {
+    const feed = makeThreadViewFeed(() => 2)
+    feed.publish({
+      _tag: "SelectionLoaded",
+      selectionEpoch: 1,
+      activitySequence: 0,
+      thread,
+      entries: [],
+      hasOlder: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 0,
+      queue: [],
+      activeTurn: turn,
+    })
+    feed.publish({
+      _tag: "TurnSettled",
+      selectionEpoch: 1,
+      activitySequence: 2,
+      threadId,
+      turnId,
+      status: "completed",
+    })
+    feed.publish({
+      _tag: "ExecutionProjectionChanged",
+      threadId,
+      turn,
+      change: {
+        _tag: "ProjectionSnapshot",
+        revision: 0,
+        checkpoint: {
+          version: ExecutionProjection.projectionVersion,
+          cursor: "delayed",
+          state: "delayed",
+        },
+        units: [unit("delayed", "late")],
+        hasOlder: false,
+        state: state("running"),
+      },
+    })
+    expect(feed.current()?.turns[0]?.turn.status).toBe("completed")
+
+    const reordered = makeThreadViewFeed(() => 2)
+    reordered.publish({
+      _tag: "SelectionLoaded",
+      selectionEpoch: 1,
+      activitySequence: 0,
+      thread,
+      entries: [],
+      hasOlder: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 0,
+      queue: [],
+    })
+    reordered.publish({
+      _tag: "TurnSettled",
+      selectionEpoch: 1,
+      activitySequence: 2,
+      threadId,
+      turnId,
+      status: "completed",
+    })
+    reordered.publish({
+      _tag: "TurnStarted",
+      selectionEpoch: 1,
+      activitySequence: 1,
+      threadId,
+      turn,
+    })
+    expect(reordered.current()?.turns[0]?.turn.status).toBe("completed")
+  })
+
   it("maps direct Projection Changes without exposing gateway checkpoints", () => {
     const feed = makeThreadViewFeed(() => 1)
     const selected = feed.publish({

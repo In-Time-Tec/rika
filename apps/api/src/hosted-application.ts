@@ -18,7 +18,7 @@ import * as ExecutionPostgres from "@rika/execution/postgres"
 import * as RemoteCells from "@rika/execution/remote-cells"
 import { type ExecutorConfig, Executor, layer as executorLayer, service as executorService } from "./executor"
 import { HostedEnvironment, layer as hostedEnvironmentLayer } from "./hosted-environment"
-import { HostedOperations, layer as hostedOperationsLayer } from "./hosted-operations"
+import { HostedThreadApplication, layer as hostedThreadApplicationLayer } from "./hosted-thread-application"
 import { HostedThreadProtocol, layer as hostedThreadProtocolLayer } from "./hosted-thread-protocol"
 import { HostedModelRegistry, layer as hostedModelRegistryLayer } from "./hosted-model-registry"
 import { HostedProduct, HostedProductError, layer as hostedProductLayer } from "./hosted-product"
@@ -33,13 +33,13 @@ import { HostedRecovery, type HostedRecoveryService, layer as hostedRecoveryLaye
 import { HostedRepositories, layer as hostedRepositoriesLayer } from "./hosted-repositories"
 import { HostedTurnWorker, layer as hostedTurnWorkerLayer } from "./hosted-turn-worker"
 import { layer as hostedWorkspaceLayer } from "./hosted-workspace"
-import { layer as localExecutorLayer } from "./local-executor"
+import { layer as runnerExecutorLayer } from "./runner-executor"
 import { HostedToolPolicy, layer as hostedToolPolicyLayer } from "./hosted-tool-policy"
 
 export interface HostedApplicationService {
   readonly product: HostedProduct["Service"]
-  readonly operations: HostedOperations["Service"]
-  readonly threads: HostedThreadProtocol["Service"]
+  readonly threadApplication: HostedThreadApplication["Service"]
+  readonly threadProtocol: HostedThreadProtocol["Service"]
   readonly toolPolicy: HostedToolPolicy["Service"]
   readonly credentials: HostedProviderCredentials["Service"]
   readonly environment: HostedEnvironment["Service"]
@@ -110,10 +110,13 @@ export const layer = (options: {
       const toolPolicyContext = yield* Layer.build(hostedToolPolicyLayer.pipe(Layer.provide(retainedData)))
       const executorContext = yield* Layer.build(
         executorService.pipe(
-          Layer.provide(Layer.merge(executorLayer(options.executor), localExecutorLayer)),
+          Layer.provide(Layer.merge(executorLayer(options.executor), runnerExecutorLayer)),
           Layer.provide(
             Layer.succeedContext(
-              Context.merge(Context.merge(Context.merge(data, environmentContext), repositoryContext), toolPolicyContext),
+              Context.merge(
+                Context.merge(Context.merge(data, environmentContext), repositoryContext),
+                toolPolicyContext,
+              ),
             ),
           ),
         ),
@@ -121,9 +124,7 @@ export const layer = (options: {
       const executor = Context.get(executorContext, Executor)
       const workspaceContext = yield* Layer.build(
         hostedWorkspaceLayer.pipe(
-          Layer.provide(
-            Layer.succeedContext(Context.merge(Context.merge(data, executorContext), environmentContext)),
-          ),
+          Layer.provide(Layer.succeedContext(Context.merge(Context.merge(data, executorContext), environmentContext))),
         ),
       )
       const executionContext = yield* Layer.build(
@@ -215,15 +216,15 @@ export const layer = (options: {
           Layer.provide(Layer.succeedContext(repositoryContext)),
         ),
       )
-      const operationsContext = yield* Layer.build(
-        hostedOperationsLayer.pipe(Layer.provide(Layer.succeedContext(hostedContext))),
+      const threadApplicationContext = yield* Layer.build(
+        hostedThreadApplicationLayer.pipe(Layer.provide(Layer.succeedContext(hostedContext))),
       )
       const threadProtocolContext = yield* Layer.build(
         hostedThreadProtocolLayer.pipe(
           Layer.provide(
             Layer.succeedContext(
               Context.merge(
-                Context.merge(hostedContext, Context.merge(productContext, operationsContext)),
+                Context.merge(hostedContext, Context.merge(productContext, threadApplicationContext)),
                 workspaceContext,
               ),
             ),
@@ -232,8 +233,8 @@ export const layer = (options: {
       )
       return HostedApplication.of({
         product: Context.get(productContext, HostedProduct),
-        operations: Context.get(operationsContext, HostedOperations),
-        threads: Context.get(threadProtocolContext, HostedThreadProtocol),
+        threadApplication: Context.get(threadApplicationContext, HostedThreadApplication),
+        threadProtocol: Context.get(threadProtocolContext, HostedThreadProtocol),
         toolPolicy: Context.get(toolPolicyContext, HostedToolPolicy),
         credentials: Context.get(credentialContext, HostedProviderCredentials),
         environment: Context.get(environmentContext, HostedEnvironment),

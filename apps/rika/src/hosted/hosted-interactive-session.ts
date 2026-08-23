@@ -201,8 +201,9 @@ export interface HostedInteractiveSession {
 
 export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.make")(function* (input: {
   readonly threadId: string
-  readonly executorKind: "local_device" | "e2b"
-  readonly createThread: Effect.Effect<string, HostedError>
+  readonly executorKind: "runner" | "orb"
+  readonly createThread: (executorKind: "runner" | "orb") => Effect.Effect<string, HostedError>
+  readonly setRemoteThreadCreation: (preference: "allowed" | "denied") => Effect.Effect<void, HostedError>
 }) {
   const profile = yield* selectedProfile()
   const http = yield* Http
@@ -281,7 +282,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         return
       }
       if (payload._tag === "PresenceSnapshot") {
-        if (payload.controllers.length > 1) yield* setHostedStatus("presence")
+        if (payload.participants.length > 1) yield* setHostedStatus("presence")
         return
       }
       if (payload._tag === "CommandAccepted") {
@@ -316,7 +317,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         else if (active.some((turn) => turn.status === "running" || turn.status === "cancelling"))
           yield* setHostedStatus("executor-connected")
         else if (active.length > 0) yield* setHostedStatus("workspace-preparing")
-        else if (input.executorKind === "local_device") yield* setHostedStatus("executor-waiting")
+        else if (input.executorKind === "runner") yield* setHostedStatus("executor-waiting")
         else yield* setHostedStatus("connected")
         yield* acknowledge(connection, threadId, String(payload.cursor))
         return
@@ -364,7 +365,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
                 )
                 yield* SubscriptionRef.set(
                   status,
-                  input.executorKind === "local_device" ? "local-placement" : "e2b-placement",
+                  input.executorKind === "runner" ? "local-placement" : "e2b-placement",
                 )
                 yield* SubscriptionRef.set(status, latestHostedStatus)
                 const replay = Effect.sleep("500 millis").pipe(
@@ -571,13 +572,45 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       )
     }),
     newThread: Effect.gen(function* () {
-      const threadId = yield* input.createThread
+      const threadId = yield* input.createThread("runner")
       selected = threadId
       cursors.set(threadId, "0")
       versions.set(threadId, "0")
       const physical = yield* awaitConnection
       yield* physical.attach(threadId, "0")
     }).pipe(Effect.mapError((error) => unavailable("InteractiveSession.newThread", error))),
+    newOrbThread: Effect.gen(function* () {
+      const threadId = yield* input.createThread("orb")
+      selected = threadId
+      cursors.set(threadId, "0")
+      versions.set(threadId, "0")
+      const physical = yield* awaitConnection
+      yield* physical.attach(threadId, "0")
+    }).pipe(Effect.mapError((error) => unavailable("InteractiveSession.newOrbThread", error))),
+    pauseOrb: Effect.gen(function* () {
+      const commandId = yield* nextCommandId("pause-orb")
+      yield* mutate("InteractiveSession.pauseOrb", commandId, (version) => ({
+        _tag: "PauseOrb",
+        commandId: CommandId.make(commandId),
+        idempotencyKey: IdempotencyKey.make(commandId),
+        expectedThreadVersion: ThreadVersion.make(version),
+      }))
+    }),
+    resumeOrb: Effect.gen(function* () {
+      const commandId = yield* nextCommandId("resume-orb")
+      yield* mutate("InteractiveSession.resumeOrb", commandId, (version) => ({
+        _tag: "ResumeOrb",
+        commandId: CommandId.make(commandId),
+        idempotencyKey: IdempotencyKey.make(commandId),
+        expectedThreadVersion: ThreadVersion.make(version),
+      }))
+    }),
+    enableRemoteThreadCreation: input
+      .setRemoteThreadCreation("allowed")
+      .pipe(Effect.mapError((error) => unavailable("InteractiveSession.enableRemoteThreadCreation", error))),
+    disableRemoteThreadCreation: input
+      .setRemoteThreadCreation("denied")
+      .pipe(Effect.mapError((error) => unavailable("InteractiveSession.disableRemoteThreadCreation", error))),
     archiveThread: unsupported("InteractiveSession.archiveThread"),
     archiveAndNewThread: unsupported("InteractiveSession.archiveAndNewThread"),
     selectThread: (threadId) =>

@@ -62,7 +62,7 @@ const effectiveThreadRank = (subject: AuthorizationSubject) => {
   if (subject.threadCreatorMemberId === subject.memberId) return rank.owner
   const direct = subject.threadRole === undefined ? 0 : rank[subject.threadRole]
   const inherited =
-    subject.executorKind === "e2b" && subject.inheritProjectGrants === true && subject.projectRole !== undefined
+    subject.executorKind === "orb" && subject.inheritProjectGrants === true && subject.projectRole !== undefined
       ? rank[subject.projectRole]
       : 0
   return Math.max(direct, inherited)

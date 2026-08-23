@@ -11,6 +11,7 @@ import {
   IdempotencyKey,
   JsonObject,
   ProjectId,
+  PresenceStatus,
   RequestId,
   Sequence,
   ThreadEventCursor,
@@ -18,7 +19,7 @@ import {
   ThreadVersion,
   Timestamp,
 } from "../model"
-import { LocalRunnerTarget } from "../local-runner-registration"
+import { RunnerTarget } from "../runner-registration"
 import { RepositoryService, WorkspaceFileInspection } from "../workspace-capability"
 
 export const protocolVersion = 1 as const
@@ -105,6 +106,8 @@ export const MutatingThreadCommand = Schema.Union([
       serviceId: Schema.NonEmptyString,
     }),
   ),
+  strict(Schema.TaggedStruct("PauseOrb", mutating)),
+  strict(Schema.TaggedStruct("ResumeOrb", mutating)),
 ])
 export type MutatingThreadCommand = typeof MutatingThreadCommand.Type
 
@@ -114,14 +117,14 @@ const CreateThread = strict(
     owner: OwnerSelection,
     projectId: Schema.optionalKey(ProjectId),
     executorKind: ExecutorKind,
-    localRunnerTarget: Schema.optionalKey(LocalRunnerTarget),
+    runnerTarget: Schema.optionalKey(RunnerTarget),
     repositoryRef: Schema.optionalKey(RepositoryRef),
   }),
 ).check(
   Schema.makeFilter((command) =>
-    (command.executorKind === "local_device") === (command.localRunnerTarget !== undefined)
+    (command.executorKind === "runner") === (command.runnerTarget !== undefined)
       ? []
-      : [{ path: ["localRunnerTarget"], issue: "local_device requires exactly one local runner target" }],
+      : [{ path: ["runnerTarget"], issue: "runner requires exactly one Runner target" }],
   ),
 )
 
@@ -143,6 +146,12 @@ export const ClientCommand = Schema.Union([
   strict(
     Schema.TaggedStruct("AcknowledgeCursor", {
       cursor: ThreadEventCursor,
+    }),
+  ),
+  strict(Schema.TaggedStruct("UpdatePresence", { status: PresenceStatus })),
+  strict(
+    Schema.TaggedStruct("OpenPortal", {
+      port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 })),
     }),
   ),
   strict(Schema.TaggedStruct("Detach", {})),
@@ -249,9 +258,17 @@ const ServerPayload = Schema.Union([
     }),
   ),
   strict(
+    Schema.TaggedStruct("PortalOpened", {
+      requestId: RequestId,
+      threadId: ThreadId,
+      port: Schema.Int,
+      url: Schema.String,
+    }),
+  ),
+  strict(
     Schema.TaggedStruct("PresenceSnapshot", {
       threadId: ThreadId,
-      controllers: Schema.Array(ActorAttribution),
+      participants: Schema.Array(Schema.Struct({ actor: ActorAttribution, status: PresenceStatus })),
     }),
   ),
   strict(Schema.TaggedStruct("Heartbeat", { at: Timestamp })),

@@ -6,7 +6,7 @@ const unavailable = (reason: string): WorkspaceCapability => ({ _tag: "Unavailab
 const encodeIdentity = Schema.encodeSync(
   Schema.fromJsonString(
     Schema.Struct({
-      target: Schema.Literals(["local_device", "e2b"]),
+      target: Schema.Literals(["runner", "orb"]),
       workspacePath: Schema.String,
       bun: Schema.String,
       gitExecutable: Schema.NullOr(Schema.String),
@@ -27,7 +27,7 @@ const encodeIdentity = Schema.encodeSync(
 )
 
 export const inspectWorkspaceCapabilities = Effect.fn("WorkspaceCapabilities.inspect")(function* (input: {
-  readonly target: "local_device" | "e2b"
+  readonly target: "runner" | "orb"
   readonly workspacePath: string
   readonly typescriptKernel: boolean
   readonly pty: boolean
@@ -42,8 +42,7 @@ export const inspectWorkspaceCapabilities = Effect.fn("WorkspaceCapabilities.ins
     .map((name) => Bun.which(name))
     .find((path) => path !== null)
   const agentBrowserExecutable = Bun.which("agent-browser")
-  const browserReady =
-    input.browser ?? (browserExecutable !== undefined && agentBrowserExecutable !== null)
+  const browserReady = input.browser ?? (browserExecutable !== undefined && agentBrowserExecutable !== null)
   const states = {
     filesystem: workspaceExists
       ? ready("workspace filesystem available")
@@ -58,9 +57,10 @@ export const inspectWorkspaceCapabilities = Effect.fn("WorkspaceCapabilities.ins
       browserReady && browserExecutable !== undefined && agentBrowserExecutable !== null
         ? ready("browser and agent-browser executables available")
         : unavailable("browser or agent-browser executable is unavailable"),
-    services: input.services === true
-      ? ready("supervised repository services available")
-      : unavailable("supervised repository services are unavailable"),
+    services:
+      input.services === true
+        ? ready("supervised repository services available")
+        : unavailable("supervised repository services are unavailable"),
     workspaceLifecycle: workspaceExists
       ? ready("workspace lifecycle ready")
       : unavailable("workspace lifecycle is not ready"),

@@ -384,7 +384,7 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               ownerId: ids.organizationOwner,
               projectId: ids.project,
               createdByUserId: ids.user,
-              executorKind: "e2b",
+              executorKind: "orb",
               now: at(0),
             })
             const thread = yield* store.createThread({
@@ -393,14 +393,14 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               projectId: ids.project,
               workspaceId: ids.workspace,
               createdByUserId: ids.user,
-              executorKind: "e2b",
+              executorKind: "orb",
               now: at(0),
             })
             const personalWorkspace = yield* store.createWorkspace({
               id: ids.personalWorkspace,
               ownerId: ids.personalOwner,
               createdByUserId: ids.user,
-              executorKind: "e2b",
+              executorKind: "orb",
               now: at(0),
             })
             const personalThread = yield* store.createThread({
@@ -408,7 +408,7 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               ownerId: ids.personalOwner,
               workspaceId: ids.personalWorkspace,
               createdByUserId: ids.user,
-              executorKind: "e2b",
+              executorKind: "orb",
               now: at(0),
             })
             expect({ project, workspace, thread }).toMatchObject({
@@ -507,7 +507,7 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               ownerId: ids.organizationOwner,
               threadId: ids.thread,
               workspaceId: ids.workspace,
-              placement: { _tag: "E2BPlacement", templateBuildId: "template", providerScope: "scope" },
+              placement: { _tag: "OrbPlacement", templateBuildId: "template", providerScope: "scope" },
               checkout: {
                 ownerId: ids.organizationOwner,
                 projectId: ids.project,

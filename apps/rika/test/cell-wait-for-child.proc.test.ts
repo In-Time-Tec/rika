@@ -37,6 +37,15 @@ test(
 
         yield* Effect.promise(() => app.type("Start the slow child and use its result."))
         app.pressEnter()
+        const turnId = Turn.TurnId.make("tui-turn-0")
+        yield* app.waitTranscript(
+          turnId,
+          (projection) =>
+            projection.units.some(
+              (unit) => unit.content._tag === "Entry" && unit.content.text.includes("PARENT_AUTOMATICALLY_RESUMED"),
+            ),
+          20_000,
+        )
         const completed = yield* app.waitFrame("PARENT_AUTOMATICALLY_RESUMED", 20_000)
         expect(completed).not.toContain("Execution failed")
 
@@ -45,7 +54,6 @@ test(
         expect(resumedPrompt).toBeDefined()
         expect(resumedPrompt).toContain(largeResult)
         yield* app.settled
-        const turnId = Turn.TurnId.make("tui-turn-0")
         const persisted = yield* app.transcript(turnId)
         expect(
           persisted?.units.find(

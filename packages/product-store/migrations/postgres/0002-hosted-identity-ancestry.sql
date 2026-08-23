@@ -16,7 +16,5 @@ ALTER TABLE rika_hosted_devices
   ADD FOREIGN KEY (user_id) REFERENCES "user" (id) ON DELETE CASCADE;
 ALTER TABLE rika_hosted_clients
   ADD FOREIGN KEY (user_id) REFERENCES "user" (id) ON DELETE CASCADE;
-ALTER TABLE rika_hosted_local_workspace_bindings
-  ADD FOREIGN KEY (user_id) REFERENCES "user" (id) ON DELETE CASCADE;
 ALTER TABLE rika_hosted_credential_references
   ADD FOREIGN KEY (created_by_user_id) REFERENCES "user" (id) ON DELETE RESTRICT;

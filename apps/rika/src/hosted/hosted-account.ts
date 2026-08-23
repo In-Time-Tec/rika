@@ -1,4 +1,7 @@
 import { Clock, Console, Crypto, Effect, Option, Redacted, Result, Schema } from "effect"
+import type { EnvironmentPhase, EnvironmentScope } from "@rika/product/environment-policy"
+import type { RepositoryService } from "@rika/product/workspace-capability"
+import type { ClientTicketResponse } from "@rika/product/client-protocol"
 import {
   Browser,
   CredentialStore,
@@ -15,6 +18,7 @@ import {
   type Session,
   type ModelProvider,
   type TokenSet,
+  type ThreadClientInterface,
 } from "./hosted-contract"
 import type { RunRequest } from "./hosted-contract"
 import * as Dpop from "./hosted-dpop"
@@ -129,6 +133,17 @@ const validOwner = (profile: Profile, identity: IdentityContext) => {
   if (profile.owner.kind === "personal") return true
   const organizationId = profile.owner.organizationId
   return identity.organizations.some((organization) => organization.id === organizationId)
+}
+
+const projectBelongsToOwner = (profile: Profile, project: IdentityContext["projects"][number]) =>
+  profile.owner.kind === "personal"
+    ? project.owner.kind === "personal"
+    : project.owner.kind === "organization" && project.owner.organizationId === profile.owner.organizationId
+
+const defaultSecretScope = (profile: Profile): EnvironmentScope => {
+  if (profile.project !== undefined) return "project"
+  if (profile.owner.kind === "organization") return "organization"
+  return "personal"
 }
 
 const staleOwner = () =>
@@ -352,6 +367,168 @@ export const invite = Effect.fn("HostedAccount.invite")(function* (rawEmail: str
   yield* Console.log(`Invited ${invitation.email}`)
 })
 
+export const listProjects = Effect.fn("HostedAccount.listProjects")(function* () {
+  const profile = yield* selectedProfile()
+  const http = yield* Http
+  const identity = yield* authenticated(profile, (session) => http.context(profile.origin, session))
+  const projects = identity.projects.filter((project) => projectBelongsToOwner(profile, project))
+  if (projects.length === 0) {
+    yield* Console.log("No Projects")
+    return
+  }
+  for (const project of projects)
+    yield* Console.log(`${profile.project === project.id ? "*" : " "} ${project.name} (${project.id})`)
+})
+
+export const createProject = Effect.fn("HostedAccount.createProject")(function* (name: string) {
+  const profile = yield* selectedProfile()
+  const profiles = yield* ProfileStore
+  const http = yield* Http
+  const project = yield* authenticated(profile, (session) =>
+    http.createProject(profile.origin, profile.owner, name, session),
+  )
+  yield* profiles.save({ ...profile, project: project.id })
+  yield* Console.log(`Created and selected Project ${project.name} (${project.id})`)
+})
+
+export const useProject = Effect.fn("HostedAccount.useProject")(function* (requested: string) {
+  const profile = yield* selectedProfile()
+  const profiles = yield* ProfileStore
+  const http = yield* Http
+  const identity = yield* authenticated(profile, (session) => http.context(profile.origin, session))
+  const matches = identity.projects.filter(
+    (project) =>
+      projectBelongsToOwner(profile, project) &&
+      (project.id === requested || project.slug === requested || project.name === requested),
+  )
+  if (matches.length !== 1)
+    return yield* failure(
+      "invalid-input",
+      matches.length === 0 ? `Project ${requested} was not found` : `Project ${requested} is ambiguous`,
+    )
+  yield* profiles.save({ ...profile, project: matches[0]!.id })
+  yield* Console.log(`Using Project ${matches[0]!.name}`)
+})
+
+export const putSecret = Effect.fn("HostedAccount.putSecret")(function* (
+  name: string,
+  value: string,
+  scope: EnvironmentScope | undefined,
+  phases: ReadonlyArray<EnvironmentPhase>,
+) {
+  const profile = yield* selectedProfile()
+  const selectedScope = scope ?? defaultSecretScope(profile)
+  if (selectedScope === "project" && profile.project === undefined)
+    return yield* failure("invalid-input", "Select a Project before setting a Project secret")
+  const http = yield* Http
+  const result = yield* authenticated(profile, (session) =>
+    http.putEnvironment(
+      profile.origin,
+      profile.owner,
+      profile.project,
+      name,
+      selectedScope,
+      phases,
+      Redacted.make(value),
+      session,
+    ),
+  )
+  yield* Console.log(`${result.name} secret is ${result.state} at revision ${result.revision}`)
+})
+
+export const revokeSecret = Effect.fn("HostedAccount.revokeSecret")(function* (
+  name: string,
+  scope: EnvironmentScope | undefined,
+) {
+  const profile = yield* selectedProfile()
+  const selectedScope = scope ?? defaultSecretScope(profile)
+  if (selectedScope === "project" && profile.project === undefined)
+    return yield* failure("invalid-input", "Select a Project before revoking a Project secret")
+  const http = yield* Http
+  const result = yield* authenticated(profile, (session) =>
+    http.revokeEnvironment(profile.origin, profile.owner, profile.project, name, selectedScope, session),
+  )
+  yield* Console.log(`${result.name} secret is ${result.state} at revision ${result.revision}`)
+})
+
+const threadControl = Effect.fn("HostedAccount.threadControl")(function* <A>(
+  run: (input: {
+    readonly ticket: ClientTicketResponse
+    readonly threads: ThreadClientInterface
+    readonly operationId: string
+  }) => Effect.Effect<A, HostedError>,
+) {
+  const profile = yield* selectedProfile()
+  const http = yield* Http
+  const threads = yield* ThreadClient
+  const crypto = yield* Crypto.Crypto
+  const operationId = yield* crypto.randomUUIDv4.pipe(
+    Effect.mapError(() => failure("host", "Could not create a hosted operation identifier")),
+  )
+  return yield* authenticated(profile, (session) =>
+    http
+      .issueThreadTicket(profile.origin, session)
+      .pipe(Effect.flatMap((ticket) => run({ ticket, threads, operationId }))),
+  )
+})
+
+export const ensureRepositoryService = Effect.fn("HostedAccount.ensureRepositoryService")(function* (
+  threadId: string,
+  service: RepositoryService,
+) {
+  yield* threadControl(({ ticket, threads, operationId }) =>
+    threads.ensureService({ ticket, threadId, commandId: operationId, service }),
+  )
+  yield* Console.log(`Repository service ${service.serviceId} is running`)
+})
+
+export const stopRepositoryService = Effect.fn("HostedAccount.stopRepositoryService")(function* (
+  threadId: string,
+  serviceId: string,
+) {
+  yield* threadControl(({ ticket, threads, operationId }) =>
+    threads.stopService({ ticket, threadId, commandId: operationId, serviceId }),
+  )
+  yield* Console.log(`Repository service ${serviceId} is stopped`)
+})
+
+export const openThreadPortal = Effect.fn("HostedAccount.openThreadPortal")(function* (threadId: string, port: number) {
+  const url = yield* threadControl(({ ticket, threads, operationId }) =>
+    threads.openPortal({ ticket, threadId, requestId: operationId, port }),
+  )
+  yield* Console.log(url)
+})
+
+export const syncRepository = Effect.fn("HostedAccount.syncRepository")(function* (input: {
+  readonly threadId: string
+  readonly commitSha: string
+  readonly targetBranch?: string | undefined
+  readonly title: string
+  readonly body: string
+}) {
+  const profile = yield* selectedProfile()
+  const http = yield* Http
+  const crypto = yield* Crypto.Crypto
+  const operationId = yield* crypto.randomUUIDv4.pipe(
+    Effect.mapError(() => failure("host", "Could not create a repository synchronization identifier")),
+  )
+  const publication = yield* authenticated(profile, (session) =>
+    http.publishRepository(
+      profile.origin,
+      input.threadId,
+      input.commitSha,
+      input.targetBranch,
+      input.title,
+      input.body,
+      operationId,
+      session,
+    ),
+  )
+  yield* Console.log(
+    `Repository synchronization ${publication.state}: ${publication.ref} -> ${publication.targetBranch}`,
+  )
+})
+
 export const createRemoteThread = Effect.fn("HostedAccount.createRemoteThread")(function* () {
   const profile = yield* selectedProfile()
   const http = yield* Http
@@ -370,12 +547,12 @@ export const createRemoteThread = Effect.fn("HostedAccount.createRemoteThread")(
           commandId,
           owner: profile.owner,
           ...(profile.project === undefined ? {} : { project: profile.project }),
-          executorKind: "e2b",
+          executorKind: "orb",
         }),
       ),
     ),
   )
-  yield* Console.log(`Created remote E2B thread ${threadId}`)
+  yield* Console.log(`Created Orb Thread ${threadId}`)
 })
 
 export const runThread = Effect.fn("HostedAccount.runThread")(function* (threadId: string, request: RunRequest) {

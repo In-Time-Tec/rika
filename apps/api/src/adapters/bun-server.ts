@@ -202,12 +202,12 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
                 .catch(() => new Response("WebSocket authentication required", { status: 401 })),
             )
           }
-          if (pathname === "/api/v1/executors" || pathname === "/api/v1/local-executors") {
+          if (pathname === "/api/v1/executors" || pathname === "/api/v1/runners") {
             if (request.method !== "GET") return new Response("Method not allowed", { status: 405 })
             const gateway =
               pathname === "/api/v1/executors"
                 ? input.dependencies.executor.gateway
-                : input.dependencies.executor.localGateway
+                : input.dependencies.executor.runnerGateway
             return bunServer.upgrade(request, { data: session(gateway) })
               ? undefined
               : new Response("WebSocket upgrade required", { status: 426 })

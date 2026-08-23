@@ -12,6 +12,7 @@ import {
   resetPasswordPage,
   signupPage,
   verifyEmailPage,
+  threadsPage,
   webScript,
   webStyles,
 } from "./web-pages"
@@ -53,6 +54,18 @@ const html = (body: string, production: boolean, status = 200) =>
 
 const redirect = (location: string, production: boolean) =>
   response(null, { production, status: 303, headers: new Headers({ location, "cache-control": "no-store" }) })
+
+const clientAsset = Effect.fn("WebHttp.clientAsset")(function* (
+  name: "thread-client.css" | "thread-client.js",
+  production: boolean,
+) {
+  const file = Bun.file(new URL(`../client/${name}`, import.meta.url))
+  if (!(yield* Effect.promise(() => file.exists()))) return html("<h1>Not found</h1>", production, 404)
+  const headers = securityHeaders(production)
+  headers.set("content-type", name.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8")
+  headers.set("cache-control", "public, max-age=3600")
+  return new Response(file, { headers })
+})
 
 const safePath = (value: string | null, requestUrl: URL, fallback = "/") => {
   if (value === null || !value.startsWith("/")) return fallback
@@ -97,6 +110,8 @@ const route = Effect.fn("WebHttp.route")(function* (request: Request, dependenci
       headers: new Headers({ "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }),
     })
   if (request.method !== "GET") return html("<h1>Not found</h1>", dependencies.production, 404)
+  if (pathname === "/assets/thread-client.css") return yield* clientAsset("thread-client.css", dependencies.production)
+  if (pathname === "/assets/thread-client.js") return yield* clientAsset("thread-client.js", dependencies.production)
   if (pathname === "/assets/web.css")
     return response(webStyles, {
       production: dependencies.production,
@@ -163,6 +178,7 @@ const route = Effect.fn("WebHttp.route")(function* (request: Request, dependenci
       true,
     )
   if (pathname === "/") return yield* guarded(request, url, dependencies, () => accountPage(), true)
+  if (pathname === "/threads") return html(threadsPage(), dependencies.production)
   return html("<h1>Not found</h1>", dependencies.production, 404)
 })
 

@@ -2,7 +2,7 @@ import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Data, Effect, FileSystem, Layer, Path, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { localExecutorProcessRole, tuiControllerProcessRole } from "../../apps/rika/src/private-runtime-role"
+import { runnerExecutorProcessRole, tuiControllerProcessRole } from "../../apps/rika/src/private-runtime-role"
 import { validatePackageArchive } from "../packaging/archive-contract"
 
 class ReleaseSmokeError extends Data.TaggedError("ReleaseSmokeError")<{
@@ -88,9 +88,9 @@ const program = Effect.scoped(
     const helpOutput = yield* runBinary(["--help"])
     if (/relay/i.test(helpOutput) || !/rika/i.test(helpOutput))
       return yield* failure("help", `Unexpected public help output: ${helpOutput.slice(0, 2_000)}`)
-    if (helpOutput.includes(tuiControllerProcessRole) || helpOutput.includes(localExecutorProcessRole))
+    if (helpOutput.includes(tuiControllerProcessRole) || helpOutput.includes(runnerExecutorProcessRole))
       return yield* failure("help", "Internal process roles are exposed in public help")
-    yield* runBinary([localExecutorProcessRole, "--help"], { RIKA_INTERNAL_LOCAL_EXECUTOR: "1" })
+    yield* runBinary([runnerExecutorProcessRole, "--help"], { RIKA_INTERNAL_LOCAL_EXECUTOR: "1" })
     const interactiveProbe = yield* runBinary([tuiControllerProcessRole], {
       RIKA_INTERNAL_CLIENT_RUNTIME: "1",
       RIKA_INTERNAL_OPENTUI_NATIVE_PROBE: "1",

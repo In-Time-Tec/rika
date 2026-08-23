@@ -69,7 +69,7 @@ it.layer(layer)("hosted memory store owner identity", (test) => {
         id: WorkspaceId.make("personal-workspace"),
         ownerId: personalOwnerId,
         createdByUserId: userId,
-        executorKind: "local_device",
+        executorKind: "runner",
         now,
       })
       const thread = yield* store.createThread({
@@ -77,7 +77,7 @@ it.layer(layer)("hosted memory store owner identity", (test) => {
         ownerId: personalOwnerId,
         workspaceId: workspace.id,
         createdByUserId: userId,
-        executorKind: "local_device",
+        executorKind: "runner",
         now,
       })
       expect(workspace.projectId).toBeUndefined()
@@ -168,7 +168,7 @@ it.layer(layer)("hosted memory store owner identity", (test) => {
             ownerId: personalOwnerId,
             projectId: project.id,
             createdByUserId: userId,
-            executorKind: "e2b",
+            executorKind: "orb",
             now,
           }),
         ),

@@ -1,7 +1,7 @@
 import { Config, Effect, Option } from "effect"
 
 export const tuiControllerProcessRole = "--internal-tui-controller"
-export const localExecutorProcessRole = "--internal-local-executor"
+export const runnerExecutorProcessRole = "--internal-runner-executor"
 
 const isInternalProcessLaunch = (environmentVariable: string) =>
   Config.option(Config.string(environmentVariable)).pipe(

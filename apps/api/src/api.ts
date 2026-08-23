@@ -1,13 +1,13 @@
 import { Context, Effect, Layer, Schema } from "effect"
 import { BetterAuthUserId, OrganizationId, ThreadId } from "@rika/product/hosted-model"
-import { IdentityContext } from "@rika/product/hosted-identity-context"
+import { IdentityContext, Project } from "@rika/product/hosted-identity-context"
 import { ClientTicketResponse } from "@rika/product/client-protocol"
 import {
   CheckoutFingerprint,
-  LocalRunnerProfile,
-  LocalRunnerPollResult,
+  RunnerProfile,
+  RunnerPollResult,
   RemoteThreadCreationPreference,
-} from "@rika/product/local-runner-registration"
+} from "@rika/product/runner-registration"
 import {
   EnvironmentClassification,
   EnvironmentPhase,
@@ -55,12 +55,19 @@ const ConnectionOwner = Schema.Union([
   strict(Schema.Struct({ kind: Schema.Literal("organization"), organization_id: Schema.NonEmptyString })),
 ])
 const ThreadTicketResponse = ClientTicketResponse.pipe(HttpApiSchema.status(201))
-const LocalExecutorAdmissionRequest = strict(
+const ProjectCreateRequest = strict(
+  Schema.Struct({
+    owner: ConnectionOwner,
+    name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  }),
+)
+const ProjectCreateResponse = Project.pipe(HttpApiSchema.status(201))
+const RunnerAdmissionRequest = strict(
   Schema.Struct({
     workspace_fingerprint: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
   }),
 )
-const LocalExecutorAdmissionResponse = Schema.Struct({
+const RunnerAdmissionResponse = Schema.Struct({
   admissionId: Schema.String,
   ticket: Schema.String,
   expiresAt: Schema.Finite,
@@ -200,35 +207,36 @@ class ProductGroup extends HttpApiGroup.make("product", { topLevel: true })
       success: IdentityContext,
       error: ServiceUnavailable,
     }),
+    HttpApiEndpoint.post("createProject", "/api/v1/projects", {
+      payload: ProjectCreateRequest,
+      success: ProjectCreateResponse,
+      error: [Forbidden, Conflict, Unprocessable, ServiceUnavailable],
+    }),
     HttpApiEndpoint.post("issueThreadTicket", "/api/v1/thread-sessions", {
       success: ThreadTicketResponse,
       error: [Unauthorized, ServiceUnavailable],
     }),
-    HttpApiEndpoint.post("admitLocalExecutor", "/api/v1/threads/:threadId/local-executor-admissions", {
+    HttpApiEndpoint.post("admitRunner", "/api/v1/threads/:threadId/runner-admissions", {
       params: { threadId: ThreadId },
-      payload: LocalExecutorAdmissionRequest,
-      success: LocalExecutorAdmissionResponse,
+      payload: RunnerAdmissionRequest,
+      success: RunnerAdmissionResponse,
       error: [Forbidden, NotFound, Conflict, ServiceUnavailable],
     }),
-    HttpApiEndpoint.put("registerLocalRunner", "/api/v1/local-runners/:checkoutFingerprint", {
+    HttpApiEndpoint.put("registerRunner", "/api/v1/runners/:checkoutFingerprint", {
       params: { checkoutFingerprint: CheckoutFingerprint },
-      payload: LocalRunnerProfile,
+      payload: RunnerProfile,
       success: HttpApiSchema.NoContent,
       error: [Forbidden, Conflict, ServiceUnavailable],
     }),
-    HttpApiEndpoint.put(
-      "setRemoteThreadCreation",
-      "/api/v1/local-runners/:checkoutFingerprint/remote-thread-creation",
-      {
-        params: { checkoutFingerprint: CheckoutFingerprint },
-        payload: RemoteThreadCreationPreference,
-        success: HttpApiSchema.NoContent,
-        error: [NotFound, Forbidden, ServiceUnavailable],
-      },
-    ),
-    HttpApiEndpoint.post("pollLocalRunner", "/api/v1/local-runners/:checkoutFingerprint/admissions", {
+    HttpApiEndpoint.put("setRemoteThreadCreation", "/api/v1/runners/:checkoutFingerprint/remote-thread-creation", {
       params: { checkoutFingerprint: CheckoutFingerprint },
-      success: LocalRunnerPollResult,
+      payload: RemoteThreadCreationPreference,
+      success: HttpApiSchema.NoContent,
+      error: [NotFound, Forbidden, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.post("pollRunner", "/api/v1/runners/:checkoutFingerprint/admissions", {
+      params: { checkoutFingerprint: CheckoutFingerprint },
+      success: RunnerPollResult,
       error: [Forbidden, Conflict, ServiceUnavailable],
     }),
     HttpApiEndpoint.get("inspectRecovery", "/api/v1/threads/:threadId/runs/:runId/recovery", {
@@ -379,6 +387,13 @@ const environmentFailure = (error: HostedEnvironmentError) => {
   return ServiceUnavailable.make({ message: "Environment service unavailable" })
 }
 
+const projectFailure = (error: { readonly kind?: string | undefined; readonly message: string }) => {
+  if (error.kind === "forbidden") return Forbidden.make({ message: "Project operation was rejected" })
+  if (error.kind === "conflict") return Conflict.make({ message: error.message })
+  if (error.kind === "invalid") return Unprocessable.make({ message: error.message })
+  return ServiceUnavailable.make({ message: "Product service unavailable" })
+}
+
 const productHandlers = (dependencies: HttpDependencies) =>
   HttpApiBuilder.group(RikaApi, "product", (handlers) =>
     handlers.handleAll({
@@ -421,6 +436,32 @@ const productHandlers = (dependencies: HttpDependencies) =>
             })),
           }
         }),
+      createProject: ({ payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined)
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          const project = yield* dependencies.product
+            .createProject({
+              principal: authenticatedPrincipal(access),
+              owner: hostedOwner(payload.owner, access),
+              name: payload.name,
+            })
+            .pipe(Effect.mapError(projectFailure))
+          return {
+            id: project.id,
+            ownerId: project.ownerId,
+            owner:
+              project.owner._tag === "PersonalOwner"
+                ? { kind: "personal" as const, userId: project.owner.userId }
+                : { kind: "organization" as const, organizationId: project.owner.organizationId },
+            name: project.name,
+            slug: project.name
+              .toLowerCase()
+              .replaceAll(/[^a-z0-9]+/g, "-")
+              .replaceAll(/^-|-$/g, ""),
+          }
+        }),
       issueThreadTicket: () =>
         Effect.gen(function* () {
           const access = yield* CurrentAccess
@@ -443,7 +484,7 @@ const productHandlers = (dependencies: HttpDependencies) =>
             protocol: "rika.thread.v1" as const,
           }
         }),
-      admitLocalExecutor: ({ params, payload }) =>
+      admitRunner: ({ params, payload }) =>
         Effect.gen(function* () {
           const access = yield* CurrentAccess
           if (access.deviceId === undefined || access.principal.clientId === undefined)
@@ -452,10 +493,10 @@ const productHandlers = (dependencies: HttpDependencies) =>
           const request = yield* HttpServerRequest.toWeb(serverRequest).pipe(
             Effect.mapError(() => ServiceUnavailable.make({ message: "Request is unavailable" })),
           )
-          const executorUrl = new URL("/api/v1/local-executors", request.url)
+          const executorUrl = new URL("/api/v1/runners", request.url)
           executorUrl.protocol = "wss:"
           return yield* dependencies.executor
-            .admitLocal({
+            .admitRunner({
               threadId: params.threadId,
               workspaceFingerprint: payload.workspace_fingerprint,
               executorUrl: executorUrl.toString(),
@@ -465,23 +506,23 @@ const productHandlers = (dependencies: HttpDependencies) =>
               Effect.mapError((error) => {
                 if (error.kind === "assignment-missing") return NotFound.make({ message: "Thread is unavailable" })
                 if (error.kind === "assignment-conflict" || error.kind === "fenced")
-                  return Conflict.make({ message: "Local executor admission is unavailable" })
-                return Forbidden.make({ message: "Local executor admission was rejected" })
+                  return Conflict.make({ message: "Runner admission is unavailable" })
+                return Forbidden.make({ message: "Runner admission was rejected" })
               }),
             )
         }),
-      registerLocalRunner: ({ params, payload }) =>
+      registerRunner: ({ params, payload }) =>
         Effect.gen(function* () {
           const access = yield* CurrentAccess
           if (access.deviceId === undefined || access.principal.clientId === undefined)
             return yield* Unauthorized.make({ message: "CLI device authentication required" })
           yield* dependencies.product
-            .registerLocalRunner({
+            .registerRunner({
               principal: authenticatedPrincipal(access),
               checkoutFingerprint: params.checkoutFingerprint,
               registration: payload,
             })
-            .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Local runner registration failed" })))
+            .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Runner registration failed" })))
         }),
       setRemoteThreadCreation: ({ params, payload }) =>
         Effect.gen(function* () {
@@ -498,37 +539,37 @@ const productHandlers = (dependencies: HttpDependencies) =>
               Effect.mapError((error) =>
                 error.kind === "not-found"
                   ? NotFound.make({ message: error.message })
-                  : ServiceUnavailable.make({ message: "Local runner preference failed" }),
+                  : ServiceUnavailable.make({ message: "Runner preference failed" }),
               ),
             )
         }),
-      pollLocalRunner: ({ params }) =>
+      pollRunner: ({ params }) =>
         Effect.gen(function* () {
           const access = yield* CurrentAccess
           if (access.deviceId === undefined || access.principal.clientId === undefined)
             return yield* Unauthorized.make({ message: "CLI device authentication required" })
           const principal = authenticatedPrincipal(access)
           const candidate = yield* dependencies.product
-            .pollLocalRunner({
+            .pollRunner({
               principal,
               checkoutFingerprint: params.checkoutFingerprint,
             })
-            .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Local runner polling failed" })))
+            .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Runner polling failed" })))
           if (candidate === undefined) return { _tag: "Waiting" as const }
           const serverRequest = yield* HttpServerRequest.HttpServerRequest
           const request = yield* HttpServerRequest.toWeb(serverRequest).pipe(
             Effect.mapError(() => ServiceUnavailable.make({ message: "Request is unavailable" })),
           )
-          const executorUrl = new URL("/api/v1/local-executors", request.url)
+          const executorUrl = new URL("/api/v1/runners", request.url)
           executorUrl.protocol = "wss:"
           const admission = yield* dependencies.executor
-            .admitLocal({
+            .admitRunner({
               threadId: candidate.threadId,
               workspaceFingerprint: params.checkoutFingerprint,
               executorUrl: executorUrl.toString(),
               principal,
             })
-            .pipe(Effect.mapError(() => Conflict.make({ message: "Local runner admission is unavailable" })))
+            .pipe(Effect.mapError(() => Conflict.make({ message: "Runner admission is unavailable" })))
           return { _tag: "Admitted" as const, ...admission }
         }),
       inspectRecovery: ({ params }) =>
@@ -806,6 +847,7 @@ export const isRikaApiPath = (pathname: string) =>
   pathname === "/readyz" ||
   pathname === "/api/v1/auth/cli/devices/revoke-all" ||
   pathname === "/api/v1/me/context" ||
+  pathname === "/api/v1/projects" ||
   pathname === "/api/v1/thread-sessions" ||
   pathname === "/api/v1/models" ||
   pathname === "/api/v1/environment-policy" ||
@@ -814,8 +856,8 @@ export const isRikaApiPath = (pathname: string) =>
   pathname === "/api/v1/tool-audit-records/list" ||
   /^\/api\/v1\/(environment|egress)\/[^/]+$/.test(pathname) ||
   /^\/api\/v1\/provider-credentials\/[^/]+$/.test(pathname) ||
-  /^\/api\/v1\/local-runners\/[^/]+(?:\/remote-thread-creation|\/admissions)?$/.test(pathname) ||
-  /^\/api\/v1\/threads\/[^/]+\/local-executor-admissions$/.test(pathname) ||
+  /^\/api\/v1\/runners\/[^/]+(?:\/remote-thread-creation|\/admissions)?$/.test(pathname) ||
+  /^\/api\/v1\/threads\/[^/]+\/runner-admissions$/.test(pathname) ||
   /^\/api\/v1\/threads\/[^/]+\/repository-publications$/.test(pathname) ||
   /^\/api\/v1\/threads\/[^/]+\/runs\/[^/]+\/recovery(?:\/[^/]+)?$/.test(pathname)
 

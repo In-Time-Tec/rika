@@ -67,9 +67,10 @@ const product: HostedProductService = {
   authorizeThread: () => Effect.fail(HostedProductError.make({ kind: "not-found", message: "Thread unavailable" })),
   threadExecutionContext: () => Effect.die("unused"),
   projects: () => Effect.succeed([]),
-  registerLocalRunner: () => Effect.die("unused"),
+  createProject: () => Effect.die("unused"),
+  registerRunner: () => Effect.die("unused"),
   setRemoteThreadCreation: () => Effect.die("unused"),
-  pollLocalRunner: () => Effect.die("unused"),
+  pollRunner: () => Effect.die("unused"),
   createConnection: () => Effect.succeed({ threadId: "thread-1" }),
   admitRun: () => Effect.die("unused"),
 }
@@ -82,8 +83,8 @@ const recovery: HttpDependencies["recovery"] = {
 const executor: Executor = {
   controller: undefined as never,
   gateway: undefined as never,
-  localGateway: undefined as never,
-  admitLocal: () => Effect.die("unused"),
+  runnerGateway: undefined as never,
+  admitRunner: () => Effect.die("unused"),
   admitRun: () => Effect.die("unused"),
   run: () => Effect.die("unused"),
   pause: () => Effect.die("unused"),
@@ -557,6 +558,53 @@ describe("api HTTP", () => {
     }),
   )
 
+  it.effect("creates and returns a selected-owner Project", () =>
+    Effect.gen(function* () {
+      const base = dependencies({ userId: "user-1", account })
+      const result = yield* response(
+        "/api/v1/projects",
+        {
+          ...base,
+          identity: {
+            ...base.identity,
+            identify: () => Effect.succeed({ userId: "user-1", clientId: "client-1" }),
+          },
+          devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
+          product: {
+            ...product,
+            createProject: (input) => {
+              expect(input.principal).toEqual({ userId: "user-1", clientId: "client-1", deviceId: "device-1" })
+              expect(input.owner).toEqual({ _tag: "OrganizationOwner", organizationId: "organization-1" })
+              expect(input.name).toBe("Remote Platform")
+              return Effect.succeed({
+                id: "project-2",
+                ownerId: "owner-1",
+                owner: { _tag: "OrganizationOwner", organizationId: "organization-1" as never },
+                name: "Remote Platform",
+                role: "owner",
+              })
+            },
+          },
+        },
+        {
+          method: "POST",
+          body: encodeJson({
+            owner: { kind: "organization", organization_id: "organization-1" },
+            name: "Remote Platform",
+          }),
+        },
+      )
+      expect(result.status).toBe(201)
+      expect(yield* Effect.promise(() => result.json())).toEqual({
+        id: "project-2",
+        ownerId: "owner-1",
+        owner: { kind: "organization", organizationId: "organization-1" },
+        name: "Remote Platform",
+        slug: "remote-platform",
+      })
+    }),
+  )
+
   it.effect("invites through Better Auth only for an authenticated organization membership", () =>
     Effect.gen(function* () {
       let forwarded: Request | undefined
@@ -658,7 +706,7 @@ describe("api HTTP", () => {
         { workspace_fingerprint: "workspace-1", organization_id: "organization-1" },
         { workspace_fingerprint: "workspace-1", member_id: "member-1" },
       ]) {
-        const result = yield* response("/api/v1/threads/thread-2/local-executor-admissions", deps, {
+        const result = yield* response("/api/v1/threads/thread-2/runner-admissions", deps, {
           method: "POST",
           body: encodeJson(body),
         })

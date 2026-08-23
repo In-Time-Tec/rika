@@ -859,7 +859,7 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
           JOIN rika_hosted_project_repositories repository ON repository.project_id = thread.project_id
             AND repository.owner_id = thread.owner_id
           WHERE thread.id = ${input.threadId} AND thread.owner_id = ${input.ownerId}
-            AND thread.executor_kind = 'e2b' AND thread.project_id IS NOT NULL
+            AND thread.executor_kind = 'orb' AND thread.project_id IS NOT NULL
             AND assignment.lifecycle = 'active' AND assignment.lease_expires_at > clock_timestamp()
             AND assignment.checkout ->> 'ownerId' = thread.owner_id
             AND assignment.checkout ->> 'repositoryId' = repository.repository_id`.pipe(

@@ -6,18 +6,13 @@ export interface Migration {
 
 export const migrations: ReadonlyArray<Migration> = [
   {
-    id: "product/0000_hosted_authority_reset",
-    checksum: "4c8195f614af79caacc5d628aeea2856795d42a66520964e17aa69956388d9bd",
-    url: new URL("../../migrations/postgres/0000-hosted-authority-reset.sql", import.meta.url),
-  },
-  {
     id: "product/0001_hosted_authority",
-    checksum: "9e9385f2865144ed34684ba13fa3f5100772635af24d50293a2936dfe86b0dcd",
+    checksum: "403079ca1cd05fb94a63252e292c990610197a0668b3e1708ca819c1c87a1c5e",
     url: new URL("../../migrations/postgres/0001-hosted-authority.sql", import.meta.url),
   },
   {
     id: "product/0002_hosted_identity_ancestry",
-    checksum: "9115ef8107f3ffcae24c3c81ff066161336846a1314c380136a958fc751debf2",
+    checksum: "735682c99444f7ca77623032ff622916dfd8a47ace8e4029f53b0c6d0be02ff5",
     url: new URL("../../migrations/postgres/0002-hosted-identity-ancestry.sql", import.meta.url),
   },
   {
@@ -26,14 +21,14 @@ export const migrations: ReadonlyArray<Migration> = [
     url: new URL("../../migrations/postgres/0003-hosted-authority-fences.sql", import.meta.url),
   },
   {
-    id: "product/0004_local_executor",
-    checksum: "3a96fa290c683d877cbf6608d2275a84a5cdf47ee746ae29e73f768f9bffaa91",
-    url: new URL("../../migrations/postgres/0004-local-executor.sql", import.meta.url),
+    id: "product/0004_runner",
+    checksum: "6468874f1cc19494c8fba7a7f495af04ab3409195ff2ece09f45163cd773d9de",
+    url: new URL("../../migrations/postgres/0004-runner.sql", import.meta.url),
   },
   {
-    id: "product/0005_local_executor_recovery",
+    id: "product/0005_runner_recovery",
     checksum: "5f8c77195f9479471379539a6f75e902aec4de05bf89c53f7ad1ec72958f49f4",
-    url: new URL("../../migrations/postgres/0005-local-executor-recovery.sql", import.meta.url),
+    url: new URL("../../migrations/postgres/0005-runner-recovery.sql", import.meta.url),
   },
   {
     id: "product/0006_product_state",
@@ -76,9 +71,9 @@ export const migrations: ReadonlyArray<Migration> = [
     url: new URL("../../migrations/postgres/0013-thread-protocol.sql", import.meta.url),
   },
   {
-    id: "product/0014_local_runner_registration",
-    checksum: "c3b4774eafa26939c91cd00822e82373964e9d373309ae63c7df4ee5dd95f175",
-    url: new URL("../../migrations/postgres/0014-local-runner-registration.sql", import.meta.url),
+    id: "product/0014_runner_registration",
+    checksum: "9584eb71419275fd2466ff93fcae24e98e779d726182ccb60b52745cfd3e4609",
+    url: new URL("../../migrations/postgres/0014-runner-registration.sql", import.meta.url),
   },
   {
     id: "product/0015_environment_and_egress",
@@ -87,7 +82,7 @@ export const migrations: ReadonlyArray<Migration> = [
   },
   {
     id: "product/0016_authority_revocation",
-    checksum: "057e350b553c3deaab26ae860cff5841de39544a698fbcc426b6a8e1328dc085",
+    checksum: "a1e426ee67344137434e0c949ad116a70ab7fe7215e281c5780ff9b07f95d9f5",
     url: new URL("../../migrations/postgres/0016-authority-revocation.sql", import.meta.url),
   },
   {
@@ -97,7 +92,7 @@ export const migrations: ReadonlyArray<Migration> = [
   },
   {
     id: "product/0018_workspace_preparation",
-    checksum: "fd7d1d0c8353e78599de0745f450dc19a55df575ecfb70083acd909571a006bf",
+    checksum: "0bef71f7d13834e870ee93f868d5c26b1102f00588bfd63118ced0b35fddc869",
     url: new URL("../../migrations/postgres/0018-workspace-preparation.sql", import.meta.url),
   },
   {

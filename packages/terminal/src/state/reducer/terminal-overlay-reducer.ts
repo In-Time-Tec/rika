@@ -143,7 +143,8 @@ const reduceOverlayImpl = (
       }
     }
     case "ExecutionCompleted": {
-      if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
+      if (message.turnId !== undefined && model.activeTurnId !== undefined && model.activeTurnId !== message.turnId)
+        return model
       return {
         ...model,
         submittedDrafts: dropSubmittedDrafts(model.submittedDrafts, message.turnId),

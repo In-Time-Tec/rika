@@ -3,11 +3,10 @@ import * as ConfigurationService from "@rika/configuration/configuration-service
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as ConfigOperations from "@rika/product/configuration-operation"
 import { executionSessionLifecycleLayerTest, productLayer, Service } from "./product-operation-test-layer"
-import * as Database from "@rika/product-store/product-database-layer"
-import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as ThreadRepository from "@rika/product-store/postgres-thread-repository"
 import * as Thread from "@rika/product/thread-record"
-import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
-import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as TranscriptRepository from "@rika/product-store/postgres-transcript-repository"
+import * as TurnRepository from "@rika/product-store/postgres-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as WebSearchProvider from "@rika/coding-tools/web-search-provider"
@@ -34,7 +33,6 @@ const withServices = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices 
 interface CliSandbox {
   readonly root: string
   readonly workspace: string
-  readonly databasePath: string
   readonly globalConfigPath: string
   readonly workspaceConfigPath: string
   readonly adapter: ConfigOperations.AdapterInterface
@@ -56,7 +54,6 @@ const sandbox = Effect.gen(function* () {
   const context: CliSandbox = {
     root,
     workspace,
-    databasePath: path.join(root, "rika.db"),
     globalConfigPath: path.join(root, "home", ".config", "rika", "settings.json"),
     workspaceConfigPath: path.join(workspace, ".rika", "settings.json"),
     adapter,
@@ -73,13 +70,9 @@ const configServiceLayer = ConfigurationService.liveConfigurationLayer({
 }).pipe(Layer.provide(Layer.succeed(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: {} }))), Layer.orDie)
 
 const operationLayer = (context: CliSandbox) => {
-  const database = Database.layer(context.databasePath)
-  const repositoryLayer = ThreadRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
-  const turnRepositoryLayer = TurnRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
-  const transcriptRepositoryLayer = TranscriptRepository.layer.pipe(
-    Layer.provide(database),
-    Layer.provide(BunServices.layer),
-  )
+  const repositoryLayer = ThreadRepository.memoryLayer()
+  const turnRepositoryLayer = TurnRepository.memoryLayer()
+  const transcriptRepositoryLayer = TranscriptRepository.memoryLayer()
   return productLayer({
     executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
     repositoryLayer,
@@ -94,7 +87,6 @@ const operationLayer = (context: CliSandbox) => {
       options: {
         globalConfigPath: context.globalConfigPath,
         workspaceConfigPath: context.workspaceConfigPath,
-        productDatabasePath: context.databasePath,
       },
     },
     interactive: () => Effect.void,

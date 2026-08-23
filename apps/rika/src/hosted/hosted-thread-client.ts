@@ -148,7 +148,7 @@ export const layer = Layer.effect(
                     : { kind: "organization", organizationId: input.owner.organizationId },
                 ...(input.project === undefined ? {} : { projectId: ProjectId.make(input.project) }),
                 executorKind: input.executorKind,
-                ...(input.localRunnerTarget === undefined ? {} : { localRunnerTarget: input.localRunnerTarget }),
+                ...(input.runnerTarget === undefined ? {} : { runnerTarget: input.runnerTarget }),
               }),
             )
             const accepted = yield* awaitCommand(connection, requestId, input.commandId)
@@ -179,6 +179,60 @@ export const layer = Layer.effect(
             if (accepted.result._tag !== "Applied")
               return yield* failure("protocol", "Hosted prompt returned the wrong result")
             return { commandId: input.commandId, status: "queued" as const }
+          }),
+        ).pipe(Effect.provideService(Socket.WebSocketConstructor, webSocketConstructor)),
+      ensureService: (input) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* connect(input.ticket)
+            const snapshot = yield* attach(connection, input.threadId, `${input.commandId}:attach`)
+            const requestId = `${input.commandId}:service`
+            yield* connection.send(
+              envelope(requestId, {
+                _tag: "EnsureRepositoryService",
+                commandId: CommandId.make(input.commandId),
+                idempotencyKey: IdempotencyKey.make(input.commandId),
+                expectedThreadVersion: snapshot.threadVersion,
+                service: input.service,
+              }),
+            )
+            const accepted = yield* awaitCommand(connection, requestId, input.commandId)
+            if (accepted.result._tag !== "Applied")
+              return yield* failure("protocol", "Repository service returned the wrong result")
+          }),
+        ).pipe(Effect.provideService(Socket.WebSocketConstructor, webSocketConstructor)),
+      stopService: (input) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* connect(input.ticket)
+            const snapshot = yield* attach(connection, input.threadId, `${input.commandId}:attach`)
+            const requestId = `${input.commandId}:service`
+            yield* connection.send(
+              envelope(requestId, {
+                _tag: "StopRepositoryService",
+                commandId: CommandId.make(input.commandId),
+                idempotencyKey: IdempotencyKey.make(input.commandId),
+                expectedThreadVersion: snapshot.threadVersion,
+                serviceId: input.serviceId,
+              }),
+            )
+            const accepted = yield* awaitCommand(connection, requestId, input.commandId)
+            if (accepted.result._tag !== "Applied")
+              return yield* failure("protocol", "Repository service returned the wrong result")
+          }),
+        ).pipe(Effect.provideService(Socket.WebSocketConstructor, webSocketConstructor)),
+      openPortal: (input) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* connect(input.ticket)
+            yield* attach(connection, input.threadId, `${input.requestId}:attach`)
+            yield* connection.send(envelope(input.requestId, { _tag: "OpenPortal", port: input.port }))
+            while (true) {
+              const payload = (yield* connection.next).payload
+              if (payload._tag === "CommandRejected" && payload.requestId === input.requestId)
+                return yield* rejection(payload)
+              if (payload._tag === "PortalOpened" && payload.requestId === input.requestId) return payload.url
+            }
           }),
         ).pipe(Effect.provideService(Socket.WebSocketConstructor, webSocketConstructor)),
     } satisfies ThreadClientInterface)

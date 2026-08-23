@@ -34,7 +34,7 @@
     "./hosted-identity-context": "./src/hosted/identity-context.ts",
     "./hosted-observability": "./src/hosted/observability.ts",
     "./hosted-model": "./src/hosted/model.ts",
-    "./local-runner-registration": "./src/hosted/local-runner-registration.ts",
+    "./runner-registration": "./src/hosted/runner-registration.ts",
     "./workspace-capability": "./src/hosted/workspace-capability.ts",
     "./hosted-store": "./src/hosted/hosted-store.ts",
     "./thread-protocol-store": "./src/hosted/thread-protocol-store.ts",

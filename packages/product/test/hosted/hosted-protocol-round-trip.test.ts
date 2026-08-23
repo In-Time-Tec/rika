@@ -76,15 +76,15 @@ describe("hosted Thread client protocol", () => {
         _tag: "CreateThread",
         ...mutation,
         owner: { kind: "personal" },
-        executorKind: "local_device",
-        localRunnerTarget: { deviceId: "device-1", checkoutFingerprint: "checkout-1" },
+        executorKind: "runner",
+        runnerTarget: { deviceId: "device-1", checkoutFingerprint: "checkout-1" },
       }),
       envelope({
         _tag: "CreateThread",
         ...mutation,
         owner: { kind: "organization", organizationId },
         projectId,
-        executorKind: "e2b",
+        executorKind: "orb",
         repositoryRef: { repositoryId: "repository", ref: "refs/heads/main" },
       }),
       envelope({ _tag: "AttachThread", threadId, afterCursor: cursor }),
@@ -129,7 +129,7 @@ describe("hosted Thread client protocol", () => {
     ).toThrow()
     expect(() =>
       Schema.decodeUnknownSync(ClientMessage)(
-        envelope({ _tag: "CreateThread", ...mutation, owner: { kind: "personal" }, executorKind: "local_device" }),
+        envelope({ _tag: "CreateThread", ...mutation, owner: { kind: "personal" }, executorKind: "runner" }),
       ),
     ).toThrow()
     expect(() =>
@@ -138,8 +138,8 @@ describe("hosted Thread client protocol", () => {
           _tag: "CreateThread",
           ...mutation,
           owner: { kind: "personal" },
-          executorKind: "e2b",
-          localRunnerTarget: { deviceId: "device-1", checkoutFingerprint: "checkout-1" },
+          executorKind: "orb",
+          runnerTarget: { deviceId: "device-1", checkoutFingerprint: "checkout-1" },
         }),
       ),
     ).toThrow()

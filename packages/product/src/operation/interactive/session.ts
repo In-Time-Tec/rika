@@ -149,7 +149,7 @@ const makeInteractiveSupervisionComponentsImpl = (
     notifyTurnChanged: input.notifyTurnChanged,
     claimTurnObserver: input.claimTurnObserver,
     observeTurn: following.observeTurn,
-    serverOwner: input.serverOwner,
+    recoveryOwner: input.recoveryOwner,
     sessionThreadViews: input.sessionThreadViews,
     sessionId: input.sessionId,
     getSelectedThreadId: state.getSelectedThreadId,
@@ -283,11 +283,11 @@ export const makeInteractiveSession = (
   input: InteractiveSessionInput,
 ): ((
   workspace: string,
-  settings?: { readonly initialThreadId?: string; readonly serverOwner?: boolean },
+  settings?: { readonly initialThreadId?: string; readonly recoveryOwner?: boolean },
 ) => Effect.Effect<InteractiveSessionRuntimeResult, OperationError, never>) =>
   Effect.fn("ProductOperation.makeInteractiveSession")(function* (
     workspace: string,
-    settings: { readonly initialThreadId?: string; readonly serverOwner?: boolean } = {},
+    settings: { readonly initialThreadId?: string; readonly recoveryOwner?: boolean } = {},
   ) {
     const sessionId = input.nextSessionId()
     const supervisionInitialized = yield* Deferred.make<void, InteractiveSupervisionError>()
@@ -297,7 +297,7 @@ export const makeInteractiveSession = (
       activitySequence: input.activitySequence,
       options: input.options,
       initialThreadId: settings.initialThreadId,
-      serverOwner: settings.serverOwner ?? false,
+      recoveryOwner: settings.recoveryOwner ?? false,
     })
     const typedLifecycleAdmission: Semaphore.Semaphore = state.lifecycleAdmission
     const typedGetLifecycle: () => "open" | "closed" = state.getLifecycle
@@ -311,7 +311,7 @@ export const makeInteractiveSession = (
       ...state,
       workspace,
       sessionId,
-      serverOwner: settings.serverOwner ?? false,
+      recoveryOwner: settings.recoveryOwner ?? false,
       supervisionInitialized,
       emit: state.emit,
       dispatchFailure: state.dispatchFailure,

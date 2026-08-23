@@ -27,7 +27,7 @@ import { migrations } from "@rika/product-store/migrations"
 import { layer } from "@rika/product-store/postgres-layer"
 import { Context, DateTime, Effect, Layer, Random, Redacted } from "effect"
 import { Pool } from "pg"
-import { HostedOperations, type HostedOperationsService } from "../src/hosted-operations"
+import { HostedThreadApplication, type HostedThreadApplicationService } from "../src/hosted-thread-application"
 import { HostedProduct, type HostedProductService } from "../src/hosted-product"
 import {
   HostedThreadProtocol,
@@ -145,7 +145,7 @@ const setup = (pool: Pool) =>
       id: workspaceId,
       ownerId,
       createdByUserId: userId,
-      executorKind: "local_device",
+      executorKind: "runner",
       now,
     })
     yield* hosted.createThread({
@@ -153,7 +153,7 @@ const setup = (pool: Pool) =>
       ownerId,
       workspaceId,
       createdByUserId: userId,
-      executorKind: "local_device",
+      executorKind: "runner",
       now,
     })
     const protocol = yield* ThreadProtocolStore
@@ -335,6 +335,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       const product: HostedProductService = {
         ready: Effect.void,
         projects: () => Effect.succeed([]),
+        createProject: () => Effect.die("unused"),
         activatePrincipal: () => Effect.void,
         createConnection: () => Effect.die("unused"),
         authorizeThread: () => Effect.succeed({ ownerId, actor }),
@@ -349,23 +350,22 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
             branch: "feature/thread-controls",
             executor: {
               assignmentId,
-              kind: "e2b",
+              kind: "orb",
               generation: "7",
               lifecycle: "active",
               executorInstanceId: "executor-1",
             },
           }),
-        registerLocalRunner: () => Effect.die("unused"),
+        registerRunner: () => Effect.die("unused"),
         setRemoteThreadCreation: () => Effect.die("unused"),
-        pollLocalRunner: () => Effect.die("unused"),
+        pollRunner: () => Effect.die("unused"),
         admitRun: (input) =>
           Effect.sync(() => {
             if (!runs.some((run) => run.operationKey === input.operationKey)) runs.push(input)
             return { commandId: input.operationKey, turnId: `turn-${input.operationKey}`, status: "queued" as const }
           }),
       }
-      const operations: HostedOperationsService = {
-        run: () => Effect.void,
+      const operations: HostedThreadApplicationService = {
         thread: () => Effect.succeed(currentSnapshot.thread),
         snapshot: () => Effect.succeed(currentSnapshot),
         interactive: (input) =>
@@ -380,8 +380,16 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       }
       const dependencies = Layer.mergeAll(
         Layer.succeed(HostedProduct, product),
-        Layer.succeed(HostedOperations, operations),
-        Layer.succeed(HostedWorkspace, HostedWorkspace.of({ execute: () => Effect.die("unused") })),
+        Layer.succeed(HostedThreadApplication, operations),
+        Layer.succeed(
+          HostedWorkspace,
+          HostedWorkspace.of({
+            execute: () => Effect.die("unused"),
+            pause: () => Effect.void,
+            resume: () => Effect.void,
+            portal: () => Effect.die("unused"),
+          }),
+        ),
         Layer.succeed(ThreadProtocolStore, protocolStore),
         Layer.succeed(HostedToolPolicy, testToolPolicy),
         BunCrypto.layer,
@@ -406,7 +414,10 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
             requestId: requestId as never,
             command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
           }),
-        ).toMatchObject([{ payload: { _tag: "ThreadSnapshot", threadVersion: "0", cursor: "0" } }])
+        ).toMatchObject([
+          { payload: { _tag: "ThreadSnapshot", threadVersion: "0", cursor: "0" } },
+          { payload: { _tag: "PresenceSnapshot", threadId, participants: [{ status: "viewing" }] } },
+        ])
 
       const duplicate = {
         protocolVersion: 1 as const,
@@ -517,6 +528,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
             snapshot: { pendingAuthorizations: [{ authorizationId: "authorization-1", checkpoint }] },
           },
         },
+        { payload: { _tag: "PresenceSnapshot", threadId } },
       ])
       const approval = {
         protocolVersion: 1 as const,
@@ -638,7 +650,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
               branch: "feature/thread-controls",
               executor: {
                 assignmentId,
-                kind: "e2b",
+                kind: "orb",
                 generation: "7",
                 lifecycle: "active",
                 executorInstanceId: "executor-1",
@@ -696,6 +708,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
             event: { cursor: "4", event: { _tag: "ExecutionControlled", action: "cancelled" } },
           },
         },
+        { payload: { _tag: "PresenceSnapshot", threadId } },
       ])
     }),
   ),
@@ -742,7 +755,7 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         id: organizationWorkspaceId,
         ownerId: organizationOwnerId,
         createdByUserId: userId,
-        executorKind: "local_device",
+        executorKind: "runner",
         now,
       })
       yield* hosted.createThread({
@@ -750,7 +763,7 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         ownerId: organizationOwnerId,
         workspaceId: organizationWorkspaceId,
         createdByUserId: userId,
-        executorKind: "local_device",
+        executorKind: "runner",
         now,
       })
       yield* protocol.initializeThread({

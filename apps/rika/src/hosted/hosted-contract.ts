@@ -1,13 +1,15 @@
 import { Context, Effect, Option, Redacted, Schema } from "effect"
 import type { ClientTicketResponse } from "@rika/product/client-protocol"
 import type { ExecutorKind } from "@rika/product/hosted-model"
+import type { EnvironmentPhase, EnvironmentScope } from "@rika/product/environment-policy"
+import type { RepositoryService } from "@rika/product/workspace-capability"
 import * as HostedIdentity from "@rika/product/hosted-identity-context"
 import type {
-  LocalRunnerTarget,
-  LocalRunnerPollResult,
-  LocalRunnerProfile,
+  RunnerTarget,
+  RunnerPollResult,
+  RunnerProfile,
   RemoteThreadCreation,
-} from "@rika/product/local-runner-registration"
+} from "@rika/product/runner-registration"
 
 export const defaultOrigin = "https://rika-app.up.railway.app"
 export const scopes = "openid profile email offline_access account"
@@ -124,6 +126,31 @@ export const RunResult = Schema.Struct({
 })
 export type RunResult = typeof RunResult.Type
 
+export const EnvironmentReferenceStatus = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  scope: Schema.Literals(["personal", "organization", "project"]),
+  classification: Schema.Literals(["plain", "secret"]),
+  phases: Schema.Array(Schema.Literals(["setup", "runtime"])),
+  revision: Schema.String,
+  state: Schema.Literals(["active", "revoked"]),
+})
+export type EnvironmentReferenceStatus = typeof EnvironmentReferenceStatus.Type
+
+export const RepositoryPublicationStatus = Schema.Struct({
+  publicationId: Schema.String,
+  state: Schema.Literals(["approved", "pushing", "pushed", "completed", "failed", "unknown"]),
+  branch: Schema.String,
+  ref: Schema.String,
+  commitSha: Schema.String,
+  targetBranch: Schema.String,
+  targetCommitSha: Schema.String,
+  targetProtected: Schema.Boolean,
+  pushResult: Schema.NullOr(Schema.Unknown),
+  pullRequestResult: Schema.NullOr(Schema.Unknown),
+})
+export type RepositoryPublicationStatus = typeof RepositoryPublicationStatus.Type
+
 export interface ThreadClientInterface {
   readonly create: (input: {
     readonly ticket: ClientTicketResponse
@@ -131,7 +158,7 @@ export interface ThreadClientInterface {
     readonly owner: OwnerSelection
     readonly project?: string
     readonly executorKind: ExecutorKind
-    readonly localRunnerTarget?: LocalRunnerTarget
+    readonly runnerTarget?: RunnerTarget
   }) => Effect.Effect<HostedThreadId, HostedError>
   readonly submit: (input: {
     readonly ticket: ClientTicketResponse
@@ -139,6 +166,24 @@ export interface ThreadClientInterface {
     readonly request: RunRequest
     readonly commandId: string
   }) => Effect.Effect<RunResult, HostedError>
+  readonly ensureService: (input: {
+    readonly ticket: ClientTicketResponse
+    readonly threadId: HostedThreadId
+    readonly commandId: string
+    readonly service: RepositoryService
+  }) => Effect.Effect<void, HostedError>
+  readonly stopService: (input: {
+    readonly ticket: ClientTicketResponse
+    readonly threadId: HostedThreadId
+    readonly commandId: string
+    readonly serviceId: string
+  }) => Effect.Effect<void, HostedError>
+  readonly openPortal: (input: {
+    readonly ticket: ClientTicketResponse
+    readonly threadId: HostedThreadId
+    readonly requestId: string
+    readonly port: number
+  }) => Effect.Effect<string, HostedError>
 }
 
 export class ThreadClient extends Context.Service<ThreadClient, ThreadClientInterface>()(
@@ -190,10 +235,10 @@ export interface HttpInterface {
   readonly revokeDevice: (origin: string, deviceId: string, session: Session) => Effect.Effect<void, HostedError>
   readonly revokeAllDevices: (origin: string, session: Session) => Effect.Effect<void, HostedError>
   readonly issueThreadTicket: (origin: string, session: Session) => Effect.Effect<ClientTicketResponse, HostedError>
-  readonly registerLocalRunner: (
+  readonly registerRunner: (
     origin: string,
     checkoutFingerprint: string,
-    registration: LocalRunnerProfile,
+    registration: RunnerProfile,
     session: Session,
   ) => Effect.Effect<void, HostedError>
   readonly setRemoteThreadCreation: (
@@ -202,11 +247,11 @@ export interface HttpInterface {
     preference: RemoteThreadCreation,
     session: Session,
   ) => Effect.Effect<void, HostedError>
-  readonly pollLocalRunner: (
+  readonly pollRunner: (
     origin: string,
     checkoutFingerprint: string,
     session: Session,
-  ) => Effect.Effect<LocalRunnerPollResult, HostedError>
+  ) => Effect.Effect<RunnerPollResult, HostedError>
   readonly putProviderCredential: (
     origin: string,
     owner: OwnerSelection,
@@ -225,6 +270,40 @@ export interface HttpInterface {
     provider: ModelProvider,
     session: Session,
   ) => Effect.Effect<ProviderCredentialStatus, HostedError>
+  readonly createProject: (
+    origin: string,
+    owner: OwnerSelection,
+    name: string,
+    session: Session,
+  ) => Effect.Effect<Project, HostedError>
+  readonly putEnvironment: (
+    origin: string,
+    owner: OwnerSelection,
+    project: string | undefined,
+    name: string,
+    scope: EnvironmentScope,
+    phases: ReadonlyArray<EnvironmentPhase>,
+    value: Redacted.Redacted<string>,
+    session: Session,
+  ) => Effect.Effect<EnvironmentReferenceStatus, HostedError>
+  readonly revokeEnvironment: (
+    origin: string,
+    owner: OwnerSelection,
+    project: string | undefined,
+    name: string,
+    scope: EnvironmentScope,
+    session: Session,
+  ) => Effect.Effect<EnvironmentReferenceStatus, HostedError>
+  readonly publishRepository: (
+    origin: string,
+    threadId: string,
+    commitSha: string,
+    targetBranch: string | undefined,
+    title: string,
+    body: string,
+    operationKey: string,
+    session: Session,
+  ) => Effect.Effect<RepositoryPublicationStatus, HostedError>
 }
 
 export class Http extends Context.Service<Http, HttpInterface>()("@rika/cli/hosted/hosted-contract/Http") {}

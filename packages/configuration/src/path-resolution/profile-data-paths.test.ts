@@ -18,37 +18,15 @@ describe("on-disk layout", () => {
 
   it("tolerates a trailing slash on the root", () => {
     expect(workspacePaths("/w/").settings).toBe(workspacePaths("/w").settings)
-    expect(dataPaths("/home/ada/").database).toBe(dataPaths("/home/ada").database)
+    expect(dataPaths("/home/ada/").dataRoot).toBe(dataPaths("/home/ada").dataRoot)
   })
 
-  it("keeps the isolated TenetKit execution database under the profile root", () => {
-    const paths = dataPaths("/home/ada")
-    expect(paths.tenetkitDatabase).toBe("/home/ada/.rika/tenetkit.db")
-  })
-
-  it("resolves host roots and explicit database precedence through one owner", () => {
-    expect(
-      resolveProfileDataPaths({
-        home: "/home/ada",
-        hostDataRoot: "/host/data",
-        productDatabase: "/explicit/product.db",
-        tenetkitDatabase: "/explicit/tenetkit.db",
-      }),
-    ).toEqual({
+  it("resolves the optional hosted data root through one owner", () => {
+    expect(resolveProfileDataPaths({ home: "/home/ada", hostDataRoot: "/host/data" })).toEqual({
       dataRoot: "/host/data",
-      database: "/host/data/rika.db",
-      tenetkitDatabase: "/host/data/tenetkit.db",
     })
-    expect(
-      resolveProfileDataPaths({
-        home: "/home/ada",
-        productDatabase: "/explicit/product.db",
-        tenetkitDatabase: "/explicit/tenetkit.db",
-      }),
-    ).toEqual({
+    expect(resolveProfileDataPaths({ home: "/home/ada" })).toEqual({
       dataRoot: "/home/ada/.rika",
-      database: "/explicit/product.db",
-      tenetkitDatabase: "/explicit/tenetkit.db",
     })
   })
 

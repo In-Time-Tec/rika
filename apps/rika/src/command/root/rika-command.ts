@@ -6,25 +6,27 @@ import { authCommand } from "../product/auth-command"
 import { credentialCommand } from "../product/credential-command"
 import { diagnosticsCommand } from "../product/diagnostics-command"
 import { organizationCommand } from "../product/organization-command"
+import { projectCommand } from "../product/project-command"
+import { secretCommand } from "../product/secret-command"
 import { threadCommand } from "../product/thread-command"
 import { dispatch, type CliOperationService } from "./cli-operation-dispatch"
 import { executeRun, runCommand } from "./noninteractive-run-command"
-import * as LocalRunnerCommand from "./local-runner-command"
+import * as RunnerCommand from "./runner-command"
 import * as ReleaseUpdate from "../../release/release-update"
 import { version } from "../../platform/application-version"
-import { localExecutorProcessRole, tuiControllerProcessRole } from "../../private-runtime-role"
+import { runnerExecutorProcessRole, tuiControllerProcessRole } from "../../private-runtime-role"
 
 export { version }
 
 const mode = Flag.string("mode").pipe(Flag.withAlias("m"), Flag.optional)
 const workspace = Flag.directory("workspace").pipe(Flag.optional)
 const thread = Flag.string("thread").pipe(Flag.optional)
-const ephemeral = Flag.boolean("ephemeral")
+const ephemeral = Flag.boolean("ephemeral").pipe(Flag.withDefault(false))
 const prompt = Argument.variadic(Argument.string("prompt"))
 const streamFlags = {
-  streamJson: Flag.boolean("stream-json"),
-  streamJsonInput: Flag.boolean("stream-json-input"),
-  streamJsonThinking: Flag.boolean("stream-json-thinking"),
+  streamJson: Flag.boolean("stream-json").pipe(Flag.withDefault(false)),
+  streamJsonInput: Flag.boolean("stream-json-input").pipe(Flag.withDefault(false)),
+  streamJsonThinking: Flag.boolean("stream-json-thinking").pipe(Flag.withDefault(false)),
 }
 const optionalValue = <A>(value: Option.Option<A>): A | undefined => Option.getOrUndefined(value)
 
@@ -75,16 +77,22 @@ const interactiveCommand = (values: {
 export const command = Command.make(
   "rika",
   {
-    execute: Flag.boolean("execute").pipe(Flag.withAlias("x")),
+    execute: Flag.boolean("execute").pipe(Flag.withDefault(false), Flag.withAlias("x")),
     mode,
     workspace,
     thread,
     ephemeral,
-    noTui: Flag.boolean("no-tui"),
-    allowRemoteThreadCreation: Flag.boolean("allow-remote-thread-creation"),
-    denyRemoteThreadCreation: Flag.boolean("deny-remote-thread-creation"),
-    internalTuiController: Flag.boolean(tuiControllerProcessRole.slice(2)).pipe(Flag.withHidden),
-    internalLocalExecutor: Flag.boolean(localExecutorProcessRole.slice(2)).pipe(Flag.withHidden),
+    noTui: Flag.boolean("no-tui").pipe(Flag.withDefault(false)),
+    allowRemoteThreadCreation: Flag.boolean("allow-remote-thread-creation").pipe(Flag.withDefault(false)),
+    denyRemoteThreadCreation: Flag.boolean("deny-remote-thread-creation").pipe(Flag.withDefault(false)),
+    internalTuiController: Flag.boolean(tuiControllerProcessRole.slice(2)).pipe(
+      Flag.withDefault(false),
+      Flag.withHidden,
+    ),
+    internalRunnerExecutor: Flag.boolean(runnerExecutorProcessRole.slice(2)).pipe(
+      Flag.withDefault(false),
+      Flag.withHidden,
+    ),
     ...streamFlags,
     prompt,
   },
@@ -107,7 +115,7 @@ export const command = Command.make(
       let remoteThreadCreation: "allowed" | "denied" | undefined
       if (values.allowRemoteThreadCreation) remoteThreadCreation = "allowed"
       else if (values.denyRemoteThreadCreation) remoteThreadCreation = "denied"
-      return LocalRunnerCommand.dispatch({
+      return RunnerCommand.dispatch({
         ...(optionalValue(values.workspace) === undefined ? {} : { workspace: optionalValue(values.workspace) }),
         ...(remoteThreadCreation === undefined ? {} : { remoteThreadCreation }),
       })
@@ -129,6 +137,8 @@ export const command = Command.make(
     threadCommand,
     organizationCommand,
     authCommand,
+    projectCommand,
+    secretCommand,
     credentialCommand,
     diagnosticsCommand,
     updateCommand,

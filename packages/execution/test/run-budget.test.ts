@@ -4,7 +4,7 @@ import { TestModel } from "tenetkit/test"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Layer, Random, Stream } from "effect"
-import { sqliteLayer as layer } from "./test-adapters"
+import { memoryLayer as layer } from "./test-adapters"
 
 const registryLayer = (...fixtures: ReadonlyArray<TestModel.Fixture>) =>
   ModelRegistry.layer(
@@ -44,7 +44,7 @@ it.live(
           { provider: "test", model: "test", registrationKey: "budget-root" },
         )
         const route = testExecutionRoute()
-        const context = yield* Layer.build(layer({ filename, modelServices: registryLayer(rootFixture) }))
+        const context = yield* Layer.build(layer({ dataRoot: filename, modelServices: registryLayer(rootFixture) }))
         const gateway = Context.get(context, ExecutionGateway.Service)
 
         const receipt = yield* gateway.startTurn({
