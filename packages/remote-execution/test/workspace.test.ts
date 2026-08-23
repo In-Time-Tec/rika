@@ -406,7 +406,7 @@ exec "$@"
         },
       })
       expect(fresh.setup.outcome).toBe("missing")
-      expect(yield* fileSystem.readFileString(calls)).toContain(`mkdir -p ${root}`)
+      expect(yield* fileSystem.readFileString(calls)).toContain(`install -d -m 0750 ${root}`)
       yield* fileSystem.makeDirectory(`${root}/.agents`, { recursive: true })
       yield* fileSystem.writeFileString(
         `${root}/.agents/setup`,
