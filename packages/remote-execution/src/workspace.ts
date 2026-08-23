@@ -967,7 +967,18 @@ const make = (options: Options) =>
             ),
           )
         } else {
-          yield* fileSystem.makeDirectory(root, { recursive: true, mode: 0o750 })
+          const created = yield* runAsWorkspace(
+            "checkout",
+            ["mkdir", "-p", root],
+            30_000,
+            workspaceParent,
+          )
+          if (created.code !== 0)
+            return yield* WorkspaceError.make({
+              phase: "checkout",
+              message: "Workspace directory creation failed",
+              retryable: true,
+            })
         }
         const setupCommit = assignment.checkout?.commitSha ?? null
         const pendingSetup = {
