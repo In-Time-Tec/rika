@@ -190,12 +190,16 @@ it.layer(layer)("executor assignments", (test) => {
   test.effect("preserves capabilities through same-generation transitions and replaces them for the successor", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(Date.parse("2026-01-01T00:00:00.000Z"))
-      const { assignments, active } = yield* open("capabilities")
+      const { assignments, active, access } = yield* open("capabilities")
 
       expect(active.capabilityGeneration).toBe(active.generation)
       expect(active.capabilities?.environmentDigest).toBe(`sha256:${"a".repeat(64)}`)
-      const paused = yield* assignments.pause(version(active))
-      expect(paused.capabilities).toEqual(active.capabilities)
+      const refreshedCapabilities = capabilities("c")
+      const updated = yield* assignments.updateCapabilities({ access, capabilities: refreshedCapabilities })
+      expect(updated.capabilityGeneration).toBe(updated.generation)
+      expect(updated.capabilities).toEqual(refreshedCapabilities)
+      const paused = yield* assignments.pause(version(updated))
+      expect(paused.capabilities).toEqual(refreshedCapabilities)
       const replacement = yield* assignments.beginReplacement({
         ...version(paused),
         bootstrapCredentialDigest: Redacted.make("replacement-capabilities"),

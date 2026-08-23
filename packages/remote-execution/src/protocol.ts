@@ -695,6 +695,7 @@ export const ExecutorMessage = Schema.Union([
   Schema.TaggedStruct("ExecutorWorkspaceReady", {
     access: AccessWire,
     proof: WorkspaceProof,
+    capabilities: WorkspaceCapabilitySnapshot,
   }),
   Schema.TaggedStruct("ExecutorQuiesced", {
     access: AccessWire,

@@ -255,6 +255,19 @@ const make = Effect.gen(function* () {
         })
         return succeed(next, saveCredentials(save(current, next), next.id, { session: input.sessionCredentialDigest }))
       }),
+    updateCapabilities: (input) =>
+      mutation((current, now) => {
+        const assignment = load(current, input.access.assignmentId)
+        const invalid = access(assignment, current.credentials.get(input.access.assignmentId), input.access, now)
+        if (invalid !== undefined) return invalid
+        if (assignment!.lifecycle._tag !== "Active") return fail("invalid-state", "Assignment is not active")
+        const next = revised(assignment!, now, {
+          capabilityGeneration: assignment!.generation,
+          capabilities: input.capabilities,
+          lastActiveAt: now,
+        })
+        return succeed(next, save(current, next))
+      }),
     reconnect: (input) =>
       mutation((current, now) => {
         const assignment = load(current, input.access.assignmentId)

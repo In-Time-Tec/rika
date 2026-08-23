@@ -265,6 +265,7 @@ const workspaceReady = (gateway: Gateway, target: ReturnType<typeof socket>, cur
           templateBuildId: "build-1",
           restoredCheckpointId: null,
         },
+        capabilities: workspaceCapabilities,
       }),
     )
     .pipe(Effect.tap(() => Effect.sync(() => target.sent.splice(retained, 1))))

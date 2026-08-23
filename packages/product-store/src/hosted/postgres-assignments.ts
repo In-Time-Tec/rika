@@ -399,6 +399,28 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
     },
   )
 
+  const updateCapabilities: AssignmentsService["updateCapabilities"] = Effect.fn(
+    "PostgresAssignments.updateCapabilities",
+  )(function* (input) {
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        const row = yield* locked(input.access.assignmentId, "UPDATE")
+        yield* checkAccess(row, input.access, true)
+        return yield* updated(
+          input.access.assignmentId,
+          sql`UPDATE rika_hosted_executor_assignments SET
+            revision = revision + 1, capability_generation = generation,
+            capability_snapshot = ${sql.json(input.capabilities)},
+            last_active_at = transaction_timestamp(), updated_at = transaction_timestamp()
+            WHERE id = ${input.access.assignmentId}
+              AND generation = ${input.access.assignmentGeneration}::bigint
+              AND lease_epoch = ${input.access.leaseEpoch}::bigint RETURNING id`,
+        )
+      }),
+    )
+  })
+
   const reconnect: AssignmentsService["reconnect"] = Effect.fn("PostgresAssignments.reconnect")(function* (input) {
     return yield* transaction(
       sql,
@@ -670,6 +692,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
     beginReplacement,
     bindProviderInstance,
     openSession,
+    updateCapabilities,
     reconnect,
     heartbeat,
     authenticate,

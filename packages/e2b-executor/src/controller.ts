@@ -1,4 +1,8 @@
-import { type ExecutorAssignment, type OrbPlacement } from "@rika/product/executor-assignment"
+import {
+  type ExecutorAssignment,
+  type OrbPlacement,
+  type WorkspaceCapabilitySnapshot,
+} from "@rika/product/executor-assignment"
 import { AssignmentError, ExecutorAssignments, type Access } from "@rika/product/executor-assignments"
 import { resolveEgressPolicy, type EnvironmentPhase, type PhaseEgressPolicy } from "@rika/product/environment-policy"
 import * as HostedObservability from "@rika/product/hosted-observability"
@@ -182,6 +186,7 @@ export interface Interface {
   readonly ready: (
     access: ProtocolAccess,
     proof: WorkspaceProof,
+    capabilities: WorkspaceCapabilitySnapshot,
     environmentDigest: string,
   ) => Effect.Effect<void, ControllerError>
   readonly loadSetupCache: (
@@ -951,6 +956,7 @@ export const layer = (
       const ready = Effect.fn("Controller.ready")(function* (
         input: ProtocolAccess,
         proof: WorkspaceProof,
+        capabilities: WorkspaceCapabilitySnapshot,
         environmentDigest: string,
       ) {
         const assignment = yield* assignments
@@ -979,6 +985,12 @@ export const layer = (
           proof.restoredCheckpointId !== latest.id
         )
           return yield* failure("checkpoint", "Replacement did not restore the latest verified checkpoint")
+        yield* assignments
+          .updateCapabilities({
+            access: yield* assignmentAccess(input),
+            capabilities,
+          })
+          .pipe(Effect.mapError(assignmentFailure))
       })
 
       const validateCacheKey = Effect.fn("Controller.validateCacheKey")(function* (

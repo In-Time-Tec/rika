@@ -555,8 +555,12 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               leaseEpoch: active.lifecycle.leaseEpoch,
               presentedSessionCredentialDigest: Redacted.make("session"),
             }
+            const refreshedCapabilities = capabilities("c")
+            const updated = yield* assignments.updateCapabilities({ access, capabilities: refreshedCapabilities })
+            expect(updated.capabilityGeneration).toBe(updated.generation)
+            expect(updated.capabilities).toEqual(refreshedCapabilities)
             const replacement = yield* assignments.beginReplacement({
-              ...version(active),
+              ...version(updated),
               bootstrapCredentialDigest: Redacted.make("replacement"),
               bootstrapLifetimeMillis: 60_000,
             })

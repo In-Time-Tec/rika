@@ -3,6 +3,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import * as HostedObservability from "@rika/product/hosted-observability"
+import type { WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
 import {
   Cause,
   Context,
@@ -411,6 +412,7 @@ const prepare = (
   executionEnvironment: Record<string, string>,
   appliedEnvironment: Ref.Ref<Map<string, string>>,
   cells: HostedKernel.Interface,
+  inspectCapabilities: Effect.Effect<WorkspaceCapabilitySnapshot, never, Crypto.Crypto | FileSystem.FileSystem>,
   environmentAccess: Semaphore.Semaphore,
   redactedValues: Set<string>,
 ) =>
@@ -650,6 +652,7 @@ const prepare = (
             attempt,
             evidence: outcome.success,
           })
+          const capabilities = yield* inspectCapabilities
           yield* send({
             _tag: "ExecutorWorkspaceReady",
             access,
@@ -663,6 +666,7 @@ const prepare = (
               templateBuildId: outcome.success.lifecycle.templateBuildId,
               restoredCheckpointId: outcome.success.lifecycle.restoredCheckpointId,
             },
+            capabilities,
           })
           yield* receive((message) =>
             message._tag === "WorkspaceAccepted" && sameFence(message.fence, access.fence) ? message : undefined,
@@ -1405,6 +1409,7 @@ const connect = Effect.fn("Host.connect")(function* (
   quiesced: Ref.Ref<boolean>,
   lifecycle: Semaphore.Semaphore,
   cells: HostedKernel.Interface,
+  inspectCapabilities: Effect.Effect<WorkspaceCapabilitySnapshot, never, Crypto.Crypto | FileSystem.FileSystem>,
   makeMachine: Effect.Effect<Machine["Service"], never, import("effect").Scope.Scope>,
   ptyDelivery: Semaphore.Semaphore,
   activeWriter: Ref.Ref<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>,
@@ -1475,6 +1480,7 @@ const connect = Effect.fn("Host.connect")(function* (
       executionEnvironment,
       appliedEnvironment,
       cells,
+      inspectCapabilities,
       environmentAccess,
       redactedValues,
     ),
@@ -1746,7 +1752,7 @@ const host = Effect.scoped(
         yield* pty.disconnectAll.pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
         const ptyCursor = yield* pty.cursor.pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
         const ptyReady = config.fence.target === "orb" && capabilities.pty
-        const workspaceCapabilities = yield* inspectWorkspaceCapabilities({
+        const inspectCapabilities = inspectWorkspaceCapabilities({
           target: config.fence.target,
           workspacePath: workspaceRoot,
           typescriptKernel: true,
@@ -1754,6 +1760,7 @@ const host = Effect.scoped(
           browser: capabilities.browser,
           services: capabilities.services,
         })
+        const workspaceCapabilities = yield* inspectCapabilities
         const runtime = runtimeLayer({
           fence: config.fence,
           bootstrapToken: config.bootstrapToken,
@@ -1823,6 +1830,7 @@ const host = Effect.scoped(
             quiesced,
             lifecycle,
             cells,
+            inspectCapabilities,
             makeMachine,
             ptyDelivery,
             activeWriter,

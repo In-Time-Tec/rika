@@ -379,6 +379,7 @@ describe("Controller", () => {
           templateBuildId: "template-build-v1-immutable",
           restoredCheckpointId: "checkpoint-replacement",
         },
+        workspaceCapabilities,
         environmentDigest,
       )
       const assignments = yield* ExecutorAssignments
@@ -430,10 +431,13 @@ describe("Controller", () => {
         templateBuildId: "template-build-v1-immutable",
         restoredCheckpointId: "different-checkpoint",
       }
-      expect((yield* Effect.flip(service.ready(second.access, proof, environmentDigest))).kind).toBe("checkpoint")
+      expect(
+        (yield* Effect.flip(service.ready(second.access, proof, workspaceCapabilities, environmentDigest))).kind,
+      ).toBe("checkpoint")
       yield* service.ready(
         second.access,
         { ...proof, restoredCheckpointId: "checkpoint-replacement" },
+        workspaceCapabilities,
         environmentDigest,
       )
     }).pipe(provideLayer(harness.layer))
@@ -582,8 +586,14 @@ describe("Controller", () => {
         templateBuildId: "template-build-v1-immutable",
         restoredCheckpointId: null,
       }
-      expect((yield* Effect.flip(service.ready(access, proof, `sha256:${"f".repeat(64)}`))).kind).toBe("fenced")
-      yield* service.ready(access, proof, environmentDigest)
+      expect(
+        (
+          yield* Effect.flip(
+            service.ready(access, proof, workspaceCapabilities, `sha256:${"f".repeat(64)}`),
+          )
+        ).kind,
+      ).toBe("fenced")
+      yield* service.ready(access, proof, workspaceCapabilities, environmentDigest)
       const key = {
         ownerId: "owner-1",
         repository: {
