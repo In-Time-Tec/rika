@@ -28,7 +28,7 @@ concurrency:
 jobs:
   review:
     if: inputs.resume_run_id == ''
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 60
     outputs:
       digest: ${{ steps.image.outputs.digest }}
@@ -178,7 +178,7 @@ jobs:
     if: inputs.promote == true && inputs.resume_run_id == ''
     needs: review
     environment: executor-production
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 60
     env:
       IMAGE: ${{ needs.review.outputs.image }}
@@ -272,7 +272,7 @@ jobs:
 
   resume:
     if: inputs.promote == true && inputs.resume_run_id != ''
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 15
     outputs:
       digest: ${{ steps.evidence.outputs.digest }}
@@ -373,7 +373,7 @@ jobs:
       (inputs.resume_run_id != '' && needs.resume.result == 'success'))
     needs: [review, publish, resume]
     environment: executor-production
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 60
     env:
       IMAGE: ${{ needs.resume.outputs.image || needs.review.outputs.image }}

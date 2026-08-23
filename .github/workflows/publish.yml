@@ -289,8 +289,7 @@ jobs:
     name: publish-npm
     needs: aggregate
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-    # npm rejects --provenance from self-hosted runners; this job must stay GitHub-hosted.
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
       contents: read
@@ -361,13 +360,13 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for archive in artifacts/npm/cli-*/*.tgz; do
-            npm publish --access public --provenance "$archive"
+            npm publish --access public "$archive"
           done
       - name: Publish launcher
         if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance artifacts/npm/cli/*.tgz
+        run: npm publish --access public artifacts/npm/cli/*.tgz
 
   publish:
     name: publish-release
