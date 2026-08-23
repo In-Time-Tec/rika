@@ -15,6 +15,7 @@ type Job = {
   readonly environment?: string
   readonly permissions?: Readonly<Record<string, string>>
   readonly steps?: ReadonlyArray<Step>
+  readonly "runs-on"?: string
 }
 type Workflow = {
   readonly on?: {
@@ -35,6 +36,11 @@ const commands = (job: string) =>
     .join("\n")
 const named = (job: string, name: string) => steps(job).find((step) => step.name === name)
 const position = (job: string, name: string) => steps(job).findIndex((step) => step.name === name)
+
+test("runs every executor image job on Blacksmith", () => {
+  for (const job of ["review", "publish", "resume", "template"])
+    expect(jobs[job]?.["runs-on"], job).toMatch(/^blacksmith-/)
+})
 
 test("builds one deterministic OCI candidate and canonical SPDX SBOM without registry authority", () => {
   expect(jobs.review?.permissions).toEqual({ contents: "read", "id-token": "write", attestations: "write" })

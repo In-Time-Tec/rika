@@ -3,12 +3,14 @@ import { expect, test } from "vitest"
 type Step = {
   readonly uses?: string
   readonly run?: string
+  readonly if?: string
 }
 
 type Job = {
   readonly needs?: string | ReadonlyArray<string>
   readonly permissions?: Readonly<Record<string, string>>
   readonly steps?: ReadonlyArray<Step>
+  readonly "runs-on"?: string
 }
 
 type Workflow = {
@@ -32,6 +34,12 @@ test("packages nothing until CI is green for the commit being published", () => 
   expect((required ?? "").split(" ").toSorted()).toEqual(["proc", "quality", "tui"])
   expect(gate).toContain("actions/workflows/ci.yml/runs?head_sha=$COMMIT")
   expect(gate).toContain("No ci run exists for $COMMIT")
+})
+
+test("runs every release job on Blacksmith", () => {
+  for (const job of ["verify", "aggregate", "npm", "publish"])
+    expect(jobs[job]?.["runs-on"], job).toMatch(/^blacksmith-/)
+  expect(jobs.package?.["runs-on"]).toBe("${{ matrix.runner }}")
 })
 
 test("retries only the known-flaky lane, a bounded number of times, and logs any override", () => {
@@ -106,10 +114,11 @@ test("publishes npm packages built from the same attested archives", () => {
 
   const npmCommands = commands("npm")
   expect(npmCommands.indexOf("--dry-run")).toBeGreaterThan(-1)
-  expect(npmCommands.indexOf("--dry-run")).toBeLessThan(npmCommands.indexOf("--provenance"))
+  expect(npmCommands).not.toContain("--provenance")
 
-  const publishSteps = steps("npm").filter((step) => (step.run ?? "").includes("npm publish"))
-  const guarded = publishSteps.filter((step) => (step.run ?? "").includes("--provenance"))
-  expect(guarded.length).toBe(2)
-  for (const step of guarded) expect((step as { readonly if?: string }).if).toContain("dry_run != true")
+  const publishSteps = steps("npm").filter(
+    (step) => (step.run ?? "").includes("npm publish") && !(step.run ?? "").includes("--dry-run"),
+  )
+  expect(publishSteps).toHaveLength(2)
+  for (const step of publishSteps) expect(step.if).toContain("dry_run != true")
 })
