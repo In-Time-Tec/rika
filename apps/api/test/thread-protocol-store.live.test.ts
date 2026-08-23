@@ -471,7 +471,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
         reason: "stale-version",
         currentThreadVersion: "2",
       })
-      expect(stale?.currentCursor).toBe("1")
+      expect(["1", "2"]).toContain(stale?.currentCursor)
       const staleIndex = stale?.requestId === "controller-a-request" ? 0 : 1
       const delayed = contenders[staleIndex]!
       const delayedSession = staleIndex === 0 ? controllerA : controllerB

@@ -47,6 +47,8 @@ describe("E2B image source contract", () => {
       expect(download).toContain("curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o")
     for (const item of manifest.aptPackages) expect(dockerfile).toContain(`${item.name}=${item.version}`)
     expect(manifest.tools.every(({ expect }) => typeof expect === "string" && expect.length > 0)).toBe(true)
+    expect(dockerfile).toContain("ARG NPM_TAR_VERSION=7.5.21")
+    expect(dockerfile).toContain("/usr/local/lib/node_modules/npm/node_modules/tar")
     const tools = new Set(manifest.tools.map(({ name }) => name))
     expect(tools.size).toBe(manifest.tools.length)
     for (const name of [
