@@ -15,6 +15,7 @@ ARG COREPACK_VERSION=0.35.0
 ARG NPM_VERSION=12.0.2
 ARG NPM_BRACE_EXPANSION_VERSION=5.0.9
 ARG NPM_IP_ADDRESS_VERSION=10.5.0
+ARG NPM_TAR_VERSION=7.5.21
 ARG PNPM_VERSION=11.22.0
 ARG YARN_VERSION=1.22.22
 ARG PILLOW_VERSION=12.3.0
@@ -68,9 +69,9 @@ RUN export DEBIAN_FRONTEND=noninteractive \
   && npm install --global "agent-browser@${AGENT_BROWSER_VERSION}" "corepack@${COREPACK_VERSION}" \
   && corepack enable && corepack prepare "pnpm@${PNPM_VERSION}" "yarn@${YARN_VERSION}" --activate \
   && npm install --global "npm@${NPM_VERSION}" \
-  && npm install --global "brace-expansion@${NPM_BRACE_EXPANSION_VERSION}" "ip-address@${NPM_IP_ADDRESS_VERSION}" \
-  && rm -rf /usr/local/lib/node_modules/npm/node_modules/brace-expansion /usr/local/lib/node_modules/npm/node_modules/ip-address \
-  && mv /usr/local/lib/node_modules/brace-expansion /usr/local/lib/node_modules/ip-address /usr/local/lib/node_modules/npm/node_modules/ \
+  && npm install --global "brace-expansion@${NPM_BRACE_EXPANSION_VERSION}" "ip-address@${NPM_IP_ADDRESS_VERSION}" "tar@${NPM_TAR_VERSION}" \
+  && rm -rf /usr/local/lib/node_modules/npm/node_modules/brace-expansion /usr/local/lib/node_modules/npm/node_modules/ip-address /usr/local/lib/node_modules/npm/node_modules/tar \
+  && mv /usr/local/lib/node_modules/brace-expansion /usr/local/lib/node_modules/ip-address /usr/local/lib/node_modules/tar /usr/local/lib/node_modules/npm/node_modules/ \
   && curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64" \
   && echo "${YQ_SHA256}  /usr/local/bin/yq" | sha256sum -c - \
   && chmod 0755 /usr/local/bin/yq \
