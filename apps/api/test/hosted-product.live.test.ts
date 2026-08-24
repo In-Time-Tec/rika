@@ -386,8 +386,11 @@ it.effect.skipIf(!live)("admits a current local Thread without recovering an unr
       expect(route.mode).toBe("high")
       expect(
         route.main.candidates.every(
-          (candidate: { providerConnection: { provider: string } }) =>
-            candidate.providerConnection.provider === "openrouter",
+          (candidate) =>
+            candidate.providerConnection.provider === "openai" &&
+            candidate.providerConnection.authentication === "account" &&
+            candidate.providerConnection.credentialIdentity === "openai-account-test" &&
+            candidate.providerConnection.accountFingerprint === "openai-fingerprint-test",
         ),
       ).toBe(true)
       expect(
