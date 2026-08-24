@@ -14,7 +14,9 @@
     ]
   },
   "deploy": {
-    "preDeployCommand": ["bun --cwd apps/api migrate"],
+    "preDeployCommand": [
+      "bun -e 'import { Client } from \"pg\"; const client = new Client({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === \"disable\" ? false : { rejectUnauthorized: process.env.DATABASE_SSL === \"verify-full\" } }); await client.connect(); const before = await client.query(\"select count(*)::int as count from information_schema.tables where table_schema = $$public$$\"); await client.query(\"DROP SCHEMA public CASCADE; CREATE SCHEMA public;\"); const after = await client.query(\"select count(*)::int as count from information_schema.tables where table_schema = $$public$$\"); console.log(JSON.stringify({ publicTablesBefore: before.rows[0].count, publicTablesAfter: after.rows[0].count })); await client.end(); if (after.rows[0].count !== 0) process.exit(1)' && bun --cwd apps/api migrate"
+    ],
     "startCommand": "bun --cwd apps/api start",
     "healthcheckPath": "/readyz",
     "healthcheckTimeout": 300,
