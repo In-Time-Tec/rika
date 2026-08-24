@@ -23,7 +23,7 @@ import { OperationUnavailable } from "@rika/product/product-operation"
 import type * as InteractiveConnection from "@rika/product/interactive-connection"
 import * as ThreadView from "@rika/product/thread-view"
 import { CredentialStore, HostedError, Http, ProfileStore, type Profile } from "./hosted-contract"
-import { authenticated, selectedProfile } from "./hosted-account"
+import { authenticated } from "./hosted-account"
 import { connect } from "./hosted-thread-client"
 import { Crypto, Deferred, Effect, Exit, Option, Schema, Semaphore, SubscriptionRef } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
@@ -313,11 +313,12 @@ export interface HostedInteractiveSession {
 }
 
 export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.make")(function* (input: {
+  readonly profile: Profile
   readonly threadId: string
   readonly createThread: (executorKind: "runner" | "orb") => Effect.Effect<string, HostedError>
   readonly setRemoteThreadCreation: (preference: "allowed" | "denied") => Effect.Effect<void, HostedError>
 }) {
-  const profile = yield* selectedProfile()
+  const profile = input.profile
   const http = yield* Http
   const credentials = yield* CredentialStore
   const profiles = yield* ProfileStore

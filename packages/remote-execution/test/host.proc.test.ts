@@ -77,6 +77,61 @@ console.log(
 )
 `
 
+const bootstrapResetProof = `
+import { Effect, Redacted } from "effect"
+import { createConnection } from "node:net"
+import { testing } from "./src/host.ts"
+const sandboxId = await Bun.file("/run/e2b/.E2B_SANDBOX_ID").text().then((value) => value.trim()).catch(() => "sandbox-1")
+const received = Effect.runPromise(testing.receiveBootstrap)
+await Bun.sleep(20)
+const body = JSON.stringify({
+  credential: "reset-bootstrap",
+  identity: {
+    target: "orb",
+    ownerId: "owner-1",
+    threadId: "thread-1",
+    assignmentId: "assignment-1",
+    assignmentGeneration: 1,
+    instanceId: sandboxId,
+    executorId: "assignment-1:g1",
+    templateBuildId: "build-1",
+    apiUrl: "wss://api.example.test/api/v1/executors",
+    workspaceId: "workspace-1",
+    repository: null,
+    lifecycle: "fresh",
+    environmentDigest: "sha256:${"a".repeat(64)}",
+    setupCache: false,
+  },
+  restore: null,
+})
+await new Promise((resolve, reject) => {
+  const socket = createConnection({ host: "127.0.0.1", port: 7070 })
+  socket.once("error", reject)
+  socket.once("connect", () => {
+    socket.write(
+      "POST /.rika/bootstrap HTTP/1.1\\r\\nHost: 127.0.0.1:7070\\r\\nContent-Type: application/json\\r\\nContent-Length: " +
+        Buffer.byteLength(body) +
+        "\\r\\nConnection: keep-alive\\r\\n\\r\\n" +
+        body,
+      () => {
+        socket.removeListener("error", reject)
+        socket.on("error", () => {})
+        socket.resetAndDestroy()
+        resolve()
+      },
+    )
+  })
+})
+const bootstrap = await received
+let listener = "open"
+try {
+  await Bun.fetch("http://127.0.0.1:7070/health")
+} catch {
+  listener = "closed"
+}
+console.log(JSON.stringify({ credential: Redacted.value(bootstrap.credential), listener }))
+`
+
 const bootstrapIdentityProof = `
 import { Schema } from "effect"
 const { promise: hello, resolve: resolveHello } = Promise.withResolvers()
@@ -254,6 +309,22 @@ describe.sequential("executor host process", () => {
             restore: null,
           })
         })
+      }).pipe(Effect.timeout("5 seconds"), provideLayer(BunServices.layer)),
+    ),
+  )
+
+  it.effect("retains an accepted bootstrap after the client resets and closes its listener", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const stdout = yield* spawner.string(
+          ChildProcess.make("bun", ["-e", bootstrapResetProof], {
+            cwd: packageRoot,
+            extendEnv: true,
+            env: { E2B_SANDBOX_ID: "sandbox-1" },
+          }),
+        )
+        expect(decodeJson(stdout)).toEqual({ credential: "reset-bootstrap", listener: "closed" })
       }).pipe(Effect.timeout("5 seconds"), provideLayer(BunServices.layer)),
     ),
   )

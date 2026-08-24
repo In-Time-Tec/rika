@@ -95,6 +95,14 @@ export const selectedProfile = Effect.fn("HostedAccount.profile")(function* () {
   return loaded.value
 })
 
+export const localLoginProfile = Effect.fn("HostedAccount.localLoginProfile")(function* () {
+  const profile = yield* selectedProfile()
+  const credentials = yield* CredentialStore
+  const credential = yield* credentials.load(profile.origin, profile.deviceId)
+  if (Option.isNone(credential)) return yield* failure("login-required", "Run rika auth login first")
+  return profile
+})
+
 const refresh = Effect.fn("HostedAccount.refresh")(function* (profile: Profile, current: Credential) {
   const http = yield* Http
   const store = yield* CredentialStore

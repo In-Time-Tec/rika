@@ -33,8 +33,6 @@ const connectionActivity = (model: Model): string | undefined => {
   switch (connection?.activity) {
     case "authenticating":
       return "Authenticating"
-    case "executor-waiting":
-      return "Waiting"
     case "executor-connecting":
       return "Connecting executor"
     case "workspace-preparing":
@@ -90,26 +88,10 @@ export const lifecycleLabel: {
 
 const statusContentImpl = (model: Model, phase: number, currentTimeMillis: number): StyledText | string => {
   const lifecycle = lifecycleLabel(model, currentTimeMillis)
-  const target = model.connection?.target
-  if (target === undefined && lifecycle === undefined) return ""
+  if (lifecycle === undefined) return ""
   const chunks: Array<TextChunk> = [fg(toOpenColor(colors.text))(" ")]
-  if (target !== undefined) {
-    let label = "Resolving target"
-    let color: string | typeof colors.text = colors.text
-    if (target === "runner") {
-      label = "Runner"
-      color = colors.runner
-    } else if (target === "orb") {
-      label = "Orb"
-      color = colors.orb
-    }
-    chunks.push(target === "resolving" ? dim(fg(color)(label)) : bold(fg(color)(label)))
-  }
-  if (lifecycle !== undefined) {
-    if (target !== undefined) chunks.push(dim(fg(toOpenColor(colors.text))(" ── ")))
-    chunks.push(fg(toOpenColor(colors.blue))(loaderFrame(lifecycle, phase)))
-    chunks.push(dim(fg(toOpenColor(colors.text))(` ${lifecycle} `)))
-  } else chunks.push(fg(toOpenColor(colors.text))(" "))
+  chunks.push(fg(toOpenColor(colors.blue))(loaderFrame(lifecycle, phase)))
+  chunks.push(dim(fg(toOpenColor(colors.text))(` ${lifecycle} `)))
   return new StyledText(chunks)
 }
 
@@ -122,7 +104,6 @@ export const animationActive = (model: Model): boolean =>
   model.compactionShimmer !== undefined ||
   model.busy ||
   model.activity !== undefined ||
-  model.connection?.target === "resolving" ||
   connectivityActivity(model) !== undefined ||
   connectionActivity(model) !== undefined ||
   panelLoading(model) !== undefined ||

@@ -571,7 +571,7 @@
           "width": 16
         },
         {
-          "text": "  new on Runner",
+          "text": "  new",
           "fg": {
             "buffer": {
               "0": 0,
@@ -589,10 +589,10 @@
             }
           },
           "attributes": 1,
-          "width": 15
+          "width": 5
         },
         {
-          "text": "                                         ",
+          "text": "                                                   ",
           "fg": {
             "buffer": {
               "0": 0,
@@ -610,7 +610,7 @@
             }
           },
           "attributes": 0,
-          "width": 41
+          "width": 51
         },
         {
           "text": " ",

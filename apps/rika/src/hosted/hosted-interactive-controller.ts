@@ -5,7 +5,7 @@ import { Crypto, Deferred, Effect, Fiber, FileSystem, Schema, Scope, Stream, Sub
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { OperationUnavailable } from "@rika/product/product-operation"
 import { CredentialStore, HostedError, ThreadClient, Http, ProfileStore } from "./hosted-contract"
-import { authenticated, selectedProfile } from "./hosted-account"
+import { authenticated, localLoginProfile } from "./hosted-account"
 import { makeHostedInteractiveSession } from "./hosted-interactive-session"
 import { preferencePath, prepareRunnerCheckout, type PreparedRunnerCheckout } from "../runner/runner"
 import { RunnerAdmission } from "../runner/runner-contract"
@@ -74,9 +74,11 @@ export const makeDeferredSession = (
         return (...args: ReadonlyArray<unknown>) =>
           Deferred.await(ready).pipe(
             Effect.flatMap((attachedSession) =>
-              (attachedSession.events as (...values: ReadonlyArray<unknown>) => Effect.Effect<void, OperationUnavailable>)(
-                ...args,
-              ),
+              (
+                attachedSession.events as (
+                  ...values: ReadonlyArray<unknown>
+                ) => Effect.Effect<void, OperationUnavailable>
+              )(...args),
             ),
           )
       if (effects.has(property)) {
@@ -98,6 +100,7 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
     readonly startRunner: (prepared: PreparedRunnerCheckout) => Effect.Effect<never, E, R>
   },
 ) {
+  const profile = yield* localLoginProfile()
   const firstDraw = yield* Deferred.make<void>()
   const sessionReady = yield* Deferred.make<InteractiveSession.InteractiveSession, OperationUnavailable>()
   const deferred = makeDeferredSession(sessionReady)
@@ -113,7 +116,6 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
   }
   const initialize = Effect.gen(function* () {
     yield* Deferred.await(firstDraw)
-    const profile = yield* selectedProfile()
     const http = yield* Http
     yield* authenticated(profile, (session) => http.context(profile.origin, session))
     const checkout = prepareRunnerCheckout({
@@ -188,6 +190,7 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
       )
     const threadId = input.threadId ?? (yield* createThread("runner"))
     const hosted = yield* makeHostedInteractiveSession({
+      profile,
       threadId,
       createThread: (executorKind) => createThread(executorKind).pipe(Effect.map(String)),
       setRemoteThreadCreation,
@@ -198,10 +201,8 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
     )
     deferred.attach(hosted.session)
     yield* Deferred.succeed(sessionReady, hosted.session)
-    return yield* startRunnerWhenPlaced(
-      hosted.connection,
-      prepare,
-      (prepared) => options.startRunner(prepared).pipe(Effect.mapError(operationFailure)),
+    return yield* startRunnerWhenPlaced(hosted.connection, prepare, (prepared) =>
+      options.startRunner(prepared).pipe(Effect.mapError(operationFailure)),
     )
   }).pipe(Effect.mapError(operationFailure))
   yield* raceStructured(

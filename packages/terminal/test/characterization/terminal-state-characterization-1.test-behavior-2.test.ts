@@ -387,6 +387,28 @@ test("restores a rejected optimistic submission only when the composer is empty"
   expect(occupied.items.at(-1)).toMatchObject({ _tag: "Block" })
 })
 
+test("ignores a late or duplicate rejection after a submission is admitted", () => {
+  const submitted = update(
+    { ...initial("/work"), input: "accepted", cursor: 8 },
+    { _tag: "Submitted", submissionId: "sub-accepted" },
+  )
+  const admitted = update(submitted, {
+    _tag: "SubmissionAdmitted",
+    turnId: "turn-accepted",
+    status: "active",
+    submissionId: "sub-accepted",
+  })
+  const rejected = update(admitted, {
+    _tag: "SubmissionRejected",
+    message: "late failure",
+    submissionId: "sub-accepted",
+  })
+
+  expect(rejected).toBe(admitted)
+  expect(rejected.entries).toEqual([{ role: "user", text: "accepted", turnId: "turn-accepted" }])
+  expect(rejected.blocks).toEqual([])
+})
+
 test("cancelling before turn start restores or settles the optimistic row without clobbering typing", () => {
   const submitted = update(
     { ...initial("/work"), input: "cancel before start", cursor: 19 },

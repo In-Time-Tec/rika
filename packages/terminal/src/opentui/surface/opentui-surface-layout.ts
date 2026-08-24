@@ -148,7 +148,8 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     this.queueLeftJoint.visible = queue.length > 0 || steering.length > 0
     this.queueRightJoint.visible = queue.length > 0 || steering.length > 0
     this.inputBox.borderColor = toOpenColor(colors.text)
-    this.inputBox.title = ""
+    this.inputBox.title = model.connection?.target === "orb" ? " Orb " : ""
+    this.inputBox.titleColor = toOpenColor(colors.orb)
     this.modeLabel.right = sidebarWidth + 2
     this.renderModeLabel(model)
     const workspaceTitle = isNarrow(model)

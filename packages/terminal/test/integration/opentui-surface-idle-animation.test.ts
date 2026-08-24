@@ -128,34 +128,34 @@ test("releases every animation timer on destroy", () =>
     }),
   ))
 
-test("settles the welcome orb after its intro and then runs no timer at all", () =>
+test("continues the welcome orb after its former intro cutoff", () =>
   Effect.runPromise(
     withSurface(welcoming(), ({ surface, animationClock, animationRenders }) => {
       expect(surface.animationDiagnostics().welcomeRunning).toBe(true)
-      animationClock.advance(spinnerInterval * 1_000)
-      const quiet = surface.animationDiagnostics()
-      expect(quiet.welcomeRunning).toBe(false)
-
-      const settledRenders = animationRenders()
-      animationClock.advance(spinnerInterval * 10_000)
-      expect(surface.animationDiagnostics().welcomePhase).toBe(quiet.welcomePhase)
-      expect(animationRenders()).toBe(settledRenders)
+      animationClock.advance(spinnerInterval * 150)
+      const afterCutoff = surface.animationDiagnostics()
+      expect(afterCutoff.welcomeRunning).toBe(true)
+      expect(afterCutoff.welcomePhase).toBe(150)
+      const renders = animationRenders()
+      animationClock.advance(spinnerInterval * 10)
+      expect(surface.animationDiagnostics().welcomePhase).toBe(160)
+      expect(animationRenders()).toBeGreaterThan(renders)
     }),
   ))
 
-test("keeps a settled welcome orb settled across ordinary model updates", () =>
+test("keeps one welcome timer across ordinary model updates", () =>
   Effect.runPromise(
     withSurface(welcoming(), ({ surface, animationClock, animationRenders }) => {
-      animationClock.advance(spinnerInterval * 1_000)
-      expect(surface.animationDiagnostics().welcomeRunning).toBe(false)
-      const quiet = surface.animationDiagnostics()
+      animationClock.advance(spinnerInterval * 150)
+      expect(surface.animationDiagnostics().welcomeRunning).toBe(true)
+      const beforeUpdate = surface.animationDiagnostics()
 
       surface.update({ ...welcoming(), input: "typing", cursor: 6 })
-      expect(surface.animationDiagnostics().welcomeRunning).toBe(false)
-      const settledRenders = animationRenders()
-      animationClock.advance(spinnerInterval * 1_000)
-      expect(surface.animationDiagnostics().welcomePhase).toBe(quiet.welcomePhase)
-      expect(animationRenders()).toBe(settledRenders)
+      expect(surface.animationDiagnostics().welcomeRunning).toBe(true)
+      const renders = animationRenders()
+      animationClock.advance(spinnerInterval * 10)
+      expect(surface.animationDiagnostics().welcomePhase).toBe(beforeUpdate.welcomePhase + 10)
+      expect(animationRenders()).toBeGreaterThan(renders)
     }),
   ))
 

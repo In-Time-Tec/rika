@@ -43,6 +43,36 @@ test(
           expect(connected).toContain("│ Send while connecting")
           expect(connected).not.toContain("STARTUP_REPLY")
           expect(yield* app.modelRequestCount).toBe(0)
+          app.pressEnter()
+          yield* Deferred.succeed(admit, undefined)
+          const replied = yield* app.waitFrame("STARTUP_REPLY")
+          expect(replied).toContain("Send while connecting")
+          yield* app.quit
+        }),
+      ),
+    ),
+  tuiTestTimeout,
+)
+
+test(
+  "waits for the existing connected state before sending an initial CLI prompt",
+  () =>
+    TuiApp.run(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const app = yield* TuiApp.tuiApp({
+            initialPrompt: ["Send", "after", "connection"],
+            initialConnectionState: { connectivity: "connecting", target: "resolving", participants: 1 },
+            script: [model.text("INITIAL_PROMPT_REPLY")],
+          })
+          yield* app.waitFrame("Connecting")
+          expect(yield* app.submissionAttempts).toBe(0)
+          expect(yield* app.modelRequestCount).toBe(0)
+
+          yield* app.setConnectionState({ connectivity: "connected", target: "runner", participants: 1 })
+          const replied = yield* app.waitFrame("INITIAL_PROMPT_REPLY")
+          expect(replied).toContain("Send after connection")
+          expect(yield* app.submissionAttempts).toBe(1)
           yield* app.quit
         }),
       ),

@@ -114,12 +114,18 @@ test("exposes local and Orb Thread creation plus the current command controls", 
     "max-depth",
     "quit",
   ])
-  expect(filter("new on runner")).toEqual([
+  expect(filter("thread new")).toEqual([
     {
       id: "new-thread",
       category: "thread",
-      label: "new on Runner",
+      label: "new",
       action: { _tag: "NewThread" },
+    },
+    {
+      id: "new-orb-thread",
+      category: "thread",
+      label: "new in Orb",
+      action: { _tag: "NewOrbThread" },
     },
   ])
   expect(filter("set max subagents")).toEqual([

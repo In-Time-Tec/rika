@@ -967,6 +967,7 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
         )
         const context = yield* Layer.build(layer)
         const first = yield* makeHostedInteractiveSession({
+          profile,
           threadId: "thread-1",
           createThread: () => Effect.succeed("thread-2"),
           setRemoteThreadCreation: () => Effect.void,
@@ -1318,6 +1319,7 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
         expect(opened).toBeGreaterThan(openedBeforeMismatch)
         secondControllerExpected = true
         const second = yield* makeHostedInteractiveSession({
+          profile,
           threadId: "thread-1",
           createThread: () => Effect.succeed("thread-2"),
           setRemoteThreadCreation: () => Effect.void,

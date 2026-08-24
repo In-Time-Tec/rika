@@ -4,11 +4,11 @@ import type { ChangedFileRow } from "./opentui-surface-transcript-types"
 import { SidebarController } from "./opentui-sidebar-controller"
 import { contentColumnWidth } from "../../state/model/terminal-layout-state"
 import { spacing } from "../../presentation/terminal/terminal-theme"
-import { spinnerFrames, spinnerInterval } from "../rendering/opentui-spinner"
+import { spinnerFrames } from "../rendering/opentui-spinner"
 import { renderSidebar } from "../rendering/opentui-render-block"
 import { goalAnimationActive, goalIndicatorVisible, statusContent, welcomeContent } from "./opentui-surface-content"
 import { goalLabelContent } from "./opentui-goal-controller"
-import { welcomeAnimationActive, welcomeAnimationSettled } from "./opentui-welcome-state"
+import { welcomeAnimationActive } from "./opentui-welcome-state"
 import { ToastController } from "./opentui-toast-controller"
 import { SurfaceOverlay } from "./opentui-surface-overlay"
 
@@ -60,10 +60,6 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
     if (this.destroyed || !this.welcomeController.running) return
     const current = this.model
     if (current === undefined || !welcomeAnimationActive(current) || this.welcomeController.child === undefined) return
-    if (welcomeAnimationSettled(this.welcomeController.phase, this.welcomeController.impulses)) {
-      this.welcomeController.stop()
-      return
-    }
     this.welcomeController.advance()
     const welcomeWidth = this.welcomeWidthFor(current)
     const impulses = this.welcomeController.impulses
@@ -82,8 +78,6 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
     const child = this.welcomeController.child
     if (this.destroyed || current === undefined || child === undefined) return
     this.welcomeController.strike(this.welcomeWidthFor(current), current.height, event.x - child.x, event.y - child.y)
-    if (this.options.animate !== false && welcomeAnimationActive(current))
-      this.welcomeController.start(spinnerInterval, () => this.tickWelcome())
     this.renderer.requestRender()
   }
   protected tickGoal(): void {
