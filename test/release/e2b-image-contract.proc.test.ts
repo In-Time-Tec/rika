@@ -72,20 +72,29 @@ describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
         Effect.scoped(
           Effect.gen(function* () {
             const fileSystem = yield* FileSystem.FileSystem
+            const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
             const tag = `rika-executor-contract:${process.pid}`
             yield* Effect.addFinalizer(() =>
               run([...containerCommand!, "image", "rm", "--force", tag]).pipe(Effect.ignore),
             )
-            yield* run([
-              ...containerCommand!,
-              "build",
-              "--pull",
-              "--file",
-              "infra/e2b/executor-v1/e2b.Dockerfile",
-              "--tag",
-              tag,
-              ".",
-            ])
+            const buildExitCode = yield* spawner.exitCode(
+              ChildProcess.make(
+                containerCommand![0],
+                [
+                  ...containerCommand!.slice(1),
+                  "build",
+                  "--pull",
+                  "--file",
+                  "infra/e2b/executor-v1/e2b.Dockerfile",
+                  "--tag",
+                  tag,
+                  ".",
+                ],
+                { cwd: root.pathname, stdout: "inherit", stderr: "inherit" },
+              ),
+            )
+            if (Number(buildExitCode) !== 0)
+              return yield* CommandError.make({ message: `executor image build exited ${buildExitCode}` })
             const output = yield* run([
               ...containerCommand!,
               "run",

@@ -143,7 +143,7 @@ test.skipIf(containerCommand === undefined)(
               apiUpgradePaths.push(`${url.pathname}${url.search}`)
               const socket = yield* request.upgrade
               const writer = yield* socket.writer
-              yield* socket.runString((message) => writer(`api-ws:${message}`)).pipe(Effect.forkScoped)
+              yield* socket.runString((message) => writer(`api-ws:${message}`))
               return HttpServerResponse.empty()
             }
             const body = yield* request.text
