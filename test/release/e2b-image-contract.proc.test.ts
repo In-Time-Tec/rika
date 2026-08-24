@@ -35,17 +35,41 @@ const collect = (stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>)
     ),
   )
 
-const run = Effect.fn("e2bImageContract.run")(function* (parts: ReadonlyArray<string>) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const child = yield* spawner.spawn(
-    ChildProcess.make(parts[0]!, parts.slice(1), { cwd: root.pathname, stdout: "pipe", stderr: "pipe" }),
+const run = Effect.fn("e2bImageContract.run")(function* (
+  parts: ReadonlyArray<string>,
+  timeout = 30_000,
+  stdout: "pipe" | "inherit" = "pipe",
+  stderr: "pipe" | "inherit" = "pipe",
+) {
+  return yield* Effect.scoped(
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const child = yield* spawner.spawn(
+        ChildProcess.make(parts[0]!, parts.slice(1), {
+          cwd: root.pathname,
+          detached: false,
+          forceKillAfter: "5 seconds",
+          stdin: "ignore",
+          stdout,
+          stderr,
+        }),
+      )
+      const [exitCode, collectedStdout, collectedStderr] = yield* Effect.all(
+        [child.exitCode, collect(child.stdout), collect(child.stderr)],
+        { concurrency: "unbounded" },
+      )
+      if (Number(exitCode) !== 0)
+        return yield* CommandError.make({
+          message: `${parts.join(" ")} exited ${exitCode}\n${collectedStdout}\n${collectedStderr}`,
+        })
+      return collectedStdout.trim()
+    }),
+  ).pipe(
+    Effect.timeoutOrElse({
+      duration: timeout,
+      orElse: () => CommandError.make({ message: `${parts.join(" ")} timed out after ${timeout}ms` }),
+    }),
   )
-  const [exitCode, stdout, stderr] = yield* Effect.all([child.exitCode, collect(child.stdout), collect(child.stderr)], {
-    concurrency: "unbounded",
-  })
-  if (Number(exitCode) !== 0)
-    return yield* CommandError.make({ message: `${parts.join(" ")} exited ${exitCode}\n${stdout}\n${stderr}` })
-  return stdout.trim()
 })
 
 const commandReady = Effect.fn("e2bImageContract.commandReady")(function* (command: ReadonlyArray<string>) {
@@ -72,42 +96,56 @@ describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
         Effect.scoped(
           Effect.gen(function* () {
             const fileSystem = yield* FileSystem.FileSystem
-            const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
             const tag = `rika-executor-contract:${process.pid}`
             yield* Effect.addFinalizer(() =>
               run([...containerCommand!, "image", "rm", "--force", tag]).pipe(Effect.ignore),
             )
-            const buildExitCode = yield* spawner.exitCode(
-              ChildProcess.make(
-                containerCommand![0],
-                [
-                  ...containerCommand!.slice(1),
-                  "build",
-                  "--pull",
-                  "--file",
-                  "infra/e2b/executor-v1/e2b.Dockerfile",
-                  "--tag",
-                  tag,
-                  ".",
-                ],
-                { cwd: root.pathname, stdout: "inherit", stderr: "inherit" },
-              ),
+            yield* run(
+              [
+                ...containerCommand!,
+                "build",
+                "--pull",
+                "--file",
+                "infra/e2b/executor-v1/e2b.Dockerfile",
+                "--tag",
+                tag,
+                ".",
+              ],
+              180_000,
+              "inherit",
+              "inherit",
             )
-            if (Number(buildExitCode) !== 0)
-              return yield* CommandError.make({ message: `executor image build exited ${buildExitCode}` })
-            const output = yield* run([
-              ...containerCommand!,
-              "run",
-              "--rm",
-              "--entrypoint",
-              "rika",
-              "--env",
-              "RIKA_DOCTOR_NETWORK_URL=https://example.com/",
-              tag,
-              "executor",
-              "doctor",
-              "--json",
-            ])
+            const doctorContainer = `rika-executor-doctor-${process.pid}`
+            const doctorOutput = yield* fileSystem.makeTempFileScoped({ prefix: "rika-executor-doctor-" })
+            yield* Effect.addFinalizer(() =>
+              run([...containerCommand!, "rm", "--force", doctorContainer]).pipe(Effect.ignore),
+            )
+            yield* run(
+              [
+                "sh",
+                "-c",
+                'output="$1"; shift; exec "$@" > "$output"',
+                "rika-executor-doctor",
+                doctorOutput,
+                ...containerCommand!,
+                "run",
+                "--name",
+                doctorContainer,
+                "--rm",
+                "--entrypoint",
+                "rika",
+                "--env",
+                "RIKA_DOCTOR_NETWORK_URL=https://example.com/",
+                tag,
+                "executor",
+                "doctor",
+                "--json",
+              ],
+              120_000,
+              "inherit",
+              "inherit",
+            )
+            const output = yield* fileSystem.readFileString(doctorOutput)
             const result = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(DoctorResult))(output)
             const manifestBytes = yield* fileSystem.readFile(new URL("tool-manifest.json", imageRoot).pathname)
             const manifest = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ToolManifest))(
