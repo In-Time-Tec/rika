@@ -2,6 +2,7 @@ import { expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { serve } from "bun"
 import { Clock, Config, Effect, FileSystem, Random, Redacted } from "effect"
+import { TestClock } from "effect/testing"
 import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
 import { makeBetterAuthIdentityRuntime, type IdentityRuntime } from "../src/better-auth-runtime"
@@ -40,7 +41,7 @@ const dpopProof = Effect.fn("IdentityLiveTest.dpopProof")(function* (input: {
     jti: `identity-live-${sequence}`,
     htm: input.method,
     htu: input.url,
-    iat: Math.floor((yield* Clock.currentTimeMillis) / 1_000),
+    iat: Math.floor((yield* TestClock.withLive(Clock.currentTimeMillis)) / 1_000),
     ...(accessDigest === undefined ? {} : { ath: base64Url(new Uint8Array(accessDigest)) }),
   }
   const unsigned = `${jsonSegment({ typ: "dpop+jwt", alg: "ES256", jwk: input.publicJwk })}.${jsonSegment(payload)}`
