@@ -9,6 +9,7 @@ import { Runtime as TenetRuntime } from "tenetkit/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import { ProviderCredentialStore } from "@rika/product/provider-credential-store"
+import * as OpenAiAuthHttp from "@rika/product/openai-auth-http"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
 import * as ProductRepositories from "@rika/product-store/postgres-product-repositories"
@@ -79,11 +80,12 @@ export const layer = (options: {
         Layer.mergeAll(postgresLayer(options.database), AuthorizationPolicy.layer, BunCrypto.layer),
       )
       const retainedData = Layer.succeedContext(data)
+      const openAiHttpContext = yield* Layer.build(OpenAiAuthHttp.layer.pipe(Layer.provide(httpLayer)))
       const credentialContext = yield* Layer.build(
         Layer.merge(
           hostedProviderCredentialsLayer({ encryptionKey: options.providerCredentialKey }),
           providerCredentialStoreLayer({ encryptionKey: options.providerCredentialKey }),
-        ).pipe(Layer.provide(retainedData)),
+        ).pipe(Layer.provide(Layer.succeedContext(Context.merge(data, openAiHttpContext)))),
       )
       const environmentContext = yield* Layer.build(
         hostedEnvironmentLayer({
@@ -131,6 +133,7 @@ export const layer = (options: {
       const executionContext = yield* Layer.build(
         HostedExecution.layerHosted({
           kernel: { runtimeVersion: Bun.version, dataRoot: `${temporaryDirectory}/rika-hosted` },
+          openAiAccountAccess: Context.get(credentialContext, HostedProviderCredentials).openAiAccountAccess,
           credentialStore: Layer.succeed(
             ProviderCredentialStore,
             Context.get(credentialContext, ProviderCredentialStore),

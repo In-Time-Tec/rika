@@ -1,5 +1,6 @@
 import { Context, Effect, Option, Redacted, Schema } from "effect"
 import type { ClientTicketResponse } from "@rika/product/client-protocol"
+import type { Credential as OpenAiAccountCredential } from "@rika/product/openai-auth-contract"
 import type { ExecutorKind } from "@rika/product/hosted-model"
 import type { EnvironmentPhase, EnvironmentScope } from "@rika/product/environment-policy"
 import type { RepositoryService } from "@rika/product/workspace-capability"
@@ -200,6 +201,16 @@ export const ProviderCredentialStatus = Schema.Struct({
   credentialIdentity: Schema.String,
 })
 export type ProviderCredentialStatus = typeof ProviderCredentialStatus.Type
+export const OpenAiAccountStatus = Schema.Union([
+  Schema.Struct({ state: Schema.Literal("missing") }),
+  Schema.Struct({
+    state: Schema.Literals(["active", "revoked"]),
+    revision: Schema.String,
+    credentialIdentity: Schema.String,
+    fingerprint: Schema.String,
+  }),
+])
+export type OpenAiAccountStatus = typeof OpenAiAccountStatus.Type
 
 export interface HttpInterface {
   readonly register: (
@@ -271,6 +282,22 @@ export interface HttpInterface {
     provider: ModelProvider,
     session: Session,
   ) => Effect.Effect<ProviderCredentialStatus, HostedError>
+  readonly putOpenAiAccount: (
+    origin: string,
+    owner: OwnerSelection,
+    credential: OpenAiAccountCredential,
+    session: Session,
+  ) => Effect.Effect<OpenAiAccountStatus, HostedError>
+  readonly getOpenAiAccount: (
+    origin: string,
+    owner: OwnerSelection,
+    session: Session,
+  ) => Effect.Effect<OpenAiAccountStatus, HostedError>
+  readonly revokeOpenAiAccount: (
+    origin: string,
+    owner: OwnerSelection,
+    session: Session,
+  ) => Effect.Effect<OpenAiAccountStatus, HostedError>
   readonly createProject: (
     origin: string,
     owner: OwnerSelection,

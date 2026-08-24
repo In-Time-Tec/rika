@@ -19,7 +19,10 @@ export interface RouteTuning {
 }
 
 export interface RouteAuthentication {
-  readonly openAiAccountFingerprint?: string
+  readonly openAiAccount?: {
+    readonly credentialIdentity: string
+    readonly fingerprint: string
+  }
 }
 
 const canonical = (value: unknown): string => {
@@ -47,14 +50,14 @@ const bedrockUrl = (connection: ModelRoute.AmazonBedrockProviderConnection): str
   return url.toString()
 }
 
-const accountFingerprint = (
+const openAiAccount = (
   route: ModelRouteResolution.ResolvedModelRoute,
   authentication: RouteAuthentication | undefined,
-): string | undefined =>
+): RouteAuthentication["openAiAccount"] =>
   route.providerId === "openai" &&
   route.providerConnection.protocol === "openai-responses" &&
   normalizedUrl(route.providerConnection.baseUrl) === normalizedUrl(Defaults.providerDefaults.openai.baseUrl)
-    ? authentication?.openAiAccountFingerprint
+    ? authentication?.openAiAccount
     : undefined
 
 const connectionSnapshot = (
@@ -62,14 +65,15 @@ const connectionSnapshot = (
   authentication: RouteAuthentication | undefined,
 ): ProviderConnectionSnapshot => {
   const connection = route.providerConnection
-  const fingerprint = accountFingerprint(route, authentication)
-  if (fingerprint !== undefined && connection.protocol === "openai-responses") {
+  const account = openAiAccount(route, authentication)
+  if (account !== undefined && connection.protocol === "openai-responses") {
     return {
       provider: route.providerId,
       protocol: connection.protocol,
       baseUrl: normalizedUrl(connection.baseUrl),
       authentication: "account",
-      credentialIdentity: fingerprint,
+      credentialIdentity: account.credentialIdentity,
+      accountFingerprint: account.fingerprint,
     }
   }
   return {

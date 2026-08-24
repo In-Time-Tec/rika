@@ -1,14 +1,9 @@
 import type { ModeId } from "@rika/configuration/behavior-mode"
-import type { ModelRoute } from "@rika/configuration/model-route"
-import { Defaults, type ConfigurationSettings } from "@rika/configuration/configuration-settings"
+import { Defaults } from "@rika/configuration/configuration-settings"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
-import type { ExecutionRouteModelSnapshot, ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
+import type { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Layer, Schema } from "effect"
-import {
-  HostedModelProvider,
-  HostedProviderCredentialError,
-  HostedProviderCredentials,
-} from "./hosted-provider-credentials"
+import { HostedProviderCredentialError, HostedProviderCredentials } from "./hosted-provider-credentials"
 
 export class HostedModelRegistryError extends Schema.TaggedError<HostedModelRegistryError>()(
   "HostedModelRegistryError",
@@ -32,62 +27,19 @@ const credentialFailure = (error: HostedProviderCredentialError) => {
   if (error.kind === "missing") {
     return HostedModelRegistryError.make({
       kind: "missing",
-      message: "Required model provider credential is not configured",
+      message: "OpenAI account is not connected. Run rika provider login codex",
     })
   }
   if (error.kind === "revoked") {
     return HostedModelRegistryError.make({
       kind: "revoked",
-      message: "Required model provider credential is revoked",
+      message: "OpenAI account connection is revoked. Run rika provider login codex",
     })
   }
   return HostedModelRegistryError.make({ kind: "unavailable", message: "Model registry is unavailable" })
 }
 
-const modelSnapshots = (route: ExecutionRouteSnapshot): ReadonlyArray<ExecutionRouteModelSnapshot> => [
-  route.main,
-  route.oracle,
-  route.title,
-  route.compactionSummary,
-  ...Object.values(route.agents ?? {}),
-]
-
-const providers = (route: ExecutionRouteSnapshot): ReadonlyArray<HostedModelProvider> => [
-  ...new Set(
-    modelSnapshots(route).flatMap((model) =>
-      model.candidates.map((candidate) => candidate.providerConnection.provider).filter(Schema.is(HostedModelProvider)),
-    ),
-  ),
-]
-
-const hostedSettings: ConfigurationSettings = {
-  ...Defaults.settingsDefaults,
-  models: Object.fromEntries(
-    Object.entries(Defaults.settingsDefaults.models).map(([alias, model]) => [
-      alias,
-      {
-        ...model,
-        provider: "openrouter",
-        candidates: model.candidates.map((candidate) => `${model.provider}/${candidate}`),
-      },
-    ]),
-  ),
-}
-
-const settingsWithCredentials = (credentials: ReadonlyMap<HostedModelProvider, string>): ConfigurationSettings => ({
-  ...hostedSettings,
-  providers: Object.fromEntries(
-    Object.entries(hostedSettings.providers).map(([provider, connection]) => {
-      const credentialIdentity = credentials.get(provider as HostedModelProvider)
-      return [
-        provider,
-        connection.protocol === "amazon-bedrock" || credentialIdentity === undefined
-          ? connection
-          : { ...connection, credentialIdentity },
-      ]
-    }),
-  ) as Readonly<Record<ModelRoute.ProviderId, ModelRoute.ProviderConnection>>,
-})
+const hostedSettings = Defaults.settingsDefaults
 
 export const layer = Layer.effect(
   HostedModelRegistry,
@@ -95,27 +47,15 @@ export const layer = Layer.effect(
     const credentials = yield* HostedProviderCredentials
     const resolve = Effect.fn("HostedModelRegistry.resolve")(function* (ownerId: string, requestedMode?: string) {
       const mode = (requestedMode ?? hostedSettings.defaultMode) as ModeId
-      const preliminary = yield* Effect.try({
-        try: () => ExecutionRouteResolution.resolve(hostedSettings, mode),
-        catch: invalid,
-      })
-      const requiredProviders = providers(preliminary)
-      if (
-        modelSnapshots(preliminary).some((model) =>
-          model.candidates.some((candidate) => !Schema.is(HostedModelProvider)(candidate.providerConnection.provider)),
-        )
-      ) {
-        return yield* invalid()
-      }
-      const identities = new Map<HostedModelProvider, string>()
-      yield* Effect.forEach(requiredProviders, (provider) =>
-        credentials.require(ownerId, provider).pipe(
-          Effect.tap((status) => Effect.sync(() => identities.set(provider, status.credentialIdentity))),
-          Effect.mapError(credentialFailure),
-        ),
-      )
+      const account = yield* credentials.requireOpenAiAccount(ownerId).pipe(Effect.mapError(credentialFailure))
       return yield* Effect.try({
-        try: () => ExecutionRouteResolution.resolve(settingsWithCredentials(identities), mode),
+        try: () =>
+          ExecutionRouteResolution.resolve(hostedSettings, mode, undefined, {
+            openAiAccount: {
+              credentialIdentity: account.credentialIdentity,
+              fingerprint: account.fingerprint,
+            },
+          }),
         catch: invalid,
       })
     })
@@ -129,7 +69,10 @@ export const testLayer = Layer.succeed(
     modes: Object.keys(hostedSettings.modes),
     resolve: (_ownerId, mode) =>
       Effect.try({
-        try: () => ExecutionRouteResolution.resolve(hostedSettings, mode ?? hostedSettings.defaultMode),
+        try: () =>
+          ExecutionRouteResolution.resolve(hostedSettings, mode ?? hostedSettings.defaultMode, undefined, {
+            openAiAccount: { credentialIdentity: "openai-account-test", fingerprint: "openai-fingerprint-test" },
+          }),
         catch: invalid,
       }),
   }),

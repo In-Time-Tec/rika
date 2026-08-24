@@ -14,8 +14,6 @@ import * as RunnerCommand from "../command/root/runner-command"
 import * as Runner from "../runner/runner"
 import * as HostedCli from "../hosted/hosted-cli"
 import { runHostedInteractive } from "../hosted/hosted-interactive-controller"
-import * as OpenAiProviderAuth from "../provider/openai/openai-provider-auth"
-import * as OpenRouterProviderAuth from "../provider/openrouter/openrouter-provider-auth"
 import * as Logging from "../diagnostics/diagnostic-file-logging"
 import { clientSigintOwnership, type SigintOwnership } from "./client-signal-ownership"
 
@@ -91,21 +89,6 @@ const dispatcherLayer = () =>
           yield* HostedObservability.event("process_start", "success", {})
           if (input._tag !== "Interactive") yield* startLogging.pipe(Effect.orDie)
           return yield* Effect.gen(function* () {
-            if (input._tag === "Auth") {
-              const home = yield* Config.string("HOME").pipe(Config.withDefault(process.cwd()))
-              const statePath = `${home}/.config/rika/provider-auth`
-              return yield* Effect.scoped(
-                Operation.runAuth(
-                  input,
-                  {
-                    layer: OpenAiProviderAuth.createLayer(statePath, "default"),
-                    openRouterLayer: OpenRouterProviderAuth.createLayer(statePath, "default"),
-                    assertOpenAiDirect: () => Effect.void,
-                  },
-                  process.cwd(),
-                ),
-              )
-            }
             if (input._tag !== "Interactive")
               return yield* ProductOperation.OperationUnavailable.make({
                 operation: input._tag,

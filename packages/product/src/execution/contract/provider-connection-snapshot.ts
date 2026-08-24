@@ -9,5 +9,6 @@ export const ProviderConnectionSnapshot = Schema.Struct({
   authentication: ProviderAuthentication,
   apiKeyEnvironment: Schema.optionalKey(Schema.String),
   credentialIdentity: Schema.optionalKey(Schema.String),
+  accountFingerprint: Schema.optionalKey(Schema.String),
 })
 export type ProviderConnectionSnapshot = typeof ProviderConnectionSnapshot.Type

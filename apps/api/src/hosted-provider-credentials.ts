@@ -1,4 +1,6 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
+import * as OpenAiAuthContract from "@rika/product/openai-auth-contract"
+import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { Clock, Context, Crypto, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { ProviderCredentialStore, ProviderCredentialStoreError } from "@rika/product/provider-credential-store"
 import type { HostedOwner } from "@rika/product/hosted-model"
@@ -23,6 +25,15 @@ export interface HostedProviderCredentialStatus {
   readonly credentialIdentity: string
 }
 
+export type HostedOpenAiAccountStatus =
+  | { readonly state: "missing" }
+  | {
+      readonly state: "active" | "revoked"
+      readonly revision: string
+      readonly credentialIdentity: string
+      readonly fingerprint: string
+    }
+
 export interface HostedProviderCredentialsService {
   readonly put: (input: {
     readonly principal: AuthenticatedPrincipal
@@ -43,6 +54,25 @@ export interface HostedProviderCredentialsService {
     ownerId: string,
     provider: HostedModelProvider,
   ) => Effect.Effect<HostedProviderCredentialStatus, HostedProviderCredentialError>
+  readonly putOpenAiAccount: (input: {
+    readonly principal: AuthenticatedPrincipal
+    readonly owner: HostedOwner
+    readonly accessToken: Redacted.Redacted<string>
+    readonly idToken: Redacted.Redacted<string>
+    readonly refreshToken: Redacted.Redacted<string>
+  }) => Effect.Effect<Exclude<HostedOpenAiAccountStatus, { readonly state: "missing" }>, HostedProviderCredentialError>
+  readonly revokeOpenAiAccount: (input: {
+    readonly principal: AuthenticatedPrincipal
+    readonly owner: HostedOwner
+  }) => Effect.Effect<HostedOpenAiAccountStatus, HostedProviderCredentialError>
+  readonly openAiAccountStatus: (input: {
+    readonly principal: AuthenticatedPrincipal
+    readonly owner: HostedOwner
+  }) => Effect.Effect<HostedOpenAiAccountStatus, HostedProviderCredentialError>
+  readonly requireOpenAiAccount: (
+    ownerId: string,
+  ) => Effect.Effect<Exclude<HostedOpenAiAccountStatus, { readonly state: "missing" }>, HostedProviderCredentialError>
+  readonly openAiAccountAccess: (credentialIdentity: string) => OpenAiAuth.CredentialAccess
 }
 
 export class HostedProviderCredentials extends Context.Service<
@@ -62,16 +92,38 @@ interface CredentialRow {
   readonly authentication_tag: Uint8Array | null
 }
 
+interface OpenAiAccountRow {
+  readonly credential_identity: string
+  readonly owner_id: string
+  readonly status: "active" | "revoked"
+  readonly revision: string
+  readonly fingerprint: string
+  readonly key_version: number | null
+  readonly nonce: Uint8Array | null
+  readonly ciphertext: Uint8Array | null
+  readonly authentication_tag: Uint8Array | null
+}
+
 const rejected = (kind: HostedProviderCredentialError["kind"], message: string) =>
   HostedProviderCredentialError.make({ kind, message })
 const unavailable = () => rejected("unavailable", "Provider credential service is unavailable")
 const storeError = (kind: ProviderCredentialStoreError["kind"], message: string) =>
   ProviderCredentialStoreError.make({ kind, message })
+const openAiStoreError = (kind: OpenAiAuthContract.StoreError["kind"], message: string) =>
+  OpenAiAuthContract.StoreError.make({ kind, message })
 const identity = (row: CredentialRow): HostedProviderCredentialStatus => ({
   provider: row.provider,
   state: row.status,
   revision: row.revision,
   credentialIdentity: row.credential_identity,
+})
+const openAiAccountIdentity = (
+  row: OpenAiAccountRow,
+): Exclude<HostedOpenAiAccountStatus, { readonly state: "missing" }> => ({
+  state: row.status,
+  revision: row.revision,
+  credentialIdentity: row.credential_identity,
+  fingerprint: row.fingerprint,
 })
 
 export const layer = (options: { readonly encryptionKey: Redacted.Redacted<string> }) =>
@@ -80,6 +132,7 @@ export const layer = (options: { readonly encryptionKey: Redacted.Redacted<strin
     Effect.gen(function* () {
       const sql = yield* PgClient.PgClient
       const crypto = yield* Crypto.Crypto
+      const openAiHttp = yield* OpenAiAuth.Http
       const cipher = makeSecretCipher({ encodedKey: options.encryptionKey, domain: "provider-credential" })
       const authorizedOwnerId = Effect.fn("HostedProviderCredentials.authorizedOwnerId")(function* (
         principal: AuthenticatedPrincipal,
@@ -106,7 +159,7 @@ export const layer = (options: { readonly encryptionKey: Redacted.Redacted<strin
         if (rows[0] === undefined) return yield* rejected("forbidden", "Owner is unavailable")
         return rows[0].id
       })
-      const credential = Effect.fn("HostedProviderCredentials.credential")(function* (
+      const providerCredential = Effect.fn("HostedProviderCredentials.providerCredential")(function* (
         ownerId: string,
         provider: HostedModelProvider,
       ) {
@@ -124,6 +177,134 @@ export const layer = (options: { readonly encryptionKey: Redacted.Redacted<strin
           WHERE owner_id = ${ownerId} AND provider = ${provider}`.pipe(Effect.catchTag("SqlError", unavailable))
         return rows[0]
       })
+      const openAiAccountByOwner = Effect.fn("HostedProviderCredentials.openAiAccountByOwner")(function* (
+        ownerId: string,
+      ) {
+        const rows = yield* sql<OpenAiAccountRow>`SELECT
+            credential_reference_id AS credential_identity,
+            owner_id,
+            status,
+            revision::text AS revision,
+            fingerprint,
+            key_version,
+            nonce,
+            ciphertext,
+            authentication_tag
+          FROM rika_hosted_openai_account_credentials
+          WHERE owner_id = ${ownerId}`.pipe(Effect.catchTag("SqlError", unavailable))
+        return rows[0]
+      })
+      const openAiAccountByIdentity = (credentialIdentity: string) =>
+        sql<OpenAiAccountRow>`SELECT
+            credential_reference_id AS credential_identity,
+            owner_id,
+            status,
+            revision::text AS revision,
+            fingerprint,
+            key_version,
+            nonce,
+            ciphertext,
+            authentication_tag
+          FROM rika_hosted_openai_account_credentials
+          WHERE credential_reference_id = ${credentialIdentity}`.pipe(
+          Effect.mapError(() => openAiStoreError("io", "OpenAI account credential load failed")),
+          Effect.map((rows) => rows[0]),
+        )
+      const decodeOpenAiAccount = (row: OpenAiAccountRow) => {
+        if (row.key_version !== 1 || row.nonce === null || row.ciphertext === null || row.authentication_tag === null) {
+          return Effect.fail(openAiStoreError("corrupt", "OpenAI account credential record is corrupt"))
+        }
+        return Effect.try({
+          try: () =>
+            cipher.decrypt(`${row.owner_id}/openai-account`, {
+              keyVersion: 1,
+              nonce: row.nonce!,
+              ciphertext: row.ciphertext!,
+              authenticationTag: row.authentication_tag!,
+            }),
+          catch: () => openAiStoreError("corrupt", "OpenAI account credential cannot be decrypted"),
+        }).pipe(
+          Effect.flatMap((value) =>
+            Schema.decodeUnknownEffect(Schema.fromJsonString(OpenAiAuthContract.CredentialDisk))(
+              Redacted.value(value),
+            ).pipe(Effect.mapError(() => openAiStoreError("corrupt", "OpenAI account credential is corrupt"))),
+          ),
+          Effect.filterOrFail(
+            (value) => value.fingerprint === row.fingerprint,
+            () => openAiStoreError("corrupt", "OpenAI account credential identity is corrupt"),
+          ),
+        )
+      }
+      const openAiAccountStore = (credentialIdentity: string): OpenAiAuth.StoreInterface => {
+        const load = openAiAccountByIdentity(credentialIdentity).pipe(
+          Effect.flatMap((row) =>
+            row === undefined || row.status === "revoked"
+              ? Effect.succeed(Option.none())
+              : decodeOpenAiAccount(row).pipe(Effect.map(Option.some)),
+          ),
+        )
+        const save = (credential: typeof OpenAiAuthContract.CredentialDisk.Type) =>
+          Effect.gen(function* () {
+            const row = yield* openAiAccountByIdentity(credentialIdentity)
+            if (row === undefined || row.status === "revoked")
+              return yield* openAiStoreError("missing", "OpenAI account credential is unavailable")
+            if (credential.fingerprint !== row.fingerprint)
+              return yield* openAiStoreError("unsafe", "OpenAI account changed during refresh")
+            const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(OpenAiAuthContract.CredentialDisk))(
+              credential,
+            ).pipe(Effect.mapError(() => openAiStoreError("corrupt", "OpenAI account credential is corrupt")))
+            const encrypted = cipher.encrypt(`${row.owner_id}/openai-account`, Redacted.make(encoded))
+            const now = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+            const updated = yield* sql<{
+              readonly credential_identity: string
+            }>`UPDATE rika_hosted_openai_account_credentials
+              SET revision = revision + 1, key_version = ${encrypted.keyVersion}, nonce = ${encrypted.nonce},
+                ciphertext = ${encrypted.ciphertext}, authentication_tag = ${encrypted.authenticationTag},
+                updated_at = ${now}, rotated_at = ${now}
+              WHERE credential_reference_id = ${credentialIdentity} AND status = 'active'
+              RETURNING credential_reference_id AS credential_identity`.pipe(
+              Effect.mapError(() => openAiStoreError("io", "OpenAI account credential refresh could not be saved")),
+            )
+            if (updated[0] === undefined)
+              return yield* openAiStoreError("missing", "OpenAI account credential is unavailable")
+          })
+        const remove = sql<{ readonly credential_identity: string }>`UPDATE rika_hosted_openai_account_credentials
+          SET status = 'revoked', revision = revision + 1, key_version = NULL, nonce = NULL,
+            ciphertext = NULL, authentication_tag = NULL, updated_at = now(), revoked_at = now()
+          WHERE credential_reference_id = ${credentialIdentity} AND status = 'active'
+          RETURNING credential_reference_id AS credential_identity`.pipe(
+          Effect.mapError(() => openAiStoreError("io", "OpenAI account credential could not be revoked")),
+          Effect.map((rows) => rows[0] !== undefined),
+        )
+        const serialized: OpenAiAuth.StoreInterface["serialized"] = <A, E, R>(
+          effect: Effect.Effect<A, E, R>,
+        ): Effect.Effect<A, E | OpenAiAuthContract.StoreError, R> => {
+          const lock = sql<{
+            readonly credential_identity: string
+          }>`SELECT credential_reference_id AS credential_identity
+                FROM rika_hosted_openai_account_credentials
+                WHERE credential_reference_id = ${credentialIdentity}
+                FOR UPDATE`.pipe(
+            Effect.mapError(() => openAiStoreError("io", "OpenAI account credential lock failed")),
+            Effect.filterOrFail(
+              (rows) => rows[0] !== undefined,
+              () => openAiStoreError("missing", "OpenAI account credential is unavailable"),
+            ),
+            Effect.asVoid,
+          )
+          const transaction: Effect.Effect<A, E | OpenAiAuthContract.StoreError, R> = lock.pipe(Effect.andThen(effect))
+          return sql
+            .withTransaction(transaction)
+            .pipe(
+              Effect.mapError((error) =>
+                Schema.is(OpenAiAuthContract.StoreError)(error)
+                  ? error
+                  : openAiStoreError("io", "OpenAI account credential operation failed"),
+              ),
+            )
+        }
+        return { load, save, remove, serialized }
+      }
       const put: HostedProviderCredentialsService["put"] = Effect.fn("HostedProviderCredentials.put")(
         function* (input) {
           if (Redacted.value(input.apiKey).trim().length === 0) {
@@ -210,12 +391,116 @@ export const layer = (options: { readonly encryptionKey: Redacted.Redacted<strin
       const requireCredential: HostedProviderCredentialsService["require"] = Effect.fn(
         "HostedProviderCredentials.require",
       )(function* (ownerId, provider) {
-        const row = yield* credential(ownerId, provider)
+        const row = yield* providerCredential(ownerId, provider)
         if (row === undefined) return yield* rejected("missing", "Provider credential is not configured")
         if (row.status === "revoked") return yield* rejected("revoked", "Provider credential is revoked")
         return identity(row)
       })
-      return HostedProviderCredentials.of({ put, revoke, list, require: requireCredential })
+      const putOpenAiAccount: HostedProviderCredentialsService["putOpenAiAccount"] = Effect.fn(
+        "HostedProviderCredentials.putOpenAiAccount",
+      )(function* (input) {
+        const ownerId = yield* authorizedOwnerId(input.principal, input.owner)
+        const value = yield* OpenAiAuth.credentialFromTokens({ crypto, tokens: input }).pipe(
+          Effect.mapError(() => rejected("invalid", "OpenAI account credential is invalid")),
+        )
+        const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(OpenAiAuthContract.CredentialDisk))(
+          value,
+        ).pipe(Effect.mapError(() => rejected("invalid", "OpenAI account credential is invalid")))
+        const credentialReferenceId = `openai-account-${yield* crypto.randomUUIDv4.pipe(Effect.mapError(unavailable))}`
+        const encrypted = cipher.encrypt(`${ownerId}/openai-account`, Redacted.make(encoded))
+        const now = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+        const rows = yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const references = yield* sql<{ readonly id: string }>`INSERT INTO rika_hosted_credential_references
+                (id, owner_id, provider, purpose, external_reference, metadata, created_by_user_id, created_at, updated_at)
+              VALUES (
+                ${credentialReferenceId}, ${ownerId}, 'openai', 'model-provider-account',
+                ${`postgresql://${credentialReferenceId}`},
+                ${'{"authentication":"account","encryption":"aes-256-gcm","keyVersion":1}'}::jsonb,
+                ${input.principal.userId}, ${now}, ${now}
+              )
+              ON CONFLICT (owner_id, provider) WHERE purpose = 'model-provider-account'
+              DO UPDATE SET metadata = EXCLUDED.metadata, updated_at = EXCLUDED.updated_at
+              RETURNING id`
+              const reference = references[0]
+              if (reference === undefined) return yield* unavailable()
+              return yield* sql<OpenAiAccountRow>`INSERT INTO rika_hosted_openai_account_credentials
+                (credential_reference_id, owner_id, provider, status, revision, fingerprint, key_version, nonce,
+                  ciphertext, authentication_tag, created_at, updated_at, rotated_at, revoked_at)
+              VALUES (
+                ${reference.id}, ${ownerId}, 'openai', 'active', 1, ${value.fingerprint}, ${encrypted.keyVersion},
+                ${encrypted.nonce}, ${encrypted.ciphertext}, ${encrypted.authenticationTag},
+                ${now}, ${now}, NULL, NULL
+              )
+              ON CONFLICT (owner_id) DO UPDATE SET
+                status = 'active',
+                revision = rika_hosted_openai_account_credentials.revision + 1,
+                fingerprint = EXCLUDED.fingerprint,
+                key_version = EXCLUDED.key_version,
+                nonce = EXCLUDED.nonce,
+                ciphertext = EXCLUDED.ciphertext,
+                authentication_tag = EXCLUDED.authentication_tag,
+                updated_at = EXCLUDED.updated_at,
+                rotated_at = EXCLUDED.updated_at,
+                revoked_at = NULL
+              RETURNING credential_reference_id AS credential_identity, owner_id, status,
+                revision::text AS revision, fingerprint, key_version, nonce, ciphertext, authentication_tag`
+            }),
+          )
+          .pipe(Effect.catchTag("SqlError", unavailable))
+        const row = rows[0]
+        if (row === undefined) return yield* unavailable()
+        return openAiAccountIdentity(row)
+      })
+      const openAiAccountStatus: HostedProviderCredentialsService["openAiAccountStatus"] = Effect.fn(
+        "HostedProviderCredentials.openAiAccountStatus",
+      )(function* (input) {
+        const ownerId = yield* authorizedOwnerId(input.principal, input.owner)
+        const row = yield* openAiAccountByOwner(ownerId)
+        return row === undefined ? { state: "missing" as const } : openAiAccountIdentity(row)
+      })
+      const revokeOpenAiAccount: HostedProviderCredentialsService["revokeOpenAiAccount"] = Effect.fn(
+        "HostedProviderCredentials.revokeOpenAiAccount",
+      )(function* (input) {
+        const ownerId = yield* authorizedOwnerId(input.principal, input.owner)
+        const now = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+        const rows = yield* sql<OpenAiAccountRow>`UPDATE rika_hosted_openai_account_credentials
+          SET status = 'revoked', revision = revision + 1, key_version = NULL, nonce = NULL,
+            ciphertext = NULL, authentication_tag = NULL, updated_at = ${now}, revoked_at = ${now}
+          WHERE owner_id = ${ownerId}
+          RETURNING credential_reference_id AS credential_identity, owner_id, status,
+            revision::text AS revision, fingerprint, key_version, nonce, ciphertext, authentication_tag`.pipe(
+          Effect.catchTag("SqlError", unavailable),
+        )
+        const row = rows[0]
+        return row === undefined ? { state: "missing" as const } : openAiAccountIdentity(row)
+      })
+      const requireOpenAiAccount: HostedProviderCredentialsService["requireOpenAiAccount"] = Effect.fn(
+        "HostedProviderCredentials.requireOpenAiAccount",
+      )(function* (ownerId) {
+        const row = yield* openAiAccountByOwner(ownerId)
+        if (row === undefined) return yield* rejected("missing", "OpenAI account is not connected")
+        if (row.status === "revoked") return yield* rejected("revoked", "OpenAI account connection is revoked")
+        return openAiAccountIdentity(row)
+      })
+      const openAiAccountAccess: HostedProviderCredentialsService["openAiAccountAccess"] = (credentialIdentity) =>
+        OpenAiAuth.makeCredentialAccess({
+          store: openAiAccountStore(credentialIdentity),
+          http: openAiHttp,
+          crypto,
+        })
+      return HostedProviderCredentials.of({
+        put,
+        revoke,
+        list,
+        require: requireCredential,
+        putOpenAiAccount,
+        revokeOpenAiAccount,
+        openAiAccountStatus,
+        requireOpenAiAccount,
+        openAiAccountAccess,
+      })
     }),
   )
 

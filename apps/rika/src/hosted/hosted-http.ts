@@ -10,6 +10,7 @@ import {
   Http,
   IdentityContext,
   Invitation,
+  OpenAiAccountStatus,
   ProviderCredentialStatus,
   Project,
   Registration,
@@ -397,6 +398,46 @@ export const layer = Layer.effect(
           session,
           ProviderCredentialStatus,
           "Provider credential revocation",
+        )
+      },
+      putOpenAiAccount: (origin, owner, credential, session) => {
+        const url = `${origin}/api/v1/provider-accounts/openai`
+        return authenticatedJson(
+          "PUT",
+          url,
+          HttpClientRequest.put(url).pipe(
+            HttpClientRequest.bodyJsonUnsafe({
+              owner: ownerWire(owner),
+              access_token: Redacted.value(credential.accessToken),
+              id_token: Redacted.value(credential.idToken),
+              refresh_token: Redacted.value(credential.refreshToken),
+            }),
+          ),
+          session,
+          OpenAiAccountStatus,
+          "OpenAI account update",
+        )
+      },
+      getOpenAiAccount: (origin, owner, session) => {
+        const url = `${origin}/api/v1/provider-accounts/openai/status`
+        return authenticatedJson(
+          "POST",
+          url,
+          HttpClientRequest.post(url).pipe(HttpClientRequest.bodyJsonUnsafe({ owner: ownerWire(owner) })),
+          session,
+          OpenAiAccountStatus,
+          "OpenAI account status",
+        )
+      },
+      revokeOpenAiAccount: (origin, owner, session) => {
+        const url = `${origin}/api/v1/provider-accounts/openai`
+        return authenticatedJson(
+          "DELETE",
+          url,
+          HttpClientRequest.delete(url).pipe(HttpClientRequest.bodyJsonUnsafe({ owner: ownerWire(owner) })),
+          session,
+          OpenAiAccountStatus,
+          "OpenAI account revocation",
         )
       },
       createProject: (origin, owner, name, session) => {

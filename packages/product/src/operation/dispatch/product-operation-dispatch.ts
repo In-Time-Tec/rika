@@ -1,5 +1,4 @@
 import * as Thread from "@rika/product/thread-record"
-import * as AuthenticationOperation from "./authentication-operation-dispatch"
 import * as ExtensionOperations from "./../contract/extension-operation"
 import * as ConfigOperations from "./../contract/configuration-operation"
 import { Console, Effect, FileSystem, Layer, Option, Path, Schema, Scope } from "effect"
@@ -37,8 +36,6 @@ const markdownExport = (thread: Thread.Thread, turns: ReadonlyArray<import("@rik
     "",
     ...turns.flatMap((turn, index) => [`## Turn ${index + 1}`, "", `Status: ${turn.status}`, "", turn.prompt, ""]),
   ].join("\n")
-
-export const runAuth = AuthenticationOperation.run
 
 type ProductLayerError<
   ThreadError extends Error,
@@ -170,7 +167,6 @@ export const productLayer = <
         operationError,
         publishInteractiveActivity,
         encodeJson,
-        runAuth,
         queueMutationEvent: state.queueMutationEvent,
         extensionOperations: ExtensionOperations,
         configOperations: ConfigOperations,

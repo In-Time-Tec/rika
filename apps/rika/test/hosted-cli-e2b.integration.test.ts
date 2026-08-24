@@ -3,6 +3,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import type { Account, CliDeviceDirectory, IdentityDirectory, IdentityRuntime } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
+import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import * as HostedPostgres from "@rika/product-store/postgres-layer"
 import { ApiMessage, ExecutorMessage, type CellResponse } from "@rika/remote-execution/protocol"
 import { Config, Context, Effect, FileSystem, Layer, Option, Random, Redacted, Ref, Schema } from "effect"
@@ -455,6 +456,17 @@ it.layer(BunServices.layer)((test) => {
             ),
             Layer.succeed(Browser, Browser.of({ open: () => Effect.void })),
             Layer.succeed(
+              OpenAiAuth.Service,
+              OpenAiAuth.Service.of({
+                loginBrowser: () => Effect.die("unused"),
+                loginDevice: Effect.die("unused"),
+                status: Effect.die("unused"),
+                logout: Effect.die("unused"),
+                acquire: Effect.die("unused"),
+                refreshRejected: () => Effect.die("unused"),
+              }),
+            ),
+            Layer.succeed(
               ThreadClient,
               ThreadClient.of({
                 create: () => Effect.die("unused"),
@@ -477,7 +489,13 @@ it.layer(BunServices.layer)((test) => {
           const hostedCommand = Layer.effect(
             HostedCommand.Service,
             Effect.context<
-              Browser | CredentialStore | import("effect").Crypto.Crypto | Http | ProfileStore | ThreadClient
+              | Browser
+              | CredentialStore
+              | import("effect").Crypto.Crypto
+              | Http
+              | OpenAiAuth.Service
+              | ProfileStore
+              | ThreadClient
             >().pipe(
               Effect.map((services) =>
                 HostedCommand.Service.of({ run: (input) => HostedCli.run(input).pipe(Effect.provide(services)) }),

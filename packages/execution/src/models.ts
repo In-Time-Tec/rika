@@ -51,29 +51,30 @@ const storedCredentialApiKey = (
 export const layer = (options: {
   readonly candidate: CandidateSnapshot
   readonly credentialStore?: ProviderCredentialStoreShape
-  readonly openAiAccountAuth?: OpenAiAuth.ServiceInterface
+  readonly openAiAccountAccess?: (credentialIdentity: string) => OpenAiAuth.CredentialAccess
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
 }): Layer.Layer<
   ModelRegistry.ModelRegistry,
   Config.ConfigError | Errors.ExecutableRegistrationInvalid | ProviderCredentialStoreError
 > => {
-  const { candidate, credentialStore, openAiAccountAuth } = options
+  const { candidate, credentialStore, openAiAccountAccess } = options
   const httpClientLayer = options.httpClientLayer ?? FetchHttpClient.layer
   const registrationKey = candidate.registrationIdentity
   switch (candidate.providerConnection.protocol) {
     case "openai-responses":
       if (candidate.providerConnection.authentication === "account") {
-        const fingerprint = candidate.providerConnection.credentialIdentity
-        if (fingerprint === undefined)
+        const credentialIdentity = candidate.providerConnection.credentialIdentity
+        const fingerprint = candidate.providerConnection.accountFingerprint
+        if (credentialIdentity === undefined || fingerprint === undefined)
           return Layer.effect(
             ModelRegistry.ModelRegistry,
             Effect.fail(
               Errors.ExecutableRegistrationInvalid.make({
-                message: "OpenAI account route is missing its credential identity",
+                message: "OpenAI account route is missing its credential identity or fingerprint",
               }),
             ),
           )
-        if (openAiAccountAuth === undefined)
+        if (openAiAccountAccess === undefined)
           return Layer.effect(
             ModelRegistry.ModelRegistry,
             Effect.fail(
@@ -84,7 +85,7 @@ export const layer = (options: {
           model: candidate.model,
           registrationKey,
           config: OpenAiResponses.decodeConfig(candidate.providerOptions),
-          credentials: OpenAiAccountCredentials.fromRikaAuth(openAiAccountAuth, fingerprint),
+          credentials: OpenAiAccountCredentials.fromRikaAuth(openAiAccountAccess(credentialIdentity), fingerprint),
         }).pipe(Layer.provide(httpClientLayer))
       }
       return Layer.unwrap(

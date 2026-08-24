@@ -61,7 +61,6 @@ export interface ProductLayerOptions<
   readonly makeTurnId: import("effect").Effect.Effect<import("@rika/product/turn-record").TurnId, never, never>
   readonly configOperations?: import("./product-operation-integrations").ProductConfigOperations
   readonly extensionOperations?: import("./product-operation-integrations").ProductExtensionOperations
-  readonly authOperations?: import("./authentication-operation-dispatch").AuthOperationOptions
   readonly interactive?: (
     input: Extract<import("../contract/product-operation").Input, { readonly _tag: "Interactive" }>,
     session: import("../interactive/session").InteractiveSession,

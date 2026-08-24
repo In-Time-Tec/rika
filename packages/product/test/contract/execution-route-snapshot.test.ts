@@ -64,7 +64,8 @@ test("preserves the pinned OpenAI account identity and rejects incomplete accoun
         protocol: "openai-responses",
         baseUrl: "https://api.openai.com/v1",
         authentication: "account" as const,
-        credentialIdentity: "account-fingerprint",
+        credentialIdentity: "openai-account-1",
+        accountFingerprint: "account-fingerprint",
       },
     })),
   })
@@ -83,7 +84,8 @@ test("preserves the pinned OpenAI account identity and rejects incomplete accoun
   }
   expect(toExecutionRouteSnapshot(route).main.candidates[0]?.providerConnection).toMatchObject({
     authentication: "account",
-    credentialIdentity: "account-fingerprint",
+    credentialIdentity: "openai-account-1",
+    accountFingerprint: "account-fingerprint",
   })
   const incomplete = {
     ...route,
@@ -96,6 +98,17 @@ test("preserves the pinned OpenAI account identity and rejects incomplete accoun
     },
   }
   expect(() => toExecutionRouteSnapshot(incomplete)).toThrow("Malformed OpenAI account provider connection")
+  const strayFingerprint = {
+    ...routeWithModels(),
+    main: {
+      ...model("main"),
+      candidates: model("main").candidates.map((candidate) => ({
+        ...candidate,
+        providerConnection: { ...candidate.providerConnection, accountFingerprint: "stray" },
+      })),
+    },
+  }
+  expect(() => toExecutionRouteSnapshot(strayFingerprint)).toThrow("Malformed provider connection account fingerprint")
 })
 
 test("malformed, adapter-shaped, and future route branches are rejected", () => {

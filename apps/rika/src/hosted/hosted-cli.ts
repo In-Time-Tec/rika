@@ -1,4 +1,5 @@
 import * as BunSocket from "@effect/platform-bun/BunSocket"
+import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import * as ProductOperation from "@rika/product/product-operation"
 import { Crypto, Effect, Layer } from "effect"
 import type { Input } from "../command/root/hosted-command-dispatch"
@@ -9,6 +10,7 @@ import * as HostedCredentialStore from "./hosted-credential-store"
 import * as HostedHttp from "./hosted-http"
 import * as HostedProfileStore from "./hosted-profile-store"
 import * as HostedThreadClient from "./hosted-thread-client"
+import * as OpenAiProviderAuth from "../provider/openai/openai-provider-auth"
 
 export const liveLayer = (home: string) =>
   Layer.mergeAll(
@@ -17,11 +19,26 @@ export const liveLayer = (home: string) =>
     HostedProfileStore.layer({ home }),
     HostedCredentialStore.layer({ lockPath: `${home}/.config/rika/hosted-refresh.lock` }),
     HostedBrowser.layer(),
+    OpenAiProviderAuth.layer,
   )
+
+const openAiFailure = (error: { readonly message: string }) =>
+  HostedError.make({ kind: "protocol", message: error.message })
+
+const loginOpenAiAccount = (deviceCode: boolean) =>
+  Effect.gen(function* () {
+    const auth = yield* OpenAiAuth.Service
+    const credential = yield* (deviceCode ? auth.loginDevice : auth.loginBrowser()).pipe(Effect.mapError(openAiFailure))
+    yield* HostedAccount.putOpenAiAccount(credential)
+  })
 
 const operation = (
   input: Input,
-): Effect.Effect<void, HostedError, Browser | CredentialStore | Crypto.Crypto | Http | ProfileStore | ThreadClient> => {
+): Effect.Effect<
+  void,
+  HostedError,
+  Browser | CredentialStore | Crypto.Crypto | Http | OpenAiAuth.Service | ProfileStore | ThreadClient
+> => {
   if (input._tag === "Auth") {
     if (input.action === "login") return HostedAccount.login(input)
     if (input.action === "status") return HostedAccount.status(input.json)
@@ -45,6 +62,11 @@ const operation = (
     if (input.action === "put") return HostedAccount.putProviderCredential(input.provider, input.apiKey)
     if (input.action === "list") return HostedAccount.listProviderCredentials(input.provider)
     return HostedAccount.revokeProviderCredential(input.provider)
+  }
+  if (input._tag === "Provider") {
+    if (input.action === "login") return loginOpenAiAccount(input.deviceCode)
+    if (input.action === "status") return HostedAccount.getOpenAiAccount()
+    return HostedAccount.revokeOpenAiAccount()
   }
   if (input._tag === "Secret") {
     if (input.action === "put")

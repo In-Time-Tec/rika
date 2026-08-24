@@ -39,7 +39,6 @@ const withClientWorkspaceImpl = (input: ProductOperation.Input, workspace: strin
     input._tag === "Mcp" ||
     input._tag === "Extension" ||
     input._tag === "Config" ||
-    input._tag === "Auth" ||
     input._tag === "Doctor" ||
     input._tag === "Thread"
   )

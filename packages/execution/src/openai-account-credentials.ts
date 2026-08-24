@@ -22,7 +22,7 @@ const adapt = (
   )
 
 const fromRikaAuthImpl = (
-  auth: OpenAiAuth.ServiceInterface,
+  auth: OpenAiAuth.CredentialAccess,
   expectedFingerprint: string,
 ): OpenAi.OpenAiAccountCredentials => ({
   acquire: adapt("acquire", expectedFingerprint, auth.acquire),
@@ -30,6 +30,6 @@ const fromRikaAuthImpl = (
 })
 
 export const fromRikaAuth: {
-  (expectedFingerprint: string): (auth: OpenAiAuth.ServiceInterface) => OpenAi.OpenAiAccountCredentials
-  (auth: OpenAiAuth.ServiceInterface, expectedFingerprint: string): OpenAi.OpenAiAccountCredentials
+  (expectedFingerprint: string): (auth: OpenAiAuth.CredentialAccess) => OpenAi.OpenAiAccountCredentials
+  (auth: OpenAiAuth.CredentialAccess, expectedFingerprint: string): OpenAi.OpenAiAccountCredentials
 } = Function.dual(2, fromRikaAuthImpl)

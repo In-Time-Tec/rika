@@ -23,7 +23,6 @@ export interface ProductOperationRunFactory extends ProductOperationRuntimeState
   readonly fileSystem: FileSystem.FileSystem | undefined
   readonly path: Path.Path | undefined
   readonly backend: import("@rika/product/execution-gateway").Interface
-  readonly runAuth: typeof import("./authentication-operation-dispatch").run
   readonly writeThread: (thread: Thread.Thread) => Effect.Effect<void>
   readonly requireThread: (
     repository: ThreadRepository.Interface,
@@ -178,11 +177,6 @@ const runSystemOperationImpl = (
   factory: ProductOperationRunFactory,
   input: Input,
 ): Effect.Effect<void, OperationError | OperationUnavailable, never> => {
-  const typedRunAuth: (
-    input: Extract<Input, { readonly _tag: "Auth" }>,
-    options: NonNullable<ProductOperationRunFactory["options"]["authOperations"]>,
-    workspace: string,
-  ) => Effect.Effect<void, OperationUnavailable, import("effect").Scope.Scope> = factory.runAuth
   if (input._tag === "ToolCatalog") {
     if (input.action === "list") return Console.log(factory.encodeJson(ToolCatalog.definitions))
     const definition = ToolCatalog.get(input.name)
@@ -190,8 +184,6 @@ const runSystemOperationImpl = (
       ? unavailable(factory, input, `Tool ${input.name} does not exist`)
       : Console.log(factory.encodeJson(definition)).pipe(Effect.provideService(Console.Console, factory.console))
   }
-  if (input._tag === "Auth" && factory.options.authOperations !== undefined)
-    return Effect.scoped(typedRunAuth(input, factory.options.authOperations, factory.options.defaultWorkspace))
   if (
     (input._tag === "Skill" || input._tag === "Mcp" || input._tag === "Extension") &&
     factory.options.extensionOperations !== undefined
