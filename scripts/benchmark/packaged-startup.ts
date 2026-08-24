@@ -313,7 +313,9 @@ const readCompleteFrame = (child: ChildProcessSpawner.ChildProcessHandle, execut
       ),
     ),
     Effect.andThen(
-      new StartupFrameError({ message: `process exited before its first complete OpenTUI frame: ${executable}` }),
+      new StartupFrameError({
+        message: `process exited before its first complete OpenTUI frame: ${executable}\n${output}`,
+      }),
     ),
     Effect.catchTag("StartupFrameComplete", ({ output: completeOutput }) => Effect.succeed(completeOutput)),
   )

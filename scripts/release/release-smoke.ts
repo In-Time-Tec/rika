@@ -95,18 +95,20 @@ const runBehavioralProbesEffect = (binary: string, emptyHome: string) =>
     const fileSystem = yield* FileSystem.FileSystem
     yield* fileSystem.makeDirectory(clientHome, { recursive: true })
     yield* fileSystem.makeDirectory(runnerHome, { recursive: true })
-    const client = yield* Effect.tryPromise(() =>
-      probePtyFrameAndInterrupt(binary, {
-        timeoutMilliseconds: probeTimeoutMilliseconds,
-        environment: {
-          HOME: clientHome,
-          XDG_CONFIG_HOME: `${clientHome}/.config`,
-          XDG_DATA_HOME: `${clientHome}/.local/share`,
-          XDG_STATE_HOME: `${clientHome}/.local/state`,
-        },
-        interrupt: "foreground-process-group-sigint",
-      }),
-    )
+    const client = yield* Effect.tryPromise({
+      try: () =>
+        probePtyFrameAndInterrupt(binary, {
+          timeoutMilliseconds: probeTimeoutMilliseconds,
+          environment: {
+            HOME: clientHome,
+            XDG_CONFIG_HOME: `${clientHome}/.config`,
+            XDG_DATA_HOME: `${clientHome}/.local/share`,
+            XDG_STATE_HOME: `${clientHome}/.local/state`,
+          },
+          interrupt: "foreground-process-group-sigint",
+        }),
+      catch: (error) => new ProbeError({ message: error instanceof Error ? error.message : String(error) }),
+    })
     if (client.exitCode !== 0 && client.exitCode !== 130)
       return yield* new ProbeError({
         message: `PTY client exited with undocumented code ${client.exitCode} after SIGINT`,
