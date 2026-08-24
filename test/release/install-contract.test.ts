@@ -9,9 +9,9 @@ import {
   platformPackageName,
 } from "../../scripts/packaging/npm-package"
 import { archiveName, archiveRoot, targetNames } from "../../scripts/packaging/package-contract"
-import * as ReleaseDownload from "../../apps/rika/src/release/release-download"
-import * as ReleaseInstall from "../../apps/rika/src/release/release-install"
-import * as ReleaseUpdate from "../../apps/rika/src/release/release-update"
+import * as ReleaseDownload from "../../apps/rika/src/release/download"
+import * as ReleaseInstall from "../../apps/rika/src/release/install"
+import * as ReleaseUpdate from "../../apps/rika/src/release/update"
 
 const installer = await Effect.runPromise(live(readText(new URL("../../install.sh", import.meta.url))))
 

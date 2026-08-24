@@ -3,7 +3,7 @@ import { fg } from "../markdown/styled-text-effects"
 import { parsePatchFiles } from "@pierre/diffs"
 import { Function } from "effect"
 import { highlightLines, languageForPath } from "../markdown/syntax-highlighter"
-import { colors } from "../terminal/terminal-theme"
+import { colors } from "../terminal/theme"
 
 const strip = (line: string | undefined): string => (line ?? "").replace(/\r?\n$/, "")
 

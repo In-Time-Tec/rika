@@ -13,7 +13,7 @@ Find something, then read it. Both are inline calls with no approval.
 ```ts
 const hits = await rika.workspace.search({ pattern: "makeCellProjection" })
 const file = await rika.workspace.read({
-  path: "packages/execution/src/projection/cell.ts",
+  path: "packages/execution/src/projection/cell/state.ts",
   range: [1, 40],
 })
 console.log(hits.text, file.text)
@@ -25,7 +25,7 @@ Change the file. A replace is a durable nested operation with an approval capabi
 
 ```ts
 const edited = await rika.workspace.replace({
-  path: "packages/execution/src/projection/cell.ts",
+  path: "packages/execution/src/projection/cell/state.ts",
   oldStr: "export const maxCellNotices = 32",
   newStr: "export const maxCellNotices = 64",
 })

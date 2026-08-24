@@ -15,7 +15,7 @@ import "prismjs/components/prism-toml.js"
 import "prismjs/components/prism-markdown.js"
 import { bold, dim, fg } from "./styled-text-effects"
 import type { TerminalTextChunk } from "./styled-text"
-import { colors } from "../terminal/terminal-theme"
+import { colors } from "../terminal/theme"
 
 const roleColors = {
   keyword: colors.blue,

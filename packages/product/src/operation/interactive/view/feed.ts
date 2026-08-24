@@ -2,8 +2,8 @@ import * as Thread from "@rika/product/thread-record"
 import { Function, Clock, Effect, Queue, Ref, Semaphore } from "effect"
 import { type InteractiveEvent, type InteractiveEvent as RuntimeEvent } from "../session-event"
 import { type InteractiveEvent as ClientEvent } from "../event"
-import { makeThreadViewFeed } from "./thread-view"
-import { OperationUnavailable } from "../../contract/product-operation"
+import { makeThreadViewFeed } from "./thread"
+import { OperationUnavailable } from "../../contract/product"
 
 export const capacity = 64
 

@@ -3,7 +3,7 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import { Effect, Function, Context, Schema, Semaphore, Exit, Scope, Deferred } from "effect"
 import { ModeId } from "@rika/configuration/behavior-mode"
-import { OperationUnavailable } from "../contract/product-operation"
+import { OperationUnavailable } from "../contract/product"
 import { type InteractiveEvent } from "./session-event"
 import { makeInteractiveQueue } from "./turn/queue"
 import { makeInteractiveSubmission } from "./turn/admission"
@@ -284,7 +284,7 @@ export const makeInteractiveImplementation = (input: InteractiveImplementationIn
   }
 }
 type TurnId = import("@rika/product/turn-record").TurnId
-type OperationError = import("../operation-error").OperationError
+type OperationError = import("../error").OperationError
 export const makeInteractiveSession = (
   input: InteractiveSessionInput,
 ): ((

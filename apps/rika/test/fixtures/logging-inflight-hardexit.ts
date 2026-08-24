@@ -2,7 +2,7 @@ import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Config, Context, Effect, Layer, Scope } from "effect"
 import { exit } from "node:process"
-import * as Logging from "../../src/diagnostics/diagnostic-file-logging"
+import * as Logging from "../../src/diagnostics/file-logging"
 
 const dataRoot = Effect.runSync(Config.string("RIKA_TEST_LOG_DATA_ROOT"))
 

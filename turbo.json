@@ -61,6 +61,9 @@
         "test/**/*.ts",
         "!**/dist/**"
       ]
+    },
+    "//#repo-lint": {
+      "inputs": [".repo-lint.yaml", ".gitignore", "apps/**", "packages/**", "!**/dist/**"]
     }
   }
 }

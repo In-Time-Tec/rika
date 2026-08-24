@@ -35,7 +35,7 @@ it.layer(BunServices.layer)("E2B image source contract", (test) => {
       expect(dockerfile).toContain("node_modules/tenetkit/package.json")
       expect(dockerfile).toContain("packages/kernel/src/executor-runtime.ts")
       expect(dockerfile).toContain('import { workerModule } from "tenetkit/repl/bun"')
-      expect(yield* text("start.sh")).toContain("packages/remote-execution/src/host.ts")
+      expect(yield* text("start.sh")).toContain("packages/remote-execution/src/host/service.ts")
       expect(lock).toContain(`"tenetkit": "${manifest.workspaces.catalog.tenetkit}"`)
     }),
   )

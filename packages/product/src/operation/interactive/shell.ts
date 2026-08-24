@@ -1,6 +1,6 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
-import * as ExecutionStatus from "../../execution/contract/execution-status"
-import * as ExecutionProjection from "../../execution/contract/execution-projection"
+import * as ExecutionStatus from "../../execution/session/status"
+import * as ExecutionProjection from "../../execution/projection/contract"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
@@ -10,15 +10,15 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import { Function, Effect, Cause, Clock, type Exit, Context, Layer, Ref } from "effect"
 import { type InteractiveEvent } from "./session-event"
-import { operationError, OperationError, failureKind } from "../operation-error"
-import { clampThreadTitle } from "../../thread/query/thread-title-policy"
+import { operationError, OperationError, failureKind } from "../error"
+import { clampThreadTitle } from "../../thread/query/title-policy"
 import { recordedShellProjection, settleRecordedShellProjection } from "@rika/transcript/recorded-shell-presentation"
 import {
   type InteractiveExecutionContext,
   type InteractiveSessionInput,
   type InteractiveRuntimeContext,
 } from "./session"
-import { makeFailure } from "../operation-failure"
+import { makeFailure } from "../failure"
 
 export const executionStartFailureMessage =
   "Rika could not start this message. Run rika diagnostics status if it keeps happening."

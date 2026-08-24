@@ -1,10 +1,10 @@
 import * as Authorization from "../src/authorization-state"
-import * as GitHubInstallation from "../src/installation-service"
-import { installation, organization, otherOrganization } from "./github-fixtures"
+import * as GitHubInstallation from "../src/installation/service"
+import { installation, organization, otherOrganization } from "./support/github.fixture"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Redacted } from "effect"
-import type * as GitHub from "../src/github-model"
-import { provide } from "./test-layer"
+import type * as GitHub from "../src/model"
+import { provide } from "./support/layer"
 
 const githubIdentity = { userId: 100, login: "octocat" } as const
 

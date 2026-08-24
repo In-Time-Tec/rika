@@ -2,7 +2,7 @@ import { Function, Schema } from "effect"
 import type { ModeId } from "./behavior-mode"
 import { presets } from "./model-preset"
 import type { ModelRoute } from "./model-route"
-import type { ConfigurationSettings } from "../settings/configuration-settings"
+import type { ConfigurationSettings } from "../settings/model"
 
 export class ModelRouteError extends Schema.TaggedError<ModelRouteError>()("ModelRouteError", {
   mode: Schema.String,

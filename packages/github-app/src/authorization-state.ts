@@ -1,5 +1,5 @@
-import * as GitHub from "./github-model"
-import * as GitHubInstallation from "./installation-service"
+import * as GitHub from "./model"
+import * as GitHubInstallation from "./installation/service"
 import { Context, Effect, Layer, Redacted, Schema } from "effect"
 
 export const GitHubLoginIdentity = Schema.Struct({

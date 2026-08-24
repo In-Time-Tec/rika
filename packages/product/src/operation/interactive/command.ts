@@ -3,7 +3,7 @@ import * as ExecutionRequest from "@rika/product/execution-request"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import { Effect, Function, Schema } from "effect"
 import { ModeId } from "@rika/configuration/behavior-mode"
-import { OperationUnavailable } from "../contract/product-operation"
+import { OperationUnavailable } from "../contract/product"
 import { type InteractiveSession } from "./session"
 
 const Mode = ModeId

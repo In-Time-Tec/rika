@@ -10,9 +10,9 @@ import {
   makePostgresPool,
   makeResendMailSender,
 } from "@rika/identity"
-import { serveApi } from "./adapters/bun-server"
-import { loadApiConfig } from "./api-config"
-import { HostedApplication, layer as hostedApplicationLayer } from "./hosted-application"
+import { serveApi } from "./server/bun"
+import { loadApiConfig } from "./config/api"
+import { HostedApplication, layer as hostedApplicationLayer } from "./hosted/application"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>

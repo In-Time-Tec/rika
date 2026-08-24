@@ -11,8 +11,8 @@
     "./model-route-resolution": "./src/model-routing/model-route-resolution.ts",
     "./configuration-paths": "./src/path-resolution/configuration-paths.ts",
     "./profile-data-paths": "./src/path-resolution/profile-data-paths.ts",
-    "./configuration-settings": "./src/settings/configuration-settings.ts",
-    "./configuration-service": "./src/settings/configuration-service.ts"
+    "./configuration-settings": "./src/settings/model.ts",
+    "./configuration-service": "./src/settings/service.ts"
   },
   "dependencies": {
     "effect": "catalog:"

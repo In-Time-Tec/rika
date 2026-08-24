@@ -31,13 +31,13 @@
     "./migrations/postgres/0018-workspace-preparation.sql": "./migrations/postgres/0018-workspace-preparation.sql",
     "./migrations/postgres/0019-approved-repository-publication.sql": "./migrations/postgres/0019-approved-repository-publication.sql",
     "./migrations/postgres/0020-tool-policy-audit.sql": "./migrations/postgres/0020-tool-policy-audit.sql",
-    "./postgres-product-repositories": "./src/database/postgres-product-repositories.ts",
-    "./postgres-goal-repository": "./src/goal/postgres-goal-repository.ts",
-    "./memory-thread-search-repository": "./src/search/memory-thread-search-repository.ts",
-    "./postgres-thread-summary-repository": "./src/summary/postgres-thread-summary-repository.ts",
-    "./postgres-thread-repository": "./src/thread/postgres-thread-repository.ts",
-    "./postgres-transcript-repository": "./src/transcript/postgres-transcript-repository.ts",
-    "./postgres-turn-repository": "./src/turn/postgres-turn-repository.ts"
+    "./postgres-product-repositories": "./src/database/product-repositories.ts",
+    "./postgres-goal-repository": "./src/goal/postgres-repository.ts",
+    "./memory-thread-search-repository": "./src/search/memory-repository.ts",
+    "./postgres-thread-summary-repository": "./src/summary/postgres-repository.ts",
+    "./postgres-thread-repository": "./src/thread/postgres-repository.ts",
+    "./postgres-transcript-repository": "./src/transcript/postgres-repository.ts",
+    "./postgres-turn-repository": "./src/turn/postgres/repository.ts"
   },
   "dependencies": {
     "@effect/sql-pg": "catalog:",

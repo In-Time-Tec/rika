@@ -10,7 +10,7 @@ import * as ThreadSummaryRepository from "@rika/product/thread-summary-repositor
 import { Function, Effect, Ref, Cause, Semaphore } from "effect"
 import { type InteractiveEvent } from "../session-event"
 import { queueItem } from "../turn/queue"
-import { OperationError, operationError } from "../../operation-error"
+import { OperationError, operationError } from "../../error"
 import { promptUnit } from "./transcript-window"
 import { type InteractiveSession, type InteractiveSessionSelectionInput } from "../session"
 

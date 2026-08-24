@@ -2,8 +2,8 @@ import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import { Config, Console, Context, Effect, FileSystem, Layer } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
-import { makeApiAccountGateway } from "./adapters/api-account-gateway"
-import { serveWeb } from "./adapters/bun-server"
+import { makeApiAccountGateway } from "./account/api-gateway"
+import { serveWeb } from "./server/bun"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>

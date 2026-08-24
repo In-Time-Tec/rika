@@ -24,8 +24,8 @@ import {
   resolveCellRoute,
 } from "./route"
 import * as Postgres from "./postgres"
-import { TreeProjector } from "./projection/tree"
-import { resolveSemanticTreeEvent, type SemanticTreeEvent } from "./projection/semantic-event"
+import { TreeProjector } from "./projection/tree/projector"
+import { resolveSemanticTreeEvent, type SemanticTreeEvent } from "./projection/semantic/event"
 
 const derivedKernelOptions = (dataRoot: string): KernelOptions => ({ runtimeVersion: Bun.version, dataRoot })
 

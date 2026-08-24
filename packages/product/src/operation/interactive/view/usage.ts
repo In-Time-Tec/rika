@@ -1,4 +1,4 @@
-import * as ExecutionProjection from "../../../execution/contract/execution-projection"
+import * as ExecutionProjection from "../../../execution/projection/contract"
 import * as ThreadView from "@rika/product/thread-view"
 
 const difference = (next: number | undefined, previous: number | undefined): number | undefined => {

@@ -24,11 +24,11 @@ import {
   HttpApiMiddleware,
   HttpApiSchema,
 } from "effect/unstable/httpapi"
-import { accountAccess, type AccountAccess, type HttpDependencies } from "./http"
-import { HostedEnvironmentError } from "./hosted-environment"
-import { HostedModelProvider, HostedProviderCredentialError } from "./hosted-provider-credentials"
-import { RecoveryOperation, type RecoveryResolution } from "./hosted-recovery"
-import { ToolAuditRecord } from "./hosted-tool-policy"
+import { accountAccess, type AccountAccess, type HttpDependencies } from "./server/http"
+import { HostedEnvironmentError } from "./hosted/environment/runtime"
+import { HostedModelProvider, HostedProviderCredentialError } from "./hosted/environment/provider-credentials"
+import { RecoveryOperation, type RecoveryResolution } from "./hosted/execution/recovery"
+import { ToolAuditRecord } from "./hosted/execution/tool-policy"
 
 const Message = { message: Schema.String }
 

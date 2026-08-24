@@ -1,6 +1,6 @@
 import type { ModeId } from "./behavior-mode"
 import type { ModelRoute } from "./model-route"
-import type { ConfigurationSettings } from "../settings/configuration-settings"
+import type { ConfigurationSettings } from "../settings/model"
 import { resolveModelRoute } from "./model-route-resolution"
 
 export interface ModeRouteLabel {

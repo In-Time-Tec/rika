@@ -5,22 +5,22 @@ import * as TranscriptPage from "@rika/product/transcript-page"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as ExecutionProjection from "../../../execution/contract/execution-projection"
+import * as ExecutionProjection from "../../../execution/projection/contract"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import { identityKey } from "@rika/transcript/transcript-unit-identity"
-import { OperationError, operationError } from "../../operation-error"
+import { OperationError, operationError } from "../../error"
 import { Effect, Clock, Fiber, Ref } from "effect"
 import {
   boundTranscriptEntries,
   maximumTranscriptPayloadBytes,
   transcriptCursorFor,
   transcriptPageEncoder,
-} from "../../../transcript/transcript-bounds"
+} from "../../../thread/transcript/bounds"
 import { recordedShellProjection, settleRecordedShellProjection } from "@rika/transcript/recorded-shell-presentation"
 import { type SelectionEpochState, makeSelectionState } from "./selection"
-import { type PageCursor as TurnPageCursor } from "../../../thread/repository/turn-repository-pagination"
+import { type PageCursor as TurnPageCursor } from "../../../thread/repository/turn-pagination"
 import { type InteractiveEvent } from "../session-event"
 import { type InteractiveRuntimeContext } from "../session"
 import { queueItem } from "../turn/queue"

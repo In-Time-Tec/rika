@@ -3,7 +3,7 @@ import type { Unit } from "@rika/product/execution-transcript-contract"
 import { Function, Schema } from "effect"
 import { type Card, type Node } from "./model"
 import { type AuthorizationState, type PersistedProjector, type ProjectorCore } from "./persistence"
-import type { ProjectorRecoveryIndex } from "./projector-recovery"
+import type { ProjectorRecoveryIndex } from "./tree/projector-recovery"
 import type { UsageAccounting } from "./usage"
 
 export interface AuthorizationTarget {

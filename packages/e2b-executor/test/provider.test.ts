@@ -1,3 +1,4 @@
+import "./provider.harness"
 import { describe, expect, it } from "@effect/vitest"
 import { ALL_TRAFFIC, type SandboxInfo, type SandboxOpts } from "e2b"
 import { Effect, Redacted, Schema } from "effect"

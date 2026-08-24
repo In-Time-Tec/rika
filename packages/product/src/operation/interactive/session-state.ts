@@ -2,10 +2,10 @@ import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import { Effect, Fiber, Scope, Semaphore, Function, Schema, Ref } from "effect"
-import { OperationUnavailable } from "../contract/product-operation"
+import { OperationUnavailable } from "../contract/product"
 import { type InteractiveEvent } from "./session-event"
-import { makeFailure } from "../operation-failure"
-import { OperationError } from "../operation-error"
+import { makeFailure } from "../failure"
+import { OperationError } from "../error"
 import { makeInteractiveOperationFeed, type InteractiveOperationFeed, type SelectionLoad } from "./view/feed"
 import { makeInteractiveSelectionProjection, type SelectionEpochState } from "./view/selection"
 
@@ -148,7 +148,7 @@ export interface InteractiveSessionStateInput {
   readonly activitySequence: number
   readonly initialThreadId: string | undefined
   readonly recoveryOwner: boolean
-  readonly options: import("../dispatch/product-operation-options").ProductLayerOptions<
+  readonly options: import("../foundation/options").ProductLayerOptions<
     Error,
     Error,
     Error,

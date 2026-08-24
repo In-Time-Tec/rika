@@ -1,6 +1,6 @@
 import { Pins } from "tenetkit"
 import { KernelProfile } from "tenetkit/repl"
-import { bindingsDigest, type Environment } from "./binding/binding-epoch"
+import { bindingsDigest, type Environment } from "./binding/epoch"
 
 const runtimeName = "bun"
 

@@ -31,7 +31,7 @@ import { Duration, Layer } from "effect"
 import type { FileSystem, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import * as KernelBootstrap from "./kernel-bootstrap"
-import { make as makeModules, type BindingRequirements, type Options as ModuleOptions } from "./binding/binding-modules"
+import { make as makeModules, type BindingRequirements, type Options as ModuleOptions } from "./binding/modules"
 import { make as makeProfile, type Options as ProfileOptions } from "./kernel-profile-registration"
 import { layer as stateStoreLayer } from "./kernel-state-store-file-system"
 

@@ -1,8 +1,8 @@
 import { Function } from "effect"
-import * as Composer from "./state/model/terminal-composer-state"
-import * as ComposerPaste from "./state/model/terminal-composer-paste"
-import type { Mode } from "./state/model/terminal-state"
-import type { PromptPart } from "./state/model/terminal-composer-state"
+import * as Composer from "./state/composer/model"
+import * as ComposerPaste from "./state/composer/paste"
+import type { Mode } from "./state/model"
+import type { PromptPart } from "./state/composer/model"
 
 export interface ModelTuning {
   readonly fastMode?: boolean
