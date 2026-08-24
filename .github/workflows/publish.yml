@@ -201,8 +201,9 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           bun run package -- --target "$TARGET"
-          archive="$(find artifacts -maxdepth 1 -type f -name "rika-*-$TARGET.tar.gz" -print -quit)"
-          test -n "$archive"
+          version="$(bun -e 'console.log((await Bun.file("apps/rika/package.json").json()).version)')"
+          archive="artifacts/rika-$version-$TARGET.tar.gz"
+          test -f "$archive"
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
       - name: Verify executable architecture
         env:
@@ -220,8 +221,27 @@ jobs:
           done
       - name: Smoke extracted release
         env:
-          TARGET: ${{ matrix.target }}
-        run: bun run release-smoke -- --target "$TARGET"
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: |
+          set -euo pipefail
+          directory="$(mktemp -d)"
+          home="$(mktemp -d)"
+          trap 'rm -rf "$directory" "$home"' EXIT
+          root="$(basename "$ARCHIVE" .tar.gz)"
+          entries="$(tar -tzf "$ARCHIVE" | LC_ALL=C sort)"
+          expected="$(printf '%s\n' "$root/" "$root/INSTALL" "$root/bin/" "$root/bin/rika" | LC_ALL=C sort)"
+          test "$entries" = "$expected"
+          tar -xzf "$ARCHIVE" -C "$directory"
+          binary="$directory/$root/bin/rika"
+          test -x "$binary"
+          version="$(bun -e 'console.log((await Bun.file("apps/rika/package.json").json()).version)')"
+          env -i HOME="$home" PATH="$PATH" TERM=dumb "$binary" --version | grep -Fq "$version"
+          help="$(env -i HOME="$home" PATH="$PATH" TERM=dumb "$binary" --help)"
+          printf '%s\n' "$help" | grep -Fqi rika
+          if printf '%s\n' "$help" | grep -Fqi relay; then
+            echo "obsolete relay command found in release help" >&2
+            exit 1
+          fi
       - name: Attest archive
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:

@@ -31,18 +31,6 @@ bun run dev
 
 The standard repository commands are `build`, `check`, `dev`, `format`, `test`, and `typecheck`.
 
-## Package and install from source
-
-Build and install an explicit host target:
-
-```bash
-bun run package -- --target linux-x64
-bun run install-local
-rika-dev --version
-```
-
-`install-local` installs the existing versioned host archive under `~/.local/share/rika-dev/current` with a command at `~/.local/bin/rika-dev`. A source build is deliberately named `rika-dev` and kept in its own directory so it never overwrites a released `rika` from npm or the installer — the two can be installed side by side. Set `RIKA_PACKAGE_TARGET`, `RIKA_INSTALL_ROOT`, or `RIKA_BIN_DIR` to override the target or locations. `uninstall-local` removes the source build but keeps Rika state and configuration.
-
 ## Configuration
 
 Global settings live at `~/.config/rika/settings.json`. A workspace can override them with `.rika/settings.json`. Credentials stay out of JSON: local credentials use the operating-system credential store, while hosted user and Organization credentials are encrypted by the API and are never returned by read APIs. A provider override names the environment variable that supplies its API key. Mode names and routes are configurable, and direct provider/model routes do not require aliases.

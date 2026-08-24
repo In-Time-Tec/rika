@@ -65,7 +65,9 @@ test("publishes only unchanged, attested native archives from a validated tag", 
   expect(jobs.publish?.permissions).toEqual({ contents: "write" })
 
   expect(commands("package").match(/bun run package/g)).toHaveLength(1)
-  expect(commands("package")).toContain("bun run release-smoke")
+  expect(commands("package")).toContain("env -i")
+  expect(commands("package")).toContain("--version")
+  expect(commands("package")).toContain("--help")
   expect(commands("aggregate")).toContain("bun run package -- --aggregate")
   expect(commands("aggregate")).toContain("gh attestation verify")
   expect(commands("publish")).not.toMatch(/bun (?:install|build)|bun run package/)

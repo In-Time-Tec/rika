@@ -2,24 +2,13 @@ import { Effect } from "effect"
 import { describe, expect, test } from "vitest"
 import { live, readText } from "../support/platform"
 import {
-  archiveCommandName,
-  devCommandName,
-  releaseCommandName,
-} from "../../scripts/installation/install-command-names"
-import {
-  binDirEnv,
-  defaultBinDir,
-  defaultInstallRoot,
-  devRootSegments,
-  installRootEnv,
-  releaseRootSegments,
-} from "../../scripts/installation/install-paths"
-import { validateInstallerScript } from "../../scripts/installation/install-script-validation"
-import { launcherManifest } from "../../scripts/packaging/npm-launcher"
-import { platformManifest } from "../../scripts/packaging/npm-platform-package"
-import { packedName, platformConstraints, platformPackageName } from "../../scripts/packaging/npm-package-names"
-import { archiveName, archiveRoot } from "../../scripts/packaging/release-archive"
-import { targetNames } from "../../scripts/packaging/package-target-contract"
+  launcherManifest,
+  packedName,
+  platformConstraints,
+  platformManifest,
+  platformPackageName,
+} from "../../scripts/packaging/npm-package"
+import { archiveName, archiveRoot, targetNames } from "../../scripts/packaging/package-contract"
 import * as ReleaseDownload from "../../apps/rika/src/release/release-download"
 import * as ReleaseInstall from "../../apps/rika/src/release/release-install"
 import * as ReleaseUpdate from "../../apps/rika/src/release/release-update"
@@ -27,29 +16,9 @@ import * as ReleaseUpdate from "../../apps/rika/src/release/release-update"
 const installer = await Effect.runPromise(live(readText(new URL("../../install.sh", import.meta.url))))
 
 describe("install contract", () => {
-  test("install.sh honours the same defaults as local-install.ts", () => {
-    expect(() => validateInstallerScript(installer)).not.toThrow()
-    expect(installer).toContain(`${installRootEnv}:-${defaultInstallRoot}`)
-    expect(installer).toContain(`${binDirEnv}:-${defaultBinDir}`)
-    expect(defaultInstallRoot).toBe("$HOME/.local/share/rika/current")
-    expect(defaultBinDir).toBe("$HOME/.local/bin")
-  })
-
-  test("keeps a source build from colliding with a released install", () => {
-    expect(devCommandName).toBe("rika-dev")
-    expect(releaseCommandName).toBe("rika")
-    expect(devCommandName).not.toBe(releaseCommandName)
-    expect(devRootSegments).not.toEqual(releaseRootSegments)
-    expect(archiveCommandName).toBe("rika")
-  })
-
-  test("install.sh installs the released command only", () => {
-    expect(installer).not.toContain(devCommandName)
-    expect(() => validateInstallerScript(`${installer}\n# ${devCommandName}`)).toThrow(devCommandName)
-  })
-
-  test("install.sh rejects a drifted default", () => {
-    expect(() => validateInstallerScript(installer.replaceAll(defaultBinDir, "$HOME/bin"))).toThrow(binDirEnv)
+  test("installs the released command to the documented defaults", () => {
+    expect(installer).toContain('install_root="${RIKA_INSTALL_ROOT:-$HOME/.local/share/rika/current}"')
+    expect(installer).toContain('bin_dir="${RIKA_BIN_DIR:-$HOME/.local/bin}"')
   })
 
   test("install.sh validates the strict one-executable archive inventory", () => {
@@ -95,12 +64,10 @@ describe("install contract", () => {
   test("rika update and install.sh read the same release overrides", () => {
     expect(installer).toContain(`${ReleaseDownload.releaseApiUrlEnv}:-`)
     expect(installer).toContain(`${ReleaseDownload.releaseBaseUrlEnv}:-`)
-    expect(ReleaseInstall.installRootEnv).toBe(installRootEnv)
-    expect(devRootSegments).toContain(ReleaseInstall.developmentRootSegment)
+    expect(ReleaseInstall.installRootEnv).toBe("RIKA_INSTALL_ROOT")
   })
 
   test("rika update names the same artifacts the packaging step publishes", () => {
-    expect(ReleaseInstall.releaseTargets.toSorted()).toEqual(targetNames.toSorted())
     for (const target of targetNames) {
       expect(ReleaseUpdate.archiveFileName("1.2.3", target)).toBe(archiveName("1.2.3", target))
       expect(ReleaseUpdate.archiveRootName("1.2.3", target)).toBe(archiveRoot("1.2.3", target))
@@ -121,7 +88,7 @@ describe("install contract", () => {
       targetNames.map(platformPackageName).toSorted(),
     )
     for (const version of Object.values(manifest.optionalDependencies)) expect(version).toBe("1.2.3")
-    expect(manifest.bin[releaseCommandName]).toBe("bin/rika.js")
+    expect(manifest.bin.rika).toBe("bin/rika.js")
   })
 
   test("platform npm packages expose exactly bin/rika", () => {

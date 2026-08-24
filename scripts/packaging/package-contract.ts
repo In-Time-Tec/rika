@@ -1,5 +1,16 @@
 import { dual } from "effect/Function"
-import { targetNames, type PackageTarget } from "./package-target-contract"
+
+export const targets = {
+  "darwin-arm64": { bun: "bun-darwin-arm64", opentuiLibc: "" },
+  "linux-arm64": { bun: "bun-linux-arm64", opentuiLibc: "glibc" },
+  "linux-x64": { bun: "bun-linux-x64", opentuiLibc: "glibc" },
+} as const
+
+export type PackageTarget = keyof typeof targets
+
+export const targetNames = Object.keys(targets) as ReadonlyArray<PackageTarget>
+
+export const isPackageTarget = (value: string): value is PackageTarget => Object.hasOwn(targets, value)
 
 export const archiveName: {
   (version: string, target: PackageTarget): string
@@ -28,3 +39,18 @@ export const validateArchiveSet: {
     throw new Error(`Expected exact archive set: ${expected.join(", ")}; found: ${actual.join(", ")}`)
   return expected
 })
+
+export interface ReleaseArtifact {
+  readonly target: PackageTarget
+  readonly archive: string
+  readonly sha256: string
+  readonly bytes: number
+}
+
+export interface ReleaseEvidence {
+  readonly schemaVersion: 1
+  readonly version: string
+  readonly revision: string
+  readonly bun: string
+  readonly artifacts: ReadonlyArray<ReleaseArtifact>
+}

@@ -17,6 +17,4 @@ ignores:
   - "node_modules/**"
   - "repos/effect/**"
   - "apps/rika/src/release/relaunch-argument.ts"
-  - "scripts/capture/tui-visual-capture.ts"
   - "scripts/packaging/package-target.ts"
-  - "scripts/release/release-smoke.ts"

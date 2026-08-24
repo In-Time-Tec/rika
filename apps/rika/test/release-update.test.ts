@@ -330,24 +330,6 @@ it.effect("refuses to replace an install this binary does not own", () =>
         expect(fromNpm.failure.failure).toBe("unmanaged-install")
         expect(fromNpm.failure.message).toContain("npm install -g @rikafx/cli@latest")
       }
-
-      const development = path.join(root, ".local", "share", "rika-dev", "current")
-      yield* fileSystem.makeDirectory(path.join(development, "bin"), { recursive: true })
-      yield* fileSystem.writeFileString(path.join(development, "bin", "rika"), "dev rika")
-      yield* fileSystem.writeFileString(path.join(development, "bin", ".rika-performance"), "dev performance")
-      yield* fileSystem.writeFileString(path.join(development, "bin", ".rika-interactive"), "dev interactive")
-      const fromSource = yield* runUpdate({
-        currentVersion: "0.0.3",
-        executable: path.join(development, "bin", "rika"),
-        environment: { RIKA_RELEASE_API_URL: releaseApiUrl },
-        routes: {},
-        seen,
-      })
-      expect(fromSource._tag).toBe("Failure")
-      if (fromSource._tag === "Failure") {
-        expect(fromSource.failure.failure).toBe("unmanaged-install")
-        expect(fromSource.failure.message).toContain("bun run install-local")
-      }
       expect(seen).toEqual([])
     }),
   ),

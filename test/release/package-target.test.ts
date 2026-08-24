@@ -2,13 +2,14 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import { Effect, FileSystem } from "effect"
 import {
-  expectedArchiveNames,
-  ownedTargetEntries,
-  validateArchiveSet,
   archiveName,
   archiveRoot,
-} from "../../scripts/packaging/release-archive"
-import { isPackageTarget, targets } from "../../scripts/packaging/package-target-contract"
+  expectedArchiveNames,
+  isPackageTarget,
+  ownedTargetEntries,
+  targets,
+  validateArchiveSet,
+} from "../../scripts/packaging/package-contract"
 
 it.layer(BunServices.layer)("release target construction", (test) => {
   test("constructs the supported OpenTUI platform mappings", () => {
@@ -37,7 +38,7 @@ it.layer(BunServices.layer)("release target construction", (test) => {
     expect(ownedTargetEntries("1.2.3", "linux-x64")).toEqual(["rika-1.2.3-linux-x64", "rika-1.2.3-linux-x64.tar.gz"])
   })
 
-  test("accepts only the exact four-archive release set", () => {
+  test("accepts only the exact supported archive set", () => {
     const exact = expectedArchiveNames("1.2.3")
     expect(validateArchiveSet("1.2.3", [...exact, "notes.txt"])).toEqual(exact)
     expect(() => validateArchiveSet("1.2.3", exact.slice(1))).toThrow("Expected exact archive set")

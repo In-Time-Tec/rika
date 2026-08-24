@@ -4,8 +4,6 @@ import { failWith } from "./release-download"
 
 export const releaseRepository = "In-Time-Tec/rika"
 export const installRootEnv = "RIKA_INSTALL_ROOT"
-export const developmentRootSegment = "rika-dev"
-export const releaseTargets = ["darwin-arm64", "linux-arm64", "linux-x64"] as const
 
 export interface InstallLayout {
   readonly installRoot: string
@@ -40,11 +38,6 @@ export const installLayout = Effect.fn("ReleaseInstall.layout")(function* (execu
     return yield* failWith(
       "unmanaged-install",
       `This Rika is running from ${executable}, which is not a released install. Install a release with: curl -fsSL https://raw.githubusercontent.com/${releaseRepository}/main/install.sh | sh`,
-    )
-  if (installRoot.split(path.sep).includes(developmentRootSegment))
-    return yield* failWith(
-      "unmanaged-install",
-      `This Rika is a source build installed at ${installRoot}. Rebuild it with: bun run install-local`,
     )
   if (installRoot.split(path.sep).includes("node_modules"))
     return yield* failWith(
