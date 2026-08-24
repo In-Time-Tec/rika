@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { createHash } from "node:crypto"
-import { Effect, FileSystem, PlatformError, Schema, Stream } from "effect"
+import { Console, Effect, FileSystem, PlatformError, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { live } from "../support/platform"
 
@@ -35,12 +35,7 @@ const collect = (stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>)
     ),
   )
 
-const run = Effect.fn("e2bImageContract.run")(function* (
-  parts: ReadonlyArray<string>,
-  timeout = 30_000,
-  stdout: "pipe" | "inherit" = "pipe",
-  stderr: "pipe" | "inherit" = "pipe",
-) {
+const run = Effect.fn("e2bImageContract.run")(function* (parts: ReadonlyArray<string>, timeout = 30_000) {
   return yield* Effect.scoped(
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -50,19 +45,22 @@ const run = Effect.fn("e2bImageContract.run")(function* (
           detached: false,
           forceKillAfter: "5 seconds",
           stdin: "ignore",
-          stdout,
-          stderr,
+          stdout: "pipe",
+          stderr: "pipe",
         }),
       )
-      const [exitCode, collectedStdout, collectedStderr] = yield* Effect.all(
-        [child.exitCode, collect(child.stdout), collect(child.stderr)],
-        { concurrency: "unbounded" },
+      const [stdout, stderr] = yield* Effect.all([collect(child.stdout), collect(child.stderr)], {
+        concurrency: "unbounded",
+      })
+      const exitCode = yield* child.exitCode.pipe(
+        Effect.timeoutOrElse({ duration: "1 second", orElse: () => Effect.void }),
       )
-      if (Number(exitCode) !== 0)
+      if (exitCode === undefined) yield* child.unref.pipe(Effect.asVoid)
+      else if (Number(exitCode) !== 0)
         return yield* CommandError.make({
-          message: `${parts.join(" ")} exited ${exitCode}\n${collectedStdout}\n${collectedStderr}`,
+          message: `${parts.join(" ")} exited ${exitCode}\n${stdout}\n${stderr}`,
         })
-      return collectedStdout.trim()
+      return { stdout: stdout.trim(), stderr: stderr.trim() }
     }),
   ).pipe(
     Effect.timeoutOrElse({
@@ -74,7 +72,7 @@ const run = Effect.fn("e2bImageContract.run")(function* (
 
 const commandReady = Effect.fn("e2bImageContract.commandReady")(function* (command: ReadonlyArray<string>) {
   return yield* run([...command, "version"]).pipe(
-    Effect.as(true),
+    Effect.map(({ stdout }) => stdout.length > 0),
     Effect.orElseSucceed(() => false),
   )
 })
@@ -89,7 +87,7 @@ const detectContainerCommand = Effect.gen(function* () {
 const containerCommand = await Effect.runPromise(live(detectContainerCommand))
 
 describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
-  it.layer(BunServices.layer)((test) =>
+  it.layer(BunServices.layer, { excludeTestServices: true })((test) =>
     test.effect(
       "builds the pinned image and executes its complete doctor contract",
       () =>
@@ -100,7 +98,7 @@ describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
             yield* Effect.addFinalizer(() =>
               run([...containerCommand!, "image", "rm", "--force", tag]).pipe(Effect.ignore),
             )
-            yield* run(
+            const build = yield* run(
               [
                 ...containerCommand!,
                 "build",
@@ -112,9 +110,11 @@ describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
                 ".",
               ],
               180_000,
-              "inherit",
-              "inherit",
             )
+            yield* Console.log(build.stdout, build.stderr)
+            const image = yield* run([...containerCommand!, "image", "inspect", tag])
+            if (image.stdout.length === 0)
+              return yield* CommandError.make({ message: `executor image build did not create ${tag}` })
             const doctorContainer = `rika-executor-doctor-${process.pid}`
             const doctorOutput = yield* fileSystem.makeTempFileScoped({ prefix: "rika-executor-doctor-" })
             yield* Effect.addFinalizer(() =>
@@ -142,8 +142,6 @@ describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
                 "--json",
               ],
               120_000,
-              "inherit",
-              "inherit",
             )
             const output = yield* fileSystem.readFileString(doctorOutput)
             const result = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(DoctorResult))(output)
@@ -171,7 +169,7 @@ describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
             ])
               expect(names).toContain(name)
 
-            const container = yield* run([...containerCommand!, "run", "--detach", "--rm", tag])
+            const container = (yield* run([...containerCommand!, "run", "--detach", "--rm", tag])).stdout
             yield* Effect.addFinalizer(() =>
               run([...containerCommand!, "rm", "--force", container]).pipe(Effect.ignore),
             )
@@ -186,15 +184,15 @@ describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
                 "--silent",
                 "http://127.0.0.1:7070/health",
               ]).pipe(
-                Effect.map((health) => health === "ready"),
+                Effect.map(({ stdout }) => stdout === "ready"),
                 Effect.orElseSucceed(() => false),
               )
               if (!ready) yield* Effect.sleep("250 millis")
             }
             expect(ready).toBe(true)
-            expect(yield* run([...containerCommand!, "inspect", "--format", "{{.Config.User}}", container])).toBe(
-              "rika-executor",
-            )
+            expect(
+              (yield* run([...containerCommand!, "inspect", "--format", "{{.Config.User}}", container])).stdout,
+            ).toBe("rika-executor")
           }),
         ),
       900_000,
