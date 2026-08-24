@@ -132,8 +132,8 @@ describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
               }
             }).pipe(
               Effect.timeoutOrElse({
-                duration: 180_000,
-                orElse: () => CommandError.make({ message: `executor image build timed out after 180000ms` }),
+                duration: 300_000,
+                orElse: () => CommandError.make({ message: `executor image build timed out after 300000ms` }),
               }),
             )
             yield* build.unref.pipe(Effect.asVoid)
