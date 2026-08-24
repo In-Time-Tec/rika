@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { createHash } from "node:crypto"
-import { Console, Effect, FileSystem, PlatformError, Schema, Stream } from "effect"
+import { Effect, FileSystem, PlatformError, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { live } from "../support/platform"
 
@@ -94,56 +94,89 @@ describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
         Effect.scoped(
           Effect.gen(function* () {
             const fileSystem = yield* FileSystem.FileSystem
+            const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
             const tag = `rika-executor-contract:${process.pid}`
             yield* Effect.addFinalizer(() =>
               run([...containerCommand!, "image", "rm", "--force", tag]).pipe(Effect.ignore),
             )
-            const build = yield* run(
-              [
-                ...containerCommand!,
-                "build",
-                "--pull",
-                "--file",
-                "infra/e2b/executor-v1/e2b.Dockerfile",
-                "--tag",
-                tag,
-                ".",
-              ],
-              180_000,
+            const build = yield* spawner.spawn(
+              ChildProcess.make(
+                containerCommand![0],
+                [
+                  ...containerCommand!.slice(1),
+                  "build",
+                  "--pull",
+                  "--file",
+                  "infra/e2b/executor-v1/e2b.Dockerfile",
+                  "--tag",
+                  tag,
+                  ".",
+                ],
+                {
+                  cwd: root.pathname,
+                  detached: false,
+                  forceKillAfter: "5 seconds",
+                  stdin: "ignore",
+                  stdout: "inherit",
+                  stderr: "inherit",
+                },
+              ),
             )
-            yield* Console.log(build.stdout, build.stderr)
-            const image = yield* run([...containerCommand!, "image", "inspect", tag])
-            if (image.stdout.length === 0)
-              return yield* CommandError.make({ message: `executor image build did not create ${tag}` })
+            yield* Effect.gen(function* () {
+              while (true) {
+                const image = yield* run([...containerCommand!, "image", "inspect", tag]).pipe(
+                  Effect.orElseSucceed(() => ({ stdout: "", stderr: "" })),
+                )
+                if (image.stdout.length > 0) return
+                yield* Effect.sleep("250 millis")
+              }
+            }).pipe(
+              Effect.timeoutOrElse({
+                duration: 180_000,
+                orElse: () => CommandError.make({ message: `executor image build timed out after 180000ms` }),
+              }),
+            )
+            yield* build.unref.pipe(Effect.asVoid)
             const doctorContainer = `rika-executor-doctor-${process.pid}`
-            const doctorOutput = yield* fileSystem.makeTempFileScoped({ prefix: "rika-executor-doctor-" })
             yield* Effect.addFinalizer(() =>
               run([...containerCommand!, "rm", "--force", doctorContainer]).pipe(Effect.ignore),
             )
-            yield* run(
-              [
-                "sh",
-                "-c",
-                'output="$1"; shift; exec "$@" > "$output"',
-                "rika-executor-doctor",
-                doctorOutput,
-                ...containerCommand!,
-                "run",
-                "--name",
-                doctorContainer,
-                "--rm",
-                "--entrypoint",
-                "rika",
-                "--env",
-                "RIKA_DOCTOR_NETWORK_URL=https://example.com/",
-                tag,
-                "executor",
-                "doctor",
-                "--json",
-              ],
-              120_000,
+            const doctorId = (yield* run([
+              ...containerCommand!,
+              "run",
+              "--detach",
+              "--name",
+              doctorContainer,
+              "--entrypoint",
+              "rika",
+              "--env",
+              "RIKA_DOCTOR_NETWORK_URL=https://example.com/",
+              tag,
+              "executor",
+              "doctor",
+              "--json",
+            ])).stdout
+            if (doctorId.length === 0)
+              return yield* CommandError.make({ message: "executor image doctor container did not start" })
+            yield* Effect.gen(function* () {
+              while (true) {
+                const state = yield* run([
+                  ...containerCommand!,
+                  "inspect",
+                  "--format",
+                  "{{.State.Status}}",
+                  doctorContainer,
+                ])
+                if (state.stdout === "exited") return
+                yield* Effect.sleep("250 millis")
+              }
+            }).pipe(
+              Effect.timeoutOrElse({
+                duration: 120_000,
+                orElse: () => CommandError.make({ message: "executor image doctor timed out after 120000ms" }),
+              }),
             )
-            const output = yield* fileSystem.readFileString(doctorOutput)
+            const output = (yield* run([...containerCommand!, "logs", doctorContainer])).stdout
             const result = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(DoctorResult))(output)
             const manifestBytes = yield* fileSystem.readFile(new URL("tool-manifest.json", imageRoot).pathname)
             const manifest = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ToolManifest))(
