@@ -2,7 +2,7 @@ import { CliRenderEvents } from "@opentui/core"
 import type { Model } from "../../state/model"
 import { idleSpinnerFrame, spinnerInterval } from "../rendering/spinner"
 import { animationActive, goalAnimationActive } from "./content"
-import { welcomeAnimationActive, welcomeAnimationSettled } from "./welcome/state"
+import { welcomeAnimationActive } from "./welcome/state"
 import { SurfaceLayout } from "./layout"
 
 export abstract class SurfaceLifecycle extends SurfaceLayout {
@@ -29,9 +29,7 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
     if (this.options.animate !== false && loaderActive) {
       this.loaderController.start(spinnerInterval, () => this.tickLoader())
     } else if (this.options.animate === false || !loaderActive) this.loaderController.stop()
-    const welcomeActive =
-      welcomeAnimationActive(model) &&
-      !welcomeAnimationSettled(this.welcomeController.phase, this.welcomeController.impulses)
+    const welcomeActive = welcomeAnimationActive(model)
     if (this.options.animate !== false && welcomeActive) {
       this.welcomeController.start(spinnerInterval, () => this.tickWelcome())
     } else if (this.options.animate === false || !welcomeActive) this.welcomeController.stop()

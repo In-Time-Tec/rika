@@ -25,7 +25,6 @@ export interface ProductOperationServiceInput {
   readonly operationError: typeof import("../error").operationError
   readonly publishInteractiveActivity: (origin: number, event: InteractiveEvent) => InteractiveEvent
   readonly encodeJson: (value: unknown) => string
-  readonly runAuth: typeof import("../dispatch/authentication").run
   readonly queueMutationEvent: ProductOperationRuntimeState["queueMutationEvent"]
   readonly extensionOperations: typeof import("../contract/extension")
   readonly configOperations: typeof import("../contract/configuration")

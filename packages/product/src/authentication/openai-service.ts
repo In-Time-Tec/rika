@@ -1,4 +1,4 @@
-import { Clock, Context, Crypto, Effect, Layer, Option, Redacted } from "effect"
+import { Clock, Context, Crypto, Effect, Layer, Option, Redacted, Semaphore } from "effect"
 import * as Contract from "./openai-contract"
 import * as Flow from "./openai-flow"
 
@@ -26,7 +26,7 @@ interface PresenterInterface {
 export class Presenter extends Context.Service<Presenter, PresenterInterface>()(
   "@rika/product/authentication/openai-service/Presenter",
 ) {}
-interface HttpInterface {
+export interface HttpInterface {
   readonly exchange: (input: {
     readonly code: Redacted.Redacted<string>
     readonly verifier: Redacted.Redacted<string>
@@ -44,7 +44,7 @@ interface HttpInterface {
 export class Http extends Context.Service<Http, HttpInterface>()(
   "@rika/product/authentication/openai-service/Http",
 ) {}
-interface StoreInterface {
+export interface StoreInterface {
   readonly load: Effect.Effect<Option.Option<typeof Contract.CredentialDisk.Type>, Contract.StoreError>
   readonly save: (credential: typeof Contract.CredentialDisk.Type) => Effect.Effect<void, Contract.StoreError>
   readonly remove: Effect.Effect<boolean, Contract.StoreError>
@@ -58,7 +58,12 @@ type Credential = Contract.Credential
 type Status = Contract.Status
 type Error = Contract.AuthError | Contract.StoreError
 
-export interface ServiceInterface {
+export interface CredentialAccess {
+  readonly acquire: Effect.Effect<Credential, Error>
+  readonly refreshRejected: (generation: string) => Effect.Effect<Credential, Error>
+}
+
+export interface ServiceInterface extends CredentialAccess {
   readonly loginBrowser: (redirect?: string) => Effect.Effect<Credential, Error>
   readonly loginDevice: Effect.Effect<Credential, Error>
   readonly status: Effect.Effect<Status, Contract.StoreError>
@@ -66,8 +71,6 @@ export interface ServiceInterface {
     { readonly removed: boolean; readonly revocationSupported: false },
     Contract.StoreError
   >
-  readonly acquire: Effect.Effect<Credential, Error>
-  readonly refreshRejected: (generation: string) => Effect.Effect<Credential, Error>
 }
 export class Service extends Context.Service<Service, ServiceInterface>()(
   "@rika/product/authentication/openai-service/Service",
@@ -90,6 +93,94 @@ const publicCredential = (value: typeof Contract.CredentialDisk.Type): Credentia
 
 export const configuration = Flow.configuration
 
+export const credentialFromTokens = (input: {
+  readonly crypto: Crypto.Crypto
+  readonly tokens: {
+    readonly accessToken: Redacted.Redacted<string>
+    readonly idToken: Redacted.Redacted<string>
+    readonly refreshToken: Redacted.Redacted<string>
+  }
+}) =>
+  Flow.Flow.credentialFrom(input.crypto, {
+    access_token: Redacted.value(input.tokens.accessToken),
+    id_token: Redacted.value(input.tokens.idToken),
+    refresh_token: Redacted.value(input.tokens.refreshToken),
+  })
+
+const credentialOperations = (store: StoreInterface, http: HttpInterface, crypto: Crypto.Crypto) => {
+  const persist = (response: typeof Contract.TokenResponse.Type, previous?: typeof Contract.CredentialDisk.Type) =>
+    Effect.gen(function* () {
+      const value = yield* Flow.Flow.credentialFrom(crypto, response, previous)
+      yield* store.save(value)
+      return publicCredential(value)
+    })
+  const refreshGeneration = (generation: string) =>
+    store.serialized(
+      Effect.gen(function* () {
+        const current = yield* store.load
+        if (Option.isNone(current))
+          return yield* Contract.AuthError.make({ kind: "login-required", message: "Login is required" })
+        if (current.value.generation !== generation) {
+          const separator = generation.lastIndexOf(".")
+          const expectedFingerprint = separator < 0 ? undefined : generation.slice(0, separator)
+          if (expectedFingerprint !== undefined && expectedFingerprint !== current.value.fingerprint) {
+            return yield* Contract.AuthError.make({
+              kind: "account-mismatch",
+              message: "OpenAI account changed while the request was active; start the turn again",
+            })
+          }
+          return publicCredential(current.value)
+        }
+        return yield* Effect.uninterruptibleMask((restore) =>
+          restore(http.refresh(Redacted.make(current.value.refreshToken))).pipe(
+            Effect.flatMap((response) => persist(response, current.value)),
+          ),
+        )
+      }),
+    )
+  const exchangeAndPersist = (exchange: Effect.Effect<typeof Contract.TokenResponse.Type, Contract.AuthError>) =>
+    Effect.uninterruptibleMask((restore) =>
+      restore(exchange).pipe(Effect.flatMap((response) => store.serialized(persist(response)))),
+    )
+  const access: CredentialAccess = {
+    acquire: Effect.gen(function* () {
+      const entry = yield* store.load
+      if (Option.isNone(entry))
+        return yield* Contract.AuthError.make({ kind: "login-required", message: "Login is required" })
+      const now = yield* Clock.currentTimeMillis
+      return entry.value.expiresAt <= now + 300_000
+        ? yield* refreshGeneration(entry.value.generation)
+        : publicCredential(entry.value)
+    }),
+    refreshRejected: refreshGeneration,
+  }
+  return { access, exchangeAndPersist }
+}
+
+export const makeCredentialAccess = (input: {
+  readonly store: StoreInterface
+  readonly http: HttpInterface
+  readonly crypto: Crypto.Crypto
+}): CredentialAccess => credentialOperations(input.store, input.http, input.crypto).access
+
+export const memoryStoreLayer = Layer.effect(
+  Store,
+  Effect.gen(function* () {
+    let value = Option.none<typeof Contract.CredentialDisk.Type>()
+    const admission = yield* Semaphore.make(1)
+    return Store.of({
+      load: Effect.sync(() => value),
+      save: (credential) => Effect.sync(() => (value = Option.some(credential))),
+      remove: Effect.sync(() => {
+        const removed = Option.isSome(value)
+        value = Option.none()
+        return removed
+      }),
+      serialized: (effect) => admission.withPermits(1)(effect),
+    })
+  }),
+)
+
 export const layer = (options: TimingOptions = {}) =>
   Layer.effect(
     Service,
@@ -99,40 +190,7 @@ export const layer = (options: TimingOptions = {}) =>
       const http = yield* Http
       const store = yield* Store
       const crypto = yield* Crypto.Crypto
-      const persist = (response: typeof Contract.TokenResponse.Type, previous?: typeof Contract.CredentialDisk.Type) =>
-        Effect.gen(function* () {
-          const value = yield* Flow.Flow.credentialFrom(crypto, response, previous)
-          yield* store.save(value)
-          return publicCredential(value)
-        })
-      const refreshGeneration = (generation: string) =>
-        store.serialized(
-          Effect.gen(function* () {
-            const current = yield* store.load
-            if (Option.isNone(current))
-              return yield* Contract.AuthError.make({ kind: "login-required", message: "Login is required" })
-            if (current.value.generation !== generation) {
-              const separator = generation.lastIndexOf(".")
-              const expectedFingerprint = separator < 0 ? undefined : generation.slice(0, separator)
-              if (expectedFingerprint !== undefined && expectedFingerprint !== current.value.fingerprint) {
-                return yield* Contract.AuthError.make({
-                  kind: "account-mismatch",
-                  message: "OpenAI account changed while the request was active; start the turn again",
-                })
-              }
-              return publicCredential(current.value)
-            }
-            return yield* Effect.uninterruptibleMask((restore) =>
-              restore(http.refresh(Redacted.make(current.value.refreshToken))).pipe(
-                Effect.flatMap((response) => persist(response, current.value)),
-              ),
-            )
-          }),
-        )
-      const exchangeAndPersist = (exchange: Effect.Effect<typeof Contract.TokenResponse.Type, Contract.AuthError>) =>
-        Effect.uninterruptibleMask((restore) =>
-          restore(exchange).pipe(Effect.flatMap((response) => store.serialized(persist(response)))),
-        )
+      const operations = credentialOperations(store, http, crypto)
       const service: ServiceInterface = {
         loginBrowser: (redirect = Flow.configuration.redirectUri) =>
           Effect.gen(function* () {
@@ -147,7 +205,7 @@ export const layer = (options: TimingOptions = {}) =>
                 message: "Authorization state did not match",
               })
             }
-            return yield* exchangeAndPersist(
+            return yield* operations.exchangeAndPersist(
               http.exchange({ code: result.code, verifier: pkce.verifier, redirectUri: redirect }),
             )
           }),
@@ -186,7 +244,7 @@ export const layer = (options: TimingOptions = {}) =>
               break
             }
           }
-          return yield* exchangeAndPersist(
+          return yield* operations.exchangeAndPersist(
             http.exchange({
               code: Redacted.make(result.authorization_code),
               verifier: Redacted.make(result.code_verifier),
@@ -213,16 +271,7 @@ export const layer = (options: TimingOptions = {}) =>
         logout: store
           .serialized(store.remove)
           .pipe(Effect.map((removed) => ({ removed, revocationSupported: false as const }))),
-        acquire: Effect.gen(function* () {
-          const entry = yield* store.load
-          if (Option.isNone(entry))
-            return yield* Contract.AuthError.make({ kind: "login-required", message: "Login is required" })
-          const now = yield* Clock.currentTimeMillis
-          return entry.value.expiresAt <= now + 300_000
-            ? yield* refreshGeneration(entry.value.generation)
-            : publicCredential(entry.value)
-        }),
-        refreshRejected: refreshGeneration,
+        ...operations.access,
       }
       return Service.of(service)
     }),

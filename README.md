@@ -33,7 +33,7 @@ The standard repository commands are `build`, `check`, `dev`, `format`, `test`, 
 
 ## Configuration
 
-Global settings live at `~/.config/rika/settings.json`. A workspace can override them with `.rika/settings.json`. Credentials stay out of JSON: local credentials use the operating-system credential store, while hosted user and Organization credentials are encrypted by the API and are never returned by read APIs. A provider override names the environment variable that supplies its API key. Mode names and routes are configurable, and direct provider/model routes do not require aliases.
+Global settings live at `~/.config/rika/settings.json`. A workspace can override them with `.rika/settings.json`. Model-provider credentials belong to the selected Personal or Organization owner, are encrypted by the API, and are never returned by read APIs. Local, Runner, and Orb execution use that hosted owner; executors never receive model credentials.
 
 ```json
 {
@@ -41,25 +41,18 @@ Global settings live at `~/.config/rika/settings.json`. A workspace can override
     "maxDepth": 4,
     "maxSubagents": 4
   },
-  "providers": {
-    "openai": {
-      "api": "chat-completions",
-      "baseUrl": "http://127.0.0.1:9000/v1",
-      "apiKeyEnv": "RIKA_MODEL_API_KEY"
-    }
-  },
-  "defaultMode": "local",
-  "modes": {
-    "local": {
-      "main": { "provider": "openai", "model": "my-local-model", "effort": "medium" }
-    }
+  "keymap": {
+    "submit": "enter",
+    "newline": "shift+enter"
   }
 }
 ```
 
 ```bash
 rika auth login
-rika credential set openai --scope local
+rika provider login codex
+# Or configure a hosted API-key provider:
+rika credential set openrouter
 rika config list
 rika doctor
 rika

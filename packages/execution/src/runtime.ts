@@ -51,7 +51,7 @@ export interface CommonOptions {
   }>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry, never, never>
   readonly credentialStore?: Layer.Layer<ProviderCredentialStore, never, never>
-  readonly openAiAccountAuth?: OpenAiAuth.ServiceInterface
+  readonly openAiAccountAccess?: (credentialIdentity: string) => OpenAiAuth.CredentialAccess
   readonly subscriberQueueCapacity?: number
   readonly scheduler?: Runtime.LayerOptions["scheduler"]
 }
@@ -377,7 +377,7 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
               ? {}
               : { skills: turnCapabilities.skills, harnessSnapshot: turnCapabilities.harnessSnapshot }),
             ...(credentialStore === undefined ? {} : { credentialStore }),
-            ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
+            ...(options.openAiAccountAccess === undefined ? {} : { openAiAccountAccess: options.openAiAccountAccess }),
             ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
           })
           const receipt = yield* runtime.start({
@@ -652,7 +652,7 @@ const resolverFor = (options: CommonOptions, credentialStore: ProviderCredential
     ...(cell === undefined ? {} : { cell }),
     ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
     ...(credentialStore === undefined ? {} : { credentialStore }),
-    ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
+    ...(options.openAiAccountAccess === undefined ? {} : { openAiAccountAccess: options.openAiAccountAccess }),
     ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
   })
 }

@@ -155,6 +155,12 @@ const reduceOverlayImpl = (
       }
     }
     case "SubmissionRejected": {
+      const matchingDraft = model.submittedDrafts.find(
+        (draft) =>
+          draft.turnId === undefined &&
+          (message.submissionId === undefined || draft.submissionId === message.submissionId),
+      )
+      if (matchingDraft === undefined) return model
       const taken = takeSubmittedDraftFor(
         model.submittedDrafts,
         message.submissionId === undefined ? {} : { submissionId: message.submissionId },

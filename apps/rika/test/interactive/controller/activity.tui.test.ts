@@ -76,7 +76,8 @@ test(
 
         app.pressKey("o", { ctrl: true })
         const palette = yield* app.waitFrame("Command Palette")
-        expect(palette.replace(/\s+/g, " ")).toContain("thread new on Runner")
+        expect(palette.replace(/\s+/g, " ")).toContain("thread new")
+        expect(palette).not.toContain("new on Runner")
         expect(palette).toContain("switch")
         expect(palette).toContain("toggle fast mode")
         expect(palette).toContain("set max subagents")
@@ -102,7 +103,7 @@ test(
         yield* app.waitGone("Context & Usage")
 
         app.pressKey("o", { ctrl: true })
-        yield* Effect.tryPromise(() => app.type("thread new on Runner"))
+        yield* Effect.tryPromise(() => app.type("thread new"))
         app.pressEnter()
         expect(yield* app.waitTerminalTitle((title) => title.startsWith("New thread - rika -"))).toContain("New thread")
         const created = yield* app.waitFrame("Welcome to Rika")

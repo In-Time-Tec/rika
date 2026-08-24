@@ -21,11 +21,14 @@ import { expect, it } from "@effect/vitest"
 import {
   authenticated,
   createRemoteThread,
+  getOpenAiAccount,
   listOrganizations,
   login,
   logout,
   logoutAll,
   pollDeviceAuthorization,
+  putOpenAiAccount,
+  revokeOpenAiAccount,
   status,
   useOrganization,
   usePersonalOwner,
@@ -92,6 +95,9 @@ const unusedHttp: HttpInterface = {
   putProviderCredential: () => Effect.die("unused"),
   listProviderCredentials: () => Effect.die("unused"),
   revokeProviderCredential: () => Effect.die("unused"),
+  putOpenAiAccount: () => Effect.die("unused"),
+  getOpenAiAccount: () => Effect.die("unused"),
+  revokeOpenAiAccount: () => Effect.die("unused"),
   createProject: () => Effect.die("unused"),
   putEnvironment: () => Effect.die("unused"),
   revokeEnvironment: () => Effect.die("unused"),
@@ -151,6 +157,77 @@ it.effect("defaults a first login with zero organizations to Personal", () =>
       owner: { kind: "personal" },
     })
     expect(Option.isSome(yield* Ref.get(savedCredential))).toBe(true)
+  }),
+)
+
+it.effect("stores, reads, and revokes the OpenAI account for the selected hosted owner", () =>
+  Effect.gen(function* () {
+    const calls = yield* Ref.make<ReadonlyArray<{ readonly action: string; readonly owner: unknown }>>([])
+    const account = {
+      accessToken: Redacted.make("oauth-access"),
+      idToken: Redacted.make("oauth-id"),
+      refreshToken: Redacted.make("oauth-refresh"),
+      accountId: Redacted.make("account-id"),
+      fingerprint: "fingerprint-1",
+      generation: "fingerprint-1.generation-1",
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      refreshedAt: 0,
+    }
+    const active = {
+      state: "active" as const,
+      revision: "1",
+      credentialIdentity: "openai-account-1",
+      fingerprint: account.fingerprint,
+    }
+    const context = yield* Layer.build(
+      Layer.mergeAll(
+        Layer.succeed(
+          ProfileStore,
+          ProfileStore.of({ load: Effect.succeed(Option.some(profile)), save: () => Effect.void }),
+        ),
+        Layer.succeed(
+          CredentialStore,
+          CredentialStore.of({
+            load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })),
+            save: () => Effect.void,
+            remove: () => Effect.succeed(true),
+            serialized: (effect) => effect,
+          }),
+        ),
+        Layer.succeed(
+          Http,
+          Http.of({
+            ...unusedHttp,
+            refresh: () => Effect.succeed({ accessToken: "access", refreshToken: "refresh", expiresIn: 600 }),
+            putOpenAiAccount: (_origin, owner, credential) =>
+              Ref.update(calls, (values) => [...values, { action: "put", owner }]).pipe(
+                Effect.tap(() => Effect.sync(() => expect(credential).toBe(account))),
+                Effect.as(active),
+              ),
+            getOpenAiAccount: (_origin, owner) =>
+              Ref.update(calls, (values) => [...values, { action: "status", owner }]).pipe(Effect.as(active)),
+            revokeOpenAiAccount: (_origin, owner) =>
+              Ref.update(calls, (values) => [...values, { action: "revoke", owner }]).pipe(
+                Effect.as({ ...active, state: "revoked" as const, revision: "2" }),
+              ),
+          }),
+        ),
+        TestConsole.layer,
+      ),
+    )
+    yield* putOpenAiAccount(account).pipe(Effect.provide(context))
+    yield* getOpenAiAccount().pipe(Effect.provide(context))
+    yield* revokeOpenAiAccount().pipe(Effect.provide(context))
+    expect(yield* Ref.get(calls)).toEqual([
+      { action: "put", owner: profile.owner },
+      { action: "status", owner: profile.owner },
+      { action: "revoke", owner: profile.owner },
+    ])
+    expect(yield* TestConsole.logLines.pipe(Effect.provide(context))).toEqual([
+      "OpenAI account is active",
+      "OpenAI account is active",
+      "OpenAI account logged out",
+    ])
   }),
 )
 

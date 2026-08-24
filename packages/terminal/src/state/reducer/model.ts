@@ -178,6 +178,7 @@ const toggleContextDetails = (model: Model): Model => {
 
 export const canSubmit = (model: Model): boolean =>
   !model.threadLoading &&
+  (model.connection === undefined || model.connection.connectivity === "connected") &&
   !model.submittedDrafts.some((draft) => draft.turnId === undefined) &&
   model.editingTurnId === undefined &&
   !model.threadSwitcher.open &&

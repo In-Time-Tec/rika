@@ -183,6 +183,7 @@ export const interactiveTui =
         loop.initialization = initializeRenderer({
           loop,
           input,
+          connection,
           session,
           options,
           fork,

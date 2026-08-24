@@ -1,4 +1,5 @@
 import * as InteractiveSession from "@rika/product/interactive-session"
+import * as ProductOperation from "@rika/product/product-operation"
 import type * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as BunServices from "@effect/platform-bun/BunServices"
@@ -52,6 +53,7 @@ type SessionEvent = Parameters<Parameters<InteractiveSession.InteractiveSession[
 
 export interface TuiAppOptions {
   readonly script?: Lane["steps"]
+  readonly initialPrompt?: ReadonlyArray<string>
   readonly lanes?: ReadonlyArray<Lane>
   readonly subagents?: ExecutionRouteSnapshot.ExecutionRouteSnapshot["subagents"]
   readonly root?: string
@@ -67,6 +69,7 @@ export interface TuiAppOptions {
   readonly holdCancellation?: Deferred.Deferred<void>
   readonly mapInteractiveEvent?: (event: SessionEvent) => SessionEvent
   readonly duplicateInteractiveEvent?: (event: SessionEvent) => boolean
+  readonly submissionFailure?: (attempt: number) => string | undefined
   readonly historicalTranscriptFixture?: HistoricalTranscriptFixture
   readonly prepareRuntimeState?: RuntimeStatePreparation
   readonly modeConfiguration?: ModeConfiguration
@@ -77,6 +80,7 @@ export type CapturedSpans = ReturnType<Awaited<ReturnType<typeof createTestRende
 export interface TuiApp {
   readonly workspace: string
   readonly type: (text: string) => ReturnType<typeof Effect.runPromise<void, never>>
+  readonly paste: (text: string) => void
   readonly pressEnter: () => void
   readonly pressEscape: () => void
   readonly pressArrow: (direction: "up" | "down" | "left" | "right") => void
@@ -115,6 +119,7 @@ export interface TuiApp {
   readonly waitSubmissionAdmissions: (count: number) => Effect.Effect<void>
   readonly setConnectionState: (state: InteractiveConnectionState) => Effect.Effect<void>
   readonly modelRequestCount: Effect.Effect<number>
+  readonly submissionAttempts: Effect.Effect<number>
   readonly modelProviderHttpEnvelopeCounts: Effect.Effect<ProviderHttpEnvelopeCounts>
   readonly modelPrompts: ReturnType<LaneModels["promptsFor"]>
   readonly modelToolNamesFor: (profile: Profile) => Effect.Effect<ReadonlyArray<ReadonlyArray<string>>>
@@ -237,6 +242,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   }
   let selectionsLoaded = 0
   let submissionAdmissions = 0
+  let submissionAttempts = 0
   const awaitSelectionLoaded = (count: number): Effect.Effect<void> =>
     Effect.suspend(() =>
       selectionsLoaded >= count
@@ -268,7 +274,12 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
       const tuiSession: InteractiveSession.InteractiveSession = {
         ...current,
         submit: (prompt, mode, parts, tuning, submissionId) => {
-          const submitted = current.submit(prompt, mode, parts, tuning, submissionId)
+          submissionAttempts += 1
+          const failed = options.submissionFailure?.(submissionAttempts)
+          const submitted =
+            failed === undefined
+              ? current.submit(prompt, mode, parts, tuning, submissionId)
+              : Effect.fail(ProductOperation.OperationUnavailable.make({ operation: "Submit", message: failed }))
           return options.holdSubmissionAdmission === undefined
             ? submitted
             : Deferred.await(options.holdSubmissionAdmission).pipe(Effect.andThen(submitted))
@@ -305,7 +316,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     operation
       .run({
         _tag: "Interactive",
-        prompt: [],
+        prompt: options.initialPrompt ?? [],
         workspace,
         ...(options.initialThreadId === undefined ? {} : { threadId: options.initialThreadId }),
         ephemeral: false,
@@ -359,6 +370,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   const app: TuiApp = {
     workspace,
     type: (text) => setup.mockInput.typeText(text),
+    paste: (text) => setup.mockInput.pasteBracketedText(text),
     pressEnter: () => setup.mockInput.pressEnter(),
     pressEscape: () => setup.mockInput.pressEscape(),
     pressArrow: (direction) => setup.mockInput.pressArrow(direction),
@@ -447,6 +459,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
       ),
     setConnectionState: (state) => SubscriptionRef.set(connectionState, state),
     modelRequestCount: laneModels.requestCountFor("Root"),
+    submissionAttempts: Effect.sync(() => submissionAttempts),
     modelProviderHttpEnvelopeCounts: laneModels.providerHttpEnvelopeCountsFor("Root"),
     modelPrompts: laneModels.promptsFor("Root"),
     modelToolNamesFor: (profile) =>

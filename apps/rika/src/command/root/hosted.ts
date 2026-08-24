@@ -28,6 +28,8 @@ export type Input =
   | { readonly _tag: "Credential"; readonly action: "put"; readonly provider: ModelProvider; readonly apiKey: string }
   | { readonly _tag: "Credential"; readonly action: "list"; readonly provider?: ModelProvider | undefined }
   | { readonly _tag: "Credential"; readonly action: "revoke"; readonly provider: ModelProvider }
+  | { readonly _tag: "Provider"; readonly action: "login"; readonly deviceCode: boolean }
+  | { readonly _tag: "Provider"; readonly action: "status" | "logout" }
   | {
       readonly _tag: "Secret"
       readonly action: "put"

@@ -5,8 +5,8 @@
     ctrl+o commands   ? help
 
 
-╭─────────────────────── high ─╮
+╭─ Orb ───────────────── high ─╮
 │                              │
 │                              │
 │                              │
-╰ Orb ── ∼ Reconnecting ───────╯
+╰ ∼ Reconnecting ──────────────╯

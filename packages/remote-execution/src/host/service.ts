@@ -1643,16 +1643,9 @@ const receiveBootstrap = Effect.suspend(() => {
               identity: { ...body.identity, stateDirectory },
               restore: body.restore,
             }
-            return new Response(
-              new ReadableStream({
-                pull: (controller) => {
-                  controller.enqueue(new TextEncoder().encode("accepted"))
-                  controller.close()
-                  setImmediate(() => resume(Effect.succeed(bootstrap)))
-                },
-              }),
-              { status: 202 },
-            )
+            const response = new Response("accepted", { status: 202 })
+            setImmediate(() => resume(Effect.succeed(bootstrap)))
+            return response
           }),
           Effect.orElseSucceed(() => new Response("invalid", { status: 400 })),
         )

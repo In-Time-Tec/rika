@@ -11,7 +11,7 @@ const hasColor = (app: TuiApp.TuiApp, text: string, color: string): boolean =>
     .some((span) => span.text.includes(text) && span.fg.toInts().join(",") === color)
 
 test(
-  "shows connection and placement lifecycle targets in the bottom-left status",
+  "shows transient status at bottom-left and only Orb placement on the composer",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -22,11 +22,16 @@ test(
 
         const connecting = yield* app.waitFrame("Connecting")
         expect(connecting).toContain("Welcome to Rika")
-        expect(connecting).toContain("Resolving target")
-        yield* app.setConnectionState({ connectivity: "connected", target: "runner", participants: 1 })
+        expect(connecting).not.toContain("Resolving target")
+        yield* app.setConnectionState({
+          connectivity: "connected",
+          target: "runner",
+          activity: "executor-waiting",
+          participants: 1,
+        })
         const runnerIdle = yield* app.waitGone("Connecting")
-        expect(runnerIdle).toContain("Runner")
-        expect(hasColor(app, "Runner", "210,162,92,255")).toBe(true)
+        expect(runnerIdle).not.toContain("Runner")
+        expect(runnerIdle).not.toContain("Waiting")
 
         yield* Effect.tryPromise(() => app.type("Keep working during replacement"))
         app.pressEnter()
@@ -34,7 +39,7 @@ test(
         yield* app.setConnectionState({ connectivity: "reconnecting", target: "runner", participants: 1 })
         const reconnecting = yield* app.waitFrame("Reconnecting")
         expect(reconnecting).toContain("Keep working during replacement")
-        expect(reconnecting).toContain("Runner")
+        expect(reconnecting).not.toContain("Runner")
 
         yield* app.setConnectionState({ connectivity: "connected", target: "runner", participants: 1 })
         yield* app.waitGone("Reconnecting")

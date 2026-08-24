@@ -10,7 +10,7 @@ import { classifyPrompt, displayInput, promptParts } from "@rika/terminal/termin
 import { execute, type Action, type Adapter, type ModelTuning } from "@rika/terminal/terminal-session"
 import { update } from "@rika/terminal/terminal-state-reducer"
 import type { PathTarget } from "@rika/terminal/terminal-transcript-presentation"
-import type { Model, Mode } from "@rika/terminal/terminal-state"
+import type { Mode } from "@rika/terminal/terminal-state"
 type PromptPart = ReturnType<ReturnType<typeof promptParts>>[number]
 import * as Thread from "@rika/product/thread-record"
 import * as ProductOperation from "@rika/product/product-operation"
@@ -180,48 +180,28 @@ export const makeProcessRuntime = (runtime: Runtime) => {
             Effect.flatMap((materialized) =>
               session.submit(classified.prompt, mode, materialized, tuning, submissionId),
             ),
-            Effect.catchIf(
-              (failure): failure is ProcessPrompt.PromptAttachmentError =>
-                Schema.is(ProcessPrompt.PromptAttachmentError)(failure),
-              (failure) =>
-                Effect.sync(() => {
-                  let restored: Model = {
-                    ...loop.model,
-                    input: "",
-                    cursor: 0,
-                    pastedText: [],
-                    busy: false,
-                    activity: undefined,
-                  }
-                  for (const [index, part] of parts.entries()) {
-                    if (part.type === "image") {
-                      if (index !== failure.index)
-                        restored = update(restored, { _tag: "ImageInserted", path: part.path })
-                    } else {
-                      restored = {
-                        ...restored,
-                        input:
-                          restored.input.slice(0, restored.cursor) + part.text + restored.input.slice(restored.cursor),
-                        cursor: restored.cursor + part.text.length,
-                      }
-                    }
-                  }
-                  loop.model = update(restored, {
-                    _tag: "ExecutionFailed",
-                    failure: {
-                      tag: "RecoveredTurnFailed",
-                      category: "operation",
-                      message: failure.message,
-                      retryable: false,
-                      retry: "none",
-                      actor: "environment",
-                    },
-                  })
-                  loop.renderer?.surface.update(loop.model)
-                }),
-            ),
           )
-    fork(effect.pipe(provideLayerScoped(BunServices.layer), recoverSession))
+    fork(
+      effect.pipe(
+        provideLayerScoped(BunServices.layer),
+        Effect.catch((failure) =>
+          Effect.sync(() => {
+            if (submissionId === undefined) {
+              loop.renderer?.surface.showToast(failure.message, "#e06c75")
+              return
+            }
+            loop.model = update(loop.model, {
+              _tag: "SubmissionRejected",
+              submissionId,
+              message: failure.message,
+            })
+            if (!loop.model.busy && loop.model.activeTurnId === undefined && loop.model.activity === undefined)
+              loop.submittedSinceIdle = false
+            loop.renderer?.surface.update(loop.model)
+          }),
+        ),
+      ),
+    )
   }
   const run = <E>(effect: Effect.Effect<void, E, BunServices.BunServices>) => {
     fork(

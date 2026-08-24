@@ -88,7 +88,7 @@ export interface ConfigureOptions {
   readonly harnessSnapshot?: HarnessState.HarnessState
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
   readonly credentialStore?: ProviderCredentialStoreShape
-  readonly openAiAccountAuth?: OpenAiAuth.ServiceInterface
+  readonly openAiAccountAccess?: (credentialIdentity: string) => OpenAiAuth.CredentialAccess
 }
 
 export interface ConfiguredExecutable {
@@ -110,7 +110,7 @@ export interface ResolverOptions {
   }>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
   readonly credentialStore?: ProviderCredentialStoreShape
-  readonly openAiAccountAuth?: OpenAiAuth.ServiceInterface
+  readonly openAiAccountAccess?: (credentialIdentity: string) => OpenAiAuth.CredentialAccess
 }
 
 type ResolvedAgent = ExecutableResolver.StaticAgentExecutable["agent"]
@@ -212,7 +212,7 @@ const routedModel = (
   route: ModelSnapshot,
   override: Layer.Layer<ModelRegistry.ModelRegistry> | undefined,
   credentialStore: ConfigureOptions["credentialStore"],
-  openAiAccountAuth: ConfigureOptions["openAiAccountAuth"],
+  openAiAccountAccess: ConfigureOptions["openAiAccountAccess"],
 ) =>
   Effect.gen(function* () {
     const available =
@@ -222,7 +222,7 @@ const routedModel = (
               Models.layer({
                 candidate,
                 ...(credentialStore === undefined ? {} : { credentialStore }),
-                ...(openAiAccountAuth === undefined ? {} : { openAiAccountAuth }),
+                ...(openAiAccountAccess === undefined ? {} : { openAiAccountAccess }),
               }),
             ).pipe(Effect.mapError((cause) => Errors.ExecutableRegistrationInvalid.make({ message: String(cause) }))),
           ).pipe(Effect.map((groups) => groups.flat()))
@@ -497,7 +497,7 @@ export const configure = (
     } as const
     const routed = Object.fromEntries(
       yield* Effect.forEach(Object.entries(routes), ([name, model]) =>
-        routedModel(model, options.modelServices, options.credentialStore, options.openAiAccountAuth).pipe(
+        routedModel(model, options.modelServices, options.credentialStore, options.openAiAccountAccess).pipe(
           Effect.map((value) => [name, value] as const),
         ),
       ),
@@ -775,7 +775,7 @@ export const makeResolver = (options: ResolverOptions): ExecutableResolver.Inter
             ? {}
             : { skills: capabilities.skills, harnessSnapshot: capabilities.harnessSnapshot }),
           ...(options.credentialStore === undefined ? {} : { credentialStore: options.credentialStore }),
-          ...(options.openAiAccountAuth === undefined ? {} : { openAiAccountAuth: options.openAiAccountAuth }),
+          ...(options.openAiAccountAccess === undefined ? {} : { openAiAccountAccess: options.openAiAccountAccess }),
           ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
         }).pipe(Effect.mapError(invalid))
         yield* Registration.verify({

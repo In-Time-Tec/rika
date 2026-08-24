@@ -25,6 +25,5 @@ export const unavailableLayer = Layer.succeed(
   }),
 )
 
-export { productLayer, runAuth } from "../dispatch/product"
-export type { AuthOperationOptions } from "../dispatch/authentication"
+export { productLayer } from "../dispatch/product"
 export { ThreadToolHandlers }

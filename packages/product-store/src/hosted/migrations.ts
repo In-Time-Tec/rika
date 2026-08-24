@@ -110,4 +110,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "e41396ab9b388fe0120f76c798cc59313684c7b7481b6fe7269802438bf3dc98",
     url: new URL("../../migrations/postgres/0021-independent-assignment-identity.sql", import.meta.url),
   },
+  {
+    id: "product/0022_openai_account_credentials",
+    checksum: "c91691d1b09392d0a4ab04949a78a39ca6c340eb0e16574e8cdf1557c834be70",
+    url: new URL("../../migrations/postgres/0022-openai-account-credentials.sql", import.meta.url),
+  },
 ]

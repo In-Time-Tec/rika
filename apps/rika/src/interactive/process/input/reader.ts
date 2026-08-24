@@ -188,11 +188,7 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       const wasChangedFilesOpen = loop.model.changedFilesOpen
       const beforePreviewId = loop.model.threadSwitcher.open ? selectedThreadMetadata(loop.model)?.id : undefined
       const submitting =
-        key.name === "return" &&
-        !key.shift &&
-        !key.ctrl &&
-        !loop.model.threadLoading &&
-        (canSubmit(loop.model) || loop.model.contextDetailsOpen)
+        key.name === "return" && !key.shift && !key.ctrl && !loop.model.threadLoading && canSubmit(loop.model)
       if (key.name === "return" && !key.shift && !key.ctrl && loop.model.threadLoading)
         loop.renderer?.surface.showToast("Thread is still loading; your draft is preserved")
       const submission = submitting ? nextSubmissionId(loop.submissionSequence) : undefined

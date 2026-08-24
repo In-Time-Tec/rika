@@ -120,6 +120,24 @@ const ProviderCredentialResponse = Schema.Struct({
   credentialIdentity: Schema.String,
 })
 const ProviderCredentialsResponse = Schema.Struct({ credentials: Schema.Array(ProviderCredentialResponse) })
+const OpenAiAccountRequest = strict(
+  Schema.Struct({
+    owner: ConnectionOwner,
+    access_token: Schema.Redacted(Schema.NonEmptyString, { disallowJsonEncode: true }),
+    id_token: Schema.Redacted(Schema.NonEmptyString, { disallowJsonEncode: true }),
+    refresh_token: Schema.Redacted(Schema.NonEmptyString, { disallowJsonEncode: true }),
+  }),
+)
+const OpenAiAccountOwnerRequest = strict(Schema.Struct({ owner: ConnectionOwner }))
+const OpenAiAccountResponse = Schema.Union([
+  Schema.Struct({ state: Schema.Literal("missing") }),
+  Schema.Struct({
+    state: Schema.Literals(["active", "revoked"]),
+    revision: Schema.String,
+    credentialIdentity: Schema.String,
+    fingerprint: Schema.String,
+  }),
+])
 const ToolAuditListRequest = strict(
   Schema.Struct({
     owner: ConnectionOwner,
@@ -277,6 +295,21 @@ class ProductGroup extends HttpApiGroup.make("product", { topLevel: true })
     HttpApiEndpoint.post("listProviderCredentials", "/api/v1/provider-credentials/list", {
       payload: ProviderCredentialRevokeRequest,
       success: ProviderCredentialsResponse,
+      error: [Forbidden, Unprocessable, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.put("putOpenAiAccount", "/api/v1/provider-accounts/openai", {
+      payload: OpenAiAccountRequest,
+      success: OpenAiAccountResponse,
+      error: [Forbidden, Unprocessable, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.post("getOpenAiAccount", "/api/v1/provider-accounts/openai/status", {
+      payload: OpenAiAccountOwnerRequest,
+      success: OpenAiAccountResponse,
+      error: [Forbidden, Unprocessable, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.delete("revokeOpenAiAccount", "/api/v1/provider-accounts/openai", {
+      payload: OpenAiAccountOwnerRequest,
+      success: OpenAiAccountResponse,
       error: [Forbidden, Unprocessable, ServiceUnavailable],
     }),
     HttpApiEndpoint.put("putEnvironment", "/api/v1/environment/:name", {
@@ -719,6 +752,57 @@ const productHandlers = (dependencies: HttpDependencies) =>
             .pipe(Effect.mapError(providerCredentialFailure))
           return { credentials: [...credentials] }
         }),
+      putOpenAiAccount: ({ payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined) {
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          }
+          if (dependencies.credentials === undefined) {
+            return yield* ServiceUnavailable.make({ message: "Provider credential service unavailable" })
+          }
+          return yield* dependencies.credentials
+            .putOpenAiAccount({
+              principal: authenticatedPrincipal(access),
+              owner: hostedOwner(payload.owner, access),
+              accessToken: payload.access_token,
+              idToken: payload.id_token,
+              refreshToken: payload.refresh_token,
+            })
+            .pipe(Effect.mapError(providerCredentialFailure))
+        }),
+      getOpenAiAccount: ({ payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined) {
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          }
+          if (dependencies.credentials === undefined) {
+            return yield* ServiceUnavailable.make({ message: "Provider credential service unavailable" })
+          }
+          return yield* dependencies.credentials
+            .openAiAccountStatus({
+              principal: authenticatedPrincipal(access),
+              owner: hostedOwner(payload.owner, access),
+            })
+            .pipe(Effect.mapError(providerCredentialFailure))
+        }),
+      revokeOpenAiAccount: ({ payload }) =>
+        Effect.gen(function* () {
+          const access = yield* CurrentAccess
+          if (access.deviceId === undefined || access.principal.clientId === undefined) {
+            return yield* Unauthorized.make({ message: "CLI device authentication required" })
+          }
+          if (dependencies.credentials === undefined) {
+            return yield* ServiceUnavailable.make({ message: "Provider credential service unavailable" })
+          }
+          return yield* dependencies.credentials
+            .revokeOpenAiAccount({
+              principal: authenticatedPrincipal(access),
+              owner: hostedOwner(payload.owner, access),
+            })
+            .pipe(Effect.mapError(providerCredentialFailure))
+        }),
       putEnvironment: ({ params, payload }) =>
         Effect.gen(function* () {
           const access = yield* CurrentAccess
@@ -856,6 +940,8 @@ export const isRikaApiPath = (pathname: string) =>
   pathname === "/api/v1/models" ||
   pathname === "/api/v1/environment-policy" ||
   pathname === "/api/v1/environment-approvals" ||
+  pathname === "/api/v1/provider-accounts/openai" ||
+  pathname === "/api/v1/provider-accounts/openai/status" ||
   pathname === "/api/v1/provider-credentials/list" ||
   pathname === "/api/v1/tool-audit-records/list" ||
   /^\/api\/v1\/(environment|egress)\/[^/]+$/.test(pathname) ||

@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest"
 import { identityMigrations, runMigration } from "@rika/identity"
 import { BetterAuthUserId, OrganizationId, OwnerId } from "@rika/product/hosted-model"
 import { ProviderCredentialStore } from "@rika/product/provider-credential-store"
+import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
 import { FileSystem, Config, Context, Effect, Layer, Option, Random, Redacted, Schema } from "effect"
@@ -27,6 +28,7 @@ const organization = (organizationId: string) => ({
 })
 const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
   Effect.tryPromise(() => pool.query(text, [...values]))
+const jwt = (payload: unknown) => `e30.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`
 
 const failureKind = <A>(effect: Effect.Effect<A, HostedProviderCredentialError>) =>
   effect.pipe(
@@ -78,7 +80,37 @@ it.effect.skipIf(databaseUrl === "")("encrypts, rotates, revokes, and resolves o
              INSERT INTO rika_hosted_owners (id, kind, organization_id)
               VALUES ('organization-owner-record', 'organization', 'organization-1')`,
         )
-        const base = Layer.merge(postgresLayer({ url: Redacted.make(url), maxConnections: 4 }), BunCrypto.layer)
+        const accountIdentity = {
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "chatgpt-account-1",
+            chatgpt_user_id: "chatgpt-user-1",
+          },
+        }
+        const firstAccessToken = jwt({ exp: 4_000_000_000 })
+        const firstIdToken = jwt(accountIdentity)
+        const secondAccessToken = jwt({ exp: 4_000_000_001 })
+        let refreshes = 0
+        const base = Layer.mergeAll(
+          postgresLayer({ url: Redacted.make(url), maxConnections: 4 }),
+          BunCrypto.layer,
+          Layer.succeed(
+            OpenAiAuth.Http,
+            OpenAiAuth.Http.of({
+              exchange: () => Effect.die("unused"),
+              refresh: () =>
+                Effect.sync(() => {
+                  refreshes += 1
+                  return {
+                    access_token: secondAccessToken,
+                    id_token: firstIdToken,
+                    refresh_token: "oauth-refresh-secret-two",
+                  }
+                }),
+              deviceStart: Effect.die("unused"),
+              devicePoll: () => Effect.die("unused"),
+            }),
+          ),
+        )
         const credentialContext = yield* Layer.build(
           Layer.merge(credentialsLayer({ encryptionKey: key }), storeLayer({ encryptionKey: key })).pipe(
             Layer.provide(base),
@@ -128,8 +160,36 @@ it.effect.skipIf(databaseUrl === "")("encrypts, rotates, revokes, and resolves o
         expect(first).toMatchObject({ provider: "openrouter", state: "active", revision: "1" })
         const firstLoaded = yield* store.load(first.credentialIdentity)
         expect(Option.isSome(firstLoaded) && Redacted.value(firstLoaded.value)).toBe("provider-secret-one")
+        expect(
+          yield* credentials.openAiAccountStatus({
+            principal: principal("owner-user"),
+            owner: personal("owner-user"),
+          }),
+        ).toEqual({ state: "missing" })
+        const openAiAccount = yield* credentials.putOpenAiAccount({
+          principal: principal("owner-user"),
+          owner: personal("owner-user"),
+          accessToken: Redacted.make(firstAccessToken),
+          idToken: Redacted.make(firstIdToken),
+          refreshToken: Redacted.make("oauth-refresh-secret-one"),
+        })
+        expect(openAiAccount).toMatchObject({ state: "active", revision: "1" })
+        const accountAccess = credentials.openAiAccountAccess(openAiAccount.credentialIdentity)
+        const acquired = yield* accountAccess.acquire
+        expect(Redacted.value(acquired.accessToken)).toBe(firstAccessToken)
+        expect(Redacted.value(acquired.refreshToken)).toBe("oauth-refresh-secret-one")
+        expect(acquired.fingerprint).toBe(openAiAccount.fingerprint)
+        const refreshed = yield* accountAccess.refreshRejected(acquired.generation)
+        expect(refreshes).toBe(1)
+        expect(Redacted.value(refreshed.accessToken)).toBe(secondAccessToken)
+        expect(Redacted.value(refreshed.refreshToken)).toBe("oauth-refresh-secret-two")
+        expect(refreshed.fingerprint).toBe(openAiAccount.fingerprint)
         const route = yield* models.resolve("personal-owner", "medium")
-        expect(route.main.candidates[0]!.providerConnection.credentialIdentity).toBe(first.credentialIdentity)
+        expect(route.main.candidates[0]!.providerConnection).toMatchObject({
+          authentication: "account",
+          credentialIdentity: openAiAccount.credentialIdentity,
+          accountFingerprint: openAiAccount.fingerprint,
+        })
         expect(encodeJson(route)).not.toContain("provider-secret-one")
         expect(encodeJson(route)).not.toContain("provider-secret-two")
         const databaseRecord = yield* query(
@@ -142,6 +202,21 @@ it.effect.skipIf(databaseUrl === "")("encrypts, rotates, revokes, and resolves o
         )
         expect(encodeJson(databaseRecord.rows)).not.toContain("provider-secret-one")
         expect(encodeJson(databaseRecord.rows)).not.toContain("provider-secret-two")
+        const accountDatabaseRecord = yield* query(
+          pool,
+          `SELECT encode(ciphertext, 'escape') AS ciphertext, fingerprint
+              FROM rika_hosted_openai_account_credentials
+              WHERE owner_id = 'personal-owner'`,
+        )
+        const encodedAccountRecord = encodeJson(accountDatabaseRecord.rows)
+        for (const secret of [
+          firstAccessToken,
+          firstIdToken,
+          secondAccessToken,
+          "oauth-refresh-secret-one",
+          "oauth-refresh-secret-two",
+        ])
+          expect(encodedAccountRecord).not.toContain(secret)
         const rotated = yield* credentials.put({
           principal: principal("owner-user"),
           owner: personal("owner-user"),
@@ -172,6 +247,18 @@ it.effect.skipIf(databaseUrl === "")("encrypts, rotates, revokes, and resolves o
               WHERE owner_id = 'personal-owner'`,
         )
         expect(cleared.rows).toEqual([{ ciphertext: null, nonce: null, authentication_tag: null }])
+        const revokedAccount = yield* credentials.revokeOpenAiAccount({
+          principal: principal("owner-user"),
+          owner: personal("owner-user"),
+        })
+        expect(revokedAccount).toMatchObject({ state: "revoked", revision: "3" })
+        expect(yield* Effect.flip(accountAccess.acquire)).toMatchObject({ kind: "login-required" })
+        const clearedAccount = yield* query(
+          pool,
+          `SELECT ciphertext, nonce, authentication_tag FROM rika_hosted_openai_account_credentials
+              WHERE owner_id = 'personal-owner'`,
+        )
+        expect(clearedAccount.rows).toEqual([{ ciphertext: null, nonce: null, authentication_tag: null }])
       } finally {
         yield* Effect.tryPromise(() => pool.end())
         yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))

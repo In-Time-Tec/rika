@@ -2,6 +2,7 @@ import { Clock, Console, Crypto, Effect, Option, Redacted, Result, Schema } from
 import type { EnvironmentPhase, EnvironmentScope } from "@rika/product/environment-policy"
 import type { RepositoryService } from "@rika/product/workspace-capability"
 import type { ClientTicketResponse } from "@rika/product/client-protocol"
+import type { Credential as OpenAiAccountCredential } from "@rika/product/openai-auth-contract"
 import {
   Browser,
   CredentialStore,
@@ -93,6 +94,14 @@ export const selectedProfile = Effect.fn("HostedAccount.profile")(function* () {
   const loaded = yield* store.load
   if (Option.isNone(loaded)) return yield* failure("login-required", "Run rika auth login first")
   return loaded.value
+})
+
+export const localLoginProfile = Effect.fn("HostedAccount.localLoginProfile")(function* () {
+  const profile = yield* selectedProfile()
+  const credentials = yield* CredentialStore
+  const credential = yield* credentials.load(profile.origin, profile.deviceId)
+  if (Option.isNone(credential)) return yield* failure("login-required", "Run rika auth login first")
+  return profile
 })
 
 const refresh = Effect.fn("HostedAccount.refresh")(function* (profile: Profile, current: Credential) {
@@ -626,4 +635,35 @@ export const revokeProviderCredential = Effect.fn("HostedAccount.revokeProviderC
     http.revokeProviderCredential(profile.origin, profile.owner, provider, session),
   )
   yield* Console.log(`${result.provider} credential is ${result.state} at revision ${result.revision}`)
+})
+
+export const putOpenAiAccount = Effect.fn("HostedAccount.putOpenAiAccount")(function* (
+  credential: OpenAiAccountCredential,
+) {
+  const profile = yield* selectedProfile()
+  const http = yield* Http
+  const result = yield* authenticated(profile, (session) =>
+    http.putOpenAiAccount(profile.origin, profile.owner, credential, session),
+  )
+  yield* Console.log(`OpenAI account is ${result.state}`)
+})
+
+export const getOpenAiAccount = Effect.fn("HostedAccount.getOpenAiAccount")(function* () {
+  const profile = yield* selectedProfile()
+  const http = yield* Http
+  const result = yield* authenticated(profile, (session) =>
+    http.getOpenAiAccount(profile.origin, profile.owner, session),
+  )
+  yield* Console.log(
+    result.state === "missing" ? "OpenAI account is not connected" : `OpenAI account is ${result.state}`,
+  )
+})
+
+export const revokeOpenAiAccount = Effect.fn("HostedAccount.revokeOpenAiAccount")(function* () {
+  const profile = yield* selectedProfile()
+  const http = yield* Http
+  const result = yield* authenticated(profile, (session) =>
+    http.revokeOpenAiAccount(profile.origin, profile.owner, session),
+  )
+  yield* Console.log(result.state === "missing" ? "OpenAI account is not connected" : "OpenAI account logged out")
 })

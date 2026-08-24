@@ -21,6 +21,7 @@ const credential = {
   expiresAt: Number.MAX_SAFE_INTEGER,
   refreshedAt: 0,
 }
+const credentialIdentity = "openai-account-credential-one"
 
 const auth = {
   loginBrowser: () => Effect.succeed(credential),
@@ -33,7 +34,7 @@ const auth = {
 
 const accountRoute = () =>
   ExecutionRouteResolution.resolve(Settings.Defaults.settingsDefaults, "medium", undefined, {
-    openAiAccountFingerprint: credential.fingerprint,
+    openAiAccount: { credentialIdentity, fingerprint: credential.fingerprint },
   })
 
 const encodeRegistrations = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
@@ -46,7 +47,8 @@ it("pins native OpenAI account authentication and account-compatible request opt
     protocol: "openai-responses",
     baseUrl: "https://api.openai.com/v1",
     authentication: "account",
-    credentialIdentity: credential.fingerprint,
+    credentialIdentity,
+    accountFingerprint: credential.fingerprint,
   })
   expect(account.main.candidates[0]?.providerOptions).toMatchObject({ store: false })
   expect(account.main.candidates[0]?.providerOptions).not.toHaveProperty("max_output_tokens")
@@ -54,7 +56,7 @@ it("pins native OpenAI account authentication and account-compatible request opt
   expect(account.main.candidates[0]?.registrationIdentity).not.toBe(apiKey.main.candidates[0]?.registrationIdentity)
 
   const secondAccount = ExecutionRouteResolution.resolve(Settings.Defaults.settingsDefaults, "medium", undefined, {
-    openAiAccountFingerprint: "account-fingerprint-two",
+    openAiAccount: { credentialIdentity: "openai-account-credential-two", fingerprint: "account-fingerprint-two" },
   })
   expect(secondAccount.main.registrationIdentity).not.toBe(account.main.registrationIdentity)
 
@@ -70,7 +72,7 @@ it("pins native OpenAI account authentication and account-compatible request opt
     },
   }
   const custom = ExecutionRouteResolution.resolve(customSettings, "medium", undefined, {
-    openAiAccountFingerprint: credential.fingerprint,
+    openAiAccount: { credentialIdentity, fingerprint: credential.fingerprint },
   })
   expect(custom.main.candidates[0]?.providerConnection).toMatchObject({
     baseUrl: "https://openai-compatible.example/v1",
@@ -113,7 +115,7 @@ it.effect("executes a valid account route through the Codex endpoint without an 
           )
         }),
       )
-      const context = yield* Layer.build(Models.layer({ candidate, openAiAccountAuth: auth, httpClientLayer }))
+      const context = yield* Layer.build(Models.layer({ candidate, openAiAccountAccess: () => auth, httpClientLayer }))
       const model = yield* ModelRegistry.operate(
         {
           provider: candidate.providerConnection.provider,
@@ -135,7 +137,7 @@ it.effect("executes a valid account route through the Codex endpoint without an 
         executionRoute: route,
         workspace: "/workspace",
         kernel,
-        openAiAccountAuth: auth,
+        openAiAccountAccess: () => auth,
       }).pipe(Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: {} })))
       const encoded = encodeRegistrations(configured.registrations)
       for (const secret of ["oauth-access-token", "oauth-id-token", "oauth-refresh-token", "chatgpt-account-id"])

@@ -123,7 +123,15 @@ const validateConnection = (value: unknown): void => {
   const connection = requireRecord(value, "Malformed provider connection")
   requireKeys(
     connection,
-    ["provider", "protocol", "baseUrl", "authentication", "apiKeyEnvironment", "credentialIdentity"],
+    [
+      "provider",
+      "protocol",
+      "baseUrl",
+      "authentication",
+      "apiKeyEnvironment",
+      "credentialIdentity",
+      "accountFingerprint",
+    ],
     "Unsupported provider connection field",
   )
   if (
@@ -132,9 +140,14 @@ const validateConnection = (value: unknown): void => {
       connection.protocol !== "openai-responses" ||
       typeof connection.credentialIdentity !== "string" ||
       connection.credentialIdentity.length === 0 ||
+      typeof connection.accountFingerprint !== "string" ||
+      connection.accountFingerprint.length === 0 ||
       connection.apiKeyEnvironment !== undefined)
   ) {
     throw new Error("Malformed OpenAI account provider connection")
+  }
+  if (connection.authentication !== "account" && connection.accountFingerprint !== undefined) {
+    throw new Error("Malformed provider connection account fingerprint")
   }
 }
 

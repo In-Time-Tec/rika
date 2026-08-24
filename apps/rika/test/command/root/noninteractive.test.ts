@@ -321,14 +321,10 @@ it.effect("dispatches interactive inputs and hosted non-interactive execution", 
 it.effect("dispatches Codex provider authentication", () =>
   Effect.gen(function* () {
     expect(yield* capture(["provider", "login", "codex", "--device-code"])).toEqual([
-      { _tag: "Auth", action: "login", provider: "openai", deviceCode: true },
+      { _tag: "Provider", action: "login", deviceCode: true },
     ])
-    expect(yield* capture(["provider", "status", "codex"])).toEqual([
-      { _tag: "Auth", action: "status", provider: "openai" },
-    ])
-    expect(yield* capture(["provider", "logout", "codex"])).toEqual([
-      { _tag: "Auth", action: "logout", provider: "openai" },
-    ])
+    expect(yield* capture(["provider", "status", "codex"])).toEqual([{ _tag: "Provider", action: "status" }])
+    expect(yield* capture(["provider", "logout", "codex"])).toEqual([{ _tag: "Provider", action: "logout" }])
   }),
 )
 

@@ -405,6 +405,7 @@ describe("api HTTP", () => {
       const principal: IdentityPrincipal = { userId: "user-1", clientId: "client-1", dpopJkt: "thumbprint-1" }
       const base = dependencies({ account })
       let receivedSecret = ""
+      let receivedOpenAiTokens: ReadonlyArray<string> = []
       const status = {
         provider: "openai" as const,
         state: "active" as const,
@@ -420,6 +421,36 @@ describe("api HTTP", () => {
         revoke: () => Effect.succeed({ ...status, state: "revoked", revision: "2" }),
         list: () => Effect.succeed([status]),
         require: () => Effect.succeed(status),
+        putOpenAiAccount: (input) =>
+          Effect.sync(() => {
+            receivedOpenAiTokens = [
+              Redacted.value(input.accessToken),
+              Redacted.value(input.idToken),
+              Redacted.value(input.refreshToken),
+            ]
+            return {
+              state: "active" as const,
+              revision: "1",
+              credentialIdentity: "openai-account-1",
+              fingerprint: "openai-fingerprint-1",
+            }
+          }),
+        revokeOpenAiAccount: () =>
+          Effect.succeed({
+            state: "revoked" as const,
+            revision: "2",
+            credentialIdentity: "openai-account-1",
+            fingerprint: "openai-fingerprint-1",
+          }),
+        openAiAccountStatus: () =>
+          Effect.succeed({
+            state: "active" as const,
+            revision: "1",
+            credentialIdentity: "openai-account-1",
+            fingerprint: "openai-fingerprint-1",
+          }),
+        requireOpenAiAccount: () => Effect.die("unused"),
+        openAiAccountAccess: () => ({ acquire: Effect.die("unused"), refreshRejected: () => Effect.die("unused") }),
       }
       const deps: HttpDependencies = {
         ...base,
@@ -441,6 +472,23 @@ describe("api HTTP", () => {
         method: "POST",
         body: encodeJson({ owner: { kind: "personal" } }),
       })
+      const putOpenAi = yield* response("/api/v1/provider-accounts/openai", deps, {
+        method: "PUT",
+        body: encodeJson({
+          owner: { kind: "personal" },
+          access_token: "oauth-access-secret",
+          id_token: "oauth-identity-secret",
+          refresh_token: "oauth-refresh-secret",
+        }),
+      })
+      const getOpenAi = yield* response("/api/v1/provider-accounts/openai/status", deps, {
+        method: "POST",
+        body: encodeJson({ owner: { kind: "personal" } }),
+      })
+      const revokeOpenAi = yield* response("/api/v1/provider-accounts/openai", deps, {
+        method: "DELETE",
+        body: encodeJson({ owner: { kind: "personal" } }),
+      })
       expect(models.status).toBe(200)
       expect(yield* Effect.tryPromise(() => models.json())).toEqual({ modes: ["low", "medium"] })
       expect(put.status).toBe(200)
@@ -450,6 +498,17 @@ describe("api HTTP", () => {
       expect(yield* Effect.tryPromise(() => revoke.json())).toMatchObject({ state: "revoked", revision: "2" })
       expect(listed.status).toBe(200)
       expect(yield* Effect.tryPromise(() => listed.json())).toEqual({ credentials: [status] })
+      expect(putOpenAi.status).toBe(200)
+      expect(receivedOpenAiTokens).toEqual(["oauth-access-secret", "oauth-identity-secret", "oauth-refresh-secret"])
+      expect(yield* Effect.tryPromise(() => putOpenAi.text())).not.toMatch(/oauth-(?:access|identity|refresh)-secret/u)
+      expect(getOpenAi.status).toBe(200)
+      expect(yield* Effect.tryPromise(() => getOpenAi.json())).toMatchObject({
+        state: "active",
+        credentialIdentity: "openai-account-1",
+        fingerprint: "openai-fingerprint-1",
+      })
+      expect(revokeOpenAi.status).toBe(200)
+      expect(yield* Effect.tryPromise(() => revokeOpenAi.json())).toMatchObject({ state: "revoked", revision: "2" })
     }),
   )
 

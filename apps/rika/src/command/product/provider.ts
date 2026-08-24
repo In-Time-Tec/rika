@@ -1,13 +1,5 @@
-import * as ProductOperation from "@rika/product/product-operation"
 import { Argument, Command, Flag } from "effect/unstable/cli"
-import { dispatch } from "../root/cli-operation"
-
-const authInput = (action: "login" | "status" | "logout", deviceCode = false): ProductOperation.Input => ({
-  _tag: "Auth",
-  action,
-  provider: "openai",
-  ...(action === "login" && deviceCode ? { deviceCode: true } : {}),
-})
+import { dispatch } from "../root/hosted"
 
 const codex = Argument.choice("provider", ["codex"])
 
@@ -17,18 +9,18 @@ const login = Command.make(
     provider: codex,
     deviceCode: Flag.boolean("device-code").pipe(Flag.withDefault(false)),
   },
-  ({ deviceCode }) => dispatch(authInput("login", deviceCode)),
+  ({ deviceCode }) => dispatch({ _tag: "Provider", action: "login", deviceCode }),
 ).pipe(Command.withDescription("Log in to Codex with an OpenAI account"))
 
-const status = Command.make("status", { provider: codex }, () => dispatch(authInput("status"))).pipe(
+const status = Command.make("status", { provider: codex }, () => dispatch({ _tag: "Provider", action: "status" })).pipe(
   Command.withDescription("Show model-provider authentication status"),
 )
 
-const logout = Command.make("logout", { provider: codex }, () => dispatch(authInput("logout"))).pipe(
-  Command.withDescription("Remove local model-provider credentials"),
+const logout = Command.make("logout", { provider: codex }, () => dispatch({ _tag: "Provider", action: "logout" })).pipe(
+  Command.withDescription("Remove hosted model-provider credentials"),
 )
 
 export const providerCommand = Command.make("provider").pipe(
-  Command.withDescription("Manage local model-provider authentication"),
+  Command.withDescription("Manage hosted model-provider authentication"),
   Command.withSubcommands([login, status, logout]),
 )

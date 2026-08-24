@@ -89,12 +89,10 @@ test(
           }
           expect(
             yield* fileSystem.readFileString(path.join(actual, "narrow-runner-placement.frame.txt")),
-          ).toContain("Runner")
+          ).not.toContain("Runner")
           expect(
-            yield* fileSystem.readFileString(path.join(actual, "narrow-runner-placement.styles.json")),
-          ).toMatch(
-            /"text": "Runner",\s+"fg": \{\s+"buffer": \{\s+"0": 210,\s+"1": 162,\s+"2": 92,\s+"3": 255/,
-          )
+            yield* fileSystem.readFileString(path.join(actual, "narrow-orb-placement.frame.txt")),
+          ).toContain("Orb")
           expect(scenarios().map(([name]) => name)).not.toContain("semantic-search")
           expect(scenarios().map(([name]) => name)).not.toContain("ast-grep-outline")
         }).pipe(Effect.provide(services))

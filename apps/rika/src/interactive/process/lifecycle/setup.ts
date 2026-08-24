@@ -1,11 +1,13 @@
 import * as InteractiveFeed from "@rika/product/interactive-feed"
+import type * as InteractiveConnection from "@rika/product/interactive-connection"
 import * as ProductOperation from "@rika/product/product-operation"
 import { create as createTui } from "@rika/terminal/opentui-surface"
 import { execute, type Adapter } from "@rika/terminal/terminal-session"
 import { update } from "@rika/terminal/terminal-state-reducer"
-import { Cause, Effect, Fiber } from "effect"
+import { Cause, Effect, Fiber, Stream } from "effect"
 import type { InteractiveInputContext } from "../runtime/context"
 import { initialSubmitAction } from "../../input/command"
+import { nextSubmissionId } from "../../controller/turn-submission"
 import { createInputHandlers } from "../input/reader"
 import { failureKind } from "../runtime/configuration"
 import { settleTuiInitialization } from "./contract"
@@ -14,6 +16,7 @@ import { gitOutput } from "../workspace/context"
 
 type StartupContext = InteractiveInputContext & {
   readonly input: InteractiveFeed.InteractiveInput
+  readonly connection: InteractiveConnection.Connection
   readonly close: () => void
   readonly refreshTerminalTitle: () => void
   readonly openPath: Parameters<typeof createInputHandlers>[0]["openPath"]
@@ -32,6 +35,7 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
   const {
     loop,
     input,
+    connection,
     session,
     options,
     fork,
@@ -138,13 +142,24 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
               Effect.flatMap(Fiber.join),
             )
           }
+          const awaitConnected = Stream.concat(Stream.make(connection.initialState), connection.stateChanges).pipe(
+            Stream.filter((state) => state.connectivity === "connected"),
+            Stream.runHead,
+            Effect.asVoid,
+          )
           run(
             startInitialSelection().pipe(
+              Effect.andThen(awaitConnected),
               Effect.andThen(
                 initialSubmitAction(input.prompt, loop.model.mode) === undefined
                   ? Effect.void
                   : Effect.sync(() => {
-                      execute(adapter, initialSubmitAction(input.prompt, loop.model.mode)!)
+                      const submission = nextSubmissionId(loop.submissionSequence)
+                      loop.submissionSequence = submission.sequence
+                      execute(adapter, {
+                        ...initialSubmitAction(input.prompt, loop.model.mode)!,
+                        submissionId: submission.id,
+                      })
                     }),
               ),
             ),
