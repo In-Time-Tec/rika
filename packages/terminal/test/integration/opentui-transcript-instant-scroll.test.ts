@@ -36,7 +36,7 @@ test("scrolls a large transcript back to its oldest unit without any mounted-win
         for (let steps = 0; steps < 400; steps += 1) {
           setup.mockInput.pressKey("\u001b[5~")
           yield* openTui(() => setup.flush())
-          if (setup.captureCharFrame().includes("answer 0")) break
+          if (setup.captureCharFrame().includes("answer 0") === true) break
         }
         expect(surface.transcriptScroll.scrollTop).toBe(0)
         const frame = setup.captureCharFrame()

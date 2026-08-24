@@ -9,11 +9,7 @@ const CredentialDisk = Schema.Struct({
 })
 const RefreshLockDisk = Schema.Struct({ pid: Schema.Int })
 
-export interface SecretVault {
-  readonly get: (options: { readonly service: string; readonly name: string }) => Promise<string | null>
-  readonly set: (options: { readonly service: string; readonly name: string; readonly value: string }) => Promise<void>
-  readonly delete: (options: { readonly service: string; readonly name: string }) => Promise<boolean>
-}
+export type SecretVault = Pick<typeof Bun.secrets, "get" | "set" | "delete">
 
 const liveVault = (Bun as unknown as { readonly secrets: SecretVault }).secrets
 const name = (origin: string, deviceId: string) => `${new URL(origin).origin}/${deviceId}`

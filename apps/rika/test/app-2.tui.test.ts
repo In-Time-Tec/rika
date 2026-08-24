@@ -13,7 +13,7 @@ test(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({ script: [model.text("TIMER_COMPLETE", 1_500)] })
 
-        yield* Effect.promise(() => app.type("Measure this turn."))
+        yield* Effect.tryPromise(() => app.type("Measure this turn."))
         app.pressEnter()
         yield* app.waitFrame("ctx")
         yield* app.clickText("ctx")
@@ -44,7 +44,7 @@ test(
             model.text("PERSISTED_TIMER_COMPLETE", 1_500),
           ],
         })
-        yield* Effect.promise(() => app.type("Persist this timer."))
+        yield* Effect.tryPromise(() => app.type("Persist this timer."))
         app.pressEnter()
         yield* app.waitFrame("ctx")
         yield* app.clickText("ctx")

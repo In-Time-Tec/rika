@@ -42,7 +42,7 @@ test(
           height: 40,
         })
 
-        yield* Effect.promise(() => app.type("Verify live child streaming."))
+        yield* Effect.tryPromise(() => app.type("Verify live child streaming."))
         app.pressEnter()
 
         const live = yield* app.waitFrameMatch(
@@ -114,7 +114,7 @@ test(
           height: 36,
         })
 
-        yield* Effect.promise(() => app.type("Stream the child answer."))
+        yield* Effect.tryPromise(() => app.type("Stream the child answer."))
         app.pressEnter()
         yield* app.waitFrame("Subagent working")
         app.pressKey("\t")

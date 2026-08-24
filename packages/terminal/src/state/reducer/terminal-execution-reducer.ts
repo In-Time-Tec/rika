@@ -43,40 +43,11 @@ const reduceExecutionImpl = (
       return { ...model, scrollOffset: 0, scrollFollow: true }
     case "Submitted": {
       if (model.input.length === 0) return model
+      if (model.submittedDrafts.some((draft) => draft.turnId === undefined)) return model
       const submission = classifyPrompt(model.input)
-      const submittedPrompt = expandPastedText(model.input, model.pastedText)
       if (submission._tag === "Shell" && submission.command.length === 0) return model
-      const submittedHistory = {
-        history: [...model.history.filter((prompt) => prompt !== submittedPrompt), submittedPrompt],
-        historyComposers: [
-          ...model.historyComposers.filter(
-            (draft) => expandPastedText(draft.input, draft.attachments) !== submittedPrompt,
-          ),
-          { input: model.input, attachments: model.pastedText },
-        ],
-        historyDraft: undefined,
-        historyIndex: undefined,
-        historySearch: "",
-      }
-      const queuesBehindActiveTurn = model.busy && message.submissionId !== undefined
-      const submitted: Model = {
+      return {
         ...model,
-        input: "",
-        cursor: 0,
-        pastedText: [],
-        ...submittedHistory,
-        ...(queuesBehindActiveTurn
-          ? {
-              queue: [
-                ...model.queue,
-                {
-                  id: message.submissionId!,
-                  prompt: submittedPrompt,
-                  provisional: true as const,
-                },
-              ],
-            }
-          : {}),
         submittedDrafts: [
           ...model.submittedDrafts,
           {
@@ -86,12 +57,7 @@ const reduceExecutionImpl = (
             ...(message.submissionId === undefined ? {} : { submissionId: message.submissionId }),
           },
         ],
-        busy: true,
-        activity: model.busy ? model.activity : { _tag: "Sending" },
       }
-      return submission._tag === "Prompt" && !model.busy
-        ? appendProvisionalUserEntry(submitted, submittedPrompt, message.submissionId)
-        : submitted
     }
     case "SubmissionAdmitted": {
       const draft = model.submittedDrafts.find(
@@ -100,6 +66,23 @@ const reduceExecutionImpl = (
           candidate.turnId === message.turnId,
       )
       const prompt = draft === undefined ? undefined : expandPastedText(draft.input, draft.attachments)
+      const composerUnchanged =
+        draft !== undefined && model.input === draft.input && model.pastedText === draft.attachments
+      const submittedHistory =
+        draft === undefined
+          ? {}
+          : {
+              history: [...model.history.filter((candidate) => candidate !== prompt), prompt!],
+              historyComposers: [
+                ...model.historyComposers.filter(
+                  (candidate) => expandPastedText(candidate.input, candidate.attachments) !== prompt,
+                ),
+                { input: draft.input, attachments: draft.attachments },
+              ],
+              historyDraft: undefined,
+              historyIndex: undefined,
+              historySearch: "",
+            }
       const admitProvisional = (item: QueueItem): ReadonlyArray<QueueItem> => {
         if ((item.id !== message.submissionId && item.id !== message.turnId) || item.provisional !== true) return [item]
         if (message.status === "queued") return [{ ...item, id: message.turnId }]
@@ -118,10 +101,12 @@ const reduceExecutionImpl = (
               },
               true,
             )
-          : { ...model, queue }
+          : { ...model, queue, busy: true, activity: model.busy ? model.activity : { _tag: "Sending" as const } }
       const admitted = reconcileUserEntry(
         {
           ...laneModel,
+          ...submittedHistory,
+          ...(composerUnchanged ? { input: "", cursor: 0, pastedText: [] } : {}),
           queueSelection: validQueueSelection(laneModel.queueSelection, queue),
           submittedDrafts: bindSubmittedDraft(model.submittedDrafts, message.turnId, message.submissionId),
         },

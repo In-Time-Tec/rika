@@ -22,7 +22,7 @@ export type PaletteAction =
   | { readonly _tag: "SetSubagentLimit"; readonly limit: "maxDepth" | "maxSubagents"; readonly value: number }
 
 export const commands: ReadonlyArray<Command> = [
-  { id: "new-thread", category: "thread", label: "new thread", action: { _tag: "NewThread" } },
+  { id: "new-thread", category: "thread", label: "new on Runner", action: { _tag: "NewThread" } },
   { id: "new-orb-thread", category: "thread", label: "new in Orb", action: { _tag: "NewOrbThread" } },
   { id: "pause-orb", category: "orb", label: "pause", action: { _tag: "PauseOrb" } },
   { id: "resume-orb", category: "orb", label: "resume", action: { _tag: "ResumeOrb" } },

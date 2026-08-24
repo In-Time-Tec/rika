@@ -1,6 +1,8 @@
+import * as BunSocket from "@effect/platform-bun/BunSocket"
 import { expect, it } from "@effect/vitest"
-import { Deferred, Effect, Exit, Fiber, Redacted, Schema, Scope, Stream } from "effect"
+import { Deferred, Effect, Exit, Fiber, Layer, Redacted, Schema, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
+import * as Socket from "effect/unstable/socket/Socket"
 import type { CliDeviceDirectory, IdentityConfig, IdentityDirectory, IdentityRuntime } from "@rika/identity"
 import { ServerFrame } from "@rika/product/client-protocol"
 import type { HostedProductService } from "../src/hosted-product"
@@ -105,13 +107,14 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
       executor,
       execution: {
         check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }),
+        status: Effect.succeed({} as never),
       },
       production: false,
     }
     const resourceScope = yield* Scope.make()
     const running = yield* serveApi({ config, dependencies }).pipe(Effect.provideService(Scope.Scope, resourceScope))
     const request = yield* Effect.forkChild(
-      Effect.promise(() => Bun.fetch(`http://127.0.0.1:${running.server.port}/readyz`)),
+      Effect.tryPromise(() => Bun.fetch(`http://127.0.0.1:${running.server.port}/readyz`)),
     )
     yield* Deferred.await(entered)
     let closed = false
@@ -152,7 +155,7 @@ it.effect("canonicalizes public HTTPS requests from the configured origin instea
     expect(canonical.headers.get("host")).toBe("api.example.test")
     expect(canonical.headers.get("x-forwarded-host")).toBeNull()
     expect(canonical.headers.get("x-forwarded-proto")).toBeNull()
-    expect(yield* Effect.promise(() => canonical.text())).toBe("request-body")
+    expect(yield* Effect.tryPromise(() => canonical.text())).toBe("request-body")
   }),
 )
 
@@ -226,7 +229,10 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
         ready: Effect.void,
       },
       recovery,
-      execution: { check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }) },
+      execution: {
+        check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }),
+        status: Effect.succeed({} as never),
+      },
       production: true,
     }
     const resourceScope = yield* Scope.make()
@@ -240,7 +246,7 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
       },
       dependencies,
     }).pipe(Effect.provideService(Scope.Scope, resourceScope))
-    const response = yield* Effect.promise(() =>
+    const response = yield* Effect.tryPromise(() =>
       Bun.fetch(`http://127.0.0.1:${running.server.port}/api/auth/session?proof=1`, {
         headers: { "x-forwarded-host": "attacker.example", "x-forwarded-proto": "http" },
       }),
@@ -357,26 +363,43 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
         ready: Effect.void,
       },
       recovery,
-      execution: { check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }) },
+      execution: {
+        check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }),
+        status: Effect.succeed({} as never),
+      },
       production: false,
     }
     const resourceScope = yield* Scope.make()
     const running = yield* serveApi({ config, dependencies }).pipe(Effect.provideService(Scope.Scope, resourceScope))
     const baseUrl = `http://127.0.0.1:${running.server.port}`
-    const queryCredential = yield* Effect.promise(() => Bun.fetch(`${baseUrl}/api/v1/threads/socket?ticket=secret`))
+    const queryCredential = yield* Effect.tryPromise(() => Bun.fetch(`${baseUrl}/api/v1/threads/socket?ticket=secret`))
     expect(queryCredential.status).toBe(401)
 
-    const reply = yield* Effect.callback<string>((resume) => {
-      const socket = new WebSocket(`${baseUrl.replace("http:", "ws:")}/api/v1/threads/socket`, [
-        "rika.thread.v1",
-        "rika.ticket.secret",
-      ])
-      socket.onopen = () => socket.send('{"protocolVersion":1,"requestId":"request-1","command":{"_tag":"Detach"}}')
-      socket.onmessage = (event) => resume(Effect.succeed(String(event.data)))
-      socket.onerror = () => resume(Effect.die("Thread WebSocket failed"))
-      return Effect.sync(() => socket.close())
-    })
-    yield* Effect.promise(() => running.server.stop(true))
+    const reply = yield* Effect.scoped(
+      Layer.build(BunSocket.layerWebSocketConstructor).pipe(
+        Effect.flatMap((context) =>
+          Effect.provide(
+            Effect.gen(function* () {
+              const socket = yield* Socket.makeWebSocket(`${baseUrl.replace("http:", "ws:")}/api/v1/threads/socket`, {
+                protocols: ["rika.thread.v1", "rika.ticket.secret"],
+              })
+              const writer = yield* socket.writer
+              const response = yield* Deferred.make<string>()
+              yield* socket
+                .runString((message) => Deferred.succeed(response, message), {
+                  onOpen: writer(
+                    '{"protocolVersion":1,"requestId":"request-1","command":{"_tag":"Detach"}}',
+                  ).pipe(Effect.orDie),
+                })
+                .pipe(Effect.forkScoped)
+              return yield* Deferred.await(response)
+            }),
+            context,
+          ),
+        ),
+      ),
+    )
+    yield* Effect.tryPromise(() => running.server.stop(true))
     yield* Scope.close(resourceScope, Exit.void)
     expect(connected).toEqual(["secret", "/api/v1/threads/socket"])
     expect(received).toEqual({ protocolVersion: 1, requestId: "request-1", command: { _tag: "Detach" } })

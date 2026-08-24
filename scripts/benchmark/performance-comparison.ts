@@ -148,6 +148,28 @@ class EvidenceReadError extends Schema.TaggedError<EvidenceReadError>()("Evidenc
   message: Schema.String,
 }) {}
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
+
+const isPerformanceEvidence = (value: unknown): value is PerformanceEvidence =>
+  isRecord(value) &&
+  typeof value.schemaVersion === "number" &&
+  isRecord(value.evidence) &&
+  isRecord(value.workload) &&
+  isRecord(value.process) &&
+  Array.isArray(value.metrics) &&
+  value.metrics.every(
+    (metric) =>
+      isRecord(metric) &&
+      typeof metric.id === "string" &&
+      typeof metric.unit === "string" &&
+      (metric.status === "measured" || metric.status === "unsupported") &&
+      (metric.value === undefined || typeof metric.value === "number") &&
+      (metric.target === undefined ||
+        (isRecord(metric.target) &&
+          typeof metric.target.operator === "string" &&
+          typeof metric.target.value === "number")),
+  )
+
 const loadEvidence = (path: string): Effect.Effect<PerformanceEvidence, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
@@ -156,6 +178,7 @@ const loadEvidence = (path: string): Effect.Effect<PerformanceEvidence, never, F
       .pipe(Effect.mapError((error) => EvidenceReadError.make({ path, message: String(error) })))
     const decoded = Schema.decodeUnknownExit(EvidenceJson)(text)
     if (Exit.isFailure(decoded)) return yield* Effect.die(Cause.pretty(decoded.cause))
+    if (!isPerformanceEvidence(decoded.value)) return yield* Effect.die(`Invalid performance evidence: ${path}`)
     return decoded.value
   }).pipe(Effect.orDie)
 

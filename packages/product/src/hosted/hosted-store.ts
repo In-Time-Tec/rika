@@ -3,6 +3,7 @@ import type { PromptPart } from "../execution/contract/execution-request"
 import type { ExecutionRouteSnapshot } from "../execution/contract/execution-route-snapshot"
 import type { TurnId } from "../thread/model/turn-record"
 import type { AuthorizationAction } from "./authorization"
+import type { PromptAdmissionStatus } from "./protocol/client-protocol"
 import {
   type ActorAttribution,
   type AuditEvent,
@@ -108,6 +109,11 @@ export interface CreateThreadInput {
   readonly now: Timestamp
 }
 
+export interface ReadThreadInput {
+  readonly ownerId: OwnerId
+  readonly threadId: ThreadId
+}
+
 export interface PutThreadGrantInput {
   readonly ownerId: OwnerId
   readonly threadId: ThreadId
@@ -183,11 +189,13 @@ export interface AdmitPromptInput {
   readonly executionRoute: ExecutionRouteSnapshot
   readonly admittedAt: Timestamp
   readonly queueCapacity: number
+  readonly readinessProof: boolean
 }
 
 export interface AdmittedPrompt {
   readonly command: ThreadCommand
   readonly turnId: TurnId
+  readonly status: PromptAdmissionStatus
 }
 
 export interface AppendEventInput {
@@ -276,6 +284,7 @@ export interface StoreService {
   readonly putProjectGrant: (input: PutProjectGrantInput) => Effect.Effect<ProjectGrant, StoreError>
   readonly createWorkspace: (input: CreateWorkspaceInput) => Effect.Effect<HostedWorkspace, StoreError>
   readonly createThread: (input: CreateThreadInput) => Effect.Effect<HostedThread, StoreError>
+  readonly readThread: (input: ReadThreadInput) => Effect.Effect<HostedThread | undefined, StoreError>
   readonly putThreadGrant: (input: PutThreadGrantInput) => Effect.Effect<ThreadGrant, StoreError>
   readonly registerDevice: (input: RegisterDeviceInput) => Effect.Effect<AuthenticatedDevice, StoreError>
   readonly authenticateClient: (input: AuthenticateClientInput) => Effect.Effect<AuthenticatedClient, StoreError>

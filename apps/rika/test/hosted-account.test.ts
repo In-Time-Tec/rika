@@ -46,6 +46,21 @@ import {
 } from "../src/hosted/hosted-contract"
 
 const platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer)
+const memorySecretVault = (values: Map<string, string>): SecretVault => ({
+  get: ({ service, name }) => Effect.runPromise(Effect.succeed(values.get(`${service}:${name}`) ?? null)),
+  set: ({ service, name, value }) =>
+    Effect.runPromise(
+      Effect.sync(() => {
+        values.set(`${service}:${name}`, value)
+      }),
+    ),
+  delete: ({ service, name }) => Effect.runPromise(Effect.sync(() => values.delete(`${service}:${name}`))),
+})
+const unavailableSecretVault = (message: string): SecretVault => ({
+  get: () => Effect.runPromise(Effect.die(new Error(message))),
+  set: () => Effect.runPromise(Effect.die(new Error(message))),
+  delete: () => Effect.runPromise(Effect.die(new Error(message))),
+})
 const key: PrivateJwk = { kty: "EC", crv: "P-256", x: "x", y: "y", d: "d" }
 const profile: Profile = {
   origin: "https://hosted.example.test",
@@ -334,14 +349,7 @@ it.layer(platform)((test) => {
         const path = yield* Path.Path
         const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-hosted-refresh-" })
         const values = new Map<string, string>()
-        const vault: SecretVault = {
-          get: ({ service, name }) => Promise.resolve(values.get(`${service}:${name}`) ?? null),
-          set: ({ service, name, value }) => {
-            values.set(`${service}:${name}`, value)
-            return Promise.resolve()
-          },
-          delete: ({ service, name }) => Promise.resolve(values.delete(`${service}:${name}`)),
-        }
+        const vault = memorySecretVault(values)
         const lockPath = path.join(root, "refresh.lock")
         const first = Context.get(
           yield* Layer.build(credentialLayer({ vault, lockPath, lockRetry: 0 })),
@@ -405,14 +413,7 @@ it.layer(platform)((test) => {
         const path = yield* Path.Path
         const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-hosted-vault-" })
         const values = new Map<string, string>()
-        const vault: SecretVault = {
-          get: ({ service, name }) => Promise.resolve(values.get(`${service}:${name}`) ?? null),
-          set: ({ service, name, value }) => {
-            values.set(`${service}:${name}`, value)
-            return Promise.resolve()
-          },
-          delete: ({ service, name }) => Promise.resolve(values.delete(`${service}:${name}`)),
-        }
+        const vault = memorySecretVault(values)
         const context = yield* Layer.build(credentialLayer({ vault, lockPath: path.join(root, "refresh.lock") }))
         const store = Context.get(context, CredentialStore)
         const credential = { refreshToken: Redacted.make("refresh"), privateJwk: key }
@@ -420,11 +421,7 @@ it.layer(platform)((test) => {
         expect(
           Redacted.value(Option.getOrThrow(yield* store.load(profile.origin, profile.deviceId)).refreshToken),
         ).toBe("refresh")
-        const unavailable: SecretVault = {
-          get: () => Promise.reject(new Error("no secret service")),
-          set: () => Promise.reject(new Error("no secret service")),
-          delete: () => Promise.reject(new Error("no secret service")),
-        }
+        const unavailable = unavailableSecretVault("no secret service")
         const unavailableContext = yield* Layer.build(
           credentialLayer({ vault: unavailable, lockPath: path.join(root, "unavailable-refresh.lock") }),
         )

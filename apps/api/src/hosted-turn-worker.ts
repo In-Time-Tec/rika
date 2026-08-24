@@ -1,7 +1,7 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import { HostedTurnWorkerStore, type TurnClaim } from "@rika/product-store/postgres-turn-worker-store"
-import { Cause, Clock, Context, Crypto, Effect, Layer, Ref, Schema } from "effect"
+import { Cause, Clock, Context, Crypto, Effect, FiberMap, Layer, Ref, Schema, SubscriptionRef } from "effect"
 
 export class HostedTurnWorkerError extends Schema.TaggedError<HostedTurnWorkerError>()("HostedTurnWorkerError", {
   message: Schema.String,
@@ -9,21 +9,42 @@ export class HostedTurnWorkerError extends Schema.TaggedError<HostedTurnWorkerEr
 
 export interface HostedTurnWorkerService {
   readonly ready: Effect.Effect<void, HostedTurnWorkerError>
+  readonly status: Effect.Effect<HostedTurnWorkerStatus>
 }
 
 export class HostedTurnWorker extends Context.Service<HostedTurnWorker, HostedTurnWorkerService>()(
   "@rika/api/hosted-turn-worker/HostedTurnWorker",
 ) {}
 
-type Health =
-  | { readonly _tag: "starting" }
-  | { readonly _tag: "healthy" }
-  | { readonly _tag: "failed"; readonly message: string }
+type PollStatus =
+  | { readonly _tag: "Starting" }
+  | { readonly _tag: "Succeeded"; readonly at: number }
+  | { readonly _tag: "Failed"; readonly at: number; readonly message: string }
+
+interface WorkerState {
+  readonly poll: PollStatus
+  readonly lastSuccessfulPollAt: number | undefined
+  readonly lastFailure: { readonly at: number; readonly message: string } | undefined
+}
+
+export interface HostedTurnWorkerStatus extends WorkerState {
+  readonly active: number
+  readonly capacity: number
+  readonly availableCapacity: number
+  readonly oldestClaimAt: number | undefined
+  readonly pollAgeMillis: number | undefined
+  readonly lastSuccessfulPollAgeMillis: number | undefined
+  readonly oldestClaimAgeMillis: number | undefined
+  readonly lastFailureAgeMillis: number | undefined
+}
+
+const age = (now: number, at: number | undefined) => (at === undefined ? undefined : now - at)
 
 export const layer = (options: {
   readonly workerId: string
   readonly leaseMillis: number
   readonly pollIntervalMillis: number
+  readonly concurrency?: number
   readonly stuckClaimMillis?: number
 }) =>
   Layer.unwrap(
@@ -31,11 +52,19 @@ export const layer = (options: {
       const store = yield* HostedTurnWorkerStore
       const gateway = yield* ExecutionGateway.Service
       const crypto = yield* Crypto.Crypto
-      const health = yield* Ref.make<Health>({ _tag: "starting" })
+      const health = yield* SubscriptionRef.make<WorkerState>({
+        poll: { _tag: "Starting" },
+        lastSuccessfulPollAt: undefined,
+        lastFailure: undefined,
+      })
+      const active = yield* FiberMap.make<string>()
+      const activeClaims = yield* Ref.make<
+        ReadonlyMap<string, { readonly claimToken: string; readonly claimedAt: number }>
+      >(new Map())
+      const concurrency = options.concurrency ?? 1
       const heartbeatInterval = Math.max(1, Math.floor(options.leaseMillis / 3))
       const stuckClaimMillis = options.stuckClaimMillis ?? options.leaseMillis * 4
       const correlation = (claim: TurnClaim): HostedObservability.Correlation => ({
-        ownerId: claim.ownerId,
         threadId: claim.input.threadId,
         turnId: claim.input.turnId,
       })
@@ -45,15 +74,18 @@ export const layer = (options: {
           Effect.sleep(heartbeatInterval).pipe(
             Effect.andThen(Clock.currentTimeMillis),
             Effect.tap((now) => {
-              const age = now - claim.claimedAt
-              if (stuckReported || age < stuckClaimMillis) return Effect.void
+              const claimAge = now - claim.claimedAt
+              if (stuckReported || claimAge < stuckClaimMillis) return Effect.void
               stuckReported = true
               return HostedObservability.health("stuck_queue_claim", correlation(claim), {
-                value: age,
+                value: claimAge,
                 threshold: stuckClaimMillis,
               }).pipe(
                 Effect.andThen(
-                  Ref.set(health, { _tag: "failed", message: "Hosted Turn worker has a stuck queue claim" }),
+                  SubscriptionRef.update(health, (state) => ({
+                    ...state,
+                    lastFailure: { at: now, message: "Hosted Turn worker has a stuck queue claim" },
+                  })),
                 ),
               )
             }),
@@ -77,15 +109,26 @@ export const layer = (options: {
             return
           }
         }
-        yield* HostedObservability.observe(
-          "run_start",
-          correlation(claim),
-          Effect.raceFirst(
-            Effect.gen(function* () {
-              const link = yield* gateway.startTurn(claim.input)
-              yield* store.complete(claim, link, yield* Clock.currentTimeMillis)
+        yield* Effect.raceFirst(
+          Effect.gen(function* () {
+            const link = yield* gateway.startTurn(claim.input)
+            yield* HostedObservability.event("run_created", "success", {
+              threadId: claim.input.threadId,
+              turnId: claim.input.turnId,
+              runId: link.runId,
+            })
+            yield* store.complete(claim, link, yield* Clock.currentTimeMillis)
+          }),
+          heartbeat(claim),
+        ).pipe(
+          Effect.ensuring(
+            Ref.update(activeClaims, (claims) => {
+              const current = claims.get(claim.input.turnId)
+              if (current?.claimToken !== claim.claimToken) return claims
+              const updated = new Map(claims)
+              updated.delete(claim.input.turnId)
+              return updated
             }),
-            heartbeat(claim),
           ),
         )
       })
@@ -99,36 +142,106 @@ export const layer = (options: {
         return (yield* store.claimRecovery(request)) ?? (yield* store.claimNext(request))
       })
       const poll = Effect.gen(function* () {
-        const claim = yield* next()
-        if (claim === undefined) {
-          yield* Ref.set(health, { _tag: "healthy" })
+        if ((yield* FiberMap.size(active)) >= concurrency) {
+          const now = yield* Clock.currentTimeMillis
+          yield* SubscriptionRef.update(health, (state) => ({
+            ...state,
+            poll: { _tag: "Succeeded", at: now } as const,
+            lastSuccessfulPollAt: now,
+          }))
           yield* Effect.sleep(options.pollIntervalMillis)
           return
         }
-        yield* execute(claim)
-        yield* Ref.set(health, { _tag: "healthy" })
+        const claim = yield* next()
+        if (claim === undefined) {
+          const now = yield* Clock.currentTimeMillis
+          yield* SubscriptionRef.update(health, (state) => ({
+            ...state,
+            poll: { _tag: "Succeeded", at: now } as const,
+            lastSuccessfulPollAt: now,
+          }))
+          yield* Effect.sleep(options.pollIntervalMillis)
+          return
+        }
+        yield* Ref.update(activeClaims, (claims) =>
+          new Map(claims).set(claim.input.turnId, {
+            claimToken: claim.claimToken,
+            claimedAt: claim.claimedAt,
+          }),
+        )
+        yield* FiberMap.run(
+          active,
+          claim.input.turnId,
+          execute(claim).pipe(
+            Effect.catchCause((cause) => {
+              if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
+              const message = "Hosted Turn worker failed"
+              return Clock.currentTimeMillis.pipe(
+                Effect.flatMap((at) =>
+                  SubscriptionRef.update(health, (state) => ({ ...state, lastFailure: { at, message } })),
+                ),
+                Effect.andThen(Effect.logError("hosted-turn-worker.failed")),
+              )
+            }),
+          ),
+        )
+        const now = yield* Clock.currentTimeMillis
+        yield* SubscriptionRef.update(health, (state) => ({
+          ...state,
+          poll: { _tag: "Succeeded", at: now } as const,
+          lastSuccessfulPollAt: now,
+        }))
       }).pipe(
         Effect.catchCause((cause) => {
           if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
-          const message = "Hosted Turn worker failed"
-          return Ref.set(health, { _tag: "failed", message }).pipe(
-            Effect.andThen(Effect.logError("hosted-turn-worker.failed")),
+          const message = "Hosted Turn worker poll failed"
+          return Clock.currentTimeMillis.pipe(
+            Effect.flatMap((at) =>
+              SubscriptionRef.update(health, (state) => ({
+                ...state,
+                poll: { _tag: "Failed", at, message } as const,
+                lastFailure: { at, message },
+              })),
+            ),
+            Effect.andThen(Effect.logError("hosted-turn-worker.poll-failed")),
             Effect.andThen(Effect.sleep(options.pollIntervalMillis)),
           )
         }),
       )
+      const status: Effect.Effect<HostedTurnWorkerStatus> = Effect.gen(function* () {
+        const state = yield* SubscriptionRef.get(health)
+        const now = yield* Clock.currentTimeMillis
+        const claims = yield* Ref.get(activeClaims)
+        const activeCount = yield* FiberMap.size(active)
+        const oldestClaimAt =
+          claims.size === 0 ? undefined : Math.min(...Array.from(claims.values(), (claim) => claim.claimedAt))
+        const pollAt = state.poll._tag === "Starting" ? undefined : state.poll.at
+        return {
+          ...state,
+          active: activeCount,
+          capacity: concurrency,
+          availableCapacity: Math.max(0, concurrency - activeCount),
+          oldestClaimAt,
+          pollAgeMillis: age(now, pollAt),
+          lastSuccessfulPollAgeMillis: age(now, state.lastSuccessfulPollAt),
+          oldestClaimAgeMillis: age(now, oldestClaimAt),
+          lastFailureAgeMillis: age(now, state.lastFailure?.at),
+        }
+      })
       const service = HostedTurnWorker.of({
-        ready: Ref.get(health).pipe(
-          Effect.flatMap((state) =>
-            state._tag === "healthy"
-              ? Effect.void
-              : Effect.fail(
-                  HostedTurnWorkerError.make({
-                    message:
-                      state._tag === "starting" ? "Hosted Turn worker has not completed its first poll" : state.message,
-                  }),
-                ),
-          ),
+        status,
+        ready: status.pipe(
+          Effect.flatMap((state) => {
+            if (state.poll._tag === "Starting")
+              return Effect.fail(
+                HostedTurnWorkerError.make({ message: "Hosted Turn worker has not completed its first poll" }),
+              )
+            if (state.poll._tag === "Failed")
+              return Effect.fail(HostedTurnWorkerError.make({ message: state.poll.message }))
+            if (state.pollAgeMillis !== undefined && state.pollAgeMillis > options.pollIntervalMillis * 4)
+              return Effect.fail(HostedTurnWorkerError.make({ message: "Hosted Turn worker poll is stale" }))
+            return Effect.void
+          }),
         ),
       })
       return Layer.merge(

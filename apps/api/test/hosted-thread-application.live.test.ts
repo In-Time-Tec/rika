@@ -3,36 +3,46 @@ import { expect, it } from "@effect/vitest"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { identityMigrations, runMigration } from "@rika/identity"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
+import * as ExecutionProjection from "@rika/product/execution-projection"
+import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import { ServerFrame } from "@rika/product/client-protocol"
 import { OwnerId } from "@rika/product/hosted-model"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
 import { ThreadId } from "@rika/product/thread-record"
+import * as TranscriptRepository from "@rika/product/transcript-repository"
+import * as Turn from "@rika/product/turn-record"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
-import { Context, Effect, Layer, Random, Redacted, Schema } from "effect"
+import * as ProductRepositories from "@rika/product-store/postgres-product-repositories"
+import { layer as hostedStoreLayer } from "@rika/product-store/postgres-store"
+import { FileSystem, Config, Context, Effect, Layer, Random, Redacted, Schema } from "effect"
 import { Pool } from "pg"
+import { live as livePlatform } from "./live-platform"
 import { testLayer as hostedModelRegistryTestLayer } from "../src/hosted-model-registry"
 import { HostedThreadApplication, layer as hostedThreadApplicationLayer } from "../src/hosted-thread-application"
 
-const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
+const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
+const JsonRoute = Schema.fromJsonString(ExecutionRoute.ExecutionRouteSnapshot)
 
 const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.promise(() => pool.query(text, [...values]))
+  Effect.tryPromise(() => pool.query(text, [...values]))
 
-it.effect.skipIf(databaseUrl === undefined)("encodes an owner-scoped snapshot without initialization writes", () =>
+it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hosted projection", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const suffix = String(yield* Random.nextInt).replaceAll("-", "n")
       const database = `rika_hosted_operations_${suffix}`
       const admin = new Pool({ connectionString: databaseUrl })
       yield* query(admin, `CREATE DATABASE "${database}"`)
-      const parsed = new URL(databaseUrl!)
+      const parsed = new URL(databaseUrl)
       parsed.pathname = `/${database}`
       const url = parsed.toString()
       const pool = new Pool({ connectionString: url })
       try {
         for (const migration of [...identityMigrations, ...productMigrations]) {
-          const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
+          const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.readFileString(migration.url.pathname),
+          )
           yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
         }
         yield* query(
@@ -46,8 +56,10 @@ it.effect.skipIf(databaseUrl === undefined)("encodes an owner-scoped snapshot wi
               ('personal-owner', 'personal', 'owner-user'),
               ('other-owner', 'personal', 'other-user')`,
         )
+        const databaseLayer = PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })
         const dependencies = Layer.mergeAll(
-          PgClient.layer({ url: Redacted.make(url), maxConnections: 8 }),
+          databaseLayer,
+          hostedStoreLayer.pipe(Layer.provide(databaseLayer)),
           BunCrypto.layer,
           ExecutionGateway.layerTest(),
           ExecutionSessionLifecycle.layerTest(),
@@ -57,6 +69,7 @@ it.effect.skipIf(databaseUrl === undefined)("encodes an owner-scoped snapshot wi
             admitCommand: () => Effect.die("unused"),
             completeCommand: () => Effect.die("unused"),
             appendEvents: () => Effect.die("unused"),
+            saveSnapshot: () => Effect.die("unused"),
             replay: () => Effect.die("unused"),
             acknowledgeCursor: () => Effect.die("unused"),
             issueTicket: () => Effect.die("unused"),
@@ -82,7 +95,13 @@ it.effect.skipIf(databaseUrl === undefined)("encodes an owner-scoped snapshot wi
           `INSERT INTO rika_workspaces (owner_id, path, created_at)
             VALUES ('other-owner', 'read-only-workspace', 1);
            INSERT INTO rika_threads (id, owner_id, workspace, title, created_at, updated_at)
-            VALUES ('read-only-thread', 'other-owner', 'read-only-workspace', 'Read only', 1, 1)`,
+            VALUES ('read-only-thread', 'other-owner', 'read-only-workspace', 'Read only', 1, 1);
+           INSERT INTO rika_hosted_workspaces
+            (id, owner_id, project_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
+            VALUES ('hosted-read-only-workspace', 'other-owner', NULL, 'other-user', 'orb', false, now());
+           INSERT INTO rika_hosted_threads
+            (id, owner_id, project_id, workspace_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
+            VALUES ('read-only-thread', 'other-owner', NULL, 'hosted-read-only-workspace', 'other-user', 'orb', false, now())`,
         )
         const sql = Context.get(context, PgClient.PgClient)
         const snapshot = yield* sql.withTransaction(
@@ -91,10 +110,12 @@ it.effect.skipIf(databaseUrl === undefined)("encodes an owner-scoped snapshot wi
           ),
         )
         expect(snapshot).toMatchObject({
-          thread: { id: "read-only-thread" },
-          turns: [],
-          units: [],
-          queue: { revision: 0, turns: [] },
+          executorKind: "orb",
+          view: {
+            thread: { id: "read-only-thread" },
+            turns: [],
+            pending: [],
+          },
           pendingAuthorizations: [],
         })
         const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(ServerFrame))({
@@ -110,11 +131,125 @@ it.effect.skipIf(databaseUrl === undefined)("encodes an owner-scoped snapshot wi
         expect(yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ServerFrame))(encoded)).toMatchObject({
           payload: { _tag: "ThreadSnapshot", snapshot },
         })
+        const route = ExecutionRoute.testExecutionRoute()
+        const turn: Turn.AgentExecutionTurn = {
+          _tag: "AgentExecution",
+          id: Turn.TurnId.make("authorization-turn"),
+          threadId: ThreadId.make("read-only-thread"),
+          prompt: "Update the README",
+          status: "waiting",
+          executionRoute: route,
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
+          createdAt: 2,
+          updatedAt: 3,
+        }
+        yield* query(
+          pool,
+          `INSERT INTO rika_turns
+            (id, thread_id, prompt, status, created_at, updated_at, execution_route_json)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            turn.id,
+            turn.threadId,
+            turn.prompt,
+            turn.status,
+            turn.createdAt,
+            turn.updatedAt,
+            yield* Schema.encodeEffect(JsonRoute)(route),
+          ],
+        )
+        const repositoryContext = yield* Layer.build(
+          ProductRepositories.layer(OwnerId.make("other-owner")).pipe(Layer.provide(databaseLayer)),
+        )
+        const usage = {
+          ...ExecutionProjection.emptyUsageState(),
+          costNanoUsd: 42,
+          tokens: { total: 3, input: { total: 2 }, output: { total: 1 } },
+          pricedAttempts: 1,
+          countedAttempts: 1,
+          sourceComplete: true,
+          context: { requestOrdinal: 1, purpose: "conversation" as const, inputTokens: 2 },
+          active: { _tag: "Available" as const, accumulatedMillis: 25 },
+        }
+        const checkpoint = {
+          version: ExecutionProjection.projectionVersion,
+          cursor: "authorization-cursor",
+          state: '{"operation":"write","path":"README.md"}',
+        }
+        const pendingSteering = {
+          runId: "run-1",
+          entryId: "entry-1",
+          requestId: "request-1",
+          sequence: 1,
+          text: "keep the exact API",
+        }
+        expect(
+          yield* Context.get(repositoryContext, TranscriptRepository.Service).commitProjection(turn, {
+            _tag: "ProjectionSnapshot",
+            revision: 7,
+            checkpoint,
+            units: [
+              {
+                key: "authorization:1",
+                turnId: String(turn.id),
+                order: [{ sequence: 0, part: 0, key: "authorization:1" }],
+                revision: 4,
+                content: {
+                  _tag: "Block",
+                  block: {
+                    _tag: "AuthorizationCard",
+                    id: "authorization-1",
+                    operation: "write",
+                    capability: "workspace",
+                    input: '{"path":"README.md"}',
+                    inputTruncated: false,
+                    status: "pending",
+                  },
+                },
+              },
+            ],
+            hasOlder: false,
+            state: {
+              status: "waiting",
+              usage,
+              steering: { steeringMessages: 1, followUpMessages: 0, pending: [pendingSteering] },
+            },
+          }),
+        ).toBe("committed")
+        const projected = yield* application.snapshot(OwnerId.make("other-owner"), ThreadId.make("read-only-thread"))
+        expect(projected).toMatchObject({
+          view: {
+            turns: [
+              {
+                projectionRevision: 7,
+                usage: { costNanoUsd: 42 },
+                pendingSteering: [{ text: "keep the exact API" }],
+                units: [
+                  {
+                    content: {
+                      block: { _tag: "AuthorizationCard", id: "authorization-1", status: "pending" },
+                    },
+                  },
+                ],
+              },
+            ],
+            usage: { state: { costNanoUsd: 42 } },
+          },
+          pendingAuthorizations: [
+            {
+              threadId: "read-only-thread",
+              turnId: "authorization-turn",
+              authorizationId: "authorization-1",
+              checkpoint,
+            },
+          ],
+        })
       } finally {
-        yield* Effect.promise(() => pool.end())
-        yield* Effect.promise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-        yield* Effect.promise(() => admin.end())
+        yield* Effect.tryPromise(() => pool.end())
+        yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+        yield* Effect.tryPromise(() => admin.end())
       }
     }),
-  ),
+  ).pipe(livePlatform),
 )

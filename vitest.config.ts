@@ -7,12 +7,35 @@ import { dirname, resolve } from "node:path"
  * runner never oversubscribes into starvation timeouts on timing-sensitive tests.
  */
 const laneWorkers = (cap: number) => Math.min(cap, Math.max(2, Math.ceil(os.cpus().length / 2)))
+const tenetkit = process.env.RIKA_TENETKIT_WORKTREE
+const tenetkitPackage = tenetkit === undefined ? undefined : resolve(tenetkit, "packages/tenetkit/dist")
+const tenetkitAliases =
+  tenetkitPackage === undefined
+    ? []
+    : [
+        { find: /^tenetkit$/, replacement: resolve(tenetkitPackage, "index.js") },
+        { find: /^tenetkit\/ai$/, replacement: resolve(tenetkitPackage, "ai/index.js") },
+        { find: /^tenetkit\/harness$/, replacement: resolve(tenetkitPackage, "harness/index.js") },
+        { find: /^tenetkit\/mcp$/, replacement: resolve(tenetkitPackage, "mcp/index.js") },
+        { find: /^tenetkit\/repl$/, replacement: resolve(tenetkitPackage, "repl/index.js") },
+        { find: /^tenetkit\/repl\/bun$/, replacement: resolve(tenetkitPackage, "repl/repl/bun.js") },
+        { find: /^tenetkit\/runtime$/, replacement: resolve(tenetkitPackage, "runtime/index.js") },
+        { find: /^tenetkit\/runtime\/driver$/, replacement: resolve(tenetkitPackage, "runtime/driver/index.js") },
+        {
+          find: /^tenetkit\/runtime\/driver\/sql\/codecs$/,
+          replacement: resolve(tenetkitPackage, "runtime/sql/codecs.js"),
+        },
+        { find: /^tenetkit\/skills$/, replacement: resolve(tenetkitPackage, "skills/index.js") },
+        { find: /^tenetkit\/test$/, replacement: resolve(tenetkitPackage, "test/index.js") },
+        { find: /^@tenetkit\/pg$/, replacement: resolve(tenetkit, "packages/pg/dist/postgres/index.js") },
+      ]
 import { defineConfig } from "vitest/config"
 import { CompletionReporter } from "./test/support/vitest-run-completeness-reporter"
 
 export default defineConfig({
   resolve: {
     dedupe: ["effect"],
+    alias: tenetkitAliases,
   },
   plugins: [
     {

@@ -101,13 +101,24 @@ export interface ThreadProtocolStoreService {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
     readonly events: ReadonlyArray<InteractiveEvent>
+    readonly snapshot: HostedThreadSnapshot
     readonly createdAt: Timestamp
   }) => Effect.Effect<ReadonlyArray<ThreadProtocolEvent>, StoreError>
+  readonly saveSnapshot: (input: {
+    readonly ownerId: OwnerId
+    readonly threadId: ThreadId
+    readonly threadVersion: ThreadVersion
+    readonly cursor: ThreadEventCursor
+    readonly snapshot: HostedThreadSnapshot
+    readonly createdAt: Timestamp
+  }) => Effect.Effect<void, StoreError>
   readonly replay: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
     readonly actor: ActorAttribution
     readonly afterCursor: ThreadEventCursor
+    readonly throughCursor?: ThreadEventCursor
+    readonly includeSnapshot?: boolean
     readonly limit: number
   }) => Effect.Effect<ThreadReplay, StoreError>
   readonly acknowledgeCursor: (input: {

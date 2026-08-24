@@ -32,8 +32,8 @@ const reduceOverlayImpl = (
 ): Model | undefined => {
   const { cancelTranscriptBlocks, sameChangedFiles } = context
   switch (message._tag) {
-    case "ConnectionStatusChanged":
-      return { ...model, connectionStatus: message.status }
+    case "ConnectionStateChanged":
+      return { ...model, connection: message.state }
     case "ReasoningStreamed": {
       const blocks = [...model.blocks] as Array<TranscriptBlock>
       const lastItem = model.items.at(-1) as TranscriptItem | undefined

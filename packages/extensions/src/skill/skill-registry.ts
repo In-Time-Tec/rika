@@ -8,7 +8,7 @@ import {
 } from "./skill-registry-model"
 import { SkillSource } from "tenetkit"
 import { SkillLoader } from "tenetkit/skills"
-import { Crypto, Effect, Encoding, FileSystem, Layer, Path } from "effect"
+import { Crypto, Effect, Encoding, FileSystem, Layer, Path, Schema } from "effect"
 import { SkillFileSystem } from "./skill-file-system"
 
 export const layer = Layer.effect(
@@ -33,8 +33,10 @@ const contained = (path: Path.Path, root: string, candidate: string): boolean =>
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))
 }
 
-const importNameOf = (manifest: string): string | undefined => {
-  const parsed: unknown = JSON.parse(manifest)
+const ManifestJson = Schema.fromJsonString(Schema.Unknown)
+
+const importNameOf = Effect.fn("SkillRegistry.importNameOf")(function* (manifest: string) {
+  const parsed = yield* Schema.decodeUnknownEffect(ManifestJson)(manifest)
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined
   const document = parsed as Record<string, unknown>
   const rika = document["rika"]
@@ -44,7 +46,7 @@ const importNameOf = (manifest: string): string | undefined => {
   if (typeof declared === "string" && declared.length > 0) return declared
   const name = document["name"]
   return typeof name === "string" && name.length > 0 ? name : undefined
-}
+})
 
 const discoverImplementation = (
   options: Options,
@@ -117,10 +119,9 @@ const discoverImplementation = (
       const content = yield* skillFileSystem
         .readFileString(realManifest)
         .pipe(Effect.mapError((cause) => failure("discover", manifestPath, cause)))
-      const importName = yield* Effect.try({
-        try: () => importNameOf(content),
-        catch: (cause) => failure("discover", manifestPath, cause),
-      })
+      const importName = yield* importNameOf(content).pipe(
+        Effect.mapError((cause) => failure("discover", manifestPath, cause)),
+      )
       if (importName === undefined) continue
       const entryBytes = yield* crypto
         .digest("SHA-256", new TextEncoder().encode(`${name}\0${importName}\0${content}`))

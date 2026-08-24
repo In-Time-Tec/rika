@@ -9,8 +9,10 @@ import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as UnitOrder from "@rika/transcript/transcript-unit-order"
 import * as PgClient from "@effect/sql-pg/PgClient"
+import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
-import { Effect, Layer, Random, Redacted } from "effect"
+import { Effect, FileSystem, Layer, Random, Redacted } from "effect"
+import { fileURLToPath } from "node:url"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Pool } from "pg"
 import { identityMigrations } from "../../../identity/src/migrations"
@@ -18,7 +20,18 @@ import { runMigration } from "../../../identity/src/postgres"
 import * as ProductRepositories from "../../src/database/postgres-product-repositories"
 import { migrations } from "../../src/hosted/migrations"
 
-const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
+const databaseUrl = "postgresql://rika:rika@127.0.0.1:5432/rika_test"
+const readFileString = (url: URL) =>
+  Effect.scoped(
+    Layer.build(BunServices.layer).pipe(
+      Effect.flatMap((context) =>
+        Effect.provide(
+          Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.readFileString(fileURLToPath(url))),
+          context,
+        ),
+      ),
+    ),
+  )
 const personalOwner = OwnerId.make("product-personal-owner")
 const organizationOwner = OwnerId.make("product-organization-owner")
 const threadId = Thread.ThreadId.make("product-thread")
@@ -44,7 +57,7 @@ const applyMigrations = (url: string) =>
   Effect.gen(function* () {
     const pool = yield* Effect.sync(() => new Pool({ connectionString: url }))
     for (const migration of [...identityMigrations, ...migrations]) {
-      const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
+      const sql = yield* readFileString(migration.url)
       yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
     }
     return pool
@@ -62,14 +75,14 @@ it.effect.skipIf(databaseUrl === undefined)(
       Effect.gen(function* () {
         const database = `rika_product_${Math.abs(yield* Random.nextInt)}`
         const admin = new Pool({ connectionString: databaseUrl })
-        yield* Effect.promise(() => admin.query(`CREATE DATABASE "${database}"`))
+        yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
         const parsed = new URL(databaseUrl!)
         parsed.pathname = `/${database}`
         const url = parsed.toString()
         let migrated: Pool | undefined
         try {
           migrated = yield* applyMigrations(url)
-          yield* Effect.promise(() =>
+          yield* Effect.tryPromise(() =>
             migrated!.query(`
               INSERT INTO "user" (id,name,email,email_verified,created_at,updated_at) VALUES
                 ('product-personal-user','Personal','product-personal@example.test',true,now(),now()),
@@ -233,9 +246,9 @@ it.effect.skipIf(databaseUrl === undefined)(
             expect(yield* sql`SELECT thread_id FROM rika_goals WHERE thread_id = ${threadId}`).toEqual([])
           }).pipe(Effect.provide(personal))
         } finally {
-          if (migrated !== undefined) yield* Effect.promise(() => migrated!.end())
-          yield* Effect.promise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-          yield* Effect.promise(() => admin.end())
+          if (migrated !== undefined) yield* Effect.tryPromise(() => migrated!.end())
+          yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+          yield* Effect.tryPromise(() => admin.end())
         }
       }),
     ),

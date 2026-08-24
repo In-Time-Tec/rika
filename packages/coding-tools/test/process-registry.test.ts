@@ -6,8 +6,8 @@ import * as ProcessRegistry from "@rika/coding-tools/shell-process-registry"
 import { provide } from "./test-layer"
 
 interface ControlledProcess {
-  readonly stdout: Queue.Queue<Uint8Array>
-  readonly stderr: Queue.Queue<Uint8Array>
+  readonly stdoutQueue: Queue.Queue<Uint8Array>
+  readonly stderrQueue: Queue.Queue<Uint8Array>
   readonly exit: Deferred.Deferred<ChildProcessSpawner.ExitCode>
 }
 
@@ -22,7 +22,7 @@ const controlledSpawner = (kills: Array<string>) => {
           const stdout = yield* Queue.unbounded<Uint8Array>()
           const stderr = yield* Queue.unbounded<Uint8Array>()
           const exit = yield* Deferred.make<ChildProcessSpawner.ExitCode>()
-          spawned.push({ stdout, stderr, exit })
+          spawned.push({ stdoutQueue: stdout, stderrQueue: stderr, exit })
           return ChildProcessSpawner.makeHandle({
             pid: ChildProcessSpawner.ProcessId(1),
             exitCode: Deferred.await(exit),
@@ -51,8 +51,8 @@ const controlledSpawner = (kills: Array<string>) => {
 const finish = (process: ControlledProcess, exitCode = 0) =>
   Effect.gen(function* () {
     yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(exitCode))
-    yield* Queue.shutdown(process.stdout)
-    yield* Queue.shutdown(process.stderr)
+    yield* Queue.shutdown(process.stdoutQueue)
+    yield* Queue.shutdown(process.stderrQueue)
   })
 
 const bytes = (text: string) => new TextEncoder().encode(text)
@@ -67,12 +67,12 @@ describe("ProcessRegistry", () => {
         const processId = yield* registry.start("command", ["one"], "/workspace")
         const secondId = yield* registry.start("command", ["two"], "/workspace")
         const firstProcess = spawner.spawned[0]!
-        yield* Queue.offer(firstProcess.stdout, bytes("first"))
+        yield* Queue.offer(firstProcess.stdoutQueue, bytes("first"))
         yield* Effect.yieldNow
 
         const first = yield* registry.poll(processId, 0, 100)
         const drained = yield* registry.poll(processId, 0, 100)
-        yield* Queue.offer(firstProcess.stderr, bytes("second"))
+        yield* Queue.offer(firstProcess.stderrQueue, bytes("second"))
         yield* Effect.yieldNow
         yield* finish(firstProcess, 7)
         const completed = yield* registry.poll(processId, 1_000, 100)
@@ -96,7 +96,7 @@ describe("ProcessRegistry", () => {
         const registry = yield* ProcessRegistry.Service
         const processId = yield* registry.start("fast", [], "/workspace")
         const process = spawner.spawned[0]!
-        yield* Queue.offer(process.stdout, bytes("completed immediately"))
+        yield* Queue.offer(process.stdoutQueue, bytes("completed immediately"))
         yield* Effect.yieldNow
         yield* finish(process)
         yield* Effect.yieldNow
@@ -122,7 +122,7 @@ describe("ProcessRegistry", () => {
         const registry = yield* ProcessRegistry.Service
         const processId = yield* registry.start("large", [], "/workspace")
         const process = spawner.spawned[0]!
-        yield* Queue.offer(process.stdout, bytes("x".repeat(ProcessRegistry.pendingOutputLimit + 10_000)))
+        yield* Queue.offer(process.stdoutQueue, bytes("x".repeat(ProcessRegistry.pendingOutputLimit + 10_000)))
         yield* Effect.yieldNow
 
         const bounded = yield* registry.poll(processId, 0, 40_000)
@@ -141,7 +141,7 @@ describe("ProcessRegistry", () => {
       Effect.gen(function* () {
         const registry = yield* ProcessRegistry.Service
         const processId = yield* registry.start("slow", [], "/workspace")
-        yield* Queue.offer(spawner.spawned[0]!.stdout, bytes("still working"))
+        yield* Queue.offer(spawner.spawned[0]!.stdoutQueue, bytes("still working"))
         yield* Effect.yieldNow
         const completed = yield* Deferred.make<void>()
         const fiber = yield* Effect.forkChild(
@@ -172,13 +172,13 @@ describe("ProcessRegistry", () => {
           const processId = yield* registry.start("fast", [String(index)], "/workspace")
           processIds.push(processId)
           const process = spawner.spawned[index + 1]!
-          yield* Queue.offer(process.stdout, bytes(String(index)))
+          yield* Queue.offer(process.stdoutQueue, bytes(String(index)))
           yield* Effect.yieldNow
           yield* finish(process)
           yield* registry.poll(processId, 1_000, 100)
         }
 
-        yield* Queue.offer(activeProcess.stdout, bytes("still active"))
+        yield* Queue.offer(activeProcess.stdoutQueue, bytes("still active"))
         yield* Effect.yieldNow
 
         expect(yield* Effect.result(registry.poll(processIds[0]!, 0, 100))).toMatchObject({

@@ -11,6 +11,7 @@ import { initial, withModeConfiguration, type ModeConfiguration } from "@rika/te
 import { update } from "@rika/terminal/terminal-state-reducer"
 import type { ThreadItem } from "@rika/terminal/terminal-state"
 import { Crypto, Deferred, Effect, Exit, Fiber, FiberHandle, FiberSet, Scope, Stream, SubscriptionRef } from "effect"
+import process, { stdin, stdout } from "node:process"
 import { terminalTitleSequence } from "./interactive-process"
 import { makeEventRouter } from "./process-events"
 import { makeProcessRuntime } from "./process-runtime"
@@ -25,11 +26,7 @@ export interface InteractiveTuiOptions {
   readonly rememberMode?: ((mode: string) => Effect.Effect<void, never, BunServices.BunServices>) | undefined
   readonly makeRenderer?: NonNullable<Parameters<typeof createTui>[0]["makeRenderer"]>
   readonly writeTerminalTitle?: (sequence: string) => void
-}
-
-const connectionLabel = (status: InteractiveConnection.Status): string | undefined => {
-  if (status === "connecting" || status === "authenticating") return "Connecting"
-  return status === "reconnecting" ? "Reconnecting" : undefined
+  readonly onFirstDraw?: () => void
 }
 
 export const interactiveTui =
@@ -40,7 +37,7 @@ export const interactiveTui =
     connection: InteractiveConnection.Connection,
   ): Effect.Effect<void, ProductOperation.OperationUnavailable> =>
     Effect.gen(function* () {
-      if (options.makeRenderer === undefined && (!process.stdin.isTTY || !process.stdout.isTTY)) return
+      if (options.makeRenderer === undefined && (!stdin.isTTY || !stdout.isTTY)) return
       const crypto = yield* Crypto.Crypto
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const nextSteeringRequestId = () => `rika:steer:${runSync(crypto.randomUUIDv4)}`
@@ -63,14 +60,13 @@ export const interactiveTui =
           : undefined
       return yield* Effect.callback<void, ProductOperation.OperationUnavailable>((resume) => {
         let renderPending = false
-        const initialConnectionStatus = connectionLabel(connection.initialStatus)
         const loop: InteractiveLoop = {
           model: {
             ...initial(
               input.workspace ?? process.cwd(),
               input.mode ?? configuredRememberedMode ?? resolvedModeConfiguration?.defaultMode,
             ),
-            connectionStatus: initialConnectionStatus,
+            connection: connection.initialState,
           },
           threadView: undefined,
           modelPreview: undefined,
@@ -100,7 +96,7 @@ export const interactiveTui =
         }
         if (resolvedModeConfiguration !== undefined)
           loop.model = withModeConfiguration(loop.model, resolvedModeConfiguration)
-        const writeTerminalTitle = options.writeTerminalTitle ?? ((sequence: string) => process.stdout.write(sequence))
+        const writeTerminalTitle = options.writeTerminalTitle ?? ((sequence: string) => stdout.write(sequence))
         const refreshTerminalTitle = () => {
           const threadId = loop.model.currentThreadId
           const title =
@@ -172,13 +168,12 @@ export const interactiveTui =
           requestSelectionResync,
         })
         fork(
-          connection.statusChanges.pipe(
-            Stream.runForEach((status) =>
+          connection.stateChanges.pipe(
+            Stream.runForEach((state) =>
               Effect.sync(() => {
-                const connectionStatus = connectionLabel(status)
                 loop.model = update(loop.model, {
-                  _tag: "ConnectionStatusChanged",
-                  ...(connectionStatus === undefined ? {} : { status: connectionStatus }),
+                  _tag: "ConnectionStateChanged",
+                  state,
                 })
                 loop.renderer?.surface.update(loop.model)
               }),

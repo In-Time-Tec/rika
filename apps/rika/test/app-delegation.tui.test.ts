@@ -25,13 +25,13 @@ test(
             model.text("MENTION_COMPLETE"),
           ],
         })
-        yield* Effect.promise(() => app.type("Say hello."))
+        yield* Effect.tryPromise(() => app.type("Say hello."))
         app.pressEnter()
         const first = yield* app.waitFrame("HARNESS_RESPONSE")
         expect(first).toContain("Say hello.")
         yield* app.settled
 
-        yield* Effect.promise(() => app.type("Run an ordinary tool."))
+        yield* Effect.tryPromise(() => app.type("Run an ordinary tool."))
         app.pressEnter()
         const ordinary = yield* app.waitFrame("ORDINARY_COMPLETE")
         expect(ordinary).toContain("printf TOOL_OK")
@@ -39,10 +39,10 @@ test(
         expect(ordinary).not.toContain("[pending]")
         yield* app.settled
 
-        yield* Effect.promise(() => app.type("check @"))
+        yield* Effect.tryPromise(() => app.type("check @"))
         const opened = yield* app.waitFrame("@README.md")
         expect(opened).toContain("@src")
-        yield* Effect.promise(() => app.type("alpha"))
+        yield* Effect.tryPromise(() => app.type("alpha"))
         const narrowed = yield* app.waitFrame("@src/alpha.ts")
         expect(narrowed).not.toContain("@README.md")
         app.pressEnter()
@@ -76,16 +76,16 @@ test(
 
         app.pressKey("o", { ctrl: true })
         const palette = yield* app.waitFrame("Command Palette")
-        expect(palette).toContain("new thread")
+        expect(palette.replace(/\s+/g, " ")).toContain("thread new on Runner")
         expect(palette).toContain("switch")
         expect(palette).toContain("toggle fast mode")
         expect(palette).toContain("set max subagents")
         expect(palette).toContain("set max depth")
         expect(palette).toContain("quit")
-        yield* Effect.promise(() => app.type("set max depth"))
+        yield* Effect.tryPromise(() => app.type("set max depth"))
         app.pressEnter()
         yield* app.waitFrame("Set Max Depth")
-        yield* Effect.promise(() => app.type("2"))
+        yield* Effect.tryPromise(() => app.type("2"))
         app.pressEnter()
         yield* app.waitFrame("Max depth set to 2")
         const settings = yield* FileSystem.FileSystem.pipe(
@@ -95,14 +95,14 @@ test(
         expect(settings).toEqual({ subagents: { maxDepth: 2 } })
 
         app.pressKey("o", { ctrl: true })
-        yield* Effect.promise(() => app.type("usage"))
+        yield* Effect.tryPromise(() => app.type("usage"))
         app.pressEnter()
         yield* app.waitFrame("Context & Usage")
         app.pressEscape()
         yield* app.waitGone("Context & Usage")
 
         app.pressKey("o", { ctrl: true })
-        yield* Effect.promise(() => app.type("new thread"))
+        yield* Effect.tryPromise(() => app.type("thread new on Runner"))
         app.pressEnter()
         expect(yield* app.waitTerminalTitle((title) => title.startsWith("New thread - rika -"))).toContain("New thread")
         const created = yield* app.waitFrame("Welcome to Rika")
@@ -125,7 +125,7 @@ test(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({ script: [] })
 
-        yield* Effect.promise(() => app.type("$printf '\\101\\114\\114\\117\\127\\105\\104'"))
+        yield* Effect.tryPromise(() => app.type("$printf '\\101\\114\\114\\117\\127\\105\\104'"))
         app.pressEnter()
         const allowed = yield* app.waitFrame("ALLOWED")
         expect(allowed).not.toContain("Run shell command")

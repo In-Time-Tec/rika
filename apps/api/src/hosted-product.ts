@@ -2,7 +2,6 @@ import * as PgClient from "@effect/sql-pg/PgClient"
 import { Clock, Context, Crypto, DateTime, Effect, Layer, Schema } from "effect"
 import { AuthorizationPolicy, type AuthorizationAction } from "@rika/product/hosted-authorization"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
-import * as HostedObservability from "@rika/product/hosted-observability"
 import {
   BetterAuthMemberId,
   BetterAuthUserId,
@@ -52,7 +51,7 @@ export interface ProjectContext {
 export interface AdmittedRun {
   readonly commandId: string
   readonly turnId: string
-  readonly status: "queued"
+  readonly status: "accepted" | "queued"
 }
 
 export interface ThreadAuthority {
@@ -152,6 +151,7 @@ export const layer = (options: {
   readonly templateBuildId: string
   readonly providerScope: string
   readonly provision: (assignmentId: string) => Effect.Effect<void, HostedProductError>
+  readonly promptAdmissionReadiness: Effect.Effect<boolean>
 }) =>
   Layer.effect(
     HostedProduct,
@@ -704,27 +704,26 @@ export const layer = (options: {
           .pipe(Effect.mapError(modelFailure))
         const commandId = CommandId.make(input.operationKey)
         const turnId = TurnId.make(yield* crypto.randomUUIDv4)
-        const admitted = yield* HostedObservability.observe(
-          "command_admission",
-          { ownerId: authority.ownerId, threadId: input.threadId, turnId, commandId },
-          store.admitPrompt({
-            ownerId: authority.ownerId,
-            threadId: ThreadId.make(input.threadId),
-            commandId,
-            idempotencyKey: IdempotencyKey.make(input.operationKey),
-            turnId,
-            actor: authority.actor,
-            prompt: input.prompt,
-            ...(input.promptParts === undefined ? {} : { promptParts: input.promptParts }),
-            executionRoute,
-            admittedAt: DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis)),
-            queueCapacity: 32,
-          }),
-        )
+        const admittedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+        const readinessProof = yield* options.promptAdmissionReadiness
+        const admitted = yield* store.admitPrompt({
+          ownerId: authority.ownerId,
+          threadId: ThreadId.make(input.threadId),
+          commandId,
+          idempotencyKey: IdempotencyKey.make(input.operationKey),
+          turnId,
+          actor: authority.actor,
+          prompt: input.prompt,
+          ...(input.promptParts === undefined ? {} : { promptParts: input.promptParts }),
+          executionRoute,
+          admittedAt,
+          queueCapacity: 32,
+          readinessProof,
+        })
         return {
           commandId: String(admitted.command.commandId),
           turnId: String(admitted.turnId),
-          status: "queued" as const,
+          status: admitted.status,
         }
       }, Effect.mapError(storeFailure))
 
@@ -748,8 +747,13 @@ export const postgresTest = (options: {
   readonly database: PgClient.PgPoolConfig
   readonly templateBuildId: string
   readonly providerScope: string
+  readonly promptAdmissionReadiness?: Effect.Effect<boolean>
 }) =>
-  layer({ ...options, provision: () => Effect.void }).pipe(
+  layer({
+    ...options,
+    provision: () => Effect.void,
+    promptAdmissionReadiness: options.promptAdmissionReadiness ?? Effect.succeed(true),
+  }).pipe(
     Layer.provide(
       Layer.mergeAll(
         postgresLayer(options.database),

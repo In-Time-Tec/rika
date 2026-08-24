@@ -2,32 +2,34 @@ import { expect, it } from "@effect/vitest"
 import { identityMigrations, runMigration } from "@rika/identity"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as ExecutionPostgres from "@rika/execution/postgres"
-import { Context, Effect, Exit, Layer, Random, Redacted, Scope } from "effect"
+import { FileSystem, Config, Context, Effect, Exit, Layer, Random, Redacted, Scope } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Pool } from "pg"
 import { HostedApplication, layer as hostedApplicationLayer } from "../src/hosted-application"
+import { live as livePlatform } from "./live-platform"
 
-const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
+const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 
-const query = (pool: Pool, text: string) => Effect.promise(() => pool.query(text))
-const waitForHostPoll = Effect.promise(() => Bun.sleep(10))
+const query = (pool: Pool, text: string) => Effect.tryPromise(() => pool.query(text))
+const waitForHostPoll = Effect.tryPromise(() => Bun.sleep(10))
 
-it.effect.skipIf(databaseUrl === undefined)(
-  "retains hosted execution resources until the application scope closes",
-  () =>
+it.effect.skipIf(databaseUrl === "")("retains hosted execution resources until the application scope closes", () =>
+  livePlatform(
     Effect.gen(function* () {
       const suffix = String(yield* Random.nextInt).replaceAll("-", "n")
       const database = `rika_hosted_application_${suffix}`
       const admin = new Pool({ connectionString: databaseUrl })
       yield* query(admin, `CREATE DATABASE "${database}"`)
-      const parsed = new URL(databaseUrl!)
+      const parsed = new URL(databaseUrl)
       parsed.pathname = `/${database}`
       const url = parsed.toString()
       const pool = new Pool({ connectionString: url })
       const resourceScope = yield* Scope.make()
       try {
         for (const migration of [...identityMigrations, ...productMigrations]) {
-          const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
+          const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.readFileString(migration.url.pathname),
+          )
           yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
         }
         yield* ExecutionPostgres.applySchema({ url, source: "rika-api" })
@@ -87,9 +89,10 @@ it.effect.skipIf(databaseUrl === undefined)(
         ).toBe("Failure")
       } finally {
         yield* Scope.close(resourceScope, Exit.void).pipe(Effect.ignore)
-        yield* Effect.promise(() => pool.end())
-        yield* Effect.promise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-        yield* Effect.promise(() => admin.end())
+        yield* Effect.tryPromise(() => pool.end())
+        yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+        yield* Effect.tryPromise(() => admin.end())
       }
     }),
+  ),
 )

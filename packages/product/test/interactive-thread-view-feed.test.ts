@@ -37,7 +37,7 @@ const unit = (key: string, text: string) => ({
   revision: 1,
   content: { _tag: "Entry" as const, role: "assistant" as const, text },
 })
-const state = (status: "running" | "completed" = "running") => ({
+const state = (status: "running" | "waiting" | "completed" = "running") => ({
   status,
   usage: ExecutionProjection.emptyUsageState(),
   steering: { steeringMessages: 0, followUpMessages: 0 },
@@ -365,7 +365,59 @@ describe("interactive ThreadView feed", () => {
       },
     })
     expect(events[0]).toMatchObject({ _tag: "ResyncRequired", threadId })
+    expect(feed.checkpoint(String(turnId))).toBeUndefined()
     expect(feed.publish({ _tag: "ThreadTitled", threadId: String(threadId), title: "ignored" })).toEqual([])
+  })
+
+  it("requires a durable checkpoint before publishing a pending authorization", () => {
+    const feed = makeThreadViewFeed(() => 1)
+    feed.publish({
+      _tag: "SelectionLoaded",
+      selectionEpoch: 1,
+      activitySequence: 0,
+      thread,
+      entries: [],
+      hasOlder: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 0,
+      queue: [],
+      activeTurn: turn,
+    })
+    expect(
+      feed.publish({
+        _tag: "ExecutionProjectionChanged",
+        threadId,
+        turn: { ...turn, status: "waiting" },
+        change: {
+          _tag: "ProjectionSnapshot",
+          revision: 0,
+          units: [
+            {
+              key: "authorization:1",
+              turnId: String(turnId),
+              order: [{ sequence: 0, part: 0, key: "authorization:1" }],
+              revision: 1,
+              content: {
+                _tag: "Block",
+                block: {
+                  _tag: "AuthorizationCard",
+                  id: "authorization-1",
+                  operation: "write",
+                  capability: "workspace",
+                  input: '{"path":"README.md"}',
+                  inputTruncated: false,
+                  status: "pending",
+                },
+              },
+            },
+          ],
+          hasOlder: false,
+          state: state("waiting"),
+        },
+      }),
+    ).toMatchObject([{ _tag: "ResyncRequired", threadId }])
+    expect(feed.current()?.turns[0]?.units.some((candidate) => candidate.key === "authorization:1")).toBe(false)
+    expect(feed.checkpoint(String(turnId))).toBeUndefined()
   })
 
   it("updates closed aggregate usage atomically in the same ThreadView patch", () => {

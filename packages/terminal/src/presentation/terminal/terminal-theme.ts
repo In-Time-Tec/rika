@@ -82,6 +82,8 @@ export interface TerminalThemeColors {
   readonly medium: string
   readonly high: string
   readonly ultra: string
+  readonly runner: string
+  readonly orb: string
   readonly selectionBg: TerminalColor
   readonly selectionFg: TerminalColor
   readonly selectionHint: TerminalColor
@@ -102,6 +104,8 @@ export const colors: TerminalThemeColors = {
   medium: "#3dffa6",
   high: "#3dd4ff",
   ultra: "#d8b3ff",
+  runner: "#d2a25c",
+  orb: "#ae77ff",
   selectionBg: new TerminalColor(128, 128, 0, 255, "indexed", 3),
   selectionFg: new TerminalColor(0, 0, 0, 255, "indexed", 0),
   selectionHint: new TerminalColor(0, 0, 128, 255, "indexed", 4),

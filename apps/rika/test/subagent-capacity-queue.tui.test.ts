@@ -41,7 +41,7 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Run five children with four active slots."))
+        yield* Effect.tryPromise(() => app.type("Run five children with four active slots."))
         app.pressEnter()
 
         const turnId = Turn.TurnId.make("tui-turn-0")

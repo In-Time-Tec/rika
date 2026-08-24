@@ -1,6 +1,7 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Config, Context, Effect, Layer } from "effect"
+import { Config, Context, Effect, Layer, Scope } from "effect"
+import { exit } from "node:process"
 import * as Logging from "../../src/diagnostics/diagnostic-file-logging"
 
 const provideScoped =
@@ -10,7 +11,12 @@ const provideScoped =
       Effect.context<RIn | Exclude<R, ROut>>().pipe(
         Effect.flatMap((parent) =>
           Layer.buildWithScope(layer, scope).pipe(
-            Effect.flatMap((context) => effect.pipe(Effect.provideContext(Context.merge(parent, context)))),
+            Effect.flatMap((context) =>
+              effect.pipe(
+                Effect.provideContext(Context.merge(parent, context)),
+                Effect.provideService(Scope.Scope, scope),
+              ),
+            ),
           ),
         ),
       ),
@@ -18,8 +24,9 @@ const provideScoped =
 
 const program = Effect.gen(function* () {
   const dataRoot = yield* Config.string("RIKA_TEST_LOG_DATA_ROOT")
-  return yield* Effect.logInfo("logging.hardexit.fixture").pipe(
-    Effect.andThen(Effect.sync(() => process.exit(0))),
+  return yield* Logging.start.pipe(
+    Effect.andThen(Effect.logInfo("logging.hardexit.fixture")),
+    Effect.andThen(Effect.sync(() => exit(0))),
     provideScoped(Logging.layer({ dataRoot, role: "server", version: "test" })),
   )
 })

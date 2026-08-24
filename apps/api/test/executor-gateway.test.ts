@@ -2,10 +2,17 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { describe, expect, it } from "@effect/vitest"
 import { ControllerError, type Interface as Controller } from "@rika/e2b-executor/controller"
 import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
-import { ApiMessage, BindingRequest, ExecutorMessage, type CellResponse } from "@rika/remote-execution/protocol"
+import {
+  ApiMessage,
+  BindingRequest,
+  ExecutorMessage,
+  type CellLifecycleFrame,
+  type CellResponse,
+} from "@rika/remote-execution/protocol"
 import { NestedOperation, ToolContext } from "tenetkit"
 import { HostBindingRegistry } from "tenetkit/repl"
-import { Context, Crypto, Effect, Fiber, Layer, Option, Redacted, Schema, Stream } from "effect"
+import { Context, Crypto, Deferred, Effect, Fiber, Layer, Logger, Option, Redacted, Schema, Stream } from "effect"
+import { TestClock } from "effect/testing"
 import {
   GatewayError,
   makeGateway as makeGatewayService,
@@ -20,8 +27,11 @@ import { testToolPolicy } from "./hosted-tool-policy-fixture"
 const encode = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
 const decode = Schema.decodeSync(Schema.fromJsonString(ApiMessage))
 const encodeBindingRequest = Schema.encodeSync(Schema.fromJsonString(BindingRequest))
+const encodeUnknown = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const bindingRequestDigest = (request: BindingRequest) =>
   new Bun.CryptoHasher("sha256").update(encodeBindingRequest(request)).digest("hex")
+const milestone = (observability: ReadonlyArray<ReturnType<typeof Logger.formatStructured.log>>, message: string) =>
+  observability.filter((record) => record.message === message)
 const ready = (detail: string) => ({ _tag: "Ready" as const, detail })
 const workspaceCapabilities = {
   environmentDigest: `sha256:${"0".repeat(64)}`,
@@ -37,7 +47,7 @@ const workspaceCapabilities = {
 }
 
 const lifecycleStore = (
-  append: LifecycleStore["append"] = () => Effect.void,
+  append: LifecycleStore["append"] = () => Effect.succeed({ _tag: "Appended" }),
   load: LifecycleStore["load"] = () => Effect.succeed([]),
 ): LifecycleStore => {
   const operations = new Map<
@@ -46,44 +56,63 @@ const lifecycleStore = (
       state: "accepted" | "dispatched" | "completed" | "unknown"
       started: boolean
       response?: CellResponse
+      outcome?: "completed" | "failed" | "cancelled" | "unknown"
       dispatchedGeneration?: number
       dispatchedExecutorInstanceId?: string
       dispatchedProcessIncarnation?: string
     }
   >()
+  const persistedFrames = new Map<string, ReadonlyArray<CellLifecycleFrame>>()
   const operation = (input: {
     readonly assignmentId: string
     readonly operationKey: string
     readonly attempt: number
   }) => `${input.assignmentId}\u0000${input.operationKey}\u0000${input.attempt}`
+  const readFrames: LifecycleStore["load"] = (assignmentId, operationKey, attempt) => {
+    const operationId = operation({ assignmentId, operationKey, attempt })
+    const persisted = persistedFrames.get(operationId)
+    return persisted === undefined
+      ? load(assignmentId, operationKey, attempt).pipe(
+          Effect.tap((frames) => Effect.sync(() => void persistedFrames.set(operationId, frames))),
+        )
+      : Effect.succeed(persisted)
+  }
   return {
-    append: (assignmentId, frame) =>
-      append(assignmentId, frame).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            const operationKey = `${assignmentId}\u0000${frame.attribution.operationKey}\u0000${frame.attribution.attempt}`
-            const current = operations.get(operationKey)
-            if (current === undefined) return
-            if (frame._tag === "Started") operations.set(operationKey, { ...current, started: true })
-            if (frame._tag === "Terminal")
-              operations.set(operationKey, {
-                ...current,
-                state: "completed",
-                response: frame.response,
-              })
-          }),
-        ),
-      ),
-    load,
+    append: (access, frame) =>
+      Effect.gen(function* () {
+        const assignmentId = access.fence.assignmentId
+        const operationKey = `${assignmentId}\u0000${frame.attribution.operationKey}\u0000${frame.attribution.attempt}`
+        const current = operations.get(operationKey)
+        if (
+          (current?.state === "completed" || current?.state === "unknown") &&
+          current.response !== undefined &&
+          current.outcome !== undefined
+        )
+          return { _tag: "AlreadyTerminal", result: { response: current.response, outcome: current.outcome } } as const
+        const disposition = yield* append(access, frame)
+        if (disposition._tag === "AlreadyTerminal" || disposition._tag === "AlreadyAppended" || current === undefined)
+          return disposition
+        persistedFrames.set(operationKey, [...(persistedFrames.get(operationKey) ?? []), frame])
+        if (frame._tag === "Started") operations.set(operationKey, { ...current, started: true })
+        if (frame._tag === "Terminal")
+          operations.set(operationKey, {
+            ...current,
+            state: frame.outcome === "unknown" ? "unknown" : "completed",
+            response: frame.response,
+            outcome: frame.outcome,
+          })
+        return disposition
+      }),
+    load: readFrames,
     prepare: (input) =>
-      load(input.assignmentId, input.operationKey, input.attempt).pipe(
+      readFrames(input.assignmentId, input.operationKey, input.attempt).pipe(
         Effect.tap((frames) =>
           Effect.sync(() => {
             const terminal = frames.find((frame) => frame._tag === "Terminal")
             operations.set(
               operation(input),
               terminal?._tag === "Terminal"
-                ? { state: "completed", started: true, response: terminal.response }
+                ? { state: "completed", started: true, response: terminal.response, outcome: terminal.outcome }
                 : { state: "accepted", started: frames.some((frame) => frame._tag === "Started") },
             )
           }),
@@ -102,10 +131,27 @@ const lifecycleStore = (
             dispatchedProcessIncarnation: access.fence.processIncarnation,
           }),
       ),
-    reassign: (input) =>
-      Effect.sync(() => void operations.set(operation(input), { state: "accepted", started: false })),
-    markUnknown: (input) =>
-      Effect.sync(() => void operations.set(operation(input), { state: "unknown", started: true })),
+    resolveDeadline: (input) =>
+      Effect.sync(() => {
+        const current = operations.get(operation(input)) ?? { state: "accepted" as const, started: false }
+        const unknown = current.state === "dispatched"
+        const response = {
+          _tag: "DomainFailure" as const,
+          failure: unknown
+            ? { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" }
+            : { kind: "timeout", message: "Cell operation deadline exceeded" },
+        }
+        operations.set(operation(input), {
+          ...current,
+          state: unknown ? "unknown" : "completed",
+          response,
+          outcome: unknown ? "unknown" : "failed",
+        })
+        return {
+          _tag: "Resolved" as const,
+          result: { response, outcome: unknown ? ("unknown" as const) : ("failed" as const) },
+        }
+      }),
   }
 }
 const readyPreparation: PreparationStore = {
@@ -119,7 +165,7 @@ const readyPreparation: PreparationStore = {
 const environmentDigest = `sha256:${"0".repeat(64)}`
 const makeGateway = (
   service: Controller,
-  append: LifecycleStore["append"] = () => Effect.void,
+  append: LifecycleStore["append"] = () => Effect.succeed({ _tag: "Appended" }),
   load: LifecycleStore["load"] = () => Effect.succeed([]),
   preparation: PreparationStore = readyPreparation,
 ) =>
@@ -179,7 +225,7 @@ const cellIdentity = {
   attempt: 0,
   replayPolicy: "pure",
   admittedAt: null,
-  deadline: null,
+  deadlineAt: "2999-01-01T00:00:00.000Z",
   bindings,
 } as const
 const attribution = (operationKey: string) => ({
@@ -856,8 +902,539 @@ describe("executor gateway", () => {
     }),
   )
 
+  it.effect("keeps the shared executor alive after a dispatched deadline wins", () =>
+    Effect.gen(function* () {
+      const observability: Array<ReturnType<typeof Logger.formatStructured.log>> = []
+      const observed = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        effect.pipe(
+          Effect.provideService(
+            Logger.CurrentLoggers,
+            new Set([Logger.map(Logger.formatStructured, (record) => observability.push(record))]),
+          ),
+        )
+      const target = socket()
+      const gateway = yield* makeGateway(controller())
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      yield* workspaceReady(gateway, target)
+      const running = yield* Effect.forkChild(
+        observed(
+          gateway.execute({
+            assignmentId: "assignment-1",
+            operationKey: "operation-deadline",
+            workspaceId: "workspace-1",
+            sessionId: "thread-1",
+            ...cellIdentity,
+            deadlineAt: "1970-01-01T00:00:01.000Z",
+            code: "wait forever",
+          }),
+        ),
+      )
+      yield* Effect.yieldNow
+      for (const frame of [
+        { _tag: "Accepted" as const, attribution: attribution("operation-deadline"), cursor: 1 },
+        { _tag: "Started" as const, attribution: attribution("operation-deadline"), cursor: 2 },
+      ])
+        yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame }))
+      yield* TestClock.adjust("1 second")
+      expect(yield* Fiber.join(running)).toEqual({
+        response: {
+          _tag: "DomainFailure",
+          failure: { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" },
+        },
+        outcome: "unknown",
+      })
+      expect(
+        target.sent
+          .map((message) => decode(message))
+          .some((message) => message._tag === "CellCancel" && message.operationKey === "operation-deadline"),
+      ).toBe(true)
+
+      const cancelled = {
+        _tag: "DomainFailure" as const,
+        failure: { kind: "cancelled", message: "Cell operation was cancelled" },
+      }
+      yield* observed(
+        gateway.receive(
+          target,
+          encode({
+            _tag: "CellLifecycle",
+            access,
+            frame: {
+              _tag: "Terminal",
+              attribution: attribution("operation-deadline"),
+              cursor: 3,
+              outcome: "cancelled",
+              response: cancelled,
+            },
+          }),
+        ),
+      )
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "CellResult",
+          access,
+          operationKey: "operation-deadline",
+          attempt: 0,
+          response: cancelled,
+        }),
+      )
+      expect(target.closed).toEqual([])
+      const renderedObservability = encodeUnknown(observability)
+      expect(renderedObservability.match(/hosted\.terminal\.unknown/g)).toHaveLength(1)
+      expect(renderedObservability).not.toContain("hosted.terminal.interrupted")
+      const deadlineAcknowledgements = target.sent
+        .map((message) => decode(message))
+        .filter(
+          (message) =>
+            (message._tag === "CellTerminalReceipt" || message._tag === "CellTerminalSuperseded") &&
+            message.operationKey === "operation-deadline",
+        )
+      expect(deadlineAcknowledgements).toEqual([
+        {
+          _tag: "CellTerminalSuperseded",
+          access,
+          operationKey: "operation-deadline",
+          attempt: 0,
+          cursor: 3,
+          outcome: "unknown",
+          response: {
+            _tag: "DomainFailure",
+            failure: { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" },
+          },
+        },
+      ])
+
+      const next = yield* Effect.forkChild(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-after-deadline",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "42",
+        }),
+      )
+      yield* Effect.yieldNow
+      const response = { _tag: "Success" as const, result: 42 }
+      for (const frame of [
+        { _tag: "Accepted" as const, attribution: attribution("operation-after-deadline"), cursor: 1 },
+        { _tag: "Started" as const, attribution: attribution("operation-after-deadline"), cursor: 2 },
+        {
+          _tag: "Terminal" as const,
+          attribution: attribution("operation-after-deadline"),
+          cursor: 3,
+          outcome: "completed" as const,
+          response,
+        },
+      ])
+        yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame }))
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "CellResult",
+          access,
+          operationKey: "operation-after-deadline",
+          attempt: 0,
+          response,
+        }),
+      )
+      expect(yield* Fiber.join(next)).toEqual({ access, response, outcome: "completed" })
+      expect(target.closed).toEqual([])
+    }),
+  )
+
+  it.effect("bounds binding and machine children by the parent cell deadline", () =>
+    Effect.gen(function* () {
+      const invocationStarted = yield* Deferred.make<void>()
+      const cleanupStarted = yield* Deferred.make<void>()
+      const releaseCleanup = yield* Deferred.make<void>()
+      const cleanupCompleted = yield* Deferred.make<void>()
+      const signal = yield* Effect.abortSignal
+      const context = Context.empty().pipe(
+        Context.add(
+          ToolContext.ToolContext,
+          ToolContext.ToolContext.of({
+            signal,
+            emit: () => Effect.void,
+            sessionId: "thread-1",
+            runId: "run-1",
+            toolCallId: "call-1",
+            operationKey: "operation-child-deadline",
+          }),
+        ),
+        Context.add(
+          NestedOperation.NestedOperations,
+          NestedOperation.NestedOperations.of({ run: (_request, operation) => operation }),
+        ),
+      )
+      const registry = HostBindingRegistry.HostBindingRegistry.of({
+        descriptors: [{ module: "workspace", operations: ["read"] }],
+        resolve: () => Effect.die("unused"),
+        invoke: () =>
+          Deferred.succeed(invocationStarted, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(
+              Deferred.succeed(cleanupStarted, undefined).pipe(
+                Effect.andThen(Deferred.await(releaseCleanup)),
+                Effect.andThen(Deferred.succeed(cleanupCompleted, undefined)),
+              ),
+            ),
+          ),
+      })
+      const authority = {
+        registry,
+        context,
+        manifest: { digest: "c".repeat(64), descriptors: registry.descriptors },
+      } as unknown as BindingAuthority
+      const target = socket()
+      let reconnectLease = 1
+      const gateway = yield* makeGateway(
+        controller({
+          reconnect: () =>
+            Effect.succeed({
+              version: 1,
+              fence,
+              leaseEpoch: ++reconnectLease,
+              leaseExpiresAt: 4_102_444_800_000,
+              heartbeatIntervalMillis: 20,
+              cursor: { sequence: 1, value: "cursor-1" },
+            }),
+        }),
+      )
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      yield* workspaceReady(gateway, target)
+      const running = yield* Effect.forkChild(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-child-deadline",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          deadlineAt: "1970-01-01T00:00:01.000Z",
+          code: "wait for children",
+          bindings: authority,
+        }),
+      )
+      yield* Effect.yieldNow
+      const request = {
+        module: "workspace",
+        operation: "read",
+        input: { path: "README.md" },
+        sessionId: "thread-1",
+        cellId: "call-1",
+      } as const
+      const beforeBoundary = yield* Effect.forkChild(
+        gateway.machine("assignment-1", "operation-child-deadline", 0, {
+          _tag: "ProcessStop",
+          processId: "process-before-boundary",
+        }),
+      )
+      yield* Effect.yieldNow
+      const beforeBoundaryRequest = target.sent
+        .map((message) => decode(message))
+        .findLast((message) => message._tag === "MachineExecute")
+      if (beforeBoundaryRequest?._tag !== "MachineExecute")
+        return yield* Effect.die("before-boundary machine request was not sent")
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "MachineResult",
+          access,
+          operationKey: beforeBoundaryRequest.operationKey,
+          attempt: beforeBoundaryRequest.attempt,
+          machineId: beforeBoundaryRequest.machineId,
+          requestDigest: beforeBoundaryRequest.requestDigest,
+          outcome: { _tag: "Success", value: { _tag: "ProcessStopped" } },
+        }),
+      )
+      expect(yield* Fiber.join(beforeBoundary)).toEqual({ _tag: "Success", value: { _tag: "ProcessStopped" } })
+      const machine = yield* Effect.forkChild(
+        gateway.machine("assignment-1", "operation-child-deadline", 0, {
+          _tag: "ProcessStop",
+          processId: "process-at-boundary",
+        }),
+      )
+      yield* Effect.yieldNow
+      const machineRequest = target.sent
+        .map((message) => decode(message))
+        .findLast((message) => message._tag === "MachineExecute")
+      if (machineRequest?._tag !== "MachineExecute") return yield* Effect.die("machine request was not sent")
+      const firstResumed = socket()
+      const firstResumedAccess = { ...access, leaseEpoch: 2 }
+      yield* gateway.disconnected(target)
+      yield* gateway.receive(firstResumed, encode({ _tag: "ExecutorReconnect", access }))
+      yield* workspaceReady(gateway, firstResumed, firstResumedAccess)
+      expect(
+        firstResumed.sent.map((message) => decode(message)).filter((message) => message._tag === "MachineExecute"),
+      ).toEqual([
+        expect.objectContaining({
+          _tag: "MachineExecute",
+          operationKey: machineRequest.operationKey,
+          machineId: machineRequest.machineId,
+        }),
+      ])
+      const binding = yield* Effect.forkChild(
+        gateway.receive(
+          firstResumed,
+          encode({
+            _tag: "BindingInvoke",
+            access: firstResumedAccess,
+            operationKey: "operation-child-deadline",
+            attempt: 0,
+            callId: "operation-child-deadline:binding:0",
+            requestDigest: bindingRequestDigest(request),
+            request,
+          }),
+        ),
+      )
+      yield* Deferred.await(invocationStarted)
+      const advancing = yield* Effect.forkChild(TestClock.adjust("1 second"))
+      yield* Deferred.await(cleanupStarted)
+      expect(yield* Fiber.join(machine)).toEqual({
+        _tag: "Unknown",
+        message: "Machine outcome is unknown at the operation deadline",
+      })
+      expect(yield* Fiber.join(running)).toMatchObject({ outcome: "unknown" })
+      expect(binding.pollUnsafe()).toBeUndefined()
+      expect(
+        firstResumed.sent.map((message) => decode(message)).filter((message) => message._tag === "BindingResult"),
+      ).toEqual([])
+      expect((yield* Deferred.poll(releaseCleanup))._tag).toBe("None")
+      yield* gateway.receive(
+        firstResumed,
+        encode({
+          _tag: "MachineResult",
+          access: firstResumedAccess,
+          operationKey: machineRequest.operationKey,
+          attempt: machineRequest.attempt,
+          machineId: machineRequest.machineId,
+          requestDigest: machineRequest.requestDigest,
+          outcome: { _tag: "Success", value: { _tag: "ProcessStopped" } },
+        }),
+      )
+      expect(firstResumed.closed).toEqual([])
+      yield* Deferred.succeed(releaseCleanup, undefined)
+      yield* Deferred.await(cleanupCompleted)
+      yield* Fiber.join(binding)
+      yield* Fiber.join(advancing)
+      expect(
+        firstResumed.sent.map((message) => decode(message)).filter((message) => message._tag === "BindingResult"),
+      ).toEqual([
+        expect.objectContaining({
+          _tag: "BindingResult",
+          outcome: { _tag: "Unknown", message: "Cell binding outcome is unknown at the operation deadline" },
+        }),
+      ])
+
+      const resumed = socket()
+      const resumedAccess = { ...access, leaseEpoch: 3 }
+      yield* gateway.disconnected(firstResumed)
+      yield* gateway.receive(resumed, encode({ _tag: "ExecutorReconnect", access: firstResumedAccess }))
+      yield* workspaceReady(gateway, resumed, resumedAccess)
+      expect(
+        resumed.sent.map((message) => decode(message)).filter((message) => message._tag === "MachineExecute"),
+      ).toEqual([])
+
+      const next = yield* Effect.forkChild(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-after-child-deadline",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "42",
+        }),
+      )
+      yield* Effect.yieldNow
+      const nextResponse = { _tag: "Success" as const, result: 42 }
+      for (const frame of [
+        { _tag: "Accepted" as const, attribution: attribution("operation-after-child-deadline"), cursor: 1 },
+        { _tag: "Started" as const, attribution: attribution("operation-after-child-deadline"), cursor: 2 },
+        {
+          _tag: "Terminal" as const,
+          attribution: attribution("operation-after-child-deadline"),
+          cursor: 3,
+          outcome: "completed" as const,
+          response: nextResponse,
+        },
+      ])
+        yield* gateway.receive(resumed, encode({ _tag: "CellLifecycle", access: resumedAccess, frame }))
+      yield* gateway.receive(
+        resumed,
+        encode({
+          _tag: "CellResult",
+          access: resumedAccess,
+          operationKey: "operation-after-child-deadline",
+          attempt: 0,
+          response: nextResponse,
+        }),
+      )
+      expect(yield* Fiber.join(next)).toEqual({ access: resumedAccess, response: nextResponse, outcome: "completed" })
+      expect(resumed.closed).toEqual([])
+    }),
+  )
+
+  it.effect("runs binding cleanup before an interrupted receive fiber exits", () =>
+    Effect.gen(function* () {
+      const invocationStarted = yield* Deferred.make<void>()
+      const cleanupStarted = yield* Deferred.make<void>()
+      const releaseCleanup = yield* Deferred.make<void>()
+      const cleanupCompleted = yield* Deferred.make<void>()
+      const signal = yield* Effect.abortSignal
+      const context = Context.empty().pipe(
+        Context.add(
+          ToolContext.ToolContext,
+          ToolContext.ToolContext.of({
+            signal,
+            emit: () => Effect.void,
+            sessionId: "thread-1",
+            runId: "run-1",
+            toolCallId: "call-1",
+            operationKey: "operation-interrupted-binding",
+          }),
+        ),
+        Context.add(
+          NestedOperation.NestedOperations,
+          NestedOperation.NestedOperations.of({ run: (_request, operation) => operation }),
+        ),
+      )
+      const registry = HostBindingRegistry.HostBindingRegistry.of({
+        descriptors: [{ module: "workspace", operations: ["read"] }],
+        resolve: () => Effect.die("unused"),
+        invoke: () =>
+          Deferred.succeed(invocationStarted, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(
+              Deferred.succeed(cleanupStarted, undefined).pipe(
+                Effect.andThen(Deferred.await(releaseCleanup)),
+                Effect.andThen(Deferred.succeed(cleanupCompleted, undefined)),
+              ),
+            ),
+          ),
+      })
+      const authority = {
+        registry,
+        context,
+        manifest: { digest: "d".repeat(64), descriptors: registry.descriptors },
+      } as unknown as BindingAuthority
+      const target = socket()
+      const gateway = yield* makeGateway(controller())
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      yield* workspaceReady(gateway, target)
+      const running = yield* Effect.forkChild(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-interrupted-binding",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "wait for binding",
+          bindings: authority,
+        }),
+      )
+      yield* Effect.yieldNow
+      const request = {
+        module: "workspace",
+        operation: "read",
+        input: { path: "README.md" },
+        sessionId: "thread-1",
+        cellId: "call-1",
+      } as const
+      const receiving = yield* Effect.forkChild(
+        gateway.receive(
+          target,
+          encode({
+            _tag: "BindingInvoke",
+            access,
+            operationKey: "operation-interrupted-binding",
+            attempt: 0,
+            callId: "operation-interrupted-binding:binding:0",
+            requestDigest: bindingRequestDigest(request),
+            request,
+          }),
+        ),
+      )
+      yield* Deferred.await(invocationStarted)
+      const interrupting = yield* Effect.forkChild(Fiber.interrupt(receiving))
+      yield* Deferred.await(cleanupStarted)
+      expect(receiving.pollUnsafe()).toBeUndefined()
+      expect(interrupting.pollUnsafe()).toBeUndefined()
+      yield* Deferred.succeed(releaseCleanup, undefined)
+      yield* Deferred.await(cleanupCompleted)
+      yield* Fiber.join(interrupting)
+      expect(receiving.pollUnsafe()).toBeDefined()
+      expect(
+        target.sent.map((message) => decode(message)).filter((message) => message._tag === "BindingResult"),
+      ).toEqual([])
+      yield* Fiber.interrupt(running)
+    }),
+  )
+
   it.effect("runs canonical nested bindings under captured API authority and deduplicates replays", () =>
     Effect.gen(function* () {
+      const observability: Array<ReturnType<typeof Logger.formatStructured.log>> = []
+      const observed = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        effect.pipe(
+          Effect.provideService(
+            Logger.CurrentLoggers,
+            new Set([Logger.map(Logger.formatStructured, (record) => observability.push(record))]),
+          ),
+        )
       const nestedRequests: Array<NestedOperation.Request> = []
       const signal = yield* Effect.abortSignal
       const context = Context.empty().pipe(
@@ -932,7 +1509,7 @@ describe("executor gateway", () => {
       const request = {
         module: "workspace",
         operation: "write",
-        input: { path: "a", content: "b" },
+        input: { path: "private-tool-input", content: "private-tool-input-secret" },
         sessionId: "thread-1",
         cellId: "call-1",
       } as const
@@ -945,8 +1522,8 @@ describe("executor gateway", () => {
         requestDigest: bindingRequestDigest(request),
         request,
       }
-      yield* gateway.receive(target, encode(invoke))
-      yield* gateway.receive(target, encode(invoke))
+      yield* observed(gateway.receive(target, encode(invoke)))
+      yield* observed(gateway.receive(target, encode(invoke)))
       const results = target.sent.map((value) => decode(value)).filter((message) => message._tag === "BindingResult")
       expect(results).toHaveLength(2)
       expect(results[0]?.outcome).toEqual({ _tag: "Suspend", token: "approval-token" })
@@ -965,20 +1542,62 @@ describe("executor gateway", () => {
       })
 
       const missing = { ...request, operation: "missing" }
-      yield* gateway.receive(
-        target,
-        encode({
-          ...invoke,
-          callId: "operation-bindings:binding:1",
-          requestDigest: bindingRequestDigest(missing),
-          request: missing,
-        }),
+      yield* observed(
+        gateway.receive(
+          target,
+          encode({
+            ...invoke,
+            callId: "operation-bindings:binding:1",
+            requestDigest: bindingRequestDigest(missing),
+            request: missing,
+          }),
+        ),
       )
       const rejected = target.sent.map((value) => decode(value)).findLast((message) => message._tag === "BindingResult")
       expect(rejected?._tag === "BindingResult" && rejected.outcome).toEqual({
         _tag: "Unknown",
         message: "Tool admission could not durably record its decision",
       })
+      const renderedObservability = encodeUnknown(observability)
+      const bindingCorrelation = {
+        "rika.thread.id": "thread-1",
+        "rika.turn.id": "turn-1",
+        "rika.run.id": "run-1",
+        "rika.operation.id": "operation-bindings",
+        "rika.cell.id": "call-1",
+      }
+      expect(milestone(observability, "hosted.binding_send.success").map((record) => record.annotations)).toEqual([
+        {
+          ...bindingCorrelation,
+          "rika.binding.id": "operation-bindings:binding:0",
+          "rika.hosted.stage": "binding_send",
+          "rika.hosted.outcome": "success",
+        },
+        {
+          ...bindingCorrelation,
+          "rika.binding.id": "operation-bindings:binding:1",
+          "rika.hosted.stage": "binding_send",
+          "rika.hosted.outcome": "success",
+        },
+      ])
+      expect(milestone(observability, "hosted.binding_terminal.success")[0]?.annotations).toMatchObject({
+        ...bindingCorrelation,
+        "rika.binding.id": "operation-bindings:binding:0",
+        "rika.hosted.stage": "binding_terminal",
+        "rika.hosted.outcome": "success",
+      })
+      expect(milestone(observability, "hosted.binding_terminal.unknown")[0]?.annotations).toMatchObject({
+        ...bindingCorrelation,
+        "rika.binding.id": "operation-bindings:binding:1",
+        "rika.hosted.stage": "binding_terminal",
+        "rika.hosted.outcome": "unknown",
+      })
+      expect(renderedObservability).not.toContain("hosted.binding.")
+      expect(renderedObservability).not.toContain("assignment-1")
+      expect(renderedObservability).not.toContain(access.fence.instanceId)
+      expect(renderedObservability).not.toContain("private-tool-input")
+      expect(renderedObservability).not.toContain("private-tool-input-secret")
+      expect(renderedObservability).not.toContain("approval-token")
 
       const conflicting = { ...request, input: { path: "a", content: "different" } }
       yield* gateway.receive(
@@ -1043,10 +1662,20 @@ describe("executor gateway", () => {
 
   it.effect("persists one bounded lifecycle before acknowledging terminal replay", () =>
     Effect.gen(function* () {
+      const observability: Array<ReturnType<typeof Logger.formatStructured.log>> = []
+      const observed = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        effect.pipe(
+          Effect.provideService(
+            Logger.CurrentLoggers,
+            new Set([Logger.map(Logger.formatStructured, (record) => observability.push(record))]),
+          ),
+        )
       const target = socket()
       const persisted: Array<string> = []
-      const gateway = yield* makeGateway(controller(), (_assignmentId, frame) =>
-        Effect.sync(() => persisted.push(`${frame.cursor}:${frame._tag}`)).pipe(Effect.asVoid),
+      const gateway = yield* makeGateway(controller(), (_access, frame) =>
+        Effect.sync(() => persisted.push(`${frame.cursor}:${frame._tag}`)).pipe(
+          Effect.as({ _tag: "Appended" as const }),
+        ),
       )
       yield* gateway.receive(
         target,
@@ -1075,7 +1704,7 @@ describe("executor gateway", () => {
           workspaceId: "workspace-1",
           sessionId: "thread-1",
           ...cellIdentity,
-          code: "42",
+          code: "private-cell-input-secret",
         }),
       )
       yield* Effect.yieldNow
@@ -1093,8 +1722,9 @@ describe("executor gateway", () => {
           truncated: false,
         })),
       ]
-      for (const frame of lifecycle) yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame }))
-      const response = { _tag: "Success" as const, result: 42 }
+      for (const frame of lifecycle)
+        yield* observed(gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame })))
+      const response = { _tag: "Success" as const, result: "private-cell-output-secret" }
       const terminalFrame = {
         _tag: "Terminal" as const,
         attribution: identity,
@@ -1102,12 +1732,29 @@ describe("executor gateway", () => {
         outcome: "completed" as const,
         response,
       }
-      yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame: terminalFrame }))
-      yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame: terminalFrame }))
+      yield* observed(gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame: terminalFrame })))
+      yield* observed(gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame: terminalFrame })))
       expect(persisted).toEqual(lifecycle.map((frame) => `${frame.cursor}:${frame._tag}`).concat("19:Terminal"))
       expect(
         target.sent.map((message) => decode(message)).filter((message) => message._tag === "CellTerminalReceipt"),
       ).toHaveLength(2)
+      const renderedObservability = encodeUnknown(observability)
+      const cellCorrelation = {
+        "rika.thread.id": "thread-1",
+        "rika.turn.id": "turn-1",
+        "rika.run.id": "run-1",
+        "rika.operation.id": "operation-lifecycle",
+        "rika.cell.id": "call-1",
+      }
+      expect(milestone(observability, "hosted.cell_admission.success").map((record) => record.annotations)).toEqual([
+        { ...cellCorrelation, "rika.hosted.stage": "cell_admission", "rika.hosted.outcome": "success" },
+      ])
+      expect(milestone(observability, "hosted.terminal.success").map((record) => record.annotations)).toEqual([
+        { ...cellCorrelation, "rika.hosted.stage": "terminal", "rika.hosted.outcome": "success" },
+      ])
+      expect(renderedObservability).not.toContain("private-cell-input-secret")
+      expect(renderedObservability).not.toContain("private-cell-output-secret")
+      expect(renderedObservability).not.toContain(access.sessionToken)
       yield* gateway.receive(
         target,
         encode({ _tag: "CellResult", access, operationKey: "operation-lifecycle", attempt: 0, response }),
@@ -1120,8 +1767,10 @@ describe("executor gateway", () => {
     Effect.gen(function* () {
       const target = socket()
       const persisted: Array<string> = []
-      const gateway = yield* makeGateway(controller(), (_assignmentId, frame) =>
-        Effect.sync(() => persisted.push(`${frame.cursor}:${frame._tag}`)).pipe(Effect.asVoid),
+      const gateway = yield* makeGateway(controller(), (_access, frame) =>
+        Effect.sync(() => persisted.push(`${frame.cursor}:${frame._tag}`)).pipe(
+          Effect.as({ _tag: "Appended" as const }),
+        ),
       )
       yield* gateway.receive(
         target,
@@ -1192,7 +1841,7 @@ describe("executor gateway", () => {
       ]
       const gateway = yield* makeGateway(
         controller(),
-        () => Effect.void,
+        () => Effect.succeed({ _tag: "Appended" }),
         () => Effect.succeed(retained),
       )
       yield* gateway.receive(
@@ -1229,7 +1878,67 @@ describe("executor gateway", () => {
       expect(target.sent.map((message) => decode(message)).filter((message) => message._tag === "CellExecute")).toEqual(
         [],
       )
-      expect(yield* Fiber.join(running)).toEqual({ access, response, outcome: "completed" })
+      expect(yield* Fiber.join(running)).toEqual({ response, outcome: "completed" })
+    }),
+  )
+
+  it.effect("returns durable cancelled and unknown terminals without an executor session", () =>
+    Effect.gen(function* () {
+      const cancelled = {
+        _tag: "DomainFailure" as const,
+        failure: { kind: "cancelled", message: "Cell operation was cancelled" },
+      }
+      const unknown = {
+        _tag: "DomainFailure" as const,
+        failure: { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" },
+      }
+      const gateway = yield* makeGateway(controller(), undefined, (_assignmentId, operationKey) => {
+        if (operationKey === "operation-expired-before-dispatch") return Effect.succeed([])
+        const response = operationKey === "operation-cancelled-replay" ? cancelled : unknown
+        const outcome = operationKey === "operation-cancelled-replay" ? ("cancelled" as const) : ("unknown" as const)
+        return Effect.succeed([
+          { _tag: "Accepted" as const, attribution: attribution(operationKey), cursor: 1 },
+          { _tag: "Started" as const, attribution: attribution(operationKey), cursor: 2 },
+          { _tag: "Terminal" as const, attribution: attribution(operationKey), cursor: 3, outcome, response },
+        ])
+      })
+      expect(
+        yield* gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-cancelled-replay",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "cancelled",
+        }),
+      ).toEqual({ response: cancelled, outcome: "cancelled" })
+      expect(
+        yield* gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-unknown-replay",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "unknown",
+        }),
+      ).toEqual({ response: unknown, outcome: "unknown" })
+      expect(
+        yield* gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-expired-before-dispatch",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          deadlineAt: "1970-01-01T00:00:00.000Z",
+          code: "expired",
+        }),
+      ).toEqual({
+        response: {
+          _tag: "DomainFailure",
+          failure: { kind: "timeout", message: "Cell operation deadline exceeded" },
+        },
+        outcome: "failed",
+      })
     }),
   )
 
@@ -1780,7 +2489,7 @@ describe("executor gateway", () => {
               ? Effect.void
               : Effect.fail(ControllerError.make({ kind: "fenced", message: "assignment generation is stale" })),
         }),
-        (_assignmentId, frame) => Effect.sync(() => persisted.push(frame)).pipe(Effect.asVoid),
+        (_access, frame) => Effect.sync(() => persisted.push(frame)).pipe(Effect.as({ _tag: "Appended" as const })),
       )
       yield* gateway.receive(
         firstSocket,

@@ -4,8 +4,10 @@ import {
   type PerformancePhase,
 } from "@rika/terminal/terminal-performance-evaluation"
 import { DateTime, Effect } from "effect"
-import { type ProcessObservation } from "./performance-platform"
+import { type ProcessIdentity, type ProcessObservation } from "./performance-platform"
 import { observeProcesses } from "./performance-process-table"
+
+const monotonicMilliseconds = () => Number(process.hrtime.bigint()) / 1_000_000
 
 const targetPasses = (target: NonNullable<PerformanceMetric["target"]>, value: number): boolean => {
   if (target.operator === "lte") return value <= target.value
@@ -31,12 +33,52 @@ const unsupported = (id: string, unit: PerformanceMetric["unit"], reason: string
   reason,
 })
 
+export const publicProcessIdentity = ({ pid, executable, runtimeKind }: ProcessIdentity) => ({
+  pid,
+  runtimeKind,
+  executable: executable.split(/[\\/]/).at(-1) ?? "",
+})
+
+export const processObservationMetrics = (processes: ProcessObservation): ReadonlyArray<PerformanceMetric> => {
+  const client = processes.client
+  return [
+    client === undefined
+      ? unsupported(
+          "process.client.idle-rss",
+          "mebibytes",
+          processes.unsupportedReason ?? "The client was not observed.",
+        )
+      : measured("process.client.idle-rss", "mebibytes", client.rssMebibytes, { operator: "lte", value: 350 }),
+    processes.idleCpuMeanPercent === undefined
+      ? unsupported(
+          "process.idle-cpu.mean",
+          "percent",
+          processes.unsupportedReason ?? "No process samples were available.",
+        )
+      : measured("process.idle-cpu.mean", "percent", processes.idleCpuMeanPercent, { operator: "lte", value: 1 }),
+    processes.idleCpuPeakPercent === undefined
+      ? unsupported(
+          "process.idle-cpu.peak",
+          "percent",
+          processes.unsupportedReason ?? "No process samples were available.",
+        )
+      : measured("process.idle-cpu.peak", "percent", processes.idleCpuPeakPercent, { operator: "lte", value: 3 }),
+    measured("executable.client.file-bytes", "count", processes.executableBytes),
+    processes.startupToProcessPresenceMilliseconds === undefined
+      ? unsupported(
+          "process.startup-to-client-presence",
+          "milliseconds",
+          processes.unsupportedReason ?? "No client process became ready.",
+        )
+      : measured("process.startup-to-client-presence", "milliseconds", processes.startupToProcessPresenceMilliseconds),
+  ]
+}
+
 export const performanceEvaluation = Effect.gen(function* () {
   const generatedAt = yield* DateTime.now
   const processes: ProcessObservation = yield* observeProcesses().pipe(
     Effect.orElseSucceed(() => ({
-      roles: [],
-      executableBytes: { launcher: 0, interactive: 0, "runner-executor": 0 },
+      executableBytes: 0,
       unsupportedReason: "The platform process observer failed before it could collect reliable evidence.",
     })),
   )
@@ -48,10 +90,10 @@ export const performanceEvaluation = Effect.gen(function* () {
     rss.set(phase, memory.rss / 1_048_576)
     heap.set(phase, memory.heapUsed / 1_048_576)
   }
-  const wallStartedAt = performance.now()
+  const wallStartedAt = monotonicMilliseconds()
   const cpuBefore = process.cpuUsage()
   const tui = yield* evaluateTui({ observe })
-  const wallMilliseconds = performance.now() - wallStartedAt
+  const wallMilliseconds = monotonicMilliseconds() - wallStartedAt
   const cpu = process.cpuUsage(cpuBefore)
   const cpuPercent = ((cpu.user + cpu.system) / 1_000 / wallMilliseconds) * 100
   const startedRss = rss.get("started")!
@@ -81,61 +123,7 @@ export const performanceEvaluation = Effect.gen(function* () {
     measured("process.heap-after", "mebibytes", heap.get("completed")!),
     measured("evaluation.cpu", "percent", cpuPercent),
     measured("evaluation.duration", "milliseconds", wallMilliseconds),
-    ...(["launcher", "interactive", "runner-executor"] as const).map((role) => {
-      const observation = processes.roles.find((candidate) => candidate.role === role)
-      let target = 250
-      if (role === "launcher") target = 75
-      if (role === "interactive") target = 175
-      return observation === undefined
-        ? unsupported(
-            `process.${role}.idle-rss`,
-            "mebibytes",
-            role === "launcher" && processes.roles.some((candidate) => candidate.role === "interactive")
-              ? "The packaged launcher replaces its process image with the interactive runtime before idle sampling."
-              : (processes.unsupportedReason ?? `${role} was not observed.`),
-          )
-        : measured(`process.${role}.idle-rss`, "mebibytes", observation.rssMebibytes, {
-            operator: "lte",
-            value: target,
-          })
-    }),
-    processes.roles.some((role) => role.role === "interactive") &&
-    processes.roles.some((role) => role.role === "runner-executor")
-      ? measured(
-          "process.combined-idle-rss",
-          "mebibytes",
-          processes.roles.reduce((total, role) => total + role.rssMebibytes, 0),
-          { operator: "lte", value: 350 },
-        )
-      : unsupported(
-          "process.combined-idle-rss",
-          "mebibytes",
-          processes.unsupportedReason ?? "Process roles were incomplete.",
-        ),
-    processes.idleCpuMeanPercent === undefined
-      ? unsupported(
-          "process.idle-cpu.mean",
-          "percent",
-          processes.unsupportedReason ?? "No process samples were available.",
-        )
-      : measured("process.idle-cpu.mean", "percent", processes.idleCpuMeanPercent, { operator: "lte", value: 1 }),
-    processes.idleCpuPeakPercent === undefined
-      ? unsupported(
-          "process.idle-cpu.peak",
-          "percent",
-          processes.unsupportedReason ?? "No process samples were available.",
-        )
-      : measured("process.idle-cpu.peak", "percent", processes.idleCpuPeakPercent, { operator: "lte", value: 3 }),
-    ...(["launcher", "interactive", "runner-executor"] as const).map((role) =>
-      measured(`executable.${role}.file-bytes`, "count", processes.executableBytes[role]),
-    ),
-    processes.startupToRolePresenceMilliseconds === undefined
-      ? unsupported(
-          "process.startup-to-role-presence",
-          "milliseconds",
-          processes.unsupportedReason ?? "No process tree became ready.",
-        )
-      : measured("process.startup-to-role-presence", "milliseconds", processes.startupToRolePresenceMilliseconds),
+    ...processObservationMetrics(processes),
     unsupported("process.active-navigation-cpu", "percent", "The deterministic workload runs without user pacing."),
     unsupported("tui.real-terminal-frame", "milliseconds", "A real PTY evidence capture was not supplied."),
     unsupported("process.cold-launch.p95", "milliseconds", "One isolated launch cannot honestly establish a p95."),
@@ -196,7 +184,10 @@ export const performanceEvaluation = Effect.gen(function* () {
     generatedAt: DateTime.formatIso(generatedAt),
     evidence: {
       renderer: tui.evidence,
-      processRoles: processes.roles.map(({ role, pid, executable }) => ({ role, pid, executable })),
+      processIdentity: processes.client === undefined ? undefined : publicProcessIdentity(processes.client),
+      processTree: {
+        descendants: processes.descendantCount,
+      },
       processSamples: processes.sampleCount,
       terminal: {
         columns: processes.terminalColumns,

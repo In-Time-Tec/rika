@@ -7,7 +7,7 @@ import { update } from "../../src/state/reducer/terminal-state-reducer"
 
 export class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
 
-export const openTui = <A>(operation: () => Promise<A>) =>
+export const openTui = <A>(operation: () => ReturnType<typeof Promise.resolve<A>>) =>
   Effect.tryPromise({ try: operation, catch: (cause) => new OpenTuiError({ cause }) })
 
 const _insertTextImpl = (model: Model, text: string) => update(model, { _tag: "Pasted", text })

@@ -15,7 +15,10 @@ import {
 } from "../../src/provider"
 
 const digest = (_algorithm: string, data: Uint8Array) =>
-  Effect.promise(() => globalThis.crypto.subtle.digest("SHA-256", data).then((value) => new Uint8Array(value)))
+  Effect.tryPromise(() => globalThis.crypto.subtle.digest("SHA-256", data)).pipe(
+    Effect.map((value) => new Uint8Array(value)),
+    Effect.orDie,
+  )
 
 export interface FakeProviderState {
   readonly creates: Array<CreateRequest>

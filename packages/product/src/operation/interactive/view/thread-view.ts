@@ -139,6 +139,7 @@ const resync = (
 export interface ThreadViewFeed {
   readonly publish: (event: RuntimeEvent) => ReadonlyArray<ClientEvent>
   readonly current: () => ThreadView.ThreadViewSnapshot | undefined
+  readonly checkpoint: (turnId: string) => ExecutionProjection.Checkpoint | undefined
 }
 export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
   let current: ThreadView.ThreadViewAccumulator | undefined
@@ -146,6 +147,7 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
   let knownThreadId: string | undefined
   const knownProjectionRevisions = new Map<string, number>()
   const knownUsage = new Map<string, ExecutionProjection.UsageState>()
+  const knownCheckpoints = new Map<string, ExecutionProjection.Checkpoint>()
   const knownTerminalStatuses = new Map<string, "completed" | "failed" | "cancelled">()
   const rememberTerminal = (turnId: string, status: "completed" | "failed" | "cancelled") => {
     knownTerminalStatuses.delete(turnId)
@@ -174,6 +176,7 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       knownThreadId = threadId
       knownProjectionRevisions.clear()
       knownUsage.clear()
+      knownCheckpoints.clear()
       knownTerminalStatuses.clear()
     }
     for (const entry of snapshot.turns) {
@@ -249,6 +252,18 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       if (current === undefined || event.threadId !== current.thread.id) return []
       const change = event.change
       const changedUnits = change._tag === "ProjectionSnapshot" ? change.units : change.upsert
+      if (
+        change.checkpoint === undefined &&
+        changedUnits.some(
+          (unit) =>
+            unit.content._tag === "Block" &&
+            unit.content.block._tag === "AuthorizationCard" &&
+            unit.content.block.status === "pending",
+        )
+      ) {
+        snapshotRequired = true
+        return [resync(current)]
+      }
       const turnId = event.turn?.id ?? changedUnits[0]?.turnId
       if (turnId === undefined) {
         snapshotRequired = true
@@ -278,30 +293,40 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
         hasNewer: current.hasNewer,
         usage: threadUsage.next(current.usage, previousUsage, change.state.usage, event.turn),
       }
-      rememberProjection(turnKey, change.revision, change.state.usage)
+      const accepted = (events: ReadonlyArray<ClientEvent>) => {
+        if (events.every((clientEvent) => clientEvent._tag !== "ResyncRequired")) {
+          rememberProjection(turnKey, change.revision, change.state.usage)
+          if (change.checkpoint !== undefined) knownCheckpoints.set(turnKey, change.checkpoint)
+        }
+        return events
+      }
       if (existing === undefined) {
         if (isTrackedOffWindow)
-          return nextPatch({
-            upsert: [],
+          return accepted(
+            nextPatch({
+              upsert: [],
+              remove: [],
+              turnChanges: [],
+              header,
+            }),
+          )
+        return accepted(
+          nextPatch({
+            upsert: changedUnits,
             remove: [],
-            turnChanges: [],
+            turnChanges: [
+              {
+                _tag: "UpsertTurn",
+                turn: { ...ThreadView.turnRecord(event.turn!), status: projectedStatus },
+                projectionRevision: change.revision,
+                usage: change.state.usage,
+                pendingSteering: change.state.steering.pending ?? [],
+                settledSteering: change.state.steering.settled ?? [],
+              },
+            ],
             header,
-          })
-        return nextPatch({
-          upsert: changedUnits,
-          remove: [],
-          turnChanges: [
-            {
-              _tag: "UpsertTurn",
-              turn: { ...ThreadView.turnRecord(event.turn!), status: projectedStatus },
-              projectionRevision: change.revision,
-              usage: change.state.usage,
-              pendingSteering: change.state.steering.pending ?? [],
-              settledSteering: change.state.steering.settled ?? [],
-            },
-          ],
-          header,
-        })
+          }),
+        )
       }
       const record =
         event.turn === undefined
@@ -319,21 +344,23 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
             .map((unit) => unit.key)
         return change._tag === "ProjectionSnapshot" ? [] : change.remove
       }
-      return nextPatch({
-        upsert: changedUnits,
-        remove: removedKeys(),
-        turnChanges: [
-          {
-            _tag: "UpsertTurn",
-            turn: record,
-            projectionRevision: change.revision,
-            usage: change.state.usage,
-            pendingSteering: change.state.steering.pending ?? [],
-            settledSteering: change.state.steering.settled ?? [],
-          },
-        ],
-        header,
-      })
+      return accepted(
+        nextPatch({
+          upsert: changedUnits,
+          remove: removedKeys(),
+          turnChanges: [
+            {
+              _tag: "UpsertTurn",
+              turn: record,
+              projectionRevision: change.revision,
+              usage: change.state.usage,
+              pendingSteering: change.state.steering.pending ?? [],
+              settledSteering: change.state.steering.settled ?? [],
+            },
+          ],
+          header,
+        }),
+      )
     }
     if (event._tag === "TurnStarted") {
       if (current === undefined || event.threadId !== current.thread.id) return []
@@ -448,5 +475,9 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
         return [event]
     }
   }
-  return { publish, current: () => current?.snapshot() }
+  return {
+    publish,
+    current: () => current?.snapshot(),
+    checkpoint: (turnId) => knownCheckpoints.get(turnId),
+  }
 }

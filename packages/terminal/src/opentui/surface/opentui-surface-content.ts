@@ -1,11 +1,14 @@
 import { Function } from "effect"
-import { fg, bold, StyledText, type TextChunk } from "@opentui/core"
+import { dim, fg, bold, StyledText, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
 import type { Model, Mode } from "../../state/model/terminal-state"
 import type { ThreadItem } from "../../state/model/terminal-thread-state"
 import { isLoading } from "../../state/model/terminal-loadable-state"
 import { activeTimeIcon } from "../../state/model/terminal-activity-time"
 import { colors, modeColor, spacing } from "../../presentation/terminal/terminal-theme"
+import { formatActivity } from "../../state/model/terminal-activity-state"
+import { loaderFrame } from "../rendering/opentui-spinner"
+import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { contentColumnWidth } from "../../state/model/terminal-layout-state"
 import { homeRelativePath } from "../../presentation/terminal/terminal-format"
 import { orbGeometry, orbRows, type OrbImpulse } from "./opentui-welcome-orb"
@@ -18,11 +21,110 @@ export const panelLoading = (model: Model): string | undefined => {
   return undefined
 }
 
+const connectivityActivity = (model: Model): string | undefined => {
+  const connection = model.connection
+  if (connection?.connectivity === "connecting") return "Connecting"
+  if (connection?.connectivity === "reconnecting") return "Reconnecting"
+  return undefined
+}
+
+const connectionActivity = (model: Model): string | undefined => {
+  const connection = model.connection
+  switch (connection?.activity) {
+    case "authenticating":
+      return "Authenticating"
+    case "executor-waiting":
+      return "Waiting"
+    case "executor-connecting":
+      return "Connecting executor"
+    case "workspace-preparing":
+      return "Preparing workspace"
+    case "workspace-setup":
+      return "Setting up workspace"
+    case "workspace-resuming":
+      return "Resuming workspace"
+    case "lease-active":
+      return "Executing"
+    case "retrying":
+      return "Retrying"
+    case "approval-required":
+      return "Approval required"
+    case "unknown-operation":
+      return "Operation status unknown"
+    default:
+      return undefined
+  }
+}
+
+const authoritativeActivity = (model: Model): string | undefined => {
+  switch (model.connection?.activity) {
+    case "authenticating":
+    case "workspace-preparing":
+    case "workspace-setup":
+    case "workspace-resuming":
+    case "retrying":
+    case "approval-required":
+    case "unknown-operation":
+      return connectionActivity(model)
+    default:
+      return undefined
+  }
+}
+
+const lifecycleLabelImpl = (model: Model, currentTimeMillis: number): string | undefined =>
+  connectivityActivity(model) ??
+  authoritativeActivity(model) ??
+  formatActivity(
+    model.activity,
+    model.activity?._tag === "Retrying"
+      ? Math.max(0, Math.ceil((model.activity.nextAt - currentTimeMillis) / 1000))
+      : model.retryCountdown,
+  ) ??
+  connectionActivity(model) ??
+  panelLoading(model)
+
+export const lifecycleLabel: {
+  (currentTimeMillis: number): (model: Model) => string | undefined
+  (model: Model, currentTimeMillis: number): string | undefined
+} = Function.dual(2, lifecycleLabelImpl)
+
+const statusContentImpl = (model: Model, phase: number, currentTimeMillis: number): StyledText | string => {
+  const lifecycle = lifecycleLabel(model, currentTimeMillis)
+  const target = model.connection?.target
+  if (target === undefined && lifecycle === undefined) return ""
+  const chunks: Array<TextChunk> = [fg(toOpenColor(colors.text))(" ")]
+  if (target !== undefined) {
+    let label = "Resolving target"
+    let color: string | typeof colors.text = colors.text
+    if (target === "runner") {
+      label = "Runner"
+      color = colors.runner
+    } else if (target === "orb") {
+      label = "Orb"
+      color = colors.orb
+    }
+    chunks.push(target === "resolving" ? dim(fg(color)(label)) : bold(fg(color)(label)))
+  }
+  if (lifecycle !== undefined) {
+    if (target !== undefined) chunks.push(dim(fg(toOpenColor(colors.text))(" ── ")))
+    chunks.push(fg(toOpenColor(colors.blue))(loaderFrame(lifecycle, phase)))
+    chunks.push(dim(fg(toOpenColor(colors.text))(` ${lifecycle} `)))
+  } else chunks.push(fg(toOpenColor(colors.text))(" "))
+  return new StyledText(chunks)
+}
+
+export const statusContent: {
+  (phase: number, currentTimeMillis: number): (model: Model) => StyledText | string
+  (model: Model, phase: number, currentTimeMillis: number): StyledText | string
+} = Function.dual(3, statusContentImpl)
+
 export const animationActive = (model: Model): boolean =>
   model.compactionShimmer !== undefined ||
   model.busy ||
   model.activity !== undefined ||
-  model.connectionStatus !== undefined ||
+  model.connection?.target === "resolving" ||
+  connectivityActivity(model) !== undefined ||
+  connectionActivity(model) !== undefined ||
   panelLoading(model) !== undefined ||
   (model.usageDisplay === "time" &&
     model.usageTime?._tag === "Available" &&

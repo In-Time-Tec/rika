@@ -1,5 +1,5 @@
 import { HostBindingRegistry } from "tenetkit/repl"
-import { Crypto, Deferred, Effect, Encoding, Layer, Ref, Schema } from "effect"
+import { Clock, Crypto, DateTime, Deferred, Effect, Encoding, Layer, Ref, Schema } from "effect"
 import type { AccessWire, BindingManifest, BindingOutcome, BindingRequest, CellRequest } from "./protocol"
 import { bindingManifest, BindingRequest as BindingRequestSchema } from "./protocol"
 
@@ -11,6 +11,7 @@ interface ActiveCell {
   readonly access: AccessWire
   readonly operationKey: string
   readonly attempt: number
+  readonly deadlineAtMillis: number
   readonly nextOrdinal: Ref.Ref<number>
   readonly suspension: Deferred.Deferred<string>
   readonly unknown: Deferred.Deferred<string>
@@ -22,6 +23,7 @@ interface PendingCall {
   readonly attempt: number
   readonly requestDigest: string
   readonly request: BindingRequest
+  readonly deadlineAtMillis: number
   readonly result: Deferred.Deferred<BindingOutcome, BindingProxyError>
 }
 
@@ -128,10 +130,12 @@ export const make: (options: {
             attempt: cell.attempt,
             requestDigest,
             request: wireRequest,
+            deadlineAtMillis: cell.deadlineAtMillis,
             result,
           }),
         )
-        yield* transport
+        const remaining = Math.max(0, cell.deadlineAtMillis - (yield* Clock.currentTimeMillis))
+        const outcome = yield* transport
           .send({
             access: cell.access,
             operationKey: cell.operationKey,
@@ -141,32 +145,30 @@ export const make: (options: {
             request: wireRequest,
           })
           .pipe(
-            Effect.mapError(() =>
+            Effect.andThen(
+              Deferred.await(result).pipe(
+                Effect.timeoutOrElse({
+                  duration: remaining,
+                  orElse: () => BindingProxyError.make({ message: "cell binding deadline exceeded" }),
+                }),
+              ),
+            ),
+            Effect.mapError((error) =>
               HostBindingRegistry.HostBindingSchemaFailure.make({
                 module: request.module,
                 operation: request.operation,
                 stage: "decode-input",
-                message: "binding request transport is unavailable",
+                message: error.message,
+              }),
+            ),
+            Effect.ensuring(
+              Ref.update(pending, (current) => {
+                const next = new Map(current)
+                next.delete(callId)
+                return next
               }),
             ),
           )
-        const outcome = yield* Deferred.await(result).pipe(
-          Effect.mapError((error) =>
-            HostBindingRegistry.HostBindingSchemaFailure.make({
-              module: request.module,
-              operation: request.operation,
-              stage: "decode-input",
-              message: error.message,
-            }),
-          ),
-          Effect.ensuring(
-            Ref.update(pending, (current) => {
-              const next = new Map(current)
-              next.delete(callId)
-              return next
-            }),
-          ),
-        )
         if (outcome._tag === "Returned") return outcome.response as HostBindingRegistry.Response
         if (outcome._tag === "Rejected") {
           if (outcome.failure._tag === "tenetkit/repl/HostBindingNotFound")
@@ -181,7 +183,12 @@ export const make: (options: {
             message: outcome.failure.message,
           })
         }
-        return yield* Effect.never
+        return yield* HostBindingRegistry.HostBindingSchemaFailure.make({
+          module: request.module,
+          operation: request.operation,
+          stage: "decode-input",
+          message: outcome._tag === "Unknown" ? outcome.message : "cell binding suspended",
+        })
       }),
   }
   const enter = (request: CellRequest) =>
@@ -199,6 +206,7 @@ export const make: (options: {
               access: request.access,
               operationKey: request.operationKey,
               attempt: request.attempt,
+              deadlineAtMillis: DateTime.toEpochMillis(DateTime.makeUnsafe(request.deadlineAt)),
               nextOrdinal,
               suspension,
               unknown,
@@ -229,33 +237,57 @@ export const make: (options: {
           : Deferred.await(cell.unknown)
       }),
     )
+  const removePending = (expected: PendingCall) =>
+    Ref.modify(pending, (current) => {
+      if (current.get(expected.callId) !== expected) return [false, current] as const
+      const next = new Map(current)
+      next.delete(expected.callId)
+      return [true, next] as const
+    })
   const replay = (access: AccessWire) =>
-    Ref.get(pending).pipe(
-      Effect.flatMap((calls) =>
-        Effect.forEach(
-          calls.values(),
-          (call) =>
-            transport.send({
-              access,
-              operationKey: call.operationKey,
-              attempt: call.attempt,
-              callId: call.callId,
-              requestDigest: call.requestDigest,
-              request: call.request,
-            }),
-          { discard: true },
-        ),
-      ),
-    )
+    Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis
+      const calls = yield* Ref.get(pending)
+      yield* Effect.forEach(
+        calls.values(),
+        (call) =>
+          call.deadlineAtMillis <= now
+            ? removePending(call).pipe(
+                Effect.flatMap((removed) =>
+                  removed
+                    ? Deferred.fail(call.result, BindingProxyError.make({ message: "cell binding deadline exceeded" }))
+                    : Effect.void,
+                ),
+              )
+            : transport.send({
+                access,
+                operationKey: call.operationKey,
+                attempt: call.attempt,
+                callId: call.callId,
+                requestDigest: call.requestDigest,
+                request: call.request,
+              }),
+        { discard: true },
+      )
+    })
   const complete: Interface["complete"] = (input) =>
     Effect.gen(function* () {
-      const call = (yield* Ref.get(pending)).get(input.callId)
-      if (
-        call === undefined ||
-        call.operationKey !== input.operationKey ||
-        call.attempt !== input.attempt ||
-        call.requestDigest !== input.requestDigest
-      )
+      const now = yield* Clock.currentTimeMillis
+      const call = yield* Ref.modify(pending, (current) => {
+        const pendingCall = current.get(input.callId)
+        if (
+          pendingCall === undefined ||
+          pendingCall.operationKey !== input.operationKey ||
+          pendingCall.attempt !== input.attempt ||
+          pendingCall.requestDigest !== input.requestDigest ||
+          pendingCall.deadlineAtMillis <= now
+        )
+          return [undefined, current] as const
+        const next = new Map(current)
+        next.delete(input.callId)
+        return [pendingCall, next] as const
+      })
+      if (call === undefined)
         return yield* BindingProxyError.make({ message: "binding result conflicts with its request identity" })
       yield* Deferred.succeed(call.result, input.outcome)
       if (input.outcome._tag === "Suspend") {

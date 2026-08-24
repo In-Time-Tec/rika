@@ -7,6 +7,10 @@ ALTER TABLE rika_hosted_executor_operations
   ADD COLUMN root_run_id TEXT NOT NULL CHECK (length(root_run_id) > 0),
   ADD COLUMN tool_call_id TEXT NOT NULL CHECK (length(tool_call_id) > 0),
   ADD COLUMN admitted_at TEXT,
-  ADD COLUMN deadline TEXT,
+  ADD COLUMN deadline_at TIMESTAMPTZ NOT NULL,
   ADD CONSTRAINT rika_hosted_executor_operations_thread
     FOREIGN KEY (thread_id) REFERENCES rika_hosted_threads (id) ON DELETE CASCADE;
+
+CREATE INDEX rika_hosted_executor_operations_recovery
+  ON rika_hosted_executor_operations (state, deadline_at)
+  WHERE state = 'dispatched';

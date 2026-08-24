@@ -25,11 +25,11 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Delegate slow work."))
+        yield* Effect.tryPromise(() => app.type("Delegate slow work."))
         app.pressEnter()
         yield* app.waitFrame("Subagent working")
 
-        yield* Effect.promise(() => app.type("TYPED_WHILE_STREAMING"))
+        yield* Effect.tryPromise(() => app.type("TYPED_WHILE_STREAMING"))
         const responsive = yield* app.waitFrame("TYPED_WHILE_STREAMING")
         expect(responsive).toContain("Subagent working")
         expect(responsive).toContain("Running 1 subagent")

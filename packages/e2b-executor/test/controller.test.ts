@@ -587,11 +587,7 @@ describe("Controller", () => {
         restoredCheckpointId: null,
       }
       expect(
-        (
-          yield* Effect.flip(
-            service.ready(access, proof, workspaceCapabilities, `sha256:${"f".repeat(64)}`),
-          )
-        ).kind,
+        (yield* Effect.flip(service.ready(access, proof, workspaceCapabilities, `sha256:${"f".repeat(64)}`))).kind,
       ).toBe("fenced")
       yield* service.ready(access, proof, workspaceCapabilities, environmentDigest)
       const key = {

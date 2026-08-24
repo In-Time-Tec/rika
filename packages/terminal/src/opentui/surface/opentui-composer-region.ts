@@ -127,13 +127,16 @@ const paletteContentImpl = (
     const selected = index === model.palette.selected
     const keybinding = command.keybinding ?? ""
     const label = command.label
+    let targetColor: string | typeof colors.text = colors.text
+    if (command.id === "new-thread") targetColor = colors.runner
+    else if (command.id === "new-orb-thread") targetColor = colors.orb
     if (innerWidth < 48) {
       const visible = truncateToWidth(label, innerWidth)
       const padding = " ".repeat(Math.max(0, innerWidth - stringWidth(visible)))
       chunks.push(
         selected
           ? bold(bg(colors.selectionBg)(fg(colors.selectionFg)(`${visible}${padding}`)))
-          : bold(fg(colors.text)(visible)),
+          : bold(fg(targetColor)(visible)),
       )
       return
     }
@@ -148,7 +151,7 @@ const paletteContentImpl = (
       chunks.push(bg(colors.selectionBg)(fg(colors.selectionFg)(" ")))
     } else {
       chunks.push(dim(fg(colors.text)(category)))
-      chunks.push(bold(fg(colors.text)(`  ${label}`)))
+      chunks.push(bold(fg(targetColor)(`  ${label}`)))
       chunks.push(fg(colors.text)(" ".repeat(padding)))
       if (keybinding.length > 0) chunks.push(bold(fg(colors.blue)(keybinding)))
       chunks.push(fg(colors.text)(" "))

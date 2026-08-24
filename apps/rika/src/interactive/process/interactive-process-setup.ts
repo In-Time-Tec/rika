@@ -95,6 +95,7 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
             suspend()
           }
           loop.model = update(loop.model, { _tag: "FilesRequested" })
+          created.surface.onNextFrameCompleted(options.onFirstDraw ?? (() => undefined))
           created.surface.update(loop.model)
           run(Effect.logInfo("tui.renderer.started"))
           if (loop.closed) return

@@ -1,7 +1,6 @@
-import { join } from "node:path"
-import { fileURLToPath } from "node:url"
-import { readFile } from "node:fs/promises"
-import { describe, expect, test } from "vitest"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import { expect, it } from "@effect/vitest"
+import { Effect, FileSystem } from "effect"
 import {
   expectedArchiveNames,
   ownedTargetEntries,
@@ -11,7 +10,7 @@ import {
 } from "../../scripts/packaging/release-archive"
 import { isPackageTarget, targets } from "../../scripts/packaging/package-target-contract"
 
-describe("release target construction", () => {
+it.layer(BunServices.layer)("release target construction", (test) => {
   test("constructs the supported OpenTUI platform mappings", () => {
     expect(Object.keys(targets)).toEqual(["darwin-arm64", "linux-arm64", "linux-x64"])
     for (const [name, target] of Object.entries(targets)) {
@@ -47,20 +46,23 @@ describe("release target construction", () => {
     )
   })
 
-  test("builds one public executable containing the interactive runtime", async () => {
-    const packaging = await readFile(
-      join(fileURLToPath(new URL("../..", import.meta.url)), "scripts/packaging/package-target.ts"),
-      "utf8",
-    )
-    expect(packaging).toContain('checkedBuild("client-main.ts", path.join(bin, "rika")')
-    for (const forbidden of [
-      "interactive-main.ts",
-      ".rika-interactive",
-      "performance-main.ts",
-      ".rika-kernel-runtime",
-      ".rika-kernel-worker.js",
-      "text-result.js",
-    ])
-      expect(packaging).not.toContain(forbidden)
-  })
+  test.effect("builds one public executable containing the interactive runtime", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const packaging = yield* fileSystem.readFileString(
+        new URL("../../scripts/packaging/package-target.ts", import.meta.url).pathname,
+      )
+      expect(packaging).toContain('checkedBuild("client-main.ts", path.join(bin, "rika")')
+      expect(packaging).toContain("bytecode: false")
+      for (const forbidden of [
+        "interactive-main.ts",
+        ".rika-interactive",
+        "performance-main.ts",
+        ".rika-kernel-runtime",
+        ".rika-kernel-worker.js",
+        "text-result.js",
+      ])
+        expect(packaging).not.toContain(forbidden)
+    }),
+  )
 })

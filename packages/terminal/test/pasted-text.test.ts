@@ -89,9 +89,16 @@ describe("pasted text attachments", () => {
     expect(expanded.cursor).toBe(expanded.input.length)
     expect(expanded.pastedText).toEqual([])
 
-    const submitted = update(collapsed, { _tag: "Submitted" })
-    expect(submitted.history.at(-1)).toBe("line one\nline two")
-    const started = update(submitted, { _tag: "TurnStarted", turnId: "turn-1", prompt: "line one\nline two" })
+    const submitted = update(collapsed, { _tag: "Submitted", submissionId: "submission-1" })
+    expect(submitted.history).toEqual([])
+    const admitted = update(submitted, {
+      _tag: "SubmissionAdmitted",
+      turnId: "turn-1",
+      submissionId: "submission-1",
+      status: "active",
+    })
+    expect(admitted.history.at(-1)).toBe("line one\nline two")
+    const started = update(admitted, { _tag: "TurnStarted", turnId: "turn-1", prompt: "line one\nline two" })
     expect(started.entries.at(-1)?.text).toBe("line one\nline two")
   })
 

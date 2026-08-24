@@ -1,7 +1,11 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
+import { createTestRenderer } from "@opentui/core/testing"
 import { assert, describe, it } from "@effect/vitest"
+import * as HostedObservability from "@rika/product/hosted-observability"
+import { Surface } from "@rika/terminal/opentui-surface"
+import { initial } from "@rika/terminal/terminal-state"
 import * as Diagnostic from "../src/diagnostics/diagnostic-file-logging-contract"
-import { Cause, Duration, Effect, FileSystem, Layer, Path, Ref, Schema } from "effect"
+import { Cause, Deferred, Duration, Effect, FileSystem, Layer, Path, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import * as Logging from "../src/diagnostics/diagnostic-file-logging"
 
@@ -15,6 +19,7 @@ const LogRecord = Schema.fromJsonString(
 )
 
 const decodeRecord = Schema.decodeUnknownEffect(LogRecord)
+const encodeUnknown = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
 const writtenRecords = (root: string) =>
   Effect.gen(function* () {
@@ -28,6 +33,162 @@ const writtenRecords = (root: string) =>
 
 describe("Logging", () => {
   it.layer(BunServices.layer)((test) => {
+    test.effect("acquires in memory and starts filesystem persistence explicitly", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-start-" })
+        const calls = yield* Ref.make(0)
+        const observedFileSystem: FileSystem.FileSystem = {
+          ...fs,
+          exists: (path) => Ref.update(calls, (count) => count + 1).pipe(Effect.andThen(fs.exists(path))),
+          makeDirectory: (path, options) =>
+            Ref.update(calls, (count) => count + 1).pipe(Effect.andThen(fs.makeDirectory(path, options))),
+          open: (path, options) => Ref.update(calls, (count) => count + 1).pipe(Effect.andThen(fs.open(path, options))),
+          readDirectory: (path, options) =>
+            Ref.update(calls, (count) => count + 1).pipe(Effect.andThen(fs.readDirectory(path, options))),
+        }
+        yield* TestClock.setTime(1_784_023_200_000)
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(
+              Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 }).pipe(
+                Layer.provide(Layer.succeed(FileSystem.FileSystem, observedFileSystem)),
+              ),
+            ),
+            (logging) =>
+              Effect.gen(function* () {
+                yield* Effect.logInfo("startup.buffered")
+                assert.strictEqual(yield* Ref.get(calls), 0)
+                yield* Logging.start
+                assert.isAbove(yield* Ref.get(calls), 0)
+              }).pipe(Effect.provide(logging), Effect.provideService(FileSystem.FileSystem, observedFileSystem)),
+          ),
+        )
+        const { records } = yield* writtenRecords(root)
+        assert.deepStrictEqual(
+          records.map(({ message }) => message),
+          ["startup.buffered"],
+        )
+      }),
+    )
+
+    test.effect("retains every record accepted before persistence starts", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-buffered-" })
+        yield* TestClock.setTime(1_784_023_200_000)
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
+            (logging) =>
+              Effect.gen(function* () {
+                yield* Effect.forEach(
+                  Array.from({ length: 1_025 }, (_, index) => index),
+                  (index) => Effect.logInfo(`startup.buffered.${index}`),
+                  { discard: true },
+                )
+                yield* Logging.start
+              }).pipe(Effect.provide(logging)),
+          ),
+        )
+        const { records } = yield* writtenRecords(root)
+        assert.strictEqual(records.length, 1_025)
+        assert.strictEqual(records[0]?.message, "startup.buffered.0")
+        assert.strictEqual(records.at(-1)?.message, "startup.buffered.1024")
+      }),
+    )
+
+    test.effect("buffers process start without IDs and records first draw without private values", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-frame-" })
+        const privateValues = ["private prompt text", "unsent draft text"]
+        const calls = yield* Ref.make(0)
+        const observedFileSystem: FileSystem.FileSystem = {
+          ...fs,
+          exists: (filename) => Ref.update(calls, (count) => count + 1).pipe(Effect.andThen(fs.exists(filename))),
+          open: (filename, options) =>
+            Ref.update(calls, (count) => count + 1).pipe(Effect.andThen(fs.open(filename, options))),
+        }
+        const setup = yield* Effect.acquireRelease(
+          Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24 })),
+          ({ renderer }) => Effect.sync(() => renderer.destroy()),
+        )
+        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        yield* Effect.addFinalizer(() => Effect.sync(() => surface.destroy()))
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(
+              Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 }).pipe(
+                Layer.provide(Layer.succeed(FileSystem.FileSystem, observedFileSystem)),
+              ),
+            ),
+            (logging) =>
+              Effect.gen(function* () {
+                const completed = yield* Deferred.make<void>()
+                const context = yield* Effect.context<never>()
+                const runFirstDraw = Effect.runSyncWith(context)
+                yield* HostedObservability.event("process_start", "success", {})
+                surface.onNextFrameCompleted(() =>
+                  runFirstDraw(
+                    HostedObservability.event("first_draw", "success", {}).pipe(
+                      Effect.ensuring(Deferred.succeed(completed, undefined)),
+                    ),
+                  ),
+                )
+                surface.update(initial(root))
+                assert.strictEqual(yield* Ref.get(calls), 0)
+                yield* Effect.tryPromise(() => setup.flush())
+                yield* Deferred.await(completed)
+                assert.strictEqual(yield* Ref.get(calls), 0)
+                yield* Logging.start
+                assert.isAbove(yield* Ref.get(calls), 0)
+              }).pipe(Effect.provide(logging), Effect.provideService(FileSystem.FileSystem, observedFileSystem)),
+          ),
+        )
+        const { records } = yield* writtenRecords(root)
+        assert.deepStrictEqual(
+          records.map(({ message }) => message),
+          ["hosted.process_start.success", "hosted.first_draw.success"],
+        )
+        assert.deepStrictEqual(
+          records.map(({ annotations }) => annotations),
+          [
+            { "rika.hosted.stage": "process_start", "rika.hosted.outcome": "success" },
+            { "rika.hosted.stage": "first_draw", "rika.hosted.outcome": "success" },
+          ],
+        )
+        const rendered = yield* encodeUnknown(records)
+        for (const privateValue of privateValues) assert.notInclude(rendered, privateValue)
+      }).pipe(Effect.scoped),
+    )
+
+    test.effect("serializes concurrent persistence starts within one layer", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-concurrent-start-" })
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
+            (logging) =>
+              Effect.all(
+                Array.from({ length: 32 }, () => Logging.start),
+                {
+                  concurrency: "unbounded",
+                  discard: true,
+                },
+              ).pipe(Effect.andThen(Effect.logInfo("concurrent.started")), Effect.provide(logging)),
+          ),
+        )
+        assert.strictEqual((yield* fs.readDirectory(yield* Logging.directory(root))).length, 1)
+        const { records } = yield* writtenRecords(root)
+        assert.deepStrictEqual(
+          records.map(({ message }) => message),
+          ["concurrent.started"],
+        )
+      }),
+    )
+
     test.effect("writes Effect JSON logs with secure permissions and reports them", () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -45,7 +206,7 @@ describe("Logging", () => {
               }),
             ),
             (logging) =>
-              Effect.logInfo("process.started").pipe(
+              Effect.andThen(Logging.start, Effect.logInfo("process.started")).pipe(
                 Effect.annotateLogs({ "rika.process.role": "client", "rika.version": "1.2.3" }),
                 Effect.provide(logging),
               ),
@@ -84,7 +245,7 @@ describe("Logging", () => {
           Effect.flatMap(
             Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
             (logging) =>
-              Effect.logError("usage repository refused an incomplete tree", 14).pipe(
+              Effect.andThen(Logging.start, Effect.logError("usage repository refused an incomplete tree", 14)).pipe(
                 Effect.annotateLogs({
                   prompt: secrets[0],
                   "model.body": secrets[1],
@@ -143,17 +304,22 @@ describe("Logging", () => {
           Effect.flatMap(
             Layer.build(Logging.layer({ dataRoot: root, role: "server", version: "1", pid: 42 })),
             (logging) =>
-              Effect.all(
-                [
-                  ...Diagnostic.modelBackendKinds.map((kind) =>
-                    Effect.logInfo("model.backend.configured").pipe(Effect.annotateLogs(Diagnostic.modelBackend(kind))),
-                  ),
-                  taggedFailure("WatchTurnFailure"),
-                  Effect.logError("failure.tagged").pipe(
-                    Effect.annotateLogs(Diagnostic.failureFrom(new Error("invalid model configuration"))),
-                  ),
-                ],
-                { concurrency: 1, discard: true },
+              Effect.andThen(
+                Logging.start,
+                Effect.all(
+                  [
+                    ...Diagnostic.modelBackendKinds.map((kind) =>
+                      Effect.logInfo("model.backend.configured").pipe(
+                        Effect.annotateLogs(Diagnostic.modelBackend(kind)),
+                      ),
+                    ),
+                    taggedFailure("WatchTurnFailure"),
+                    Effect.logError("failure.tagged").pipe(
+                      Effect.annotateLogs(Diagnostic.failureFrom(new Error("invalid model configuration"))),
+                    ),
+                  ],
+                  { concurrency: 1, discard: true },
+                ),
               ).pipe(Effect.provide(logging)),
           ),
         )
@@ -175,7 +341,7 @@ describe("Logging", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-string-schemas-" })
-        const opaque = "sk-live-7f3a9c2d"
+        const opaque = "private user text /tmp/secret"
         const stringFields = [
           "rika.event.cursor",
           "rika.event.type",
@@ -216,7 +382,7 @@ describe("Logging", () => {
           Effect.flatMap(
             Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
             (logging) =>
-              Effect.logError("failure.tagged").pipe(
+              Effect.andThen(Logging.start, Effect.logError("failure.tagged")).pipe(
                 Effect.annotateLogs({
                   ...Object.fromEntries(stringFields.map((key) => [key, opaque])),
                   "rika.failure.kind": "TokenExpiredError",
@@ -242,11 +408,14 @@ describe("Logging", () => {
           Effect.flatMap(
             Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
             (logging) =>
-              Effect.all([
-                Effect.logWarning("usage repository refused an incomplete tree", cyclic),
-                Effect.logInfo("execution.follow.started", cyclic),
-                Effect.logWarning("usage-cost.read.failed", Cause.fail(secret)),
-              ]).pipe(Effect.provide(logging)),
+              Effect.andThen(
+                Logging.start,
+                Effect.all([
+                  Effect.logWarning("usage repository refused an incomplete tree", cyclic),
+                  Effect.logInfo("execution.follow.started", cyclic),
+                  Effect.logWarning("usage-cost.read.failed", Cause.fail(secret)),
+                ]),
+              ).pipe(Effect.provide(logging)),
           ),
         )
         const { content, records } = yield* writtenRecords(root)
@@ -263,39 +432,145 @@ describe("Logging", () => {
       }),
     )
 
-    test.effect("records follow and reconnect annotations without unknown keys", () =>
+    test.effect("persists only validated hosted continuity annotations", () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-annotations-" })
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-hosted-" })
+        const sensitive = "SENSITIVE-PROMPT-/home/alice/private/project"
         yield* Effect.scoped(
           Effect.flatMap(
-            Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
+            Layer.build(Logging.layer({ dataRoot: root, role: "server", version: "1", pid: 42 })),
             (logging) =>
-              Effect.logInfo("execution.follow.started").pipe(
+              Effect.andThen(Logging.start, Effect.logInfo("hosted.cell_execution.success")).pipe(
                 Effect.annotateLogs({
-                  "rika.failure.cause": "TranscriptRepositoryError",
-                  "rika.failure.kind": "WatchTurnFailure",
-                  "rika.failure.message": "ExecutionNotFound",
-                  "rika.follow.cursor": "cursor-42",
-                  "rika.follow.reason": "thread-open",
-                  "rika.follow.scope": "tree",
-                  "rika.reconnect.attempt": 3,
-                  "rika.reconnect.message": "execution stream closed",
-                  "rika.unknown.annotation": "dropped-annotation-a41c",
+                  "rika.hosted.stage": "cell_execution",
+                  "rika.hosted.outcome": "success",
+                  "rika.duration.millis": 321,
+                  "rika.thread.id": "thread-01",
+                  "rika.turn.id": "turn:02",
+                  "rika.run.id": "run-03",
+                  "rika.operation.id": "operation.04",
+                  "rika.cell.id": "cell_05",
+                  "rika.binding.id": "binding-06",
+                  "rika.model_attempt.id": "attempt:07",
+                  "rika.failure.message": sensitive,
+                  owner: sensitive,
+                  command: sensitive,
+                  assignment: sensitive,
+                  sandbox: sensitive,
+                  build: sensitive,
+                  checkpoint: sensitive,
+                  prompt: sensitive,
+                  payload: sensitive,
+                  path: sensitive,
+                  secret: sensitive,
                 }),
                 Effect.provide(logging),
               ),
           ),
         )
         const { content, records } = yield* writtenRecords(root)
+        assert.notInclude(content, sensitive)
         assert.deepStrictEqual(records[0]?.annotations, {
-          "rika.failure.kind": "WatchTurnFailure",
-          "rika.failure.message": "ExecutionNotFound",
-          "rika.follow.cursor": "cursor-42",
-          "rika.follow.reason": "thread-open",
-          "rika.follow.scope": "tree",
-          "rika.reconnect.attempt": 3,
+          "rika.hosted.stage": "cell_execution",
+          "rika.hosted.outcome": "success",
+          "rika.duration.millis": 321,
+          "rika.thread.id": "thread-01",
+          "rika.turn.id": "turn:02",
+          "rika.run.id": "run-03",
+          "rika.operation.id": "operation.04",
+          "rika.cell.id": "cell_05",
+          "rika.binding.id": "binding-06",
+          "rika.model_attempt.id": "attempt:07",
         })
+      }),
+    )
+
+    test.effect("rejects invalid hosted annotations and user text", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-hosted-invalid-" })
+        const sentinel = "SENSITIVE user payload /var/lib/rika/secrets.db"
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Logging.layer({ dataRoot: root, role: "server", version: "1", pid: 42 })),
+            (logging) =>
+              Effect.andThen(Logging.start, Effect.logInfo("hosted.terminal.failure")).pipe(
+                Effect.annotateLogs({
+                  "rika.hosted.stage": sentinel,
+                  "rika.hosted.outcome": "maybe",
+                  "rika.duration.millis": -1,
+                  "rika.thread.id": sentinel,
+                  "rika.turn.id": "turn id with spaces",
+                  "rika.run.id": "run/with/path",
+                  "rika.operation.id": "x".repeat(129),
+                  "rika.cell.id": "cell\nuser-text",
+                  "rika.binding.id": "",
+                  "rika.model_attempt.id": { prompt: sentinel },
+                }),
+                Effect.provide(logging),
+              ),
+          ),
+        )
+        const { content, records } = yield* writtenRecords(root)
+        assert.notInclude(content, sentinel)
+        assert.deepStrictEqual(records[0]?.annotations, {})
+      }),
+    )
+
+    test.effect("records closed failure fields without arbitrary failure text", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-annotations-" })
+        const privateFailureText = [
+          "Cause.pretty: prompt=Delete every file under /home/alice/private-workspace",
+          "error.message: failed path /var/lib/rika/secrets.db at postgresql://admin:db-password@db.internal/rika",
+          'raw upstream: Bearer sk-live-7f3a9c2d SQL=SELECT * FROM credentials input={"token":"ghp_0123456789abcdef"}',
+        ]
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
+            (logging) =>
+              Effect.andThen(
+                Logging.start,
+                Effect.forEach(
+                  privateFailureText,
+                  (message) =>
+                    Effect.logInfo("execution.follow.started").pipe(
+                      Effect.annotateLogs({
+                        "rika.failure.cause": "TranscriptRepositoryError",
+                        "rika.failure.category": "dependency_unavailable",
+                        "rika.failure.interrupted": false,
+                        "rika.failure.kind": "WatchTurnFailure",
+                        "rika.failure.message": message,
+                        "rika.failure.outcome": "known",
+                        "rika.follow.cursor": "cursor-42",
+                        "rika.follow.reason": "thread-open",
+                        "rika.follow.scope": "tree",
+                        "rika.reconnect.attempt": 3,
+                        "rika.reconnect.message": "execution stream closed",
+                        "rika.unknown.annotation": "dropped-annotation-a41c",
+                      }),
+                    ),
+                  { concurrency: 1, discard: true },
+                ),
+              ).pipe(Effect.provide(logging)),
+          ),
+        )
+        const { content, records } = yield* writtenRecords(root)
+        for (const privateText of privateFailureText) assert.notInclude(content, privateText)
+        for (const record of records) {
+          assert.deepStrictEqual(record.annotations, {
+            "rika.failure.category": "dependency_unavailable",
+            "rika.failure.interrupted": false,
+            "rika.failure.kind": "WatchTurnFailure",
+            "rika.failure.outcome": "known",
+            "rika.follow.cursor": "cursor-42",
+            "rika.follow.reason": "thread-open",
+            "rika.follow.scope": "tree",
+            "rika.reconnect.attempt": 3,
+          })
+        }
         assert.notInclude(content, "dropped-annotation-a41c")
       }),
     )
@@ -305,29 +580,13 @@ describe("Logging", () => {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-" })
-        const writes = yield* Ref.make(0)
-        const observedFileSystem: FileSystem.FileSystem = {
-          ...fs,
-          open: (filename, options) =>
-            fs.open(filename, options).pipe(
-              Effect.map((file) => ({
-                ...file,
-                write: (bytes: Uint8Array) =>
-                  Ref.update(writes, (current) => current + 1).pipe(Effect.andThen(file.write(bytes))),
-              })),
-            ),
-        }
         yield* TestClock.setTime(1_784_023_200_000)
-        const logging = yield* Layer.build(
-          Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 }).pipe(
-            Layer.provide(Layer.succeed(FileSystem.FileSystem, observedFileSystem)),
-          ),
-        )
+        const logging = yield* Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 }))
         yield* Effect.gen(function* () {
+          yield* Logging.start
           yield* Effect.logInfo("test.first")
           yield* Effect.logInfo("test.second")
           yield* TestClock.adjust(Duration.millis(999))
-          assert.strictEqual(yield* Ref.get(writes), 0)
           yield* TestClock.adjust(Duration.millis(1))
           const filename = path.join(root, "diagnostics", "client-2026-07-14T10-00-00-000Z-42.open.jsonl")
           const decodeBatch = Effect.gen(function* () {
@@ -342,12 +601,33 @@ describe("Logging", () => {
             else if (attempt >= 100_000) return yield* Effect.die("log batch did not flush")
             else yield* Effect.yieldNow
           }
-          assert.strictEqual(yield* Ref.get(writes), 1)
           assert.deepStrictEqual(
             records.map((record) => record.message),
             ["test.first", "test.second"],
           )
-        }).pipe(Effect.provide(logging), Effect.provideService(FileSystem.FileSystem, observedFileSystem))
+        }).pipe(Effect.provide(logging))
+      }),
+    )
+
+    test.effect("writes final buffered records before closing and renaming", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-settlement-race-" })
+        yield* TestClock.setTime(1_784_023_200_000)
+        const logging = yield* Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 }))
+        yield* Effect.gen(function* () {
+          yield* Logging.start
+          yield* Effect.logInfo("race.inflight")
+          yield* TestClock.adjust(Duration.seconds(1))
+          yield* Effect.logInfo("race.final")
+          yield* Logging.settleActiveLogs
+          yield* Effect.logInfo("race.rejected")
+        }).pipe(Effect.provide(logging))
+        const { records } = yield* writtenRecords(root)
+        assert.deepStrictEqual(
+          records.map(({ message }) => message),
+          ["race.inflight", "race.final"],
+        )
       }),
     )
 
@@ -358,8 +638,9 @@ describe("Logging", () => {
         yield* TestClock.setTime(1_784_023_200_000)
         yield* Effect.scoped(
           Effect.gen(function* () {
-            yield* Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 }))
-            Logging.settleActiveLogs()
+            const logging = yield* Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 }))
+            yield* Logging.start.pipe(Effect.provide(logging))
+            yield* Logging.settleActiveLogs
             const names = yield* fs.readDirectory(yield* Logging.directory(root))
             assert.deepStrictEqual(
               names.filter((name) => name.endsWith(".open.jsonl")),
@@ -414,7 +695,12 @@ describe("Logging", () => {
         yield* fs.utimes(expired, 0, 0)
         yield* fs.utimes(crash, 0, 0)
         yield* TestClock.setTime(1_784_023_200_000)
-        yield* Effect.scoped(Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })))
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
+            (logging) => Logging.start.pipe(Effect.provide(logging)),
+          ),
+        )
         assert.isFalse(yield* fs.exists(expired))
         assert.isTrue(yield* fs.exists(crash))
       }),
@@ -429,9 +715,10 @@ describe("Logging", () => {
           Effect.flatMap(
             Layer.build(Logging.layer({ dataRoot: root, role: "server", version: "1", level: "error", pid: 7 })),
             (logging) =>
-              Effect.all([Effect.logInfo("level.hidden"), Effect.logError("level.visible")]).pipe(
-                Effect.provide(logging),
-              ),
+              Effect.andThen(
+                Logging.start,
+                Effect.all([Effect.logInfo("level.hidden"), Effect.logError("level.visible")]),
+              ).pipe(Effect.provide(logging)),
           ),
         )
         const diagnostics = yield* Logging.directory(root)

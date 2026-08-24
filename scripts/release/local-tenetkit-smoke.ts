@@ -12,7 +12,7 @@ import {
 } from "./local-tenetkit-package-verification"
 import { directoryDigest } from "../upstream/upstream-content-digest"
 
-export const tenetkitReleasePackages = ["tenetkit", "@tenetkit/pg", "@tenetkit/mysql"] as const
+export const tenetkitReleasePackages = ["tenetkit", "@tenetkit/pg", "@tenetkit/mysql", "@tenetkit/cloudflare"] as const
 
 type TenetkitReleasePackage = (typeof tenetkitReleasePackages)[number]
 
@@ -44,6 +44,38 @@ const failure = (step: string, message: string) => new LocalTenetKitSmokeError({
 
 const UnknownJson = Schema.fromJsonString(Schema.Unknown)
 const encodeManifest = (manifest: RootManifest): string => Schema.encodeSync(UnknownJson)(manifest)
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
+
+const isStringRecord = (value: unknown): value is Record<string, string> =>
+  isRecord(value) && Object.values(value).every((item) => typeof item === "string")
+
+const isRootManifest = (value: unknown): value is RootManifest =>
+  isRecord(value) &&
+  isRecord(value.workspaces) &&
+  isStringRecord(value.workspaces.catalog) &&
+  (value.overrides === undefined || isStringRecord(value.overrides))
+
+const isTenetKitReleaseEvidence = (value: unknown): value is TenetKitReleaseEvidence =>
+  isRecord(value) &&
+  typeof value.schemaVersion === "number" &&
+  Array.isArray(value.packages) &&
+  value.packages.every(
+    (item) =>
+      isRecord(item) &&
+      typeof item.name === "string" &&
+      typeof item.version === "string" &&
+      typeof item.filename === "string" &&
+      typeof item.sha256 === "string",
+  )
+
+const isPackageManifest = (value: unknown): value is { readonly name?: string; readonly version?: string } =>
+  isRecord(value) &&
+  (value.name === undefined || typeof value.name === "string") &&
+  (value.version === undefined || typeof value.version === "string")
+
+const isVersionManifest = (value: unknown): value is { readonly version: string } =>
+  isRecord(value) && typeof value.version === "string"
 
 const tenetkitTarballNameImpl = (packageName: string, version: string): string =>
   `${packageName.replace("@tenetkit/", "tenetkit-")}-${version}.tgz`
@@ -88,9 +120,8 @@ export const tenetkitReleaseInventoryError: {
 } = Function.dual(3, tenetkitReleaseInventoryErrorImpl)
 
 export const catalogTenetKitVersion = (catalog: Readonly<Record<string, string>>): string => {
-  const versions = new Set(tenetkitPackages.map((packageName) => catalog[packageName]))
-  if (versions.size !== 1 || versions.has(undefined))
-    throw new Error("Rika must pin every TenetKit package to one exact version")
+  const versions = new Set(tenetkitPackages.flatMap((packageName) => catalog[packageName] ?? []))
+  if (versions.size !== 1) throw new Error("Rika must pin its TenetKit catalog entries to one exact version")
   const version = [...versions][0]!
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`Rika TenetKit catalog version is not exact semver: ${version}`)
   return version
@@ -110,10 +141,6 @@ const manifestWithLocalTenetKitTarballsImpl = (
   return {
     ...manifest,
     overrides: { ...manifest.overrides, ...tarballs },
-    workspaces: {
-      ...manifest.workspaces,
-      catalog: { ...manifest.workspaces.catalog, ...tarballs },
-    },
   }
 }
 
@@ -121,6 +148,23 @@ export const manifestWithLocalTenetKitTarballs: {
   (arg0: RootManifest, arg1: string, arg2: string): RootManifest
   (arg1: string, arg2: string): (arg0: RootManifest) => RootManifest
 } = Function.dual(3, manifestWithLocalTenetKitTarballsImpl)
+
+const localTenetKitLockErrorImpl = (lock: string, version: string): string | undefined => {
+  for (const packageName of tenetkitPackages) {
+    const filename = tenetkitTarballName(packageName, version)
+    if (!lock.includes(filename)) return `Local lock does not name ${filename}`
+  }
+  if (/^\s*"@tenetkit\/pg\/tenetkit"\s*:\s*\["tenetkit@\d/m.test(lock))
+    return "Local lock contains nested @tenetkit/pg/tenetkit registry resolution"
+  if (/^\s*"(?:tenetkit|@tenetkit\/pg)(?:\/tenetkit)?"\s*:\s*\["(?:tenetkit|@tenetkit\/pg)@\d/m.test(lock))
+    return "Local consumer resolved a TenetKit package from the registry"
+  return undefined
+}
+
+export const localTenetKitLockError: {
+  (lock: string, version: string): string | undefined
+  (version: string): (lock: string) => string | undefined
+} = Function.dual(2, localTenetKitLockErrorImpl)
 
 const run = Effect.fn("LocalTenetKitSmoke.run")(function* (
   command: string,
@@ -174,7 +218,11 @@ export const provisionProvenHostArchive = Effect.fn("LocalTenetKitSmoke.provisio
   return destination
 })
 
-const program = (options: { readonly tenetkitRelease: string; readonly target?: string | undefined }) =>
+const program = (options: {
+  readonly tenetkitRelease: string
+  readonly target?: string | undefined
+  readonly check: boolean
+}) =>
   Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -193,16 +241,17 @@ const program = (options: { readonly tenetkitRelease: string; readonly target?: 
         )
 
       const sourceManifestText = yield* fileSystem.readFileString(path.join(root, "package.json"))
-      const sourceManifest = (yield* Schema.decodeUnknownEffect(UnknownJson)(sourceManifestText)) as RootManifest
+      const sourceManifest = yield* Schema.decodeUnknownEffect(UnknownJson)(sourceManifestText)
+      if (!isRootManifest(sourceManifest)) return yield* failure("read manifest", "Rika package manifest is invalid")
       const version = yield* Effect.try({
         try: () => catalogTenetKitVersion(sourceManifest.workspaces.catalog),
         catch: (cause) => failure("read TenetKit version", String(cause)),
       })
       const evidencePath = path.join(releaseDirectory, "release-evidence.json")
       const checksumPath = path.join(releaseDirectory, "SHA256SUMS")
-      const evidence = (yield* Schema.decodeUnknownEffect(UnknownJson)(
-        yield* fileSystem.readFileString(evidencePath),
-      )) as TenetKitReleaseEvidence
+      const evidence = yield* Schema.decodeUnknownEffect(UnknownJson)(yield* fileSystem.readFileString(evidencePath))
+      if (!isTenetKitReleaseEvidence(evidence))
+        return yield* failure("validate TenetKit release inventory", "TenetKit release evidence is invalid")
       const checksumEntries = (yield* fileSystem.readFileString(checksumPath))
         .trim()
         .split("\n")
@@ -233,7 +282,7 @@ const program = (options: { readonly tenetkitRelease: string; readonly target?: 
 
       const packedPackages = new Map<string, PackedTenetKitPackage>()
       const packedPackageRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-local-tenetkit-packages-" })
-      for (const name of tenetkitPackages) {
+      for (const name of tenetkitReleasePackages) {
         const filename = tenetkitTarballName(name, version)
         const item = evidence.packages.find((candidate) => candidate.name === name)
         if (
@@ -245,22 +294,27 @@ const program = (options: { readonly tenetkitRelease: string; readonly target?: 
           return yield* failure("validate TenetKit evidence", `${name} does not match ${filename} at ${version}`)
         const tarball = path.join(releaseDirectory, filename)
         const manifestText = yield* run("tar", ["-xOzf", tarball, "package/package.json"], root)
-        const manifest = (yield* Schema.decodeUnknownEffect(UnknownJson)(manifestText)) as {
-          readonly name?: string
-          readonly version?: string
-        }
+        const manifest = yield* Schema.decodeUnknownEffect(UnknownJson)(manifestText)
+        if (!isPackageManifest(manifest))
+          return yield* failure("validate TenetKit tarball", `${filename} has an invalid package manifest`)
         if (manifest.name !== name || manifest.version !== version)
           return yield* failure(
             "validate TenetKit tarball",
             `${filename} has identity ${manifest.name}@${manifest.version}`,
           )
-        const extractedRoot = path.join(packedPackageRoot, packageName)
+        if (!tenetkitPackages.some((packageName) => packageName === name)) continue
+        const extractedRoot = path.join(packedPackageRoot, name)
         yield* fileSystem.makeDirectory(extractedRoot, { recursive: true })
         yield* run("tar", ["-xzf", tarball, "-C", extractedRoot], root)
         packedPackages.set(name, {
           manifest: manifestText.trim(),
           directoryDigest: yield* directoryDigest(path.join(extractedRoot, "package")),
         })
+      }
+
+      if (options.check) {
+        yield* Effect.log(`TenetKit ${version} release evidence and tarballs are valid`)
+        return
       }
 
       const temporary = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-local-tenetkit-smoke-" })
@@ -298,16 +352,17 @@ const program = (options: { readonly tenetkitRelease: string; readonly target?: 
         NODE_PATH: "",
       }
       yield* run("git", ["read-tree", "HEAD"], temporary, environment)
-      yield* run("bun", ["install", "--linker=isolated"], temporary, environment)
+      yield* run("bun", ["install", "--linker=isolated", "--ignore-scripts"], temporary, environment)
+      yield* run(
+        "bun",
+        ["node_modules/@effect/tsgo/dist/effect-tsgo.cjs", "patch", "--no-typescript", "--oxlint"],
+        temporary,
+        environment,
+      )
 
       const localLock = yield* fileSystem.readFileString(path.join(temporary, "bun.lock"))
-      if (localLock.includes("npmjs.org/tenetkit"))
-        return yield* failure("verify isolated install", "Local consumer resolved a TenetKit package from npm")
-      for (const packageName of tenetkitPackages) {
-        const filename = tenetkitTarballName(packageName, version)
-        if (!localLock.includes(filename))
-          return yield* failure("verify isolated install", `Local lock does not name ${filename}`)
-      }
+      const lockError = localTenetKitLockError(localLock, version)
+      if (lockError !== undefined) return yield* failure("verify isolated install", lockError)
       const installedPackages = yield* verifyInstalledTenetKitPackages({
         isolatedRoot: temporary,
         version,
@@ -322,9 +377,11 @@ const program = (options: { readonly tenetkitRelease: string; readonly target?: 
         yield* run("bun", ["run", "typecheck"], path.join(temporary, consumer), environment)
       yield* run("bun", ["run", "package", "--", "--target", target], temporary, environment)
       yield* run("bun", ["run", "release-smoke", "--", "--target", target], temporary, environment)
-      const rikaManifest = (yield* Schema.decodeUnknownEffect(UnknownJson)(
+      const rikaManifest = yield* Schema.decodeUnknownEffect(UnknownJson)(
         yield* fileSystem.readFileString(path.join(temporary, "apps", "rika", "package.json")),
-      )) as { readonly version: string }
+      )
+      if (!isVersionManifest(rikaManifest))
+        return yield* failure("read Rika version", "Rika package manifest is invalid")
       const provisionedArchive = yield* provisionProvenHostArchive({
         sourceRoot: root,
         isolatedRoot: temporary,
@@ -341,8 +398,9 @@ const command = Command.make(
   {
     tenetkitRelease: Flag.directory("tenetkit-release", { mustExist: true }),
     target: Flag.string("target").pipe(Flag.optional),
+    check: Flag.boolean("check").pipe(Flag.withDefault(false)),
   },
-  ({ tenetkitRelease, target }) => program({ tenetkitRelease, target: Option.getOrUndefined(target) }),
+  ({ tenetkitRelease, target, check }) => program({ tenetkitRelease, target: Option.getOrUndefined(target), check }),
 )
 
 const main = Command.run(command, { version: "0.0.0" })

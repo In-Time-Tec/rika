@@ -1,5 +1,6 @@
 import { expect, test } from "vitest"
 import { Deferred, Effect } from "effect"
+import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
@@ -12,8 +13,42 @@ const hasGreenText = (app: TuiApp.TuiApp, text: string): boolean =>
     .lines.flatMap((line) => line.spans)
     .some((span) => span.text.includes(text) && span.fg.toInts().join(",") === green)
 
+const rendersQueued = (frame: string, prompt: string): boolean =>
+  frame.split("\n").some((line) => line.includes(prompt) && line.includes("Backspace to dequeue"))
+
 test(
-  "echoes an idle submission in the next frame before server admission",
+  "never renders an idle first prompt as queued across duplicate delivery and resync",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const threadId = Thread.ThreadId.make("tui-thread-0")
+        const prompt = "IDLE_FIRST_PROMPT"
+        const app = yield* TuiApp.tuiApp({
+          duplicateInteractiveEvent: (event) => event._tag === "SubmissionAdmitted",
+          script: [model.text("IDLE_FIRST_COMPLETE", 4_000)],
+        })
+
+        yield* Effect.tryPromise(() => app.type(prompt))
+        app.pressEnter()
+        const admitted = yield* app.waitFrame(prompt)
+        yield* app.waitModelRequests(1)
+        expect(rendersQueued(admitted, prompt)).toBe(false)
+        expect((yield* app.queue(threadId)).queuedCount).toBe(0)
+
+        yield* app.reload
+        const resynced = yield* app.waitFrame(prompt)
+        expect(rendersQueued(resynced, prompt)).toBe(false)
+        expect((yield* app.queue(threadId)).queuedCount).toBe(0)
+
+        yield* app.waitFrame("IDLE_FIRST_COMPLETE", 20_000)
+        yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)
+
+test(
+  "keeps an idle draft editable until server admission",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -23,16 +58,18 @@ test(
           script: [model.text("OPTIMISTIC_ECHO_COMPLETE")],
         })
 
-        yield* Effect.promise(() => app.type("OPTIMISTIC_ECHO_PROMPT"))
+        yield* Effect.tryPromise(() => app.type("OPTIMISTIC_ECHO_PROMPT"))
         app.pressEnter()
-        const submittedFrame = yield* app.nextFrame
-        expect(submittedFrame).toContain("OPTIMISTIC_ECHO_PROMPT")
-        expect(submittedFrame.match(/OPTIMISTIC_ECHO_PROMPT/g) ?? []).toHaveLength(1)
-        expect(submittedFrame).toContain("Sending")
+        const held = yield* app.nextFrame
+        expect(held).toContain("│ OPTIMISTIC_ECHO_PROMPT")
+        expect(held).not.toContain("Sending")
+        expect((yield* app.queue(Thread.ThreadId.make("tui-thread-0"))).turns).toHaveLength(0)
+        expect(yield* app.modelRequestCount).toBe(0)
 
-        yield* Deferred.succeed(admission, undefined)
-        const completed = yield* app.waitFrame("OPTIMISTIC_ECHO_COMPLETE")
-        expect(completed.match(/OPTIMISTIC_ECHO_PROMPT/g) ?? []).toHaveLength(1)
+        yield* Effect.tryPromise(() => app.type("_EDITED"))
+        const edited = yield* app.nextFrame
+        expect(edited).toContain("│ OPTIMISTIC_ECHO_PROMPT_EDITED")
+        expect(edited).not.toContain("OPTIMISTIC_ECHO_COMPLETE")
         yield* app.quit
       }),
     ),
@@ -48,7 +85,7 @@ test(
           script: [model.text("CANCELLED_LATE_RESPONSE", 20_000), model.text("RESTORED_PROMPT_SENT")],
         })
 
-        yield* Effect.promise(() => app.type("Restore this submitted prompt."))
+        yield* Effect.tryPromise(() => app.type("Restore this submitted prompt."))
         app.pressEnter()
         yield* app.waitFrame("Restore this submitted prompt.")
         yield* app.waitModelRequests(1)
@@ -56,7 +93,7 @@ test(
         const restored = yield* app.waitFrame("│ Restore this submitted prompt.")
         expect(restored).not.toContain("⊘")
         expect(restored).not.toContain("cancelled")
-        yield* Effect.promise(() => app.type(" again"))
+        yield* Effect.tryPromise(() => app.type(" again"))
         app.pressEnter()
         yield* app.waitFrame("RESTORED_PROMPT_SENT")
         yield* app.quit
@@ -77,11 +114,11 @@ test(
           // margin without the test sitting out the rest of a twenty-second answer.
           script: [model.text("SLOW_FIRST_ANSWER", 4_000), model.text("QUEUED_SECOND_ANSWER")],
         })
-        yield* Effect.promise(() => app.type("First slow prompt."))
+        yield* Effect.tryPromise(() => app.type("First slow prompt."))
         app.pressEnter()
         yield* app.waitFrame("First slow prompt.")
         yield* app.waitModelRequests(1)
-        yield* Effect.promise(() => app.type("Second queued prompt."))
+        yield* Effect.tryPromise(() => app.type("Second queued prompt."))
         app.pressKey("\u001b[13;3u")
         const queuedFrame = yield* app.waitFrame("Second queued prompt.")
         expect(queuedFrame).toContain("First slow prompt.")
@@ -103,10 +140,10 @@ test(
         const app = yield* TuiApp.tuiApp({
           script: [model.text("LATE_QUEUE_HEAD", 20_000), model.text("QUEUED_DONE")],
         })
-        yield* Effect.promise(() => app.type("Hold the queue head."))
+        yield* Effect.tryPromise(() => app.type("Hold the queue head."))
         app.pressEnter()
         yield* app.waitFrame("Hold the queue head.")
-        yield* Effect.promise(() => app.type("Queued follow-up prompt."))
+        yield* Effect.tryPromise(() => app.type("Queued follow-up prompt."))
         app.pressKey("\u001b[13;3u")
         yield* app.waitFrame("Queued follow-up prompt.")
         yield* app.waitModelRequests(1)
@@ -143,13 +180,13 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Start child work that will be cancelled."))
+        yield* Effect.tryPromise(() => app.type("Start child work that will be cancelled."))
         app.pressEnter()
         yield* app.waitFrame("Subagent working")
         app.pressKey("c", { ctrl: true })
         yield* app.waitFrame("Subagent cancelled")
         yield* app.settled
-        yield* Effect.promise(() => app.type(" Run only this follow-up."))
+        yield* Effect.tryPromise(() => app.type(" Run only this follow-up."))
         app.pressEnter()
 
         const followUp = yield* app.waitFrame("FOLLOW_UP_AFTER_CHILD_CANCELLATION", 30_000)
@@ -192,11 +229,11 @@ test(
             model.text("ACTIVE_STEER_COMPLETE"),
           ],
         })
-        yield* Effect.promise(() => app.type("Read the fixture slowly."))
+        yield* Effect.tryPromise(() => app.type("Read the fixture slowly."))
         app.pressEnter()
         yield* app.waitFrame("Read the fixture slowly.")
         yield* app.waitFrame("Waiting")
-        yield* Effect.promise(() => app.type("Focus on the exact fixture text."))
+        yield* Effect.tryPromise(() => app.type("Focus on the exact fixture text."))
         app.pressEnter()
         yield* app.waitFrame("Focus on the exact fixture text.")
         app.pressArrow("up")
@@ -234,11 +271,11 @@ test(
         const app = yield* TuiApp.tuiApp({
           script: [model.text("LATE_INTERRUPTED_RESPONSE", 20_000), model.text("REPLACEMENT_COMPLETE")],
         })
-        yield* Effect.promise(() => app.type("Begin interruptible work."))
+        yield* Effect.tryPromise(() => app.type("Begin interruptible work."))
         app.pressEnter()
         yield* app.waitFrame("Begin interruptible work.")
         yield* app.waitModelRequests(1)
-        yield* Effect.promise(() => app.type("Run the replacement prompt."))
+        yield* Effect.tryPromise(() => app.type("Run the replacement prompt."))
         yield* app.waitFrame("Run the replacement prompt.")
         app.pressKey("\u001b[13;5u")
         const replaced = yield* app.waitFrame("REPLACEMENT_COMPLETE")

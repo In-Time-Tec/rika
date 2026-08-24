@@ -38,14 +38,18 @@ CREATE TABLE rika_hosted_executor_operations (
   dispatched_lease_epoch BIGINT,
   dispatched_executor_instance_id TEXT,
   dispatched_process_incarnation TEXT,
-  dispatch_deadline_at TIMESTAMPTZ,
   response JSONB,
+  terminal_outcome TEXT CHECK (terminal_outcome IN ('completed', 'failed', 'cancelled', 'unknown')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT transaction_timestamp(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT transaction_timestamp(),
   PRIMARY KEY (assignment_id, operation_key),
   FOREIGN KEY (owner_id) REFERENCES rika_hosted_owners (id) ON DELETE CASCADE,
   FOREIGN KEY (assignment_id, owner_id) REFERENCES rika_hosted_executor_assignments (id, owner_id) ON DELETE CASCADE,
-  CHECK ((state IN ('completed', 'unknown') AND response IS NOT NULL) OR (state NOT IN ('completed', 'unknown') AND response IS NULL)),
+  CHECK (
+    (state IN ('accepted', 'dispatched') AND response IS NULL AND terminal_outcome IS NULL)
+    OR (state = 'completed' AND response IS NOT NULL AND terminal_outcome IN ('completed', 'failed', 'cancelled'))
+    OR (state = 'unknown' AND response IS NOT NULL AND terminal_outcome = 'unknown')
+  ),
   CHECK ((state = 'dispatched' AND dispatched_generation IS NOT NULL AND dispatched_lease_epoch IS NOT NULL) OR state <> 'dispatched'),
   CHECK (
     state NOT IN ('dispatched', 'unknown')
@@ -55,11 +59,5 @@ CREATE TABLE rika_hosted_executor_operations (
       AND dispatched_executor_instance_id IS NOT NULL
       AND dispatched_process_incarnation IS NOT NULL
     )
-  ),
-  CHECK (state <> 'dispatched' OR dispatch_deadline_at IS NOT NULL),
-  CHECK (state <> 'unknown' OR dispatch_deadline_at IS NULL)
+  )
 );
-
-CREATE INDEX rika_hosted_executor_operations_recovery
-  ON rika_hosted_executor_operations (state, dispatch_deadline_at)
-  WHERE state = 'dispatched';

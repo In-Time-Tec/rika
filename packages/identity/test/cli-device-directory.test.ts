@@ -5,13 +5,16 @@ import { makePostgresCliDeviceDirectory } from "../src/cli-device-directory"
 
 it.effect("revokes every grant for only the authenticated user", () =>
   Effect.gen(function* () {
+    const context = yield* Effect.context<never>()
     const queries: Array<{ readonly text: string; readonly values: ReadonlyArray<unknown> }> = []
     const pool = {
       query: (text: string, values: ReadonlyArray<unknown>) => {
         queries.push({ text, values })
-        return Promise.resolve({
-          rows: text.includes("returning device_id") ? [{ device_id: "device-1" }] : [],
-        })
+        return Effect.runPromiseWith(context)(
+          Effect.succeed({
+            rows: text.includes("returning device_id") ? [{ device_id: "device-1" }] : [],
+          }),
+        )
       },
     } as unknown as Pool
     const directory = makePostgresCliDeviceDirectory(pool)

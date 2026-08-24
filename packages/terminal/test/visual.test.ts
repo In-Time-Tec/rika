@@ -52,6 +52,10 @@ test(
             "compact-mode-selector",
             "narrow-mode-overlay",
             "narrow-palette-overlay",
+            "runner-placement",
+            "orb-placement",
+            "narrow-orb-placement",
+            "narrow-runner-placement",
             "context-meter",
             "meter-scanner",
             "meter-muncher-open",
@@ -70,13 +74,27 @@ test(
           expect(yield* fileSystem.readFileString(path.join(actual, "cancelled-subagent.frame.txt"))).toContain(
             "⊘ Subagent cancelled ▾\n │   Wait then run the checks\n │   ├ $ sleep 60 (cancelled)\n │   │\n │   │\n │   ╰   The subagent was cancelled.",
           )
-          const colorScenarios = ["mode-picker", "diff-complex", "tool-group-states"]
+          const colorScenarios = [
+            "mode-picker",
+            "diff-complex",
+            "tool-group-states",
+            "runner-placement",
+            "orb-placement",
+          ]
           const colorStyles = yield* Effect.forEach(colorScenarios, (scenario) =>
             fileSystem.readFileString(path.join(actual, `${scenario}.styles.json`)),
           )
           for (const styles of colorStyles) {
             expect(new Set(styles.match(/"buffer": \{[^}]+\}/gs) ?? []).size).toBeGreaterThan(2)
           }
+          expect(
+            yield* fileSystem.readFileString(path.join(actual, "narrow-runner-placement.frame.txt")),
+          ).toContain("Runner")
+          expect(
+            yield* fileSystem.readFileString(path.join(actual, "narrow-runner-placement.styles.json")),
+          ).toMatch(
+            /"text": "Runner",\s+"fg": \{\s+"buffer": \{\s+"0": 210,\s+"1": 162,\s+"2": 92,\s+"3": 255/,
+          )
           expect(scenarios().map(([name]) => name)).not.toContain("semantic-search")
           expect(scenarios().map(([name]) => name)).not.toContain("ast-grep-outline")
         }).pipe(Effect.provide(services))

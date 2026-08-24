@@ -39,7 +39,7 @@ test(
           height: 48,
         })
 
-        yield* Effect.promise(() => app.type("Run the deduplicated group."))
+        yield* Effect.tryPromise(() => app.type("Run the deduplicated group."))
         app.pressEnter()
         yield* app.waitFrame("ROOT_DEDUPE_COMPLETE")
         const settled = yield* app.waitFrameMatch(

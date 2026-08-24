@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { TreeProjector } from "../src/projection/tree"
 import type { CheckpointInstrumentation } from "../src/projection/projector-recovery"
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
+import { Schema } from "effect"
 import {
   assistantOf,
   block,
@@ -289,7 +290,7 @@ describe("TenetKit tree projector", () => {
         call: cellCall("live", "await forever()"),
       } as never),
     )
-    const persisted = JSON.parse(patch.checkpoint.state) as {
+    const persisted = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(patch.checkpoint.state) as {
       readonly nodes: ReadonlyArray<{ readonly cells: ReadonlyArray<readonly [string, unknown]> }>
     }
     expect(persisted.nodes.flatMap((node) => node.cells.map(([rawId]) => rawId))).toEqual(["live"])
@@ -770,7 +771,7 @@ describe("TenetKit tree projector", () => {
       expect.objectContaining({ content: { _tag: "Block", block: expect.objectContaining({ _tag: "Cell" }) } }),
     ])
     expect(Object.fromEntries(visits)).toEqual({ node: 1, cell: 1, compaction: 1 })
-    const persisted = JSON.parse(active.checkpoint.state) as {
+    const persisted = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(active.checkpoint.state) as {
       readonly nodes: ReadonlyArray<{ readonly cells: ReadonlyArray<readonly [string, unknown]> }>
       readonly runningCompactions: ReadonlyArray<string>
     }

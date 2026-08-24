@@ -7,13 +7,11 @@ import { TestConsole } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { expect, it } from "@effect/vitest"
 import { run as runClient } from "../src/client/client-process"
-import { cleanInteractiveRuntimeExit } from "../src/client/client-process"
 import { clientProcessExitCode } from "../src/client/client-process-exit"
 import { parseJsonLines, readStreamInput } from "../src/command/root/noninteractive-run-command"
 import { run } from "../src/command/root/rika-command"
 import * as HostedCommand from "../src/command/root/hosted-command-dispatch"
 import * as RunnerCommand from "../src/command/root/runner-command"
-import { runnerExecutorProcessRole, tuiControllerProcessRole } from "../src/private-runtime-role"
 
 const workspace = process.cwd()
 type Input = ProductInput | HostedCommand.Input | RunnerCommand.Input
@@ -58,13 +56,6 @@ it("maps pure client interruption to success without masking failures", () => {
     }),
   ).toBe(17)
   expect(clientProcessExitCode({ exit: Exit.fail("real failure"), interruptedBySigint: true })).toBe(1)
-})
-
-it("accepts only successful and SIGINT-convention interactive runtime exits", () => {
-  expect(cleanInteractiveRuntimeExit(0)).toBe(true)
-  expect(cleanInteractiveRuntimeExit(130)).toBe(true)
-  expect(cleanInteractiveRuntimeExit(1)).toBe(false)
-  expect(cleanInteractiveRuntimeExit(143)).toBe(false)
 })
 
 const execute = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>): Effect.Effect<A, E, never> =>
@@ -139,9 +130,7 @@ it.effect("maps stdin failures and dispatch failures", () =>
       ),
     )
     expect(
-      (yield* Effect.exit(
-        execute(run([tuiControllerProcessRole]).pipe(Effect.mapError((error) => String(error))), layer),
-      ))._tag,
+      (yield* Effect.exit(execute(run([]).pipe(Effect.mapError((error) => String(error))), layer)))._tag,
     ).toBe("Failure")
   }),
 )
@@ -159,8 +148,6 @@ it.effect("renders help without dispatching an operation", () =>
     )
     expect(output.join("\n")).toContain("Hosted durable coding agent")
     expect(output.join("\n")).toContain("diagnostics")
-    expect(output.join("\n")).not.toContain(tuiControllerProcessRole)
-    expect(output.join("\n")).not.toContain(runnerExecutorProcessRole)
     yield* execute(run(["diagnostics", "--help"]), layer)
     expect((yield* TestConsole.logLines).join("\n")).toContain("performance")
     expect(yield* Ref.get(calls)).toEqual([])
@@ -300,6 +287,7 @@ it.effect("routes headless runner mode and keeps remote Thread creation opt in",
       { workspace, remoteThreadCreation: "allowed" },
     ])
     expect(yield* capture(["--no-tui", "--deny-remote-thread-creation"])).toEqual([{ remoteThreadCreation: "denied" }])
+    yield* failsWithoutDispatch(["--internal-runner-executor", "--no-tui"])
     yield* failsWithoutDispatch(["--allow-remote-thread-creation"])
     yield* failsWithoutDispatch(["--no-tui", "--allow-remote-thread-creation", "--deny-remote-thread-creation"])
   }),
@@ -307,8 +295,6 @@ it.effect("routes headless runner mode and keeps remote Thread creation opt in",
 
 it.effect("dispatches interactive inputs and hosted non-interactive execution", () =>
   Effect.gen(function* () {
-    expect(yield* capture([tuiControllerProcessRole])).toEqual([{ _tag: "Interactive", prompt: [], ephemeral: false }])
-    expect(yield* capture([runnerExecutorProcessRole, "--no-tui", "--workspace", "."])).toEqual([{ workspace }])
     expect(yield* capture(["hello", "world", "--mode", "high", "--ephemeral"])).toEqual([
       { _tag: "Interactive", prompt: ["hello", "world"], mode: "high", ephemeral: true },
     ])

@@ -39,6 +39,18 @@ describe("performance metric policy", () => {
     })
   })
 
+  test("gates the client subtree instead of obsolete process roles", () => {
+    expect(metricPolicy("process.client.idle-rss")?.target).toBe(350)
+    expect(performanceMetricPolicies.map(({ id }) => id)).not.toEqual(
+      expect.arrayContaining([
+        "process.launcher.idle-rss",
+        "process.interactive.idle-rss",
+        "process.server.idle-rss",
+        "process.combined-idle-rss",
+      ]),
+    )
+  })
+
   test("uses the median and requires both target and baseline tolerance", () => {
     expect(comparePerformanceRuns(group(100), group(115)).pass).toBe(true)
     expect(comparePerformanceRuns([run(100), run(100), run(200)], group(160)).pass).toBe(false)

@@ -10,6 +10,7 @@ import { TestConsole } from "effect/testing"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 
 const encodeChanges = Schema.encodeSync(Schema.fromJsonString(Schema.Array(ExecutionProjection.Change)))
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(ExecutionProjection.Change))
 
 import { executionRoute } from "../support/product-test-current-state"
 import { executionSessionLifecycleLayerTest, productLayer, provideLayer } from "../support/operation-layer-harness"
@@ -64,7 +65,7 @@ describe("Operation", () => {
       expect(turn).toMatchObject({ threadId: "thread-existing", prompt: "existing prompt", status: "completed" })
       const streamed = output
         .filter((line): line is string => typeof line === "string" && line.startsWith("{"))
-        .map((line) => JSON.parse(line))
+        .map((line) => decodeJson(line))
       expect(streamed).toMatchObject([
         {
           _tag: "ProjectionSnapshot",

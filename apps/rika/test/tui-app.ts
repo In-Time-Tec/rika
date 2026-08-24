@@ -11,8 +11,20 @@ import * as Turn from "@rika/product/turn-record"
 import * as ThreadQuery from "@rika/product/thread-query-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import type { ModeConfiguration } from "@rika/terminal/terminal-state"
-import { Config, Context, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Scope, SubscriptionRef } from "effect"
-import { performance } from "node:perf_hooks"
+import {
+  Clock,
+  Config,
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  Path,
+  Scope,
+  SubscriptionRef,
+} from "effect"
 import { interactiveTui } from "../src/interactive/process/interactive-process-loop"
 import {
   makeTuiAppQueue,
@@ -27,7 +39,7 @@ import { backendLayer, kernelPoolFor, prepareTuiRuntimeState, type RuntimeStateP
 import { laneExecutionRoute, makeLaneModels } from "./tui-app-model"
 
 type InteractiveConnection = Parameters<ReturnType<typeof interactiveTui>>[2]
-type InteractiveConnectionStatus = InteractiveConnection["initialStatus"]
+type InteractiveConnectionState = InteractiveConnection["initialState"]
 
 /**
  * Settling means no work is still in flight, so a running subagent counts. `Running` covers every
@@ -35,7 +47,6 @@ type InteractiveConnectionStatus = InteractiveConnection["initialStatus"]
  * an exact "Running 1 tool" misses the moment a turn delegates.
  */
 const activityMarkers = ["Waiting", "Streaming", "Running", "Thinking"] as const
-const currentWallTime = () => performance.now()
 
 type SessionEvent = Parameters<Parameters<InteractiveSession.InteractiveSession["events"]>[0]>[0]
 
@@ -51,10 +62,11 @@ export interface TuiAppOptions {
   readonly workspaceFiles?: Readonly<Record<string, string>>
   readonly width?: number
   readonly height?: number
-  readonly initialConnectionStatus?: InteractiveConnectionStatus
+  readonly initialConnectionState?: InteractiveConnectionState
   readonly holdSubmissionAdmission?: Deferred.Deferred<void>
   readonly holdCancellation?: Deferred.Deferred<void>
   readonly mapInteractiveEvent?: (event: SessionEvent) => SessionEvent
+  readonly duplicateInteractiveEvent?: (event: SessionEvent) => boolean
   readonly historicalTranscriptFixture?: HistoricalTranscriptFixture
   readonly prepareRuntimeState?: RuntimeStatePreparation
   readonly modeConfiguration?: ModeConfiguration
@@ -64,7 +76,7 @@ export type CapturedSpans = ReturnType<Awaited<ReturnType<typeof createTestRende
 
 export interface TuiApp {
   readonly workspace: string
-  readonly type: (text: string) => Promise<void>
+  readonly type: (text: string) => ReturnType<typeof Effect.runPromise<void, never>>
   readonly pressEnter: () => void
   readonly pressEscape: () => void
   readonly pressArrow: (direction: "up" | "down" | "left" | "right") => void
@@ -100,7 +112,8 @@ export interface TuiApp {
   readonly settled: Effect.Effect<string>
   readonly reload: Effect.Effect<void>
   readonly waitModelRequests: (count: number) => Effect.Effect<void>
-  readonly setConnectionStatus: (status: InteractiveConnectionStatus) => Effect.Effect<void>
+  readonly waitSubmissionAdmissions: (count: number) => Effect.Effect<void>
+  readonly setConnectionState: (state: InteractiveConnectionState) => Effect.Effect<void>
   readonly modelRequestCount: Effect.Effect<number>
   readonly modelProviderHttpEnvelopeCounts: Effect.Effect<ProviderHttpEnvelopeCounts>
   readonly modelPrompts: ReturnType<LaneModels["promptsFor"]>
@@ -138,14 +151,17 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   }
   const lanes = options.lanes ?? [{ steps: options.script ?? [] }]
   const laneModels = yield* makeLaneModels(lanes)
-  const awaitModelRequests = (count: number, started = currentWallTime()): Effect.Effect<void> =>
+  const awaitModelRequests = (count: number): Effect.Effect<void> =>
     Effect.gen(function* () {
-      const requests = yield* laneModels.requestCountFor("Root")
-      if (requests >= count) return
-      if (currentWallTime() - started >= 10_000)
-        return yield* Effect.die(`tui-app timed out waiting for ${count} model requests; observed ${requests}`)
-      yield* Effect.sleep("5 millis")
-      return yield* awaitModelRequests(count, started)
+      const started = yield* Clock.currentTimeMillis
+      for (;;) {
+        const requests = yield* laneModels.requestCountFor("Root")
+        if (requests >= count) return
+        const now = yield* Clock.currentTimeMillis
+        if (now - started >= 10_000)
+          return yield* Effect.die(`tui-app timed out waiting for ${count} model requests; observed ${requests}`)
+        yield* Effect.sleep("5 millis")
+      }
     })
   const {
     repositoryLayer,
@@ -200,7 +216,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     waitModelRequests: awaitModelRequests,
   })
   const setup = yield* Effect.acquireRelease(
-    Effect.promise(() =>
+    Effect.tryPromise(() =>
       createTestRenderer({ width: options.width ?? 100, height: options.height ?? 30, exitOnCtrlC: false }),
     ),
     (created) => Effect.sync(() => created.renderer.destroy()).pipe(Effect.ignore),
@@ -209,13 +225,18 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   let nextThread = options.idStart ?? 0
   let nextTurn = options.idStart ?? 0
   let session: InteractiveSession.InteractiveSession | undefined
-  const initialConnectionStatus = options.initialConnectionStatus ?? "connected"
-  const connectionStatus = yield* SubscriptionRef.make<InteractiveConnectionStatus>(initialConnectionStatus)
+  const initialConnectionState = options.initialConnectionState ?? {
+    connectivity: "connected",
+    target: "runner",
+    participants: 1,
+  }
+  const connectionState = yield* SubscriptionRef.make<InteractiveConnectionState>(initialConnectionState)
   const interactiveConnection: InteractiveConnection = {
-    initialStatus: initialConnectionStatus,
-    statusChanges: SubscriptionRef.changes(connectionStatus),
+    initialState: initialConnectionState,
+    stateChanges: SubscriptionRef.changes(connectionState),
   }
   let selectionsLoaded = 0
+  let submissionAdmissions = 0
   const awaitSelectionLoaded = (count: number): Effect.Effect<void> =>
     Effect.suspend(() =>
       selectionsLoaded >= count
@@ -224,7 +245,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     )
   const runInteractive = interactiveTui({
     modeConfiguration: () => options.modeConfiguration,
-    makeRenderer: () => Promise.resolve(setup.renderer),
+    makeRenderer: () => Effect.succeed(setup.renderer),
     writeTerminalTitle: (sequence) => terminalTitles.push(sequence.slice(4, -1)),
   })
   const operationLayer = productLayer({
@@ -260,7 +281,9 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
           current.events((event) => {
             const delivered = options.mapInteractiveEvent?.(event) ?? event
             dispatch(delivered)
+            if (options.duplicateInteractiveEvent?.(delivered) === true) dispatch(delivered)
             if (delivered._tag === "ThreadViewSnapshot") selectionsLoaded += 1
+            if (delivered._tag === "SubmissionAdmitted") submissionAdmissions += 1
           }),
         selectThread: (threadId) =>
           options.initialThreadSelected === true && threadId === settings.threadId
@@ -304,12 +327,13 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   )
   const waitFor = (predicate: (frame: string) => boolean, timeoutMillis: number, description: string) =>
     Effect.gen(function* () {
-      const started = currentWallTime()
+      const started = yield* Clock.currentTimeMillis
       for (;;) {
         yield* flushRenderer
         const captured = frame()
         if (predicate(captured)) return captured
-        if (currentWallTime() - started >= timeoutMillis) {
+        const now = yield* Clock.currentTimeMillis
+        if (now - started >= timeoutMillis) {
           return yield* Effect.die(`tui-app timed out waiting for ${description}\n${captured}`)
         }
         yield* Effect.sleep("20 millis")
@@ -317,11 +341,12 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     })
   const waitTerminalTitle = (predicate: (title: string) => boolean, timeoutMillis: number) =>
     Effect.gen(function* () {
-      const started = currentWallTime()
+      const started = yield* Clock.currentTimeMillis
       for (;;) {
         const title = terminalTitles.at(-1)
         if (title !== undefined && predicate(title)) return title
-        if (currentWallTime() - started >= timeoutMillis)
+        const now = yield* Clock.currentTimeMillis
+        if (now - started >= timeoutMillis)
           return yield* Effect.die(`tui-app timed out waiting on terminal title\n${title ?? "<unset>"}`)
         yield* Effect.sleep("20 millis")
       }
@@ -341,43 +366,44 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
       modifiers?.alt === true ? setup.mockInput.pressKey(`\u001b${key}`) : setup.mockInput.pressKey(key, modifiers),
     pressPageUp: Effect.gen(function* () {
       setup.mockInput.pressKey("\u001b[5~")
-      yield* Effect.promise(() => setup.flush())
+      yield* Effect.tryPromise(() => setup.flush()).pipe(Effect.orDie)
       yield* Effect.yieldNow
-      yield* Effect.promise(() => setup.flush())
+      yield* Effect.tryPromise(() => setup.flush()).pipe(Effect.orDie)
     }).pipe(Effect.asVoid),
     pressPageDown: Effect.gen(function* () {
       setup.mockInput.pressKey("\u001b[6~")
-      yield* Effect.promise(() => setup.flush())
+      yield* Effect.tryPromise(() => setup.flush()).pipe(Effect.orDie)
       yield* Effect.yieldNow
-      yield* Effect.promise(() => setup.flush())
+      yield* Effect.tryPromise(() => setup.flush()).pipe(Effect.orDie)
     }).pipe(Effect.asVoid),
     clickText: (text) =>
       Effect.gen(function* () {
-        yield* Effect.promise(() => setup.flush())
+        yield* Effect.tryPromise(() => setup.flush()).pipe(Effect.orDie)
         const lines = frame().split("\n")
         const y = lines.findIndex((line) => line.includes(text))
         const x = y < 0 ? -1 : lines[y]!.indexOf(text)
         if (x < 0 || y < 0) return yield* Effect.die(`tui-app could not click missing text: ${text}`)
-        yield* Effect.promise(() => setup.mockMouse.click(x, y))
+        yield* Effect.tryPromise(() => setup.mockMouse.click(x, y)).pipe(Effect.orDie)
       }),
     clickComposer: Effect.gen(function* () {
-      yield* Effect.promise(() => setup.flush())
-      yield* Effect.promise(() => setup.mockMouse.click(2, (options.height ?? 30) - 2))
-    }).pipe(Effect.asVoid),
+      yield* Effect.tryPromise(() => setup.flush())
+      yield* Effect.tryPromise(() => setup.mockMouse.click(2, (options.height ?? 30) - 2))
+    }).pipe(Effect.orDie, Effect.asVoid),
     submit: (prompt) =>
       session?.submit(prompt, "medium", [], undefined).pipe(Effect.orDie) ??
       Effect.die("TUI interactive session is not ready"),
     frame,
-    nextFrame: Effect.promise(() => setup.flush()).pipe(Effect.andThen(Effect.sync(frame))),
+    nextFrame: Effect.tryPromise(() => setup.flush()).pipe(Effect.orDie, Effect.andThen(Effect.sync(frame))),
     spans: () => setup.captureSpans(),
     thread: (threadId) => threads.get(Thread.ThreadId.make(threadId)),
     waitThread: (threadId, predicate, timeoutMillis = 10_000) =>
       Effect.gen(function* () {
-        const started = currentWallTime()
+        const started = yield* Clock.currentTimeMillis
         for (;;) {
           const thread = yield* threads.get(Thread.ThreadId.make(threadId))
           if (thread !== undefined && predicate(thread)) return thread
-          if (currentWallTime() - started >= timeoutMillis)
+          const now = yield* Clock.currentTimeMillis
+          if (now - started >= timeoutMillis)
             return yield* Effect.die(`tui-app timed out waiting on thread ${threadId}`)
           yield* Effect.sleep("20 millis")
         }
@@ -386,12 +412,13 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     queue,
     waitTranscript: (turnId, predicate, timeoutMillis = 10_000) =>
       Effect.gen(function* () {
-        const started = currentWallTime()
+        const started = yield* Clock.currentTimeMillis
         for (;;) {
           const projection = yield* transcripts?.get(turnId) ??
             Effect.die("TUI transcript inspection was not requested")
           if (projection !== undefined && predicate(projection)) return projection
-          if (currentWallTime() - started >= timeoutMillis)
+          const now = yield* Clock.currentTimeMillis
+          if (now - started >= timeoutMillis)
             return yield* Effect.die(`tui-app timed out waiting on the durable transcript for ${turnId}`)
           yield* Effect.sleep("20 millis")
         }
@@ -412,7 +439,13 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
       yield* awaitSelectionLoaded(before + 1)
     }),
     waitModelRequests: awaitModelRequests,
-    setConnectionStatus: (status) => SubscriptionRef.set(connectionStatus, status),
+    waitSubmissionAdmissions: (count) =>
+      Effect.suspend(() =>
+        submissionAdmissions >= count
+          ? Effect.void
+          : Effect.sleep("10 millis").pipe(Effect.andThen(app.waitSubmissionAdmissions(count))),
+      ),
+    setConnectionState: (state) => SubscriptionRef.set(connectionState, state),
     modelRequestCount: laneModels.requestCountFor("Root"),
     modelProviderHttpEnvelopeCounts: laneModels.providerHttpEnvelopeCountsFor("Root"),
     modelPrompts: laneModels.promptsFor("Root"),
@@ -425,7 +458,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     quit: Effect.gen(function* () {
       yield* settled
       setup.mockInput.pressCtrlC()
-      yield* Effect.promise(() => setup.flush())
+      yield* Effect.tryPromise(() => setup.flush()).pipe(Effect.orDie)
       setup.mockInput.pressCtrlC()
       yield* Fiber.join(operationFiber).pipe(Effect.asVoid, Effect.orDie)
     }),

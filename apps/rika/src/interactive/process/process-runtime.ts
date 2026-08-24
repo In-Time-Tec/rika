@@ -70,18 +70,18 @@ export const makeProcessRuntime = (runtime: Runtime) => {
         Effect.gen(function* () {
           yield* Effect.logInfo("tui.teardown.started")
           loop.closed = true
-          Logging.settleActiveLogs()
           loop.renderer?.releaseTerminal()
           if (loop.initialization !== undefined) yield* Fiber.await(loop.initialization)
           if (showGoodbye) ProcessSignals.writeGoodbye(loop.model)
           yield* Effect.logInfo("tui.teardown.completed")
+          yield* Logging.settleActiveLogs
         }),
       )
     })
-  const close = (exitCode?: number, showGoodbye = true) => {
+  const close = (exitCode?: number, showGoodbye = true, lastInterruptAt?: number) => {
     const current = Effect.runSync(SubscriptionRef.get(loop.lifecycle))
     if (current._tag === "Quitting" || current._tag === "TornDown") return
-    Effect.runSync(SubscriptionRef.set(loop.lifecycle, { _tag: "Quitting", lastInterruptAt: undefined }))
+    Effect.runSync(SubscriptionRef.set(loop.lifecycle, { _tag: "Quitting", lastInterruptAt }))
     if (exitCode !== undefined) process.exitCode = exitCode
     fork(
       Effect.raceFirst(
@@ -127,8 +127,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     }
     if (lifecycle._tag === "Running" || lifecycle._tag === "Cancelling")
       loop.renderer?.surface.showToast("Quitting… press ctrl+c again to force quit")
-    yield* SubscriptionRef.set(loop.lifecycle, { _tag: "Quitting", lastInterruptAt: now })
-    close(tuiSignalExitCode("SIGINT"))
+    close(tuiSignalExitCode("SIGINT"), true, now)
   })
   const terminate = () => close(tuiSignalExitCode("SIGTERM"))
   const hangup = () => close(tuiSignalExitCode("SIGHUP"), false)

@@ -1,7 +1,7 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Sandbox } from "e2b"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, FileSystem, Layer, Schema } from "effect"
 import { Argument, Command } from "effect/unstable/cli"
 
 const ImageManifest = Schema.Struct({
@@ -62,6 +62,7 @@ const smoke = Effect.fn("ExecutorImageSmoke.run")(function* (
   buildId: string,
   manifestSha256: string,
 ) {
+  const fileSystem = yield* FileSystem.FileSystem
   const environment = {
     HOME: "/home/rika-executor",
     LANG: "en_US.UTF-8",
@@ -75,9 +76,9 @@ const smoke = Effect.fn("ExecutorImageSmoke.run")(function* (
   const environmentCommand = Object.entries(environment)
     .map(([name, value]) => `${name}=${value}`)
     .join(" ")
-  const manifest = yield* Effect.tryPromise(() =>
-    Bun.file(new URL("../../../infra/e2b/executor-v1/tool-manifest.json", import.meta.url)).text(),
-  ).pipe(Effect.flatMap(decodeImageManifest))
+  const manifest = yield* fileSystem
+    .readFileString(new URL("../../../infra/e2b/executor-v1/tool-manifest.json", import.meta.url).pathname)
+    .pipe(Effect.flatMap(decodeImageManifest))
   yield* Effect.acquireUseRelease(
     Effect.tryPromise(() =>
       Sandbox.create(`${templateId}:${buildId}`, {
@@ -102,7 +103,7 @@ const smoke = Effect.fn("ExecutorImageSmoke.run")(function* (
           }),
         ).pipe(Effect.flatMap((command) => decodeDoctorResult(command.stdout)))
         const artifact = yield* encodeSmokeArtifact({ ...result, sandboxId: sandbox.sandboxId })
-        yield* Effect.tryPromise(() => Bun.write("executor-smoke.json", `${artifact}\n`))
+        yield* fileSystem.writeFileString("executor-smoke.json", `${artifact}\n`)
         if (!acceptsDoctorResult(result, buildId, manifestSha256, manifest)) {
           const failed = result.checks.filter(({ ok }) => !ok).map(({ name, detail }) => `${name}: ${detail}`)
           return yield* SmokeError.make({

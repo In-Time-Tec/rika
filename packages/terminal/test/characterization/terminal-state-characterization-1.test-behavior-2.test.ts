@@ -260,43 +260,24 @@ test("does not infer steering disposition for any turn when one turn settles", (
   const completed = update(busy, { _tag: "ExecutionCompleted", turnId: "turn-a" })
   expect(completed.pendingSteering).toEqual(busy.pendingSteering)
 })
-test("binds keyed submission drafts and restores only the cancelled turn's draft", () => {
-  let model = update({ ...initial("/work"), input: "first prompt" }, { _tag: "Submitted", submissionId: "sub-a" })
-  model = { ...model, busy: false, activity: undefined }
-  model = update({ ...model, input: "second prompt" }, { _tag: "Submitted", submissionId: "sub-b" })
-  model = update(model, { _tag: "SubmissionAdmitted", turnId: "turn-a", submissionId: "sub-a" })
-  model = update(model, { _tag: "SubmissionAdmitted", turnId: "turn-b", submissionId: "sub-b" })
-  model = update(model, { _tag: "TurnStarted", turnId: "turn-a", prompt: "first prompt" })
-  expect(model.submittedDrafts).toEqual([
-    { input: "first prompt", attachments: [], cursor: 0, submissionId: "sub-a", turnId: "turn-a" },
-    { input: "second prompt", attachments: [], cursor: 0, submissionId: "sub-b", turnId: "turn-b" },
-  ])
-  const cancelled = update(model, {
-    _tag: "ExecutionCancelled",
-    turnId: "turn-a",
-    agentResponseArrived: false,
-  })
-  expect(cancelled.input).toBe("first prompt")
-  expect(cancelled.submittedDrafts).toEqual([
-    { input: "second prompt", attachments: [], cursor: 0, submissionId: "sub-b", turnId: "turn-b" },
+test("blocks a duplicate submission while admission is pending", () => {
+  const submitted = update({ ...initial("/work"), input: "first prompt" }, { _tag: "Submitted", submissionId: "sub-a" })
+  const duplicate = update({ ...submitted, input: "edited prompt" }, { _tag: "Submitted", submissionId: "sub-b" })
+  expect(duplicate.submittedDrafts).toEqual([
+    { input: "first prompt", attachments: [], cursor: 0, submissionId: "sub-a" },
   ])
 })
 
-test("echoes an idle submission immediately and reconciles admission and start in place", () => {
+test("keeps the captured draft visible until active admission and then clears it", () => {
   const submitted = update(
     { ...initial("/work"), input: "optimistic prompt", cursor: 17 },
     { _tag: "Submitted", submissionId: "sub-optimistic" },
   )
-  expect(submitted.entries).toEqual([{ role: "user", text: "optimistic prompt" }])
-  expect(submitted.items).toEqual([
-    {
-      _tag: "Entry",
-      index: 0,
-      id: "submission:sub-optimistic:user",
-      submissionId: "sub-optimistic",
-      provisional: true,
-    },
-  ])
+  expect(submitted.input).toBe("optimistic prompt")
+  expect(submitted.entries).toEqual([])
+  expect(submitted.items).toEqual([])
+  expect(submitted.busy).toBe(false)
+  expect(submitted.activity).toBeUndefined()
 
   const admitted = update(submitted, {
     _tag: "SubmissionAdmitted",
@@ -304,6 +285,7 @@ test("echoes an idle submission immediately and reconciles admission and start i
     status: "active",
     submissionId: "sub-optimistic",
   })
+  expect(admitted.input).toBe("")
   expect(admitted.entries).toEqual([{ role: "user", text: "optimistic prompt", turnId: "turn-optimistic" }])
   expect(admitted.items).toEqual([
     {
@@ -338,6 +320,25 @@ test("echoes an idle submission immediately and reconciles admission and start i
       submissionId: "sub-optimistic",
     },
   ])
+})
+
+test("preserves composer edits made before queued admission", () => {
+  const submitted = update(
+    { ...initial("/work"), busy: true, activeTurnId: "active", input: "captured", cursor: 8 },
+    { _tag: "Submitted", submissionId: "sub-queued" },
+  )
+  const admitted = update(
+    { ...submitted, input: "captured edited", cursor: 15 },
+    {
+      _tag: "SubmissionAdmitted",
+      turnId: "queued",
+      status: "queued",
+      submissionId: "sub-queued",
+    },
+  )
+  expect(admitted.input).toBe("captured edited")
+  expect(admitted.queue).toEqual([{ id: "queued", prompt: "captured", provisional: true }])
+  expect(admitted.entries).toEqual([])
 })
 
 test("reconciles a start that arrives before admission without duplicating the optimistic row", () => {
@@ -382,8 +383,8 @@ test("restores a rejected optimistic submission only when the composer is empty"
     { _tag: "SubmissionRejected", message: "Queue full", submissionId: "sub-occupied" },
   )
   expect(occupied.input).toBe("new composer text")
-  expect(occupied.entries).toEqual([{ role: "user", text: "do not lose me" }])
-  expect(occupied.items[0]).not.toMatchObject({ provisional: true })
+  expect(occupied.entries).toEqual([])
+  expect(occupied.items.at(-1)).toMatchObject({ _tag: "Block" })
 })
 
 test("cancelling before turn start restores or settles the optimistic row without clobbering typing", () => {

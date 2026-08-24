@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
-import { ConfigProvider, Effect, FileSystem, Layer, Path } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
+import { ConfigProvider, Crypto, Effect, Encoding, FileSystem, Layer, Path } from "effect"
+import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as ReleaseUpdate from "../src/release/release-update"
 
@@ -11,29 +11,31 @@ const releaseApiUrl = "https://releases.test/api/latest"
 const releaseBaseUrl = "https://releases.test/download"
 const archiveFile = ReleaseUpdate.archiveFileName(latest, target)
 
-const digestOf = (bytes: Uint8Array) => new Bun.CryptoHasher("sha256").update(bytes).digest("hex")
+const digestOf = Effect.fn("ReleaseUpdateProc.digestOf")(function* (bytes: Uint8Array) {
+  const crypto = yield* Crypto.Crypto
+  return Encoding.encodeHex(yield* crypto.digest("SHA-256", bytes))
+})
 
 const withPlatform = <A, E, R>(body: Effect.Effect<A, E, R>) =>
   Effect.scoped(
     Effect.gen(function* () {
       const scope = yield* Effect.scope
-      const context = yield* Layer.buildWithScope(Layer.merge(BunServices.layer, FetchHttpClient.layer), scope)
+      const context = yield* Layer.buildWithScope(BunServices.layer, scope)
       return yield* Effect.provide(body, context)
     }),
   )
 
-const stubFetch = (routes: Readonly<Record<string, string | Uint8Array>>): typeof globalThis.fetch => {
-  const handler = (input: string | URL | Request) => {
-    let url: string
-    if (typeof input === "string") url = input
-    else if (input instanceof URL) url = input.toString()
-    else url = input.url
-    const body = routes[url]
-    if (body === undefined) return Promise.reject(new TypeError(`fetch failed: ${url}`))
-    return Promise.resolve(new Response(body))
-  }
-  return Object.assign(handler, { preconnect: globalThis.fetch.preconnect })
-}
+const stubHttpClient = (routes: Readonly<Record<string, string | Uint8Array>>) =>
+  HttpClient.make((request) => {
+    const body = routes[request.url]
+    return body === undefined
+      ? Effect.fail(
+          new HttpClientError.HttpClientError({
+            reason: new HttpClientError.TransportError({ request, description: `No route for ${request.url}` }),
+          }),
+        )
+      : Effect.succeed(HttpClientResponse.fromWeb(request, new Response(body)))
+  })
 
 const buildArchive = Effect.fn("ReleaseUpdateProc.buildArchive")(function* (options: {
   readonly directory: string
@@ -93,7 +95,7 @@ const runUpdate = (options: {
       host: { platform: "linux", architecture: "x64" },
     }),
   ).pipe(
-    Effect.provideService(FetchHttpClient.Fetch, stubFetch(options.routes)),
+    Effect.provideService(HttpClient.HttpClient, stubHttpClient(options.routes)),
     Effect.provideService(
       ConfigProvider.ConfigProvider,
       ConfigProvider.fromEnv({
@@ -119,7 +121,7 @@ it.effect("replaces a verified install in one rename and keeps the command on PA
         executable: install.binary,
         routes: {
           [releaseApiUrl]: `{"tag_name":"v${latest}"}`,
-          [`${releaseBaseUrl}/SHA256SUMS`]: `${digestOf(archive)}  ${archiveFile}\n`,
+          [`${releaseBaseUrl}/SHA256SUMS`]: `${yield* digestOf(archive)}  ${archiveFile}\n`,
           [`${releaseBaseUrl}/${archiveFile}`]: archive,
         },
       })
@@ -152,7 +154,7 @@ it.effect("leaves the working install in place when the downloaded archive has n
         executable: install.binary,
         routes: {
           [releaseApiUrl]: `{"tag_name":"v${latest}"}`,
-          [`${releaseBaseUrl}/SHA256SUMS`]: `${digestOf(archive)}  ${archiveFile}\n`,
+          [`${releaseBaseUrl}/SHA256SUMS`]: `${yield* digestOf(archive)}  ${archiveFile}\n`,
           [`${releaseBaseUrl}/${archiveFile}`]: archive,
         },
       })
@@ -181,7 +183,7 @@ it.effect("accepts a one-executable archive and removes private runtimes", () =>
         executable: install.binary,
         routes: {
           [releaseApiUrl]: `{"tag_name":"v${latest}"}`,
-          [`${releaseBaseUrl}/SHA256SUMS`]: `${digestOf(archive)}  ${archiveFile}\n`,
+          [`${releaseBaseUrl}/SHA256SUMS`]: `${yield* digestOf(archive)}  ${archiveFile}\n`,
           [`${releaseBaseUrl}/${archiveFile}`]: archive,
         },
       })

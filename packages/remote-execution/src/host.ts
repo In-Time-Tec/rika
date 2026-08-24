@@ -6,6 +6,7 @@ import * as HostedObservability from "@rika/product/hosted-observability"
 import type { WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
 import {
   Cause,
+  Config as EffectConfig,
   Context,
   Crypto,
   Deferred,
@@ -14,6 +15,7 @@ import {
   Fiber,
   FileSystem,
   Layer,
+  ManagedRuntime,
   Option,
   Path,
   Queue,
@@ -26,7 +28,7 @@ import {
 import { ChildProcessSpawner } from "effect/unstable/process"
 import * as Socket from "effect/unstable/socket/Socket"
 import { BindingProxyError } from "./binding-proxy"
-import { CellError, State as CellState, type State as CellStateValue } from "./cells"
+import { CellError, State as CellState, terminalOutcome, type State as CellStateValue } from "./cells"
 import * as HostedKernel from "./hosted-kernel"
 import {
   Machine,
@@ -126,7 +128,12 @@ const executorStateDirectory = "/var/lib/rika-executor"
 const directoryMode = 0o700
 const fileMode = 0o600
 const sandboxIdPath = "/run/e2b/.E2B_SANDBOX_ID"
-const workspaceRoot = Bun.env.RIKA_EXECUTOR_WORKSPACE_ROOT || RemoteRepositoryRoot
+const workspaceRootConfig = EffectConfig.string("RIKA_EXECUTOR_WORKSPACE_ROOT").pipe(
+  EffectConfig.withDefault(RemoteRepositoryRoot),
+)
+const workspaceRoot = workspaceRootConfig.pipe(
+  Effect.mapError(() => HostError.make({ message: "RIKA_EXECUTOR_WORKSPACE_ROOT is invalid" })),
+)
 const workspaceUser = "rika-workspace"
 
 const cellCorrelation = (request: CellRequest) => ({
@@ -134,22 +141,30 @@ const cellCorrelation = (request: CellRequest) => ({
   turnId: request.turnId,
   runId: request.runId,
   operationId: request.operationKey,
-  assignmentId: request.access.fence.assignmentId,
-  sandboxId: request.access.fence.instanceId,
+  cellId: request.toolCallId,
 })
 
-const sandboxInstanceId = () =>
-  Bun.file(sandboxIdPath)
-    .text()
-    .then((value) => value.trim())
-    .catch(() => Bun.env.E2B_SANDBOX_ID ?? "")
+const sandboxInstanceId = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem
+  return yield* fileSystem.readFileString(sandboxIdPath).pipe(
+    Effect.map((value) => value.trim()),
+    Effect.catch(() => EffectConfig.string("E2B_SANDBOX_ID").pipe(EffectConfig.withDefault(""))),
+  )
+})
 
-const required = (name: string) => {
-  const value = Bun.env[name]
-  return value === undefined || value.length === 0
-    ? Effect.fail(HostError.make({ message: `${name} is required` }))
-    : Effect.succeed(value)
-}
+const stopServerAdapter = (server: ReturnType<typeof Bun.serve>) =>
+  Effect.raceFirst(
+    Effect.callback<void>((resume) => {
+      server.stop(false).then(
+        () => resume(Effect.void),
+        (error) => resume(Effect.die(error)),
+      )
+    }),
+    Effect.sleep("1 second").pipe(Effect.andThen(Effect.tryPromise(() => server.stop(true))), Effect.orDie),
+  )
+
+const required = (name: string) =>
+  EffectConfig.nonEmptyString(name).pipe(Effect.mapError(() => HostError.make({ message: `${name} is required` })))
 
 const executorIdentity = Effect.gen(function* () {
   const target = yield* Effect.flatMap(required("RIKA_EXECUTOR_TARGET"), (value) =>
@@ -163,16 +178,15 @@ const executorIdentity = Effect.gen(function* () {
   const assignmentGeneration = Number(generationText)
   if (!Number.isSafeInteger(assignmentGeneration) || assignmentGeneration < 1)
     return yield* HostError.make({ message: "RIKA_EXECUTOR_GENERATION is invalid" })
-  const repositoryId = Bun.env.RIKA_EXECUTOR_REPOSITORY_ID
-  const repository =
-    repositoryId === undefined
-      ? null
-      : {
-          repositoryId,
-          owner: yield* required("RIKA_EXECUTOR_REPOSITORY_OWNER"),
-          name: yield* required("RIKA_EXECUTOR_REPOSITORY_NAME"),
-          commitSha: yield* required("RIKA_EXECUTOR_COMMIT_SHA"),
-        }
+  const repositoryId = yield* EffectConfig.option(EffectConfig.string("RIKA_EXECUTOR_REPOSITORY_ID"))
+  const repository = Option.isNone(repositoryId)
+    ? null
+    : {
+        repositoryId: repositoryId.value,
+        owner: yield* required("RIKA_EXECUTOR_REPOSITORY_OWNER"),
+        name: yield* required("RIKA_EXECUTOR_REPOSITORY_NAME"),
+        commitSha: yield* required("RIKA_EXECUTOR_COMMIT_SHA"),
+      }
   return {
     target,
     ownerId: yield* required("RIKA_EXECUTOR_OWNER_ID"),
@@ -187,8 +201,10 @@ const executorIdentity = Effect.gen(function* () {
     repository,
     lifecycle: "resume",
     environmentDigest: yield* required("RIKA_EXECUTOR_ENVIRONMENT_DIGEST"),
-    setupCache: Bun.env.RIKA_EXECUTOR_SETUP_CACHE === "1",
-    stateDirectory: Bun.env.RIKA_EXECUTOR_STATE_DIRECTORY || executorStateDirectory,
+    setupCache: (yield* EffectConfig.string("RIKA_EXECUTOR_SETUP_CACHE").pipe(EffectConfig.withDefault("0"))) === "1",
+    stateDirectory: yield* EffectConfig.string("RIKA_EXECUTOR_STATE_DIRECTORY").pipe(
+      EffectConfig.withDefault(executorStateDirectory),
+    ),
   } satisfies Identity
 })
 
@@ -464,7 +480,7 @@ const prepare = (
     ): Effect.Effect<
       RepositoryCheckoutWire | null,
       HostError | WorkspaceError,
-      Crypto.Crypto | FileSystem.FileSystem | import("effect").Scope.Scope
+      ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | FileSystem.FileSystem | import("effect").Scope.Scope
     > {
       return Effect.gen(function* () {
         yield* writer(
@@ -944,6 +960,56 @@ const dispatchWorkspace = Effect.fn("Host.dispatchWorkspace")(function* (
   return true
 })
 
+const cancelCell = Effect.fn("ExecutorHost.cancelCell")(function* (input: {
+  readonly message: Extract<IncomingMessage, { readonly _tag: "CellCancel" }>
+  readonly access: CellRequest["access"]
+  readonly frames: Ref.Ref<Map<string, ReadonlyArray<CellLifecycleFrame>>>
+  readonly cells: HostedKernel.Interface
+  readonly emit: (access: CellRequest["access"], frame: CellLifecycleFrame) => Effect.Effect<boolean, HostError>
+}) {
+  const key = executionKey(input.message.operationKey, input.message.attempt)
+  const known = (yield* Ref.get(input.frames)).get(key)
+  const accepted = known?.find((frame) => frame._tag === "Accepted")
+  if (
+    !sameAccess(input.access, input.message.access) ||
+    known === undefined ||
+    accepted === undefined ||
+    accepted.attribution.attempt !== input.message.attempt
+  )
+    return yield* HostError.make({ message: "Cell cancellation has a stale executor fence" })
+  const response = yield* input.cells
+    .cancel(input.message.operationKey, input.message.attempt)
+    .pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
+  const interrupted = (yield* Ref.get(input.frames)).get(key)
+  if (interrupted !== undefined && !interrupted.some((frame) => frame._tag === "Terminal")) {
+    yield* input.emit(input.message.access, {
+      _tag: "Terminal",
+      attribution: accepted.attribution,
+      cursor: interrupted.length + 1,
+      outcome: terminalOutcome(response),
+      response,
+    })
+  }
+})
+
+const admitCell = Effect.fn("ExecutorHost.admitCell")(function* (input: {
+  readonly request: CellRequest
+  readonly accepted: Extract<CellLifecycleFrame, { readonly _tag: "Accepted" }>
+  readonly frames: Ref.Ref<Map<string, ReadonlyArray<CellLifecycleFrame>>>
+  readonly cells: HostedKernel.Interface
+  readonly emit: (access: CellRequest["access"], frame: CellLifecycleFrame) => Effect.Effect<boolean, HostError>
+}) {
+  yield* input.cells.admit(input.request)
+  const key = executionKey(input.request.operationKey, input.request.attempt)
+  const admittedFrames = (yield* Ref.get(input.frames)).get(key) ?? []
+  if (!admittedFrames.some((frame) => frame._tag === "Started"))
+    yield* input.emit(input.request.access, {
+      _tag: "Started",
+      attribution: input.accepted.attribution,
+      cursor: admittedFrames.length + 1,
+    })
+})
+
 const consumeApi = (
   config: Config,
   incoming: Queue.Queue<IncomingMessage>,
@@ -1116,7 +1182,7 @@ const consumeApi = (
                   repositoryUrl: wire.repositoryUrl,
                   expiresAt: wire.expiresAt,
                 },
-                root: workspaceRoot,
+                root: yield* workspaceRoot,
               })
             : { _tag: "Failed" as const, kind: "stale" as const, message: "Branch credential scope is stale" }
           yield* writer(
@@ -1167,92 +1233,113 @@ const consumeApi = (
         const key = executionKey(message.request.operationKey, message.request.attempt)
         const retained = (yield* Ref.get(frames)).get(key)
         if (retained !== undefined) {
-          const accepted = retained.find((frame) => frame._tag === "Accepted")
-          if (accepted === undefined || !sameAttribution(accepted.attribution, identity))
+          const retainedAccepted = retained.find((frame) => frame._tag === "Accepted")
+          if (retainedAccepted === undefined || !sameAttribution(retainedAccepted.attribution, identity))
             return yield* HostError.make({ message: "Cell operation identity conflicts with retained execution" })
-          if (!retained.some((frame) => frame._tag === "Terminal") && !(yield* Ref.get(operations)).has(key)) {
-            const response = {
-              _tag: "DomainFailure" as const,
-              failure: { kind: "unknown", message: "Cell operation outcome is unknown after executor restart" },
-            }
-            yield* HostedObservability.unknownOutcome(cellCorrelation(message.request))
-            yield* emit(message.request.access, {
-              _tag: "Terminal",
-              attribution: identity,
-              cursor: retained.length + 1,
-              outcome: "unknown",
-              response,
-            })
-          } else
+          if (retained.some((frame) => frame._tag === "Terminal") || (yield* Ref.get(operations)).has(key)) {
             yield* Effect.forEach(
               retained,
               (frame) => writer(encodeExecutorMessage({ _tag: "CellLifecycle", access, frame })),
               { discard: true },
             )
-          return
+            return
+          }
         }
-        const accepted = { _tag: "Accepted", attribution: identity, cursor: 1 } as const
-        yield* emit(message.request.access, accepted)
-        const operation = Effect.gen(function* () {
-          yield* emit(message.request.access, { _tag: "Started", attribution: accepted.attribution, cursor: 2 })
-          const secrets = phase.redactedNames.flatMap((name) => {
-            const value = phase.values[name]
-            return value === undefined ? [] : [value]
-          })
-          const response = yield* HostedObservability.observe(
-            "cell",
-            cellCorrelation(message.request),
-            environmentAccess
-              .withPermits(1)(
-                Effect.gen(function* () {
-                  const applied = yield* Ref.get(appliedEnvironment)
-                  const previousDigest = applied.get(message.request.sessionId)
-                  if (previousDigest !== phase.digest) {
-                    for (const name of Object.keys(executionEnvironment)) delete executionEnvironment[name]
-                    Object.assign(executionEnvironment, phase.values)
-                    if (previousDigest !== undefined) yield* cells.restart(message.request.sessionId)
-                    yield* Ref.set(appliedEnvironment, new Map(applied).set(message.request.sessionId, phase.digest))
-                  }
-                  const result = yield* cells.execute(message.request, (chunk) =>
-                    Effect.gen(function* () {
-                      const output = redactOutput(chunk.text, secrets)
-                      const outputFrames = (yield* Ref.get(frames)).get(key) ?? []
-                      if (outputFrames.filter((frame) => frame._tag === "Output").length >= 16) return
-                      yield* emit(message.request.access, {
-                        _tag: "Output",
-                        attribution: accepted.attribution,
-                        cursor: outputFrames.length + 1,
-                        stream: chunk.stream,
-                        text: output.text,
-                        redacted: true,
-                        truncated: output.truncated,
-                      }).pipe(Effect.ignore)
-                    }),
-                  )
-                  return redactResponse(result, secrets)
-                }),
-              )
-              .pipe(
-                Effect.catchCause((cause) =>
-                  Cause.hasInterruptsOnly(cause)
-                    ? Effect.failCause(cause)
-                    : Effect.succeed({
-                        _tag: "DomainFailure" as const,
-                        failure: { kind: "execution", message: "Cell execution failed" },
-                      }),
-                ),
-              ),
-            (result) => (result._tag === "DomainFailure" ? "failure" : "success"),
-          )
-          const completedFrames = (yield* Ref.get(frames)).get(key) ?? []
+        const accepted =
+          retained?.find(
+            (frame): frame is Extract<CellLifecycleFrame, { readonly _tag: "Accepted" }> => frame._tag === "Accepted",
+          ) ?? ({ _tag: "Accepted", attribution: identity, cursor: 1 } as const)
+        if (retained === undefined) yield* emit(message.request.access, accepted)
+        const admission = yield* admitCell({ request: message.request, accepted, frames, cells, emit }).pipe(
+          Effect.match({
+            onFailure: (error) =>
+              ({
+                _tag: "Failure" as const,
+                response: {
+                  _tag: "DomainFailure" as const,
+                  failure: { kind: error._tag === "CellError" ? error.kind : "execution", message: error.message },
+                },
+              }) satisfies { readonly _tag: "Failure"; readonly response: CellResponse },
+            onSuccess: () => ({ _tag: "Success" as const }),
+          }),
+        )
+        if (admission._tag === "Failure") {
+          const admittedFrames = (yield* Ref.get(frames)).get(key) ?? []
           yield* emit(message.request.access, {
             _tag: "Terminal",
             attribution: accepted.attribution,
-            cursor: completedFrames.length + 1,
-            outcome: response._tag === "Success" ? "completed" : "failed",
-            response,
+            cursor: admittedFrames.length + 1,
+            outcome: terminalOutcome(admission.response),
+            response: admission.response,
           })
-        }).pipe(
+          return
+        }
+        const operation = Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            const secrets = phase.redactedNames.flatMap((name) => {
+              const value = phase.values[name]
+              return value === undefined ? [] : [value]
+            })
+            const response = yield* restore(
+              HostedObservability.observe(
+                "cell_execution",
+                cellCorrelation(message.request),
+                environmentAccess
+                  .withPermits(1)(
+                    Effect.gen(function* () {
+                      const applied = yield* Ref.get(appliedEnvironment)
+                      const previousDigest = applied.get(message.request.sessionId)
+                      if (previousDigest !== phase.digest) {
+                        for (const name of Object.keys(executionEnvironment)) delete executionEnvironment[name]
+                        Object.assign(executionEnvironment, phase.values)
+                        if (previousDigest !== undefined) yield* cells.restart(message.request.sessionId)
+                        yield* Ref.set(
+                          appliedEnvironment,
+                          new Map(applied).set(message.request.sessionId, phase.digest),
+                        )
+                      }
+                      const result = yield* cells.execute(message.request, (chunk) =>
+                        Effect.gen(function* () {
+                          const output = redactOutput(chunk.text, secrets)
+                          const outputFrames = (yield* Ref.get(frames)).get(key) ?? []
+                          if (outputFrames.filter((frame) => frame._tag === "Output").length >= 16) return
+                          yield* emit(message.request.access, {
+                            _tag: "Output",
+                            attribution: accepted.attribution,
+                            cursor: outputFrames.length + 1,
+                            stream: chunk.stream,
+                            text: output.text,
+                            redacted: true,
+                            truncated: output.truncated,
+                          }).pipe(Effect.ignore)
+                        }),
+                      )
+                      return redactResponse(result, secrets)
+                    }),
+                  )
+                  .pipe(
+                    Effect.catchCause((cause) =>
+                      Cause.hasInterruptsOnly(cause)
+                        ? Effect.failCause(cause)
+                        : Effect.succeed({
+                            _tag: "DomainFailure" as const,
+                            failure: { kind: "execution", message: "Cell execution failed" },
+                          }),
+                    ),
+                  ),
+                (result) => (result._tag === "DomainFailure" ? "failure" : "success"),
+              ),
+            )
+            const completedFrames = (yield* Ref.get(frames)).get(key) ?? []
+            yield* emit(message.request.access, {
+              _tag: "Terminal",
+              attribution: accepted.attribution,
+              cursor: completedFrames.length + 1,
+              outcome: terminalOutcome(response),
+              response,
+            })
+          }),
+        ).pipe(
           Effect.ensuring(
             Ref.update(operations, (values) => {
               const next = new Map(values)
@@ -1270,32 +1357,7 @@ const consumeApi = (
         const access = yield* runtime.access.pipe(
           Effect.mapError((cause) => HostError.make({ message: cause.message })),
         )
-        const key = executionKey(message.operationKey, message.attempt)
-        const known = (yield* Ref.get(frames)).get(key)
-        const started = known?.find((frame) => frame._tag === "Started")
-        if (
-          !sameAccess(access, message.access) ||
-          known === undefined ||
-          started === undefined ||
-          started.attribution.attempt !== message.attempt
-        )
-          return yield* HostError.make({ message: "Cell cancellation has a stale executor fence" })
-        const fiber = (yield* Ref.get(operations)).get(key)
-        if (fiber !== undefined) yield* Fiber.interrupt(fiber)
-        const interrupted = (yield* Ref.get(frames)).get(key)
-        if (interrupted !== undefined && !interrupted.some((frame) => frame._tag === "Terminal")) {
-          const response = {
-            _tag: "DomainFailure" as const,
-            failure: { kind: "cancelled", message: "Cell operation cancelled" },
-          }
-          yield* emit(message.access, {
-            _tag: "Terminal",
-            attribution: started.attribution,
-            cursor: interrupted.length + 1,
-            outcome: "cancelled",
-            response,
-          })
-        }
+        yield* cancelCell({ message, access, frames, cells, emit })
       }
       if (message._tag === "CellReplay") {
         const access = yield* runtime.access.pipe(
@@ -1331,6 +1393,13 @@ const consumeApi = (
               response: terminal.response,
             }),
           )
+      }
+      if (message._tag === "CellTerminalSuperseded") {
+        const access = yield* runtime.access.pipe(
+          Effect.mapError((cause) => HostError.make({ message: cause.message })),
+        )
+        if (!sameAccess(access, message.access))
+          return yield* HostError.make({ message: "Cell terminal supersession has a stale executor fence" })
       }
       if (message._tag === "Quiesce") {
         const access = yield* runtime.access.pipe(
@@ -1374,7 +1443,7 @@ const consumeApi = (
         const operationStatuses = [...new Map(statuses.map((status) => [status.operationKey, status])).values()]
         const checkpointId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(workspaceFailure))
         const archive = encodeArchive(
-          yield* createArchive(workspaceRoot, redactedValues).pipe(Effect.mapError(workspaceFailure)),
+          yield* createArchive(yield* workspaceRoot, redactedValues).pipe(Effect.mapError(workspaceFailure)),
         )
         const cursor = yield* runtime.cursor.pipe(Effect.mapError(workspaceFailure))
         yield* writer(
@@ -1460,7 +1529,7 @@ const connect = Effect.fn("Host.connect")(function* (
   )
   yield* heartbeat
   const checkout = yield* HostedObservability.observe(
-    config.restoredSession === undefined ? "executor_setup" : "executor_resume",
+    "attach",
     {
       assignmentId: config.fence.assignmentId,
       sandboxId: config.fence.instanceId,
@@ -1537,66 +1606,71 @@ const connect = Effect.fn("Host.connect")(function* (
   )
 })
 
-const receiveBootstrap = Effect.callback<Bootstrap, HostError>((resume) => {
+const receiveBootstrap = Effect.suspend(() => {
   let consumed = false
-  const server = Bun.serve({
-    hostname: "0.0.0.0",
-    port: 7070,
-    fetch: (request) => {
-      const path = new URL(request.url).pathname
-      if (path === "/health") return new Response("ready")
-      if (path !== "/.rika/bootstrap" || request.method !== "POST" || consumed)
-        return new Response("not found", { status: 404 })
-      return request
-        .json()
-        .then((input) =>
-          Promise.all([
-            Effect.runPromise(
-              decodeBootstrap(input).pipe(
-                Effect.match({
-                  onFailure: () => undefined,
-                  onSuccess: (value) => value,
-                }),
+  const callbackRuntime = ManagedRuntime.make(BunServices.layer)
+  let server: ReturnType<typeof Bun.serve>
+  const receive = Effect.callback<Bootstrap, HostError>((resume) => {
+    server = Bun.serve({
+      hostname: "0.0.0.0",
+      port: 7070,
+      fetch: (request) => {
+        const path = new URL(request.url).pathname
+        if (path === "/health") return new Response("ready")
+        if (path !== "/.rika/bootstrap" || request.method !== "POST" || consumed)
+          return new Response("not found", { status: 404 })
+        const handleBootstrapRequest = Effect.tryPromise({
+          try: () => request.json(),
+          catch: () => HostError.make({ message: "Bootstrap request body is invalid" }),
+        }).pipe(
+          Effect.flatMap((input) =>
+            Effect.all([
+              decodeBootstrap(input).pipe(Effect.option),
+              sandboxInstanceId,
+              EffectConfig.string("RIKA_EXECUTOR_STATE_DIRECTORY").pipe(
+                EffectConfig.withDefault(executorStateDirectory),
               ),
-            ),
-            sandboxInstanceId(),
-          ]),
+            ]),
+          ),
+          Effect.map(([bodyOption, instanceId, stateDirectory]) => {
+            const body = bodyOption._tag === "Some" ? bodyOption.value : undefined
+            if (body === undefined || instanceId.length === 0 || body.identity.instanceId !== instanceId)
+              return new Response("invalid", { status: 400 })
+            if (consumed) return new Response("not found", { status: 404 })
+            consumed = true
+            const bootstrap = {
+              credential: Redacted.make(body.credential, { label: "executor-bootstrap" }),
+              identity: { ...body.identity, stateDirectory },
+              restore: body.restore,
+            }
+            return new Response(
+              new ReadableStream({
+                pull: (controller) => {
+                  controller.enqueue(new TextEncoder().encode("accepted"))
+                  controller.close()
+                  setImmediate(() => resume(Effect.succeed(bootstrap)))
+                },
+              }),
+              { status: 202 },
+            )
+          }),
+          Effect.orElseSucceed(() => new Response("invalid", { status: 400 })),
         )
-        .then(([body, instanceId]) => {
-          if (body === undefined || instanceId.length === 0 || body.identity.instanceId !== instanceId)
-            return new Response("invalid", { status: 400 })
-          if (consumed) return new Response("not found", { status: 404 })
-          consumed = true
-          const identity: Identity = {
-            ...body.identity,
-            stateDirectory: Bun.env.RIKA_EXECUTOR_STATE_DIRECTORY || executorStateDirectory,
-          }
-          Effect.runFork(
-            Effect.sleep("10 millis").pipe(
-              Effect.andThen(Effect.promise(() => server.stop(true))),
-              Effect.andThen(
-                Effect.sync(() =>
-                  resume(
-                    Effect.succeed({
-                      credential: Redacted.make(body.credential, { label: "executor-bootstrap" }),
-                      identity,
-                      restore: body.restore,
-                    }),
-                  ),
-                ),
-              ),
-            ),
-          )
-          return new Response("accepted", { status: 202 })
-        })
-        .catch(() => new Response("invalid", { status: 400 }))
-    },
+        return callbackRuntime.runPromise(handleBootstrapRequest)
+      },
+    })
   })
-  return Effect.promise(() => server.stop(true))
+  return receive.pipe(
+    Effect.ensuring(
+      Effect.suspend(() => stopServerAdapter(server)).pipe(Effect.ensuring(callbackRuntime.disposeEffect)),
+    ),
+  )
 })
 
 export const testing = {
+  admitCell,
   applyPhaseGrant,
+  cancelCell,
   dispatchPty,
   dispatchWorkspace,
   operationReceiptStore,
@@ -1609,6 +1683,7 @@ export const testing = {
 const host = Effect.scoped(
   Effect.gen(function* () {
     const environmentIdentity = yield* executorIdentity
+    const root = yield* workspaceRoot
     const cellStateDirectory = `${environmentIdentity.stateDirectory}/cells`
     const machineStateDirectory = `${environmentIdentity.stateDirectory}/machines`
     const store = yield* sessionStore(environmentIdentity.stateDirectory)
@@ -1701,7 +1776,7 @@ const host = Effect.scoped(
       Effect.gen(function* () {
         const config = yield* configuration(identity, bootstrapToken, restoredSession)
         const kernelOptions = {
-          workspace: workspaceRoot,
+          workspace: root,
           workspaceDigest: config.workspaceId,
           dataRoot: config.stateDirectory,
           runtimeVersion: process.versions.bun,
@@ -1723,7 +1798,7 @@ const host = Effect.scoped(
               Layer.merge(
                 ptyDriverLayer({
                   fence: config.fence,
-                  workspaceRoot,
+                  workspaceRoot: root,
                   workspaceUser,
                 }),
                 ptyRepositoryLayer({
@@ -1736,11 +1811,11 @@ const host = Effect.scoped(
         ).pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
         const workspaceContext = yield* Layer.build(
           Layer.merge(
-            workspaceFilesLayer(workspaceRoot),
+            workspaceFilesLayer(root),
             repositoryServicesLayer.pipe(
               Layer.provide(
                 Layer.merge(
-                  repositoryServiceDriverLayer({ workspaceRoot, workspaceUser }),
+                  repositoryServiceDriverLayer({ workspaceRoot: root, workspaceUser }),
                   repositoryServiceRepositoryLayer({ stateDirectory: config.stateDirectory, fence: config.fence }),
                 ),
               ),
@@ -1754,7 +1829,7 @@ const host = Effect.scoped(
         const ptyReady = config.fence.target === "orb" && capabilities.pty
         const inspectCapabilities = inspectWorkspaceCapabilities({
           target: config.fence.target,
-          workspacePath: workspaceRoot,
+          workspacePath: root,
           typescriptKernel: true,
           pty: ptyReady,
           browser: capabilities.browser,
@@ -1785,7 +1860,7 @@ const host = Effect.scoped(
         )
         const cells = yield* HostedKernel.make({
           workspaceIdentity: config.workspaceId,
-          workspacePath: workspaceRoot,
+          workspacePath: root,
           dataRoot: config.stateDirectory,
           bindingContractDigest,
           read: readState,
@@ -1804,9 +1879,9 @@ const host = Effect.scoped(
               )
             }),
         })
-        const makeMachine = Layer.build(
-          machineLayer({ workspace: workspaceRoot, read: readMachine, write: writeMachine }),
-        ).pipe(Effect.map((context) => Context.get(context, Machine)))
+        const makeMachine = Layer.build(machineLayer({ workspace: root, read: readMachine, write: writeMachine })).pipe(
+          Effect.map((context) => Context.get(context, Machine)),
+        )
         const operations = yield* Ref.make(new Map<string, Fiber.Fiber<void, unknown>>())
         const frames = yield* Ref.make(yield* receipts.load)
         const quiesced = yield* Ref.make(false)
@@ -1940,7 +2015,7 @@ const host = Effect.scoped(
   }),
 )
 
-const program: Effect.Effect<void, HostError> = Effect.scoped(
+const program = Effect.scoped(
   Effect.flatMap(Layer.build(Layer.merge(BunSocket.layerWebSocketConstructor, BunServices.layer)), (context) =>
     Effect.provide(host, context),
   ),

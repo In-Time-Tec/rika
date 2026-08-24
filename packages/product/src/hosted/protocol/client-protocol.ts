@@ -1,9 +1,8 @@
-import { Schema } from "effect"
+import { Function, Schema } from "effect"
 import * as ExecutionProjection from "../../execution/contract/execution-projection"
 import { InteractiveEventSchema, type InteractiveEvent } from "../../operation/interactive/event"
-import * as Thread from "../../thread/model/thread-record"
 import * as Turn from "../../thread/model/turn-record"
-import * as TranscriptUnit from "@rika/transcript/transcript-unit"
+import * as ThreadView from "../../thread/model/thread-view"
 import {
   ActorAttribution,
   CommandId,
@@ -30,8 +29,38 @@ export const isDurableThreadEvent = (event: InteractiveEvent) =>
   event._tag !== "ThreadPreviewFailed" &&
   Schema.is(InteractiveEventSchema)(event)
 
+export const interactiveEventThreadId = (event: InteractiveEvent): string | undefined => {
+  switch (event._tag) {
+    case "ThreadViewSnapshot":
+      return String(event.snapshot.thread.id)
+    case "ThreadViewPatch":
+      return String(event.patch.threadId)
+    case "ResyncRequired":
+    case "ExecutionModelPreviewChanged":
+    case "ContextDiagnostics":
+    case "ThreadRefolding":
+    case "QueueFull":
+    case "SubmissionAdmitted":
+    case "ShellCompleted":
+    case "ThreadTitled":
+    case "GoalChanged":
+    case "ThreadActivated":
+    case "ThreadPreviewLoaded":
+    case "ThreadPreviewFailed":
+    case "TurnRetryScheduled":
+      return String(event.threadId)
+    case "ExecutionFailed":
+    case "ExecutionControlFailed":
+    case "ExecutionControlled":
+      return event.threadId === undefined ? undefined : String(event.threadId)
+    case "ThreadsListed":
+    case "AssistantCompleted":
+    case "SubmissionRejected":
+      return undefined
+  }
+}
+
 const strict = <S extends Schema.Top>(schema: S) => schema.annotate({ parseOptions: { onExcessProperty: "error" } })
-const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 const OwnerSelection = Schema.Union([
   strict(Schema.Struct({ kind: Schema.Literal("personal") })),
   strict(Schema.Struct({ kind: Schema.Literal("organization"), organizationId: Schema.NonEmptyString })),
@@ -49,11 +78,12 @@ const Attachment = strict(
     filename: Schema.optionalKey(Schema.NonEmptyString),
   }),
 )
-const mutating = {
+const admitted = {
   commandId: CommandId,
   idempotencyKey: IdempotencyKey,
   expectedThreadVersion: ThreadVersion,
 } as const
+const mutating = { threadId: ThreadId, ...admitted } as const
 
 export const MutatingThreadCommand = Schema.Union([
   strict(
@@ -113,7 +143,7 @@ export type MutatingThreadCommand = typeof MutatingThreadCommand.Type
 
 const CreateThread = strict(
   Schema.TaggedStruct("CreateThread", {
-    ...mutating,
+    ...admitted,
     owner: OwnerSelection,
     projectId: Schema.optionalKey(ProjectId),
     executorKind: ExecutorKind,
@@ -139,18 +169,21 @@ export const ClientCommand = Schema.Union([
   MutatingThreadCommand,
   strict(
     Schema.TaggedStruct("InspectWorkspaceFile", {
+      threadId: ThreadId,
       path: Schema.NonEmptyString,
       maximumBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(1_048_576)),
     }),
   ),
   strict(
     Schema.TaggedStruct("AcknowledgeCursor", {
+      threadId: ThreadId,
       cursor: ThreadEventCursor,
     }),
   ),
-  strict(Schema.TaggedStruct("UpdatePresence", { status: PresenceStatus })),
+  strict(Schema.TaggedStruct("UpdatePresence", { threadId: ThreadId, status: PresenceStatus })),
   strict(
     Schema.TaggedStruct("OpenPortal", {
+      threadId: ThreadId,
       port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 })),
     }),
   ),
@@ -183,19 +216,22 @@ export type PendingAuthorization = typeof PendingAuthorization.Type
 
 export const HostedThreadSnapshot = strict(
   Schema.Struct({
-    thread: Thread.Thread,
-    turns: Schema.Array(Turn.Turn),
-    units: Schema.Array(TranscriptUnit.Unit),
-    queue: strict(
-      Schema.Struct({
-        revision: NonNegativeInt,
-        turns: Schema.Array(Turn.AgentExecutionTurn),
-      }),
-    ),
+    executorKind: ExecutorKind,
+    view: ThreadView.ThreadViewSnapshot,
     pendingAuthorizations: Schema.Array(PendingAuthorization),
   }),
 )
 export type HostedThreadSnapshot = typeof HostedThreadSnapshot.Type
+
+export const hostedThreadSnapshotMatches: {
+  (threadId: string): (snapshot: HostedThreadSnapshot) => boolean
+  (snapshot: HostedThreadSnapshot, threadId: string): boolean
+} = Function.dual(
+  2,
+  (snapshot: HostedThreadSnapshot, threadId: string) =>
+    String(snapshot.view.thread.id) === threadId &&
+    snapshot.pendingAuthorizations.every((authorization) => String(authorization.threadId) === threadId),
+)
 
 export const ThreadProtocolEvent = strict(
   Schema.Struct({
@@ -209,11 +245,17 @@ export const ThreadProtocolEvent = strict(
 )
 export type ThreadProtocolEvent = typeof ThreadProtocolEvent.Type
 
-const CommandResult = Schema.Union([
+export const PromptAdmissionStatus = Schema.Literals(["accepted", "queued"])
+export type PromptAdmissionStatus = typeof PromptAdmissionStatus.Type
+
+export const CommandResult = Schema.Union([
   strict(Schema.TaggedStruct("ThreadCreated", { threadId: ThreadId })),
+  strict(Schema.TaggedStruct("PromptAdmitted", { status: PromptAdmissionStatus })),
   strict(Schema.TaggedStruct("Applied", {})),
 ])
 export type CommandResult = typeof CommandResult.Type
+
+const PresenceParticipant = Schema.Struct({ actor: ActorAttribution, status: PresenceStatus })
 
 const ServerPayload = Schema.Union([
   strict(
@@ -236,6 +278,19 @@ const ServerPayload = Schema.Union([
       currentCursor: Schema.optionalKey(ThreadEventCursor),
       message: Schema.String,
       details: JsonObject,
+    }),
+  ),
+  strict(
+    Schema.TaggedStruct("ThreadAttached", {
+      requestId: RequestId,
+      threadId: ThreadId,
+      snapshotThreadVersion: ThreadVersion,
+      snapshotCursor: ThreadEventCursor,
+      threadVersion: ThreadVersion,
+      cursor: ThreadEventCursor,
+      snapshot: HostedThreadSnapshot,
+      events: Schema.Array(ThreadProtocolEvent),
+      participants: Schema.Array(PresenceParticipant),
     }),
   ),
   strict(
@@ -268,7 +323,7 @@ const ServerPayload = Schema.Union([
   strict(
     Schema.TaggedStruct("PresenceSnapshot", {
       threadId: ThreadId,
-      participants: Schema.Array(Schema.Struct({ actor: ActorAttribution, status: PresenceStatus })),
+      participants: Schema.Array(PresenceParticipant),
     }),
   ),
   strict(Schema.TaggedStruct("Heartbeat", { at: Timestamp })),

@@ -45,7 +45,7 @@ interface State {
   readonly clients: Map<string, AuthenticatedClient>
   readonly clientAuthorities: Map<string, Timestamp>
   readonly commands: Map<string, ReadonlyArray<ThreadCommand>>
-  readonly promptTurns: Map<string, TurnId>
+  readonly promptTurns: Map<string, { readonly turnId: TurnId; readonly status: "accepted" | "queued" }>
   readonly events: Map<string, ReadonlyArray<ThreadEvent>>
   readonly cursors: Map<string, ResumableCursor>
   readonly writers: Map<string, TerminalWriterLease>
@@ -291,6 +291,13 @@ const make = Effect.gen(function* () {
           }),
         })
       }),
+    readThread: (input) =>
+      Ref.get(state).pipe(
+        Effect.map((current) => {
+          const thread = current.threads.get(input.threadId)?.thread
+          return thread?.ownerId === input.ownerId ? thread : undefined
+        }),
+      ),
     putThreadGrant: (input) =>
       mutation(state, (current) => {
         const thread = current.threads.get(input.threadId)?.thread
@@ -459,6 +466,11 @@ const make = Effect.gen(function* () {
       }),
     admitPrompt: (input) =>
       mutation(state, (current) => {
+        if (input.prompt.length === 0) return fail("conflict", "Prompt cannot be empty")
+        const queueCapacity = Math.trunc(input.queueCapacity)
+        if (queueCapacity < 1) return fail("conflict", "Prompt queue capacity must be positive")
+        if (!Number.isFinite(Date.parse(input.admittedAt)))
+          return fail("conflict", "Prompt admission timestamp is invalid")
         const threadState = current.threads.get(input.threadId)
         if (threadState === undefined || threadState.thread.ownerId !== input.ownerId)
           return fail("not-found", "Thread does not exist in the organization")
@@ -474,14 +486,24 @@ const make = Effect.gen(function* () {
           command: { _tag: "SubmitPrompt" as const, prompt: input.prompt, mode: input.executionRoute.mode },
         }
         if (previous !== undefined) {
-          const turnId = current.promptTurns.get(previous.commandId)
-          if (turnId === undefined) return fail("conflict", "Command identity was admitted without a queued Turn")
+          const admission = current.promptTurns.get(previous.commandId)
+          if (admission === undefined) return fail("conflict", "Command identity was admitted without a Turn")
           return commandEquivalent(previous, comparable)
-            ? succeed({ command: previous, turnId }, current)
+            ? succeed({ command: previous, ...admission }, current)
             : fail("conflict", "Command identity or idempotency key was reused with different content")
         }
-        if ([...current.promptTurns.values()].includes(input.turnId))
+        if (!input.readinessProof) return fail("database", "Prompt admission workers are unavailable")
+        if ([...current.promptTurns.values()].some((admission) => admission.turnId === input.turnId))
           return fail("conflict", "Turn identity is already in use")
+        const status = commands.some((command) => current.promptTurns.has(command.commandId))
+          ? ("queued" as const)
+          : ("accepted" as const)
+        if (
+          status === "queued" &&
+          commands.filter((command) => current.promptTurns.get(command.commandId)?.status === "queued").length >=
+            queueCapacity
+        )
+          return fail("conflict", "Thread prompt queue is full")
         const allocated = allocateCommitCursor(current, input.ownerId)
         const command: ThreadCommand = {
           ownerId: input.ownerId,
@@ -495,7 +517,7 @@ const make = Effect.gen(function* () {
           commitCursor: allocated.commitCursor,
         }
         return succeed(
-          { command, turnId: input.turnId },
+          { command, turnId: input.turnId, status },
           {
             ...current,
             ownerCounters: allocated.ownerCounters,
@@ -504,7 +526,7 @@ const make = Effect.gen(function* () {
               nextCommandSequence: threadState.nextCommandSequence + 1n,
             }),
             commands: replace(current.commands, input.threadId, [...commands, command]),
-            promptTurns: replace(current.promptTurns, input.commandId, input.turnId),
+            promptTurns: replace(current.promptTurns, input.commandId, { turnId: input.turnId, status }),
           },
         )
       }),

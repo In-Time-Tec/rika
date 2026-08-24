@@ -1,5 +1,6 @@
 import { RunSchema, layerPostgres as upstreamLayer } from "@tenetkit/pg"
-import { Cause, Context, Effect, Layer, Ref, Schedule, Schema } from "effect"
+import * as HostedObservability from "@rika/product/hosted-observability"
+import { Cause, Clock, Context, Effect, Function, Layer, Schema, Scope } from "effect"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import {
   Errors,
@@ -55,16 +56,6 @@ export class WorkerUnavailable extends Schema.TaggedError<WorkerUnavailable>()(
   { message: Schema.String },
 ) {}
 
-export interface WorkerHealthInterface {
-  readonly check: Effect.Effect<void, WorkerUnavailable>
-  readonly healthy: Effect.Effect<void>
-  readonly failed: Effect.Effect<void>
-}
-
-export class WorkerHealth extends Context.Service<WorkerHealth, WorkerHealthInterface>()(
-  "@rika/execution/postgres/WorkerHealth",
-) {}
-
 export const ReadinessProof = Schema.Struct({
   backend: Schema.Literal("postgres"),
   source: NonEmptyString,
@@ -73,8 +64,17 @@ export const ReadinessProof = Schema.Struct({
 
 export type ReadinessProof = typeof ReadinessProof.Type
 
+export interface WorkerDiagnostics extends RuntimeWorker.WorkerStatus {
+  readonly pollAgeMillis: number | undefined
+  readonly lastSuccessfulPollAgeMillis: number | undefined
+  readonly oldestClaimAgeMillis: number | undefined
+  readonly lastFailureAgeMillis: number | undefined
+  readonly availableCapacity: number
+}
+
 export interface ReadinessInterface {
   readonly check: Effect.Effect<ReadinessProof, SchemaError | WorkerUnavailable>
+  readonly status: Effect.Effect<WorkerDiagnostics>
 }
 
 export class Readiness extends Context.Service<Readiness, ReadinessInterface>()("@rika/execution/postgres/Readiness") {}
@@ -99,7 +99,22 @@ export const toWorkerOptions = (options: WorkerOptions): RuntimeWorker.WorkerOpt
   lease: options.leaseMillis,
   pollInterval: options.pollIntervalMillis,
   cancellationInterval: options.cancellationIntervalMillis,
+  onClaim: observeClaim,
 })
+
+export const observeClaim = (claim: {
+  readonly run: {
+    readonly runId: string
+    readonly message?: { readonly metadata?: Readonly<Record<string, unknown>> }
+  }
+}) => {
+  const metadata: Readonly<Record<string, unknown>> = claim.run.message?.metadata ?? {}
+  return HostedObservability.event("run_claim", "success", {
+    runId: claim.run.runId,
+    ...(typeof metadata.threadId === "string" ? { threadId: metadata.threadId } : {}),
+    ...(typeof metadata.turnId === "string" ? { turnId: metadata.turnId } : {}),
+  })
+}
 
 export const applySchema = Effect.fn("Postgres.applySchema")(function* (input: Pick<Options, "url" | "source">) {
   return yield* Effect.scoped(
@@ -120,64 +135,28 @@ export const checkSchema = Effect.fn("Postgres.checkSchema")(function* (input: P
 export const workerLayer = (
   options: WorkerOptions,
 ): Layer.Layer<
-  RuntimeWorker.RuntimeWorker | WorkerHealth,
+  RuntimeWorker.RuntimeWorker,
   InvalidOptions,
   RunClaims.RunClaims | ExecutionHost.ExecutionHost | RunStore.RunStore
 > =>
   Layer.unwrap(
     validateWorkerOptions(options).pipe(
       Effect.map((validated) => {
-        const worker = RuntimeWorker.layerWorker(toWorkerOptions(validated))
-        const health = Layer.effect(
-          WorkerHealth,
-          Ref.make<"starting" | "healthy" | "failed">("starting").pipe(
-            Effect.map((state) =>
-              WorkerHealth.of({
-                check: Ref.get(state).pipe(
-                  Effect.flatMap((status) =>
-                    status === "healthy"
-                      ? Effect.void
-                      : Effect.fail(
-                          WorkerUnavailable.make({
-                            message:
-                              status === "starting"
-                                ? "Hosted execution worker has not completed its first poll"
-                                : "Hosted execution worker is unavailable",
-                          }),
-                        ),
-                  ),
-                ),
-                healthy: Ref.set(state, "healthy"),
-                failed: Ref.set(state, "failed"),
-              }),
-            ),
-          ),
-        )
-        const services = Layer.merge(worker, health)
-        const loop = Layer.effectDiscard(
-          Effect.gen(function* () {
-            const runtimeWorker = yield* RuntimeWorker.RuntimeWorker
-            const workerHealth = yield* WorkerHealth
-            const poll = runtimeWorker.execute.pipe(
-              Effect.matchCauseEffect({
-                onFailure: (cause) =>
-                  Cause.hasInterrupts(cause)
-                    ? Effect.failCause(cause)
-                    : workerHealth.failed.pipe(
-                        Effect.andThen(
-                          Effect.logError("hosted-execution.worker.failed").pipe(
-                            Effect.annotateLogs("rika.worker.id", runtimeWorker.workerId),
-                          ),
-                        ),
-                      ),
-                onSuccess: () => workerHealth.healthy,
-              }),
-              Effect.repeat(Schedule.spaced(validated.pollIntervalMillis)),
-            )
-            yield* Effect.forkScoped(poll)
-          }),
-        ).pipe(Layer.provide(services))
-        return Layer.merge(services, loop)
+        const worker: Layer.Layer<
+          RuntimeWorker.RuntimeWorker,
+          never,
+          RunClaims.RunClaims | ExecutionHost.ExecutionHost | RunStore.RunStore
+        > = RuntimeWorker.layerWorker(toWorkerOptions(validated))
+        const runLoop: Effect.Effect<void, never, RuntimeWorker.RuntimeWorker | Scope.Scope> = Effect.gen(function* () {
+          const runtimeWorker = yield* RuntimeWorker.RuntimeWorker
+          yield* Effect.forkScoped(runtimeWorker.run)
+        })
+        const loop: Layer.Layer<
+          never,
+          never,
+          RunClaims.RunClaims | ExecutionHost.ExecutionHost | RunStore.RunStore
+        > = Layer.effectDiscard(runLoop).pipe(Layer.provide(worker))
+        return Layer.merge(worker, loop)
       }),
     ),
   )
@@ -192,11 +171,71 @@ export interface LayerOptions {
 const runtimeUnavailable = (cause: Cause.Cause<unknown>) =>
   RuntimeUnavailable.make({ message: String(Cause.squash(cause)) })
 
+const age = (now: number, at: number | undefined) => (at === undefined ? undefined : now - at)
+
+export const workerDiagnostics: {
+  (now: number): (status: RuntimeWorker.WorkerStatus) => WorkerDiagnostics
+  (status: RuntimeWorker.WorkerStatus, now: number): WorkerDiagnostics
+} = Function.dual(2, (status: RuntimeWorker.WorkerStatus, now: number): WorkerDiagnostics => ({
+  ...status,
+  pollAgeMillis: status.poll._tag === "Starting" ? undefined : age(now, status.poll.at),
+  lastSuccessfulPollAgeMillis: age(now, status.lastSuccessfulPollAt),
+  oldestClaimAgeMillis: age(now, status.oldestClaimAt),
+  lastFailureAgeMillis: age(now, status.lastFailure?.at),
+  availableCapacity: Math.max(0, status.capacity - status.active),
+}))
+
+export const checkWorkerReadiness: {
+  (now: number, pollIntervalMillis: number): (status: RuntimeWorker.WorkerStatus) => Effect.Effect<void, WorkerUnavailable>
+  (
+    status: RuntimeWorker.WorkerStatus,
+    now: number,
+    pollIntervalMillis: number,
+  ): Effect.Effect<void, WorkerUnavailable>
+} = Function.dual(
+  3,
+  (
+    status: RuntimeWorker.WorkerStatus,
+    now: number,
+    pollIntervalMillis: number,
+  ): Effect.Effect<void, WorkerUnavailable> => {
+    if (status.poll._tag === "Starting")
+      return Effect.fail(WorkerUnavailable.make({ message: "Hosted execution worker has not completed its first poll" }))
+    if (status.poll._tag === "Failed")
+      return Effect.fail(WorkerUnavailable.make({ message: "Hosted execution worker poll failed" }))
+    if (now - status.poll.at > pollIntervalMillis * 4)
+      return Effect.fail(WorkerUnavailable.make({ message: "Hosted execution worker poll is stale" }))
+    return Effect.void
+  },
+)
+
+export const makeReadiness = (input: {
+  readonly source: string
+  readonly pollIntervalMillis: number
+  readonly worker: Pick<RuntimeWorker.Interface, "workerId" | "status">
+  readonly schema: Effect.Effect<void, SchemaError>
+}): ReadinessInterface => {
+  const status: Effect.Effect<RuntimeWorker.WorkerStatus> = input.worker.status
+  const check: Effect.Effect<ReadinessProof, SchemaError | WorkerUnavailable> = Effect.gen(function* () {
+    yield* input.schema
+    const workerStatus = yield* status
+    const now = yield* Clock.currentTimeMillis
+    yield* checkWorkerReadiness(workerStatus, now, input.pollIntervalMillis)
+    return ReadinessProof.make({ backend: "postgres", source: input.source, workerId: input.worker.workerId })
+  })
+  const diagnostics: Effect.Effect<WorkerDiagnostics> = Effect.all([status, Clock.currentTimeMillis]).pipe(
+    Effect.map(([workerStatus, now]) => workerDiagnostics(workerStatus, now)),
+  )
+  return {
+    check,
+    status: diagnostics,
+  }
+}
+
 export const layer = (
   options: LayerOptions,
 ): Layer.Layer<
   | Readiness
-  | WorkerHealth
   | Runtime.Runtime
   | RuntimeWorker.RuntimeWorker
   | RunStore.RunStore
@@ -226,20 +265,14 @@ export const layer = (
           Readiness,
           Effect.gen(function* () {
             const runtimeWorker = yield* RuntimeWorker.RuntimeWorker
-            const workerHealth = yield* WorkerHealth
-            return Readiness.of({
-              check: checkSchema(postgres).pipe(
-                Effect.andThen(workerHealth.check),
-                Effect.andThen(runtimeWorker.claimed),
-                Effect.as(
-                  ReadinessProof.make({
-                    backend: "postgres",
-                    source: postgres.source,
-                    workerId: runtimeWorker.workerId,
-                  }),
-                ),
-              ),
-            })
+            return Readiness.of(
+              makeReadiness({
+                source: postgres.source,
+                pollIntervalMillis: postgres.worker.pollIntervalMillis,
+                worker: runtimeWorker,
+                schema: checkSchema(postgres),
+              }),
+            )
           }),
         )
         return readiness.pipe(Layer.provideMerge(worker))

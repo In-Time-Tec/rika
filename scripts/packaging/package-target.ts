@@ -104,6 +104,7 @@ const program = Effect.gen(function* () {
           return Bun.build({
             entrypoints: [path.join(root, "apps/rika/src", entrypoint)],
             compile: { target: metadata.bun, outfile },
+            bytecode: false,
             minify: true,
             external: ["msgpackr-extract"],
             loader: { ".txt": "text" },

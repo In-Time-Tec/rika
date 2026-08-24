@@ -7,12 +7,13 @@ import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import { BetterAuthUserId, OrganizationId } from "@rika/product/hosted-model"
 import { CheckoutFingerprint } from "@rika/product/runner-registration"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
-import { Effect, Layer, Random, Redacted, Schema } from "effect"
+import { FileSystem, Config, Effect, Layer, Random, Redacted, Ref, Schema } from "effect"
 import { Pool, type QueryResult } from "pg"
+import { live as livePlatform } from "./live-platform"
 import { HostedProduct, HostedProductError, postgresTest, type AuthenticatedPrincipal } from "../src/hosted-product"
 
-const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
-const live = databaseUrl !== undefined
+const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
+const live = databaseUrl !== ""
 const decodeExecutionRoute = Schema.decodeUnknownSync(Schema.fromJsonString(ExecutionRouteSnapshot))
 const decodePromptParts = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(PromptPart)))
 const encodeStartTurn = Schema.encodeSync(Schema.fromJsonString(ExecutionGateway.StartTurn))
@@ -30,7 +31,7 @@ const organization = (organizationId: string) => ({
 })
 
 const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.promise(() => pool.query(text, [...values]))
+  Effect.tryPromise(() => pool.query(text, [...values]))
 
 const user = (pool: Pool, id: string) =>
   query(
@@ -57,38 +58,47 @@ const failureKind = <A>(effect: Effect.Effect<A, HostedProductError>) =>
     Effect.map((error) => error.kind),
   )
 
-const withDatabase = <A, E, R>(label: string, use: (pool: Pool) => Effect.Effect<A, E, R | HostedProduct>) =>
+const withDatabase = <A, E, R>(
+  label: string,
+  use: (pool: Pool) => Effect.Effect<A, E, R | HostedProduct>,
+  promptAdmissionReadiness: Effect.Effect<boolean> = Effect.succeed(true),
+) =>
   Effect.scoped(
     Effect.gen(function* () {
       const suffix = String(yield* Random.nextInt).replaceAll("-", "n")
       const database = `rika_hosted_product_${label}_${suffix}`
       const admin = new Pool({ connectionString: databaseUrl })
       yield* query(admin, `CREATE DATABASE "${database}"`)
-      const parsed = new URL(databaseUrl!)
+      const parsed = new URL(databaseUrl)
       parsed.pathname = `/${database}`
       const url = parsed.toString()
       let pool: Pool | undefined
       try {
-        pool = new Pool({ connectionString: url })
+        const activePool = new Pool({ connectionString: url })
+        pool = activePool
         for (const migration of [...identityMigrations, ...productMigrations]) {
-          const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
-          yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
+          const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.readFileString(migration.url.pathname),
+          )
+          yield* runMigration({ pool: activePool, id: migration.id, checksum: migration.checksum, sql })
         }
         const context = yield* Layer.build(
           postgresTest({
             database: { url: Redacted.make(url), maxConnections: 8 },
             templateBuildId: "hosted-product-live",
             providerScope: "hosted-product-live",
+            promptAdmissionReadiness,
           }).pipe(Layer.provide(BunCrypto.layer)),
         )
-        return yield* use(pool).pipe(Effect.provide(context))
+        return yield* use(activePool).pipe(Effect.provide(context))
       } finally {
-        yield* Effect.promise(() => pool?.end() ?? Promise.resolve())
-        yield* Effect.promise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-        yield* Effect.promise(() => admin.end())
+        const cleanupPool = pool
+        yield* cleanupPool === undefined ? Effect.void : Effect.tryPromise(() => cleanupPool.end())
+        yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+        yield* Effect.tryPromise(() => admin.end())
       }
     }),
-  )
+  ).pipe(livePlatform)
 
 it.effect.skipIf(!live)("supports a projectless personal connection for a user with no organizations", () =>
   withDatabase("personal", (pool) =>
@@ -108,6 +118,7 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
         prompt: "personal prompt",
       } as const
       const admitted = yield* product.admitRun(admissionInput)
+      expect(admitted.status).toBe("accepted")
       expect(yield* product.admitRun(admissionInput)).toEqual(admitted)
       expect(yield* failureKind(product.admitRun({ ...admissionInput, prompt: "different prompt" }))).toBe("conflict")
       expect(yield* failureKind(product.admitRun({ ...admissionInput, mode: "low" }))).toBe("conflict")
@@ -133,12 +144,160 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
         created_by_user_id: "personal-user",
         memberships: 0,
         turn_id: admitted.turnId,
-        status: "queued",
+        status: "accepted",
         prompt: "personal prompt",
         turn_count: 1,
-        queued_count: 1,
+        queued_count: 0,
         actor: { _tag: "PersonalActor", userId: "personal-user", owner: personal("personal-user") },
       })
+      const queued = yield* product.admitRun({
+        ...admissionInput,
+        operationKey: "personal-operation-queued",
+        prompt: "queued prompt",
+      })
+      expect(queued.status).toBe("queued")
+      expect(
+        yield* query(
+          pool,
+          `SELECT turn.id, turn.status, queue.queued_count
+            FROM rika_turns turn
+            JOIN rika_thread_queue_state queue ON queue.thread_id = turn.thread_id
+            WHERE turn.id = $1`,
+          [queued.turnId],
+        ),
+      ).toMatchObject({ rows: [{ id: queued.turnId, status: "queued", queued_count: 1 }] })
+    }),
+  ),
+)
+
+it.effect.skipIf(!live)("rejects new prompts without mutation and replays them through outage and recovery", () =>
+  Effect.gen(function* () {
+    const ready = yield* Ref.make(false)
+    yield* withDatabase(
+      "prompt-readiness",
+      (pool) =>
+        Effect.gen(function* () {
+          yield* user(pool, "prompt-readiness-user")
+          const product = yield* HostedProduct
+          const connection = yield* product.createConnection({
+            principal: principal("prompt-readiness-user"),
+            owner: personal("prompt-readiness-user"),
+            executorKind: "orb",
+          })
+          const input = {
+            principal: principal("prompt-readiness-user"),
+            threadId: connection.threadId,
+            operationKey: "readiness-command",
+            prompt: "ready prompt",
+          } as const
+          expect(yield* failureKind(product.admitRun(input))).toBe("unavailable")
+          expect(
+            yield* query(
+              pool,
+              `SELECT
+                (SELECT count(*)::int FROM rika_hosted_thread_commands WHERE thread_id = $1) AS commands,
+                (SELECT count(*)::int FROM rika_turns WHERE thread_id = $1) AS turns,
+                (SELECT count(*)::int FROM rika_thread_queue_state WHERE thread_id = $1) AS queues`,
+              [connection.threadId],
+            ),
+          ).toMatchObject({ rows: [{ commands: 0, turns: 0, queues: 0 }] })
+          yield* Ref.set(ready, true)
+          const admitted = yield* product.admitRun(input)
+          yield* Ref.set(ready, false)
+          expect(yield* product.admitRun(input)).toEqual(admitted)
+          expect(yield* failureKind(product.admitRun({ ...input, operationKey: "new-during-outage" }))).toBe(
+            "unavailable",
+          )
+          yield* Ref.set(ready, true)
+          expect((yield* product.admitRun({ ...input, operationKey: "after-recovery" })).status).toBe("queued")
+        }),
+      Ref.get(ready),
+    )
+  }),
+)
+
+it.effect.skipIf(!live)("admits concurrent duplicate prompts with one mutation", () =>
+  Effect.gen(function* () {
+    const checks = yield* Ref.make(0)
+    const readiness = Ref.update(checks, (count) => count + 1).pipe(Effect.as(true))
+    yield* withDatabase(
+      "prompt-readiness-race",
+      (pool) =>
+        Effect.gen(function* () {
+          yield* user(pool, "prompt-readiness-race-user")
+          const product = yield* HostedProduct
+          const connection = yield* product.createConnection({
+            principal: principal("prompt-readiness-race-user"),
+            owner: personal("prompt-readiness-race-user"),
+            executorKind: "orb",
+          })
+          const input = {
+            principal: principal("prompt-readiness-race-user"),
+            threadId: connection.threadId,
+            operationKey: "racing-command",
+            prompt: "racing prompt",
+          } as const
+          const results = yield* Effect.all([product.admitRun(input), product.admitRun(input)], { concurrency: 2 })
+          expect(results[1]).toEqual(results[0])
+          expect(yield* Ref.get(checks)).toBe(2)
+          expect(
+            yield* query(pool, `SELECT count(*)::int AS count FROM rika_turns WHERE thread_id = $1`, [
+              connection.threadId,
+            ]),
+          ).toMatchObject({ rows: [{ count: 1 }] })
+        }),
+      readiness,
+    )
+  }),
+)
+
+it.effect.skipIf(!live)("serializes the first prompt lane without queue-count drift", () =>
+  withDatabase("prompt-lane", (pool) =>
+    Effect.gen(function* () {
+      yield* user(pool, "prompt-lane-user")
+      const product = yield* HostedProduct
+      const connection = yield* product.createConnection({
+        principal: principal("prompt-lane-user"),
+        owner: personal("prompt-lane-user"),
+        executorKind: "orb",
+      })
+      const inputs = Array.from({ length: 8 }, (_, index) => ({
+        principal: principal("prompt-lane-user"),
+        threadId: connection.threadId,
+        operationKey: `concurrent-prompt-${index}`,
+        prompt: `concurrent prompt ${index}`,
+      }))
+      const admitted = yield* Effect.all(
+        inputs.map((input) => product.admitRun(input)),
+        { concurrency: "unbounded" },
+      )
+      const lanes = yield* query(
+        pool,
+        `SELECT status, count(*)::int AS count
+          FROM rika_turns WHERE thread_id = $1 GROUP BY status ORDER BY status`,
+        [connection.threadId],
+      )
+      expect(lanes.rows).toEqual([
+        { status: "accepted", count: 1 },
+        { status: "queued", count: 7 },
+      ])
+      expect(
+        yield* query(pool, `SELECT queued_count FROM rika_thread_queue_state WHERE thread_id = $1`, [
+          connection.threadId,
+        ]),
+      ).toMatchObject({ rows: [{ queued_count: 7 }] })
+      const accepted = lanes.rows.find((lane) => lane.status === "accepted")
+      expect(accepted?.count).toBe(1)
+      expect(admitted.map((item) => item.status).toSorted()).toEqual([
+        "accepted",
+        "queued",
+        "queued",
+        "queued",
+        "queued",
+        "queued",
+        "queued",
+        "queued",
+      ])
     }),
   ),
 )
@@ -221,7 +380,7 @@ it.effect.skipIf(!live)("admits a current local Thread without recovering an unr
       const stale = turns.rows.find((row) => row.id === staleRun.turnId)
       const current = turns.rows.find((row) => row.id === currentRun.turnId)
       expect(stale).toMatchObject({ status: "running" })
-      expect(current).toMatchObject({ status: "queued" })
+      expect(current).toMatchObject({ status: "accepted" })
       expect(decodePromptParts(current.prompt_parts_json)).toEqual(promptParts)
       const route = decodeExecutionRoute(current.execution_route_json)
       expect(route.mode).toBe("high")

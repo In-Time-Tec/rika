@@ -11,11 +11,7 @@ describe("OpenAI authentication flow", () => {
       expect(Redacted.value(first.verifier)).not.toBe(Redacted.value(first.state))
       expect(Redacted.value(first.state)).not.toBe(Redacted.value(second.state))
       const expected = Encoding.encodeBase64Url(
-        new Uint8Array(
-          yield* Effect.promise(() =>
-            crypto.subtle.digest("SHA-256", new TextEncoder().encode(Redacted.value(first.verifier))),
-          ),
-        ),
+        yield* digest("SHA-256", new TextEncoder().encode(Redacted.value(first.verifier))),
       )
       expect(first.challenge).toBe(expected)
       expect(Redacted.value(first.verifier)).toHaveLength(86)

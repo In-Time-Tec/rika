@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest"
 import { it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Clock, Effect } from "effect"
 import stringWidth from "string-width"
 import {
   boundedTranscriptModel,
@@ -323,9 +323,9 @@ it.effect("keeps a 4000-chunk transcript resize reflow bounded", () =>
     })
     surface.update(wide)
 
-    const startedAt = performance.now()
+    const startedAt = yield* Clock.currentTimeMillis
     surface.update(update(wide, { _tag: "Resized", width: 100, height: 30 }))
-    const elapsed = performance.now() - startedAt
+    const elapsed = (yield* Clock.currentTimeMillis) - startedAt
     const transcript = surface as unknown as {
       readonly transcriptChildren: ReadonlyArray<{
         readonly content: { readonly chunks: ReadonlyArray<{ text: string }> }

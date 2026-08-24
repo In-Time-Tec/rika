@@ -1,75 +1,104 @@
-import { chmod, mkdir, mkdtemp, readFile, readlink, readdir, rm, stat, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { fileURLToPath } from "node:url"
-import { expect, test } from "vitest"
+import { expect, it } from "@effect/vitest"
+import { Effect, FileSystem, Path, PlatformError, Schema, Stream } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { live } from "../support/platform"
 
-const root = fileURLToPath(new URL("../..", import.meta.url))
-const version: string = (await Bun.file(join(root, "apps", "rika", "package.json")).json()).version
+const PackageManifest = Schema.Struct({ version: Schema.String })
 const target = "install-test"
-const archive = join(root, "artifacts", `rika-${version}-${target}.tar.gz`)
 
-const run = async (script: string, environment: Readonly<Record<string, string>>) => {
-  const child = Bun.spawn(["bun", "run", script], {
-    cwd: root,
-    env: { ...process.env, ...environment },
-    stdout: "pipe",
-    stderr: "pipe",
+const collect = (stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>) =>
+  stream.pipe(
+    Stream.decodeText(),
+    Stream.runFold(
+      () => "",
+      (output, chunk) => output + chunk,
+    ),
+  )
+
+const run = Effect.fn("LocalInstallProc.run")(function* (
+  root: string,
+  script: string,
+  environment: Readonly<Record<string, string>>,
+) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const child = yield* spawner.spawn(
+    ChildProcess.make("bun", ["run", script], {
+      cwd: root,
+      env: { ...process.env, ...environment },
+    }),
+  )
+  const [exitCode, stdout, stderr] = yield* Effect.all([child.exitCode, collect(child.stdout), collect(child.stderr)], {
+    concurrency: "unbounded",
   })
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ])
-  if (exitCode !== 0) throw new Error(`${script} failed\n${stderr}\n${stdout}`)
-}
-
-const makeArchive = async (directory: string, marker: string) => {
-  const payload = join(directory, `rika-${version}-${target}`)
-  await mkdir(join(payload, "bin"), { recursive: true })
-  await writeFile(join(payload, "INSTALL"), "install fixture\n")
-  await writeFile(join(payload, "bin", "rika"), marker)
-  await chmod(join(payload, "bin", "rika"), 0o755)
-  const child = Bun.spawn(["tar", "-czf", archive, `rika-${version}-${target}`], { cwd: directory })
-  expect(await child.exited).toBe(0)
-}
-
-test("installs, upgrades, and uninstalls the packaged runtimes without deleting state", async () => {
-  const home = await mkdtemp(join(tmpdir(), "rika-local-install-"))
-  const installRoot = join(home, "install")
-  const binDir = join(home, "bin")
-  const state = join(home, ".rika", "state")
-  const environment = {
-    HOME: home,
-    RIKA_PACKAGE_TARGET: target,
-    RIKA_INSTALL_ROOT: installRoot,
-    RIKA_BIN_DIR: binDir,
-  }
-  await mkdir(join(root, "artifacts"), { recursive: true })
-  await mkdir(join(home, ".rika"), { recursive: true })
-  await writeFile(state, "preserve")
-  try {
-    await makeArchive(home, "first")
-    await run("scripts/installation/install-local.ts", environment)
-    expect(await readlink(join(binDir, "rika-dev"))).toBe(join(installRoot, "bin", "rika"))
-    expect(await readFile(join(installRoot, "bin", "rika"), "utf8")).toBe("first")
-    expect(await readdir(join(installRoot, "bin"))).toEqual(["rika"])
-
-    await writeFile(join(installRoot, "bin", ".rika-interactive"), "stale")
-    await writeFile(join(installRoot, "bin", ".rika-performance"), "stale")
-    await writeFile(join(installRoot, "bin", ".rika-kernel-runtime"), "stale")
-    await makeArchive(home, "second")
-    await run("scripts/installation/install-local.ts", environment)
-    expect(await readFile(join(installRoot, "bin", "rika"), "utf8")).toBe("second")
-    expect(await readdir(join(installRoot, "bin"))).toEqual(["rika"])
-    expect(await readFile(state, "utf8")).toBe("preserve")
-
-    await run("scripts/installation/uninstall-local.ts", environment)
-    await expect(stat(join(binDir, "rika-dev"))).rejects.toThrow()
-    await expect(stat(installRoot)).rejects.toThrow()
-    expect(await readFile(state, "utf8")).toBe("preserve")
-  } finally {
-    await rm(home, { recursive: true, force: true })
-    await rm(archive, { force: true })
-  }
+  if (Number(exitCode) !== 0) return yield* Effect.die(new Error(`${script} failed\n${stderr}\n${stdout}`))
 })
+
+const makeArchive = Effect.fn("LocalInstallProc.makeArchive")(function* (
+  directory: string,
+  archive: string,
+  version: string,
+  marker: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const payload = path.join(directory, `rika-${version}-${target}`)
+  yield* fileSystem.makeDirectory(path.join(payload, "bin"), { recursive: true })
+  yield* fileSystem.writeFileString(path.join(payload, "INSTALL"), "install fixture\n")
+  yield* fileSystem.writeFileString(path.join(payload, "bin", "rika"), marker, { mode: 0o755 })
+  const exitCode = yield* spawner.exitCode(
+    ChildProcess.make("tar", ["-czf", archive, `rika-${version}-${target}`], { cwd: directory }),
+  )
+  expect(Number(exitCode)).toBe(0)
+})
+
+it.effect("installs, upgrades, and uninstalls the packaged runtimes without deleting state", () =>
+  live(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* path.fromFileUrl(new URL("../..", import.meta.url))
+        const manifest = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PackageManifest))(
+          yield* fileSystem.readFileString(path.join(root, "apps", "rika", "package.json")),
+        )
+        const archive = path.join(root, "artifacts", `rika-${manifest.version}-${target}.tar.gz`)
+        yield* fileSystem.makeDirectory(path.dirname(archive), { recursive: true })
+        yield* Effect.addFinalizer(() => fileSystem.remove(archive, { force: true }).pipe(Effect.ignore))
+        const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-local-install-" })
+        const installRoot = path.join(home, "install")
+        const binDir = path.join(home, "bin")
+        const stateDirectory = path.join(home, ".rika")
+        const state = path.join(stateDirectory, "state")
+        const environment = {
+          HOME: home,
+          RIKA_PACKAGE_TARGET: target,
+          RIKA_INSTALL_ROOT: installRoot,
+          RIKA_BIN_DIR: binDir,
+        }
+        yield* fileSystem.makeDirectory(stateDirectory, { recursive: true })
+        yield* fileSystem.writeFileString(state, "preserve")
+
+        yield* makeArchive(home, archive, manifest.version, "first")
+        yield* run(root, "scripts/installation/install-local.ts", environment)
+        expect(yield* fileSystem.readLink(path.join(binDir, "rika-dev"))).toBe(path.join(installRoot, "bin", "rika"))
+        expect(yield* fileSystem.readFileString(path.join(installRoot, "bin", "rika"))).toBe("first")
+        expect(yield* fileSystem.readDirectory(path.join(installRoot, "bin"))).toEqual(["rika"])
+
+        yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-interactive"), "stale")
+        yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-performance"), "stale")
+        yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-kernel-runtime"), "stale")
+        yield* makeArchive(home, archive, manifest.version, "second")
+        yield* run(root, "scripts/installation/install-local.ts", environment)
+        expect(yield* fileSystem.readFileString(path.join(installRoot, "bin", "rika"))).toBe("second")
+        expect(yield* fileSystem.readDirectory(path.join(installRoot, "bin"))).toEqual(["rika"])
+        expect(yield* fileSystem.readFileString(state)).toBe("preserve")
+
+        yield* run(root, "scripts/installation/uninstall-local.ts", environment)
+        expect(yield* fileSystem.exists(path.join(binDir, "rika-dev"))).toBe(false)
+        expect(yield* fileSystem.exists(installRoot)).toBe(false)
+        expect(yield* fileSystem.readFileString(state)).toBe("preserve")
+      }),
+    ),
+  ),
+)

@@ -1,4 +1,4 @@
-import { Effect, Function, Schema, Stream } from "effect"
+import { Effect, Function, Layer, Schema, Stream } from "effect"
 import { define, type Command } from "foldkit/command"
 import * as Input from "@foldkit/ui/input"
 import * as Textarea from "@foldkit/ui/textarea"
@@ -7,6 +7,7 @@ import { m } from "foldkit/message"
 import type { ApplicationInit } from "foldkit/runtime"
 import { Subscription } from "foldkit"
 import { connectThread, frameEventName, openPortal, sendPrompt } from "./thread-socket"
+import * as Socket from "effect/unstable/socket/Socket"
 import { html, htmlScope } from "./html"
 
 export const ConnectionState = Schema.Literals(["disconnected", "connecting", "connected", "failed"])
@@ -14,6 +15,8 @@ export const ConnectionState = Schema.Literals(["disconnected", "connecting", "c
 export const Model = Schema.Struct({
   connection: ConnectionState,
   threadId: Schema.String,
+  attachedThreadId: Schema.NullOr(Schema.String),
+  connectionEpoch: Schema.Int,
   threadVersion: Schema.String,
   draft: Schema.String,
   portalPort: Schema.String,
@@ -29,7 +32,15 @@ export const ClickedConnect = m("ClickedConnect")
 export const SubmittedPrompt = m("SubmittedPrompt")
 export const ChangedPortalPort = m("ChangedPortalPort", { value: Schema.String })
 export const ClickedOpenPortal = m("ClickedOpenPortal")
-export const ConnectedThread = m("ConnectedThread", { threadId: Schema.String })
+export const ConnectedThread = m("ConnectedThread", {
+  epoch: Schema.Int,
+  threadId: Schema.String,
+  frame: Schema.Unknown,
+})
+export const FailedThreadConnection = m("FailedThreadConnection", {
+  epoch: Schema.Int,
+  message: Schema.String,
+})
 export const FailedThreadAction = m("FailedThreadAction", { message: Schema.String })
 export const SentPrompt = m("SentPrompt")
 export const SentPortalRequest = m("SentPortalRequest")
@@ -43,6 +54,7 @@ export const Message = Schema.Union([
   ClickedOpenPortal,
   SubmittedPrompt,
   ConnectedThread,
+  FailedThreadConnection,
   FailedThreadAction,
   SentPrompt,
   SentPortalRequest,
@@ -54,13 +66,17 @@ type ProgramCommand = Command<Message, never, never>
 type Update = readonly [Model, ReadonlyArray<ProgramCommand>]
 
 export const ConnectThread = define("ConnectThread", {
-  args: { threadId: Schema.String },
-  messages: [ConnectedThread, FailedThreadAction],
-  execute: ({ threadId }) =>
-    connectThread(threadId).pipe(
+  args: { epoch: Schema.Int, threadId: Schema.String },
+  messages: [ConnectedThread, FailedThreadConnection],
+  execute: ({ epoch, threadId }) =>
+    Effect.scoped(
+      Layer.build(Socket.layerWebSocketConstructorGlobal).pipe(
+        Effect.flatMap((context) => connectThread(threadId).pipe(Effect.provide(context))),
+      ),
+    ).pipe(
       Effect.match({
-        onFailure: (error) => FailedThreadAction({ message: error.message }),
-        onSuccess: (connected) => ConnectedThread({ threadId: connected }),
+        onFailure: (error) => FailedThreadConnection({ epoch, message: error.message }),
+        onSuccess: (connected) => ConnectedThread({ epoch, threadId: connected.threadId, frame: connected.frame }),
       }),
     ),
 })
@@ -93,6 +109,8 @@ export const init: ApplicationInit<Model, Message, void> = () => [
   {
     connection: "disconnected",
     threadId: "",
+    attachedThreadId: null,
+    connectionEpoch: 0,
     threadVersion: "0",
     draft: "",
     portalPort: "3000",
@@ -111,6 +129,27 @@ const frameText = (frame: unknown): string => {
   }
 }
 
+const frameThread = (frame: unknown): string | undefined => {
+  const payload = (frame as { readonly payload?: Record<string, unknown> } | undefined)?.payload
+  if (payload === undefined) return undefined
+  if (payload._tag === "ThreadEvent") {
+    const event = payload.event as { readonly threadId?: unknown } | undefined
+    return typeof event?.threadId === "string" ? event.threadId : undefined
+  }
+  return typeof payload.threadId === "string" ? payload.threadId : undefined
+}
+
+const frameVersion = (frame: unknown): string | undefined => {
+  const payload = (frame as { readonly payload?: Record<string, unknown> } | undefined)?.payload
+  if (payload === undefined) return undefined
+  if (typeof payload.threadVersion === "string") return payload.threadVersion
+  if (payload._tag === "ThreadEvent") {
+    const event = payload.event as { readonly threadVersion?: unknown } | undefined
+    return typeof event?.threadVersion === "string" ? event.threadVersion : undefined
+  }
+  return undefined
+}
+
 const updateModel = (model: Model, message: Message): Update => {
   switch (message._tag) {
     case "ChangedThreadId":
@@ -127,21 +166,50 @@ const updateModel = (model: Model, message: Message): Update => {
     }
     case "ClickedConnect": {
       const threadId = model.threadId.trim()
+      const epoch = model.connectionEpoch + 1
       return threadId.length === 0
         ? [{ ...model, connection: "failed", error: "Enter a Thread ID" }, []]
-        : [{ ...model, connection: "connecting", error: null }, [ConnectThread({ threadId })]]
+        : [
+            { ...model, connection: "connecting", connectionEpoch: epoch, error: null },
+            [ConnectThread({ epoch, threadId })],
+          ]
     }
-    case "ConnectedThread":
-      return [{ ...model, connection: "connected", threadId: message.threadId, error: null }, []]
+    case "ConnectedThread": {
+      if (message.epoch !== model.connectionEpoch) return [model, []]
+      const version = frameVersion(message.frame)
+      return [
+        {
+          ...model,
+          connection: "connected",
+          threadId: message.threadId,
+          attachedThreadId: message.threadId,
+          threadVersion: version ?? model.threadVersion,
+          frames: [...model.frames.slice(-199), frameText(message.frame)],
+          error: null,
+        },
+        [],
+      ]
+    }
+    case "FailedThreadConnection":
+      return message.epoch === model.connectionEpoch
+        ? [
+            {
+              ...model,
+              connection: model.attachedThreadId === null ? "failed" : "connected",
+              error: message.message,
+            },
+            [],
+          ]
+        : [model, []]
     case "FailedThreadAction":
       return [{ ...model, connection: "failed", error: message.message }, []]
     case "SubmittedPrompt": {
       const text = model.draft.trim()
-      return model.connection !== "connected" || text.length === 0
+      return model.attachedThreadId === null || text.length === 0
         ? [model, []]
         : [
             { ...model, draft: "", error: null },
-            [SubmitThreadPrompt({ threadId: model.threadId, threadVersion: model.threadVersion, text })],
+            [SubmitThreadPrompt({ threadId: model.attachedThreadId, threadVersion: model.threadVersion, text })],
           ]
     }
     case "SentPrompt":
@@ -152,8 +220,20 @@ const updateModel = (model: Model, message: Message): Update => {
       const frame = message.frame as {
         readonly payload?: { readonly threadVersion?: unknown; readonly _tag?: unknown; readonly url?: unknown }
       }
-      const version = frame.payload?.threadVersion
-      const disconnected = frame.payload?._tag === "ClientDisconnected"
+      const scopedThread = frameThread(message.frame)
+      if (scopedThread !== undefined && scopedThread !== model.attachedThreadId) return [model, []]
+      const version = frameVersion(message.frame)
+      const reconnecting = frame.payload?._tag === "ClientReconnecting"
+      const reconnectFailed = frame.payload?._tag === "ClientReconnectFailed"
+      let connection = model.connection
+      let error = model.error
+      if (reconnecting) {
+        connection = "connecting"
+        error = null
+      } else if (reconnectFailed) {
+        connection = "failed"
+        error = "Thread reconnection failed"
+      }
       const portalUrl =
         frame.payload?._tag === "PortalOpened" && typeof frame.payload.url === "string"
           ? frame.payload.url
@@ -161,11 +241,11 @@ const updateModel = (model: Model, message: Message): Update => {
       return [
         {
           ...model,
-          connection: disconnected ? "disconnected" : model.connection,
+          connection,
           threadVersion: typeof version === "string" ? version : model.threadVersion,
           portalUrl,
           frames: [...model.frames.slice(-199), frameText(message.frame)],
-          error: disconnected ? "Thread connection closed" : model.error,
+          error,
         },
         [],
       ]

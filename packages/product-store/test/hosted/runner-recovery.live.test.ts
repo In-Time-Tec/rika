@@ -1,4 +1,5 @@
 import { expect, it } from "@effect/vitest"
+import * as BunServices from "@effect/platform-bun/BunServices"
 import { AssignmentRevision, type WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
 import { ExecutorAssignments, type Access, type Version } from "@rika/product/executor-assignments"
 import {
@@ -23,15 +24,27 @@ import {
 } from "@rika/product/hosted-model"
 import { HostedStore } from "@rika/product/hosted-store"
 import { CheckoutFingerprint } from "@rika/product/runner-registration"
-import { Effect, Layer, Random, Redacted } from "effect"
+import { Effect, FileSystem, Layer, Random, Redacted } from "effect"
+import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
 import { identityMigrations } from "../../../identity/src/migrations"
 import { runMigration } from "../../../identity/src/postgres"
 import { migrations } from "../../src/hosted/migrations"
 import * as HostedPostgres from "../../src/hosted/postgres-layer"
 
-const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
+const databaseUrl = "postgresql://rika:rika@127.0.0.1:5432/rika_test"
 const live = databaseUrl !== undefined
+const readFileString = (url: URL) =>
+  Effect.scoped(
+    Layer.build(BunServices.layer).pipe(
+      Effect.flatMap((context) =>
+        Effect.provide(
+          Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.readFileString(fileURLToPath(url))),
+          context,
+        ),
+      ),
+    ),
+  )
 const at = (second: number) => Timestamp.make(`2099-01-01T00:00:${String(second).padStart(2, "0")}.000Z`)
 const capabilities: WorkspaceCapabilitySnapshot = {
   environmentDigest: `sha256:${"a".repeat(64)}`,
@@ -84,7 +97,7 @@ const apply = (
 ) =>
   Effect.gen(function* () {
     for (const migration of selected) {
-      const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
+      const sql = yield* readFileString(migration.url)
       expect(yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })).toBe(true)
     }
   })
@@ -93,7 +106,7 @@ const isolated = <A, E, R>(run: (input: { readonly url: string; readonly pool: P
   Effect.gen(function* () {
     const database = `rika_local_recovery_${Math.abs(yield* Random.nextInt)}`
     const admin = new Pool({ connectionString: databaseUrl })
-    yield* Effect.promise(() => admin.query(`CREATE DATABASE "${database}"`))
+    yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
     const parsed = new URL(databaseUrl!)
     parsed.pathname = `/${database}`
     const url = parsed.toString()
@@ -101,23 +114,23 @@ const isolated = <A, E, R>(run: (input: { readonly url: string; readonly pool: P
     try {
       return yield* run({ url, pool })
     } finally {
-      yield* Effect.promise(() => pool.end())
-      yield* Effect.promise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-      yield* Effect.promise(() => admin.end())
+      yield* Effect.tryPromise(() => pool.end())
+      yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+      yield* Effect.tryPromise(() => admin.end())
     }
   })
 
 const seedIdentity = (pool: Pool) =>
   Effect.gen(function* () {
-    yield* Effect.promise(() =>
+    yield* Effect.tryPromise(() =>
       pool.query(`INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
         VALUES ('user-recovery', 'Recovery', 'recovery@example.test', true, now(), now())`),
     )
-    yield* Effect.promise(() =>
+    yield* Effect.tryPromise(() =>
       pool.query(`INSERT INTO "organization" (id, name, slug, created_at)
         VALUES ('organization-recovery', 'Recovery', 'recovery', now())`),
     )
-    yield* Effect.promise(() =>
+    yield* Effect.tryPromise(() =>
       pool.query(`INSERT INTO member (id, organization_id, user_id, role, created_at)
         VALUES ('member-recovery', 'organization-recovery', 'user-recovery', 'owner', now())`),
     )
@@ -128,10 +141,10 @@ it.effect.skipIf(!live)("applies Runner migrations idempotently and inspects rec
     Effect.gen(function* () {
       yield* apply(pool, [...identityMigrations, ...migrations])
       for (const migration of [...identityMigrations, ...migrations]) {
-        const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
+        const sql = yield* readFileString(migration.url)
         expect(yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })).toBe(false)
       }
-      const constraints = yield* Effect.promise(() =>
+      const constraints = yield* Effect.tryPromise(() =>
         pool.query(`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
           WHERE conrelid = 'rika_hosted_executor_operations'::regclass
           ORDER BY conname`),
@@ -140,19 +153,18 @@ it.effect.skipIf(!live)("applies Runner migrations idempotently and inspects rec
       expect(
         constraintDefinitions.some((definition) => definition.includes("dispatched_executor_instance_id IS NOT NULL")),
       ).toBe(true)
-      expect(constraintDefinitions.some((definition) => definition.includes("dispatch_deadline_at IS NOT NULL"))).toBe(
-        true,
-      )
-      expect(constraintDefinitions.some((definition) => definition.includes("dispatch_deadline_at IS NULL"))).toBe(true)
-      const indexes = yield* Effect.promise(() =>
-        pool.query(`SELECT indexname FROM pg_indexes
+      expect(constraintDefinitions.some((definition) => definition.includes("dispatch_deadline_at"))).toBe(false)
+      const indexes = yield* Effect.tryPromise(() =>
+        pool.query(`SELECT indexname, indexdef FROM pg_indexes
           WHERE tablename = 'rika_hosted_executor_operations'
           ORDER BY indexname`),
       )
-      expect(indexes.rows.map((row: { indexname: string }) => row.indexname)).toContain(
-        "rika_hosted_executor_operations_recovery",
-      )
-      const definition = yield* Effect.promise(() =>
+      const recoveryIndex = indexes.rows.find(
+        (row: { indexname: string }) => row.indexname === "rika_hosted_executor_operations_recovery",
+      ) as { readonly indexdef: string } | undefined
+      expect(recoveryIndex?.indexdef).toContain("(state, deadline_at)")
+      expect(recoveryIndex?.indexdef).toContain("WHERE (state = 'dispatched'")
+      const definition = yield* Effect.tryPromise(() =>
         pool.query(`SELECT pg_get_functiondef('rika_hosted_validate_executor_fence'::regproc) AS definition`),
       )
       expect(definition.rows[0]?.definition).toContain("state = 'unknown'")
@@ -167,26 +179,26 @@ it.effect.skipIf(!live)("fails closed when a dispatched operation has no reconst
     Effect.gen(function* () {
       yield* apply(pool, [...identityMigrations, ...migrations])
       yield* seedIdentity(pool)
-      yield* Effect.promise(() =>
+      yield* Effect.tryPromise(() =>
         pool.query(`INSERT INTO rika_hosted_owners (id, kind, organization_id, created_at)
           VALUES ('owner-recovery', 'organization', 'organization-recovery', now())`),
       )
-      yield* Effect.promise(() =>
+      yield* Effect.tryPromise(() =>
         pool.query(`INSERT INTO rika_hosted_projects
           (id, owner_id, name, created_by_user_id, created_at, updated_at)
           VALUES ('project-recovery', 'owner-recovery', 'Recovery', 'user-recovery', now(), now())`),
       )
-      yield* Effect.promise(() =>
+      yield* Effect.tryPromise(() =>
         pool.query(`INSERT INTO rika_hosted_workspaces
           (id, owner_id, project_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
           VALUES ('workspace-recovery', 'owner-recovery', 'project-recovery', 'user-recovery', 'runner', false, now())`),
       )
-      yield* Effect.promise(() =>
+      yield* Effect.tryPromise(() =>
         pool.query(`INSERT INTO rika_hosted_threads
           (id, owner_id, project_id, workspace_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
           VALUES ('thread-recovery', 'owner-recovery', 'project-recovery', 'workspace-recovery', 'user-recovery', 'runner', false, now())`),
       )
-      yield* Effect.promise(() =>
+      yield* Effect.tryPromise(() =>
         pool.query(`INSERT INTO rika_hosted_executor_assignments
           (id, owner_id, thread_id, workspace_id, executor_kind, placement, generation, revision, last_lease_epoch,
             lifecycle, provider_instance_id, executor_instance_id, process_incarnation, session_digest, lease_epoch,
@@ -195,18 +207,13 @@ it.effect.skipIf(!live)("fails closed when a dispatched operation has no reconst
             '{"_tag":"RunnerPlacement","deviceId":"device-recovery"}', 2, 1, 2, 'active',
             'device-recovery', 'executor-recovery', 'process-recovery', 'session-digest', 2, now() + interval '5 minutes')`),
       )
-      const failed = yield* Effect.promise(() =>
-        pool
-          .query(
-            `INSERT INTO rika_hosted_executor_operations
+      const failed = yield* Effect.tryPromise(() =>
+        pool.query(
+          `INSERT INTO rika_hosted_executor_operations
           (assignment_id, owner_id, operation_key, request_digest, code, attempt, state, dispatched_generation, dispatched_lease_epoch)
           VALUES ('assignment-recovery', 'owner-recovery', 'unfenced-dispatch', 'digest', 'printf 1', 0, 'dispatched', 1, 1)`,
-          )
-          .then(
-            () => false,
-            () => true,
-          ),
-      )
+        ),
+      ).pipe(Effect.match({ onFailure: () => true, onSuccess: () => false }))
       expect(failed).toBe(true)
     }),
   ),
@@ -344,16 +351,18 @@ it.effect.skipIf(!live)(
                 leaseEpoch: active.lifecycle.leaseEpoch,
                 presentedSessionCredentialDigest: Redacted.make("session"),
               }
-              yield* Effect.promise(() =>
+              yield* Effect.tryPromise(() =>
                 pool.query(
                   `INSERT INTO rika_hosted_executor_operations
                 (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
-                  turn_id, run_id, root_run_id, tool_call_id, code, attempt, state, dispatched_generation,
-                  dispatched_lease_epoch, dispatched_executor_instance_id, dispatched_process_incarnation, response)
+                  turn_id, run_id, root_run_id, tool_call_id, code, attempt, deadline_at, state, dispatched_generation,
+                  dispatched_lease_epoch, dispatched_executor_instance_id, dispatched_process_incarnation, response,
+                  terminal_outcome)
                 VALUES ($1, $2, 'operation-recovered', 'digest', 'workspace-recovery', 'thread-recovery',
                   'thread-recovery', 'turn-recovery', 'run-recovery', 'run-recovery', 'call-recovery',
-                  'printf recover', 0, 'unknown', $3, $4, $5, $6,
-                  '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"Local operation outcome is unknown after executor disconnect"}}'::jsonb)`,
+                  'printf recover', 0, '2999-01-01T00:00:00.000Z', 'unknown', $3, $4, $5, $6,
+                  '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"Local operation outcome is unknown after executor disconnect"}}'::jsonb,
+                  'unknown')`,
                   [
                     access.assignmentId,
                     ids.owner,

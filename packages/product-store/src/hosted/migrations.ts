@@ -22,7 +22,7 @@ export const migrations: ReadonlyArray<Migration> = [
   },
   {
     id: "product/0004_runner",
-    checksum: "6468874f1cc19494c8fba7a7f495af04ab3409195ff2ece09f45163cd773d9de",
+    checksum: "93dbbe71d6423282d922991fc5930d4cde251ba92dbd9fc1c1ab5b8fa2c3613c",
     url: new URL("../../migrations/postgres/0004-runner.sql", import.meta.url),
   },
   {
@@ -37,7 +37,7 @@ export const migrations: ReadonlyArray<Migration> = [
   },
   {
     id: "product/0007_hosted_prompt_admission",
-    checksum: "7acbef20b49d79185a1da7bcb00138c509966f2a0fe0dff5e8f614932f490442",
+    checksum: "c42346f786f60b4d91ac03c38b4229aef5ead763f47e2ff95ee68e5b2199acaa",
     url: new URL("../../migrations/postgres/0007-hosted-prompt-admission.sql", import.meta.url),
   },
   {
@@ -57,7 +57,7 @@ export const migrations: ReadonlyArray<Migration> = [
   },
   {
     id: "product/0011_executor_operation_identity",
-    checksum: "513d0d28cac6b127c22490bb0e04f6d49f926a569c9c3e0b94b3f150429edd4b",
+    checksum: "09c670bb359652be3b01af47064e00cf7926060d6f84cf7f7be41e63ed0a1f21",
     url: new URL("../../migrations/postgres/0011-executor-operation-identity.sql", import.meta.url),
   },
   {

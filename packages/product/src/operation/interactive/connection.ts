@@ -1,14 +1,9 @@
 import type { Stream } from "effect"
 
-export type Status =
-  | "connecting"
-  | "connected"
-  | "reconnecting"
+export type Connectivity = "connecting" | "connected" | "reconnecting"
+export type ExecutionTarget = "resolving" | "runner" | "orb"
+export type Activity =
   | "authenticating"
-  | "personal-owner"
-  | "organization-owner"
-  | "local-placement"
-  | "e2b-placement"
   | "executor-waiting"
   | "executor-connecting"
   | "executor-connected"
@@ -20,9 +15,17 @@ export type Status =
   | "approval-required"
   | "unknown-operation"
   | "terminal"
-  | "presence"
+export type Ownership = "personal" | "organization"
+
+export interface State {
+  readonly connectivity: Connectivity
+  readonly target: ExecutionTarget
+  readonly activity?: Activity
+  readonly ownership?: Ownership
+  readonly participants: number
+}
 
 export interface Connection {
-  readonly initialStatus: Status
-  readonly statusChanges: Stream.Stream<Status>
+  readonly initialState: State
+  readonly stateChanges: Stream.Stream<State>
 }

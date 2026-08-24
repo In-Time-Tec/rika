@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Context, Deferred, Effect, Exit, Layer, Ref, Scope } from "effect"
+import { Context, DateTime, Deferred, Effect, Exit, Layer, Logger, Ref, Scope } from "effect"
 import { TestClock } from "effect/testing"
 import { ExecutionHost, RunClaims, RunStore, RuntimeWorker } from "tenetkit/runtime"
 import * as Postgres from "../src/postgres"
@@ -28,9 +28,40 @@ it.effect("validates the complete PostgreSQL and worker configuration", () =>
       lease: 30_000,
       pollInterval: 200,
       cancellationInterval: 100,
+      onClaim: Postgres.observeClaim,
     })
   }),
 )
+
+it.effect("emits persisted Thread, Turn, and Run correlation when a Run claim is accepted", () => {
+  const logs: Array<ReturnType<typeof Logger.formatStructured.log>> = []
+  const logger = Logger.map(Logger.formatStructured, (record) => logs.push(record))
+  const claim = {
+    run: {
+      runId: "run-claim-01",
+      message: { metadata: { threadId: "thread-claim-01", turnId: "turn-claim-01", ignored: 42 } },
+    },
+  } satisfies Parameters<typeof Postgres.observeClaim>[0]
+
+  return Postgres.observeClaim(claim).pipe(
+    Effect.andThen(
+      Effect.sync(() => {
+        expect(logs).toContainEqual(
+          expect.objectContaining({
+            message: "hosted.run_claim.success",
+            annotations: expect.objectContaining({
+              "rika.thread.id": "thread-claim-01",
+              "rika.turn.id": "turn-claim-01",
+              "rika.run.id": "run-claim-01",
+              "rika.hosted.stage": "run_claim",
+            }),
+          }),
+        )
+      }),
+    ),
+    Effect.provideService(Logger.CurrentLoggers, new Set([logger])),
+  )
+})
 
 it.effect("rejects missing identities and non-positive PostgreSQL worker bounds before opening a database", () =>
   Effect.gen(function* () {
@@ -51,13 +82,16 @@ it.effect("rejects missing identities and non-positive PostgreSQL worker bounds 
   }),
 )
 
-const workerDependencies = (claims: RunClaims.Interface) =>
+const workerDependencies = (
+  claims: RunClaims.Interface,
+  executionHost: ExecutionHost.Interface = {
+    execute: () => Effect.void,
+    interrupt: () => Effect.void,
+  },
+) =>
   Layer.mergeAll(
     Layer.succeed(RunClaims.RunClaims, RunClaims.RunClaims.of(claims)),
-    Layer.succeed(
-      ExecutionHost.ExecutionHost,
-      ExecutionHost.ExecutionHost.of({ execute: () => Effect.void } as unknown as ExecutionHost.Interface),
-    ),
+    Layer.succeed(ExecutionHost.ExecutionHost, ExecutionHost.ExecutionHost.of(executionHost)),
     Layer.succeed(
       RunStore.RunStore,
       RunStore.RunStore.of({ inspect: () => Effect.die("unused") } as unknown as RunStore.Interface),
@@ -70,6 +104,13 @@ const claims = (claimReadyRuns: RunClaims.Interface["claimReadyRuns"]): RunClaim
   releaseClaim: () => Effect.void,
   commitWithClaim: () => Effect.void,
 })
+
+type ClaimedRun = Effect.Success<ReturnType<RunClaims.Interface["claimReadyRuns"]>>[number]
+
+const waitUntil = (condition: Effect.Effect<boolean>): Effect.Effect<void> =>
+  condition.pipe(
+    Effect.flatMap((ready) => (ready ? Effect.void : Effect.yieldNow.pipe(Effect.andThen(waitUntil(condition))))),
+  )
 
 it.effect("runs the RuntimeWorker loop only for its owning scope", () =>
   Effect.gen(function* () {
@@ -84,17 +125,57 @@ it.effect("runs the RuntimeWorker loop only for its owning scope", () =>
       ),
     )
     const scope = yield* Scope.make()
-    const context = yield* Layer.buildWithScope(Postgres.workerLayer(worker).pipe(Layer.provide(dependencies)), scope)
+    const workerLayer: Layer.Layer<RuntimeWorker.RuntimeWorker, Postgres.InvalidOptions> = Postgres.workerLayer(
+      worker,
+    ).pipe(Layer.provide(dependencies))
+    const context = yield* Layer.buildWithScope(workerLayer, scope)
     const runtimeWorker = Context.get(context, RuntimeWorker.RuntimeWorker)
-    const health = Context.get(context, Postgres.WorkerHealth)
     yield* Deferred.await(started)
     yield* Effect.yieldNow
     expect(runtimeWorker.workerId).toBe(worker.workerId)
-    yield* health.check
+    expect((yield* runtimeWorker.status).poll._tag).toBe("Succeeded")
     const beforeClose = yield* Ref.get(ticks)
     yield* Scope.close(scope, Exit.void)
     yield* TestClock.adjust("1 second")
     expect(yield* Ref.get(ticks)).toBe(beforeClose)
+  }),
+)
+
+it.effect("interrupts an active claim and clears its status when the worker scope closes", () =>
+  Effect.gen(function* () {
+    const executing = yield* Deferred.make<void>()
+    const interrupted = yield* Deferred.make<void>()
+    const claimed = yield* Ref.make(false)
+    const claim = {
+      run: { runId: "run-active-scope-close" },
+      workerId: worker.workerId,
+      attemptFence: 1,
+      leaseExpiresAt: DateTime.toDate(DateTime.makeUnsafe("2999-01-01T00:00:00.000Z")),
+    } as ClaimedRun
+    const dependencies = workerDependencies(
+      claims(() => Ref.getAndSet(claimed, true).pipe(Effect.map((alreadyClaimed) => (alreadyClaimed ? [] : [claim])))),
+      {
+        execute: () =>
+          Deferred.succeed(executing, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)),
+          ),
+        interrupt: () => Effect.void,
+      },
+    )
+    const scope = yield* Scope.make()
+    const workerLayer: Layer.Layer<RuntimeWorker.RuntimeWorker, Postgres.InvalidOptions> = Postgres.workerLayer(
+      worker,
+    ).pipe(Layer.provide(dependencies))
+    const context = yield* Layer.buildWithScope(workerLayer, scope)
+    const runtimeWorker = Context.get(context, RuntimeWorker.RuntimeWorker)
+
+    yield* Deferred.await(executing)
+    yield* waitUntil(runtimeWorker.status.pipe(Effect.map((status) => status.active === 1)))
+    yield* Scope.close(scope, Exit.void)
+
+    expect(yield* Deferred.isDone(interrupted)).toBe(true)
+    expect((yield* runtimeWorker.status).active).toBe(0)
   }),
 )
 
@@ -113,14 +194,107 @@ it.effect("reports a worker defect and keeps the supervised loop running", () =>
         ),
       ),
     )
-    const context = yield* Layer.build(Postgres.workerLayer(worker).pipe(Layer.provide(dependencies)))
-    const health = Context.get(context, Postgres.WorkerHealth)
+    const workerLayer: Layer.Layer<RuntimeWorker.RuntimeWorker, Postgres.InvalidOptions> = Postgres.workerLayer(
+      worker,
+    ).pipe(Layer.provide(dependencies))
+    const context = yield* Layer.build(workerLayer)
+    const runtimeWorker = Context.get(context, RuntimeWorker.RuntimeWorker)
     yield* Deferred.await(attempted)
     yield* Effect.yieldNow
-    const unavailable = yield* health.check.pipe(Effect.flip)
-    expect(unavailable.message).toBe("Hosted execution worker is unavailable")
+    expect((yield* runtimeWorker.status).poll._tag).toBe("Failed")
     yield* TestClock.adjust(worker.pollIntervalMillis)
-    yield* health.check
+    expect((yield* runtimeWorker.status).poll._tag).toBe("Succeeded")
     expect(yield* Ref.get(attempts)).toBeGreaterThanOrEqual(2)
   }).pipe(Effect.scoped),
+)
+
+const workerStatus = (
+  poll: RuntimeWorker.WorkerStatus["poll"],
+  overrides: Partial<RuntimeWorker.WorkerStatus> = {},
+): RuntimeWorker.WorkerStatus => ({
+  poll,
+  lastSuccessfulPollAt: poll._tag === "Succeeded" ? poll.at : undefined,
+  lastFailure: undefined,
+  active: 0,
+  capacity: 4,
+  oldestClaimAt: undefined,
+  ...overrides,
+})
+
+const readinessWorker = (status: Ref.Ref<RuntimeWorker.WorkerStatus>) => ({
+  workerId: worker.workerId,
+  status: Ref.get(status),
+})
+
+it.effect("uses only the current poll result and exact freshness fence for readiness", () =>
+  Effect.gen(function* () {
+    const now = 10_000
+    const interval = worker.pollIntervalMillis
+    const starting = yield* Effect.exit(
+      Postgres.checkWorkerReadiness(workerStatus({ _tag: "Starting" }), now, interval),
+    )
+    expect(starting._tag).toBe("Failure")
+
+    const failed = workerStatus(
+      { _tag: "Failed", at: now, message: "latest poll failed" },
+      { lastSuccessfulPollAt: now - 1 },
+    )
+    expect((yield* Effect.exit(Postgres.checkWorkerReadiness(failed, now, interval)))._tag).toBe("Failure")
+
+    const fence = workerStatus({ _tag: "Succeeded", at: now - interval * 4 })
+    yield* Postgres.checkWorkerReadiness(fence, now, interval)
+    const stale = workerStatus({ _tag: "Succeeded", at: now - interval * 4 - 1 })
+    expect((yield* Effect.exit(Postgres.checkWorkerReadiness(stale, now, interval)))._tag).toBe("Failure")
+  }),
+)
+
+it.effect("returns exact proof after recovery and exposes non-gating worker diagnostics", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(10_000)
+    const retainedFailure = { at: 8_000, message: "earlier failure" }
+    const status = yield* Ref.make(
+      workerStatus(
+        { _tag: "Failed", at: 9_900, message: "poll failed" },
+        { lastSuccessfulPollAt: 9_800, lastFailure: retainedFailure },
+      ),
+    )
+    const readiness = Postgres.makeReadiness({
+      source: options.source,
+      pollIntervalMillis: worker.pollIntervalMillis,
+      worker: readinessWorker(status),
+      schema: Effect.void,
+    })
+    expect((yield* Effect.exit(readiness.check))._tag).toBe("Failure")
+
+    yield* Ref.set(
+      status,
+      workerStatus(
+        { _tag: "Succeeded", at: 10_000 },
+        {
+          lastFailure: retainedFailure,
+          active: 4,
+          capacity: 4,
+          oldestClaimAt: 1,
+        },
+      ),
+    )
+    expect(yield* readiness.check).toEqual({
+      backend: "postgres",
+      source: options.source,
+      workerId: worker.workerId,
+    })
+    expect(yield* readiness.status).toEqual({
+      poll: { _tag: "Succeeded", at: 10_000 },
+      lastSuccessfulPollAt: 10_000,
+      lastFailure: retainedFailure,
+      active: 4,
+      capacity: 4,
+      oldestClaimAt: 1,
+      pollAgeMillis: 0,
+      lastSuccessfulPollAgeMillis: 0,
+      oldestClaimAgeMillis: 9_999,
+      lastFailureAgeMillis: 2_000,
+      availableCapacity: 0,
+    })
+  }),
 )

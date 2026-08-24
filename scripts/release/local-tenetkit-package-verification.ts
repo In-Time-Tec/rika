@@ -1,11 +1,7 @@
 import { Data, Effect, FileSystem, Path, Schema } from "effect"
 import { directoryDigest } from "../upstream/upstream-content-digest"
 
-/**
- * TenetKit ships one package with subpath exports, so the list holds whole package names rather
- * than the scope-relative suffixes the thirteen `@tenetkitfx/*` packages needed.
- */
-export const tenetkitPackages = ["tenetkit"] as const
+export const tenetkitPackages = ["tenetkit", "@tenetkit/pg"] as const
 
 class LocalTenetKitSmokeError extends Data.TaggedError("LocalTenetKitSmokeError")<{
   readonly step: string

@@ -18,7 +18,7 @@ const spansFor = (app: TuiApp.TuiApp, text: string) =>
 
 const createCurrentThread = (app: TuiApp.TuiApp) =>
   Effect.gen(function* () {
-    yield* Effect.promise(() => app.type("Create the current thread."))
+    yield* Effect.tryPromise(() => app.type("Create the current thread."))
     app.pressEnter()
     yield* app.waitFrame("CURRENT_THREAD_READY")
     yield* app.waitTranscript(Turn.TurnId.make("tui-turn-0"), (projection) => projection.state.status === "completed")
@@ -108,7 +108,7 @@ test(
           inspectTranscript: true,
         })
 
-        yield* Effect.promise(() => app.type("Cancel this busy turn."))
+        yield* Effect.tryPromise(() => app.type("Cancel this busy turn."))
         app.pressEnter()
         yield* app.waitModelRequests(1)
         yield* app.waitFrame("Waiting")
@@ -137,7 +137,7 @@ test(
           holdCancellation: cancellation,
         })
 
-        yield* Effect.promise(() => app.type("Keep cancellation pending."))
+        yield* Effect.tryPromise(() => app.type("Keep cancellation pending."))
         app.pressEnter()
         yield* app.waitModelRequests(1)
         yield* app.waitFrame("Waiting")

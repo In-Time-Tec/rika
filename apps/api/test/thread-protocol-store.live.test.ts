@@ -25,8 +25,9 @@ import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId } from "@rika/product/turn-record"
 import { migrations } from "@rika/product-store/migrations"
 import { layer } from "@rika/product-store/postgres-layer"
-import { Context, DateTime, Effect, Layer, Random, Redacted } from "effect"
+import { FileSystem, Config, Context, DateTime, Effect, Layer, Random, Redacted } from "effect"
 import { Pool } from "pg"
+import { live as livePlatform } from "./live-platform"
 import { HostedThreadApplication, type HostedThreadApplicationService } from "../src/hosted-thread-application"
 import { HostedProduct, type HostedProductService } from "../src/hosted-product"
 import {
@@ -38,8 +39,8 @@ import { HostedToolPolicy } from "../src/hosted-tool-policy"
 import { HostedWorkspace } from "../src/hosted-workspace"
 import { testToolPolicy } from "./hosted-tool-policy-fixture"
 
-const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
-const live = databaseUrl !== undefined
+const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
+const live = databaseUrl !== ""
 const startedAt = DateTime.toEpochMillis(DateTime.nowUnsafe())
 const timestampAfter = (milliseconds: number) =>
   Timestamp.make(DateTime.formatIso(DateTime.makeUnsafe(startedAt + milliseconds)))
@@ -62,25 +63,32 @@ const actor = {
   deviceId,
 }
 const snapshot = {
-  thread: {
-    id: ProductThreadId.make(threadId),
-    workspace: workspaceId,
-    title: "Protocol Thread",
-    labels: [],
-    pinned: false,
-    archived: false,
-    lineage: { _tag: "Original" as const },
-    createdAt: 1,
-    updatedAt: 1,
+  executorKind: "runner" as const,
+  view: {
+    thread: {
+      id: ProductThreadId.make(threadId),
+      workspace: workspaceId,
+      title: "Protocol Thread",
+      labels: [],
+      pinned: false,
+      archived: false,
+      lineage: { _tag: "Original" as const },
+      createdAt: 1,
+      updatedAt: 1,
+    },
+    revision: 0,
+    source: { projectionVersion: ExecutionProjection.projectionVersion },
+    turns: [],
+    pending: [],
+    hasOlder: false,
+    hasNewer: false,
+    usage: { state: ExecutionProjection.emptyUsageState() },
   },
-  turns: [],
-  units: [],
-  queue: { revision: 0, turns: [] },
   pendingAuthorizations: [],
 }
 
 const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.promise(() => pool.query(text, [...values]))
+  Effect.tryPromise(() => pool.query(text, [...values]))
 
 const withDatabase = <A, E, R>(use: (pool: Pool) => Effect.Effect<A, E, R | HostedStore | ThreadProtocolStore>) =>
   Effect.scoped(
@@ -89,27 +97,31 @@ const withDatabase = <A, E, R>(use: (pool: Pool) => Effect.Effect<A, E, R | Host
       const database = `rika_thread_protocol_${suffix}`
       const admin = new Pool({ connectionString: databaseUrl })
       yield* query(admin, `CREATE DATABASE "${database}"`)
-      const parsed = new URL(databaseUrl!)
+      const parsed = new URL(databaseUrl)
       parsed.pathname = `/${database}`
       const url = parsed.toString()
       let pool: Pool | undefined
       try {
-        pool = new Pool({ connectionString: url })
+        const activePool = new Pool({ connectionString: url })
+        pool = activePool
         for (const migration of [...identityMigrations, ...migrations]) {
-          const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
-          yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
+          const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.readFileString(migration.url.pathname),
+          )
+          yield* runMigration({ pool: activePool, id: migration.id, checksum: migration.checksum, sql })
         }
         const context = yield* Layer.build(
           layer({ url: Redacted.make(url), maxConnections: 8 }).pipe(Layer.provide(BunCrypto.layer)),
         )
-        return yield* use(pool).pipe(Effect.provide(context))
+        return yield* use(activePool).pipe(Effect.provide(context))
       } finally {
-        yield* Effect.promise(() => pool?.end() ?? Promise.resolve())
-        yield* Effect.promise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-        yield* Effect.promise(() => admin.end())
+        const cleanupPool = pool
+        yield* cleanupPool === undefined ? Effect.void : Effect.tryPromise(() => cleanupPool.end())
+        yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+        yield* Effect.tryPromise(() => admin.end())
       }
     }),
-  )
+  ).pipe(livePlatform)
 
 const setup = (pool: Pool) =>
   Effect.gen(function* () {
@@ -217,6 +229,7 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
         ownerId,
         threadId,
         events: [{ _tag: "ExecutionControlled", action: "cancelled" }],
+        snapshot,
         createdAt: later,
       })
       const replay = yield* protocol.replay({
@@ -226,8 +239,8 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
         afterCursor: ThreadEventCursor.make("0"),
         limit: 100,
       })
-      expect(replay).toMatchObject({ threadVersion: "2", cursor: "2", snapshot: { cursor: "1" } })
-      expect(replay.events.map((event) => event.cursor)).toEqual(["2"])
+      expect(replay).toMatchObject({ threadVersion: "2", cursor: "2", snapshot: { cursor: "2" } })
+      expect(replay.events).toEqual([])
       expect(
         yield* protocol.acknowledgeCursor({
           ownerId,
@@ -244,8 +257,8 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
         afterCursor: ThreadEventCursor.make("0"),
         limit: 100,
       })
-      expect(compacted.snapshot?.cursor).toBe("1")
-      expect(compacted.events.map((event) => event.cursor)).toEqual(["2"])
+      expect(compacted.snapshot?.cursor).toBe("2")
+      expect(compacted.events).toEqual([])
 
       yield* protocol.issueTicket({
         ticketId: "ticket",
@@ -366,16 +379,19 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
           }),
       }
       const operations: HostedThreadApplicationService = {
-        thread: () => Effect.succeed(currentSnapshot.thread),
+        thread: () => Effect.succeed(currentSnapshot.view.thread),
         snapshot: () => Effect.succeed(currentSnapshot),
-        interactive: (input) =>
-          Effect.sync(() => {
+        interactive: (input, persist) =>
+          Effect.suspend(() => {
             effects.push(input.command)
             if (input.command._tag === "ApproveAuthorization" || input.command._tag === "DenyAuthorization") {
               currentSnapshot = { ...currentSnapshot, pendingAuthorizations: [] }
-              return []
+              return persist({ events: [], snapshot: currentSnapshot })
             }
-            return [{ _tag: "ExecutionControlled" as const, selectionEpoch: 0, action: "cancelled" as const }]
+            return persist({
+              events: [{ _tag: "ExecutionControlled" as const, action: "cancelled" as const }],
+              snapshot: currentSnapshot,
+            })
           }),
       }
       const dependencies = Layer.mergeAll(
@@ -415,8 +431,15 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
             command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
           }),
         ).toMatchObject([
-          { payload: { _tag: "ThreadSnapshot", threadVersion: "0", cursor: "0" } },
-          { payload: { _tag: "PresenceSnapshot", threadId, participants: [{ status: "viewing" }] } },
+          {
+            payload: {
+              _tag: "ThreadAttached",
+              threadVersion: "0",
+              cursor: "0",
+              events: [],
+              participants: [{ status: "viewing" }],
+            },
+          },
         ])
 
       const duplicate = {
@@ -424,6 +447,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
         requestId: "duplicate-a" as never,
         command: {
           _tag: "SubmitPrompt" as const,
+          threadId,
           commandId: CommandId.make("duplicate-submit"),
           idempotencyKey: IdempotencyKey.make("duplicate-submit-key"),
           expectedThreadVersion: ThreadVersion.make("0"),
@@ -450,6 +474,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
         requestId: requestId as never,
         command: {
           _tag: "SubmitPrompt" as const,
+          threadId,
           commandId: CommandId.make(id),
           idempotencyKey: IdempotencyKey.make(`${id}-key`),
           expectedThreadVersion: ThreadVersion.make("1"),
@@ -522,19 +547,21 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       ).toMatchObject([
         {
           payload: {
-            _tag: "ThreadSnapshot",
+            _tag: "ThreadAttached",
             threadVersion: "3",
             cursor: "3",
-            snapshot: { pendingAuthorizations: [{ authorizationId: "authorization-1", checkpoint }] },
+            snapshot: { pendingAuthorizations: [] },
+            events: [],
+            participants: expect.any(Array),
           },
         },
-        { payload: { _tag: "PresenceSnapshot", threadId } },
       ])
       const approval = {
         protocolVersion: 1 as const,
         requestId: "approval-request" as never,
         command: {
           _tag: "Approve" as const,
+          threadId,
           commandId: CommandId.make("approval-command"),
           idempotencyKey: IdempotencyKey.make("approval-key"),
           expectedThreadVersion: ThreadVersion.make("3"),
@@ -604,6 +631,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
           requestId: "denial-request" as never,
           command: {
             _tag: "Deny",
+            threadId,
             commandId: CommandId.make("denial-command"),
             idempotencyKey: IdempotencyKey.make("denial-key"),
             expectedThreadVersion: ThreadVersion.make("5"),
@@ -691,25 +719,68 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       yield* protocolStore.appendEvents({
         ownerId,
         threadId,
-        events: [{ _tag: "ExecutionControlled", action: "cancelled" }],
+        events: Array.from({ length: 1_002 }, () => ({
+          _tag: "ExecutionControlled" as const,
+          action: "cancelled" as const,
+        })),
+        snapshot: currentSnapshot,
         createdAt: later,
       })
+      yield* query(pool, `DELETE FROM rika_hosted_thread_protocol_snapshots WHERE thread_id = $1 AND cursor > 3`, [
+        threadId,
+      ])
       const replayController = yield* open
       const replay = yield* replayController.receive({
         protocolVersion: 1,
         requestId: "replay-attach" as never,
         command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
       })
-      expect(replay).toMatchObject([
-        { payload: { _tag: "ThreadSnapshot", threadVersion: "6", cursor: "3" } },
-        {
-          payload: {
-            _tag: "ThreadEvent",
-            event: { cursor: "4", event: { _tag: "ExecutionControlled", action: "cancelled" } },
-          },
-        },
-        { payload: { _tag: "PresenceSnapshot", threadId } },
+      expect(replay).toHaveLength(1)
+      const attachedReplay = replay[0]!.payload
+      expect(attachedReplay).toMatchObject({
+        _tag: "ThreadAttached",
+        snapshotCursor: "3",
+        threadVersion: "6",
+        cursor: "1005",
+        participants: expect.any(Array),
+      })
+      if (attachedReplay._tag !== "ThreadAttached") throw new Error("expected ThreadAttached")
+      expect(attachedReplay.events).toHaveLength(1_002)
+      expect(attachedReplay.events[0]).toMatchObject({ cursor: "4", event: { _tag: "ExecutionControlled" } })
+      expect(attachedReplay.events.at(-1)).toMatchObject({ cursor: "1005", event: { _tag: "ExecutionControlled" } })
+      expect(
+        (yield* replayController.receive({
+          protocolVersion: 1,
+          requestId: "large-replay-ack" as never,
+          command: { _tag: "AcknowledgeCursor", threadId, cursor: ThreadEventCursor.make("1005") },
+        }))[0]?.payload,
+      ).toMatchObject({ _tag: "CommandAccepted", cursor: "1005" })
+
+      yield* protocolStore.appendEvents({
+        ownerId,
+        threadId,
+        events: [{ _tag: "ExecutionControlled", action: "cancelled" }],
+        snapshot: currentSnapshot,
+        createdAt: later,
+      })
+      yield* query(pool, `DELETE FROM rika_hosted_thread_protocol_snapshots WHERE thread_id = $1 AND cursor > 3`, [
+        threadId,
       ])
+      const appendOnlyReplay = yield* replayController.receive({
+        protocolVersion: 1,
+        requestId: "append-only-replay" as never,
+        command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("1005") },
+      })
+      expect(appendOnlyReplay).toHaveLength(1)
+      const appendOnlyAttachment = appendOnlyReplay[0]!.payload
+      expect(appendOnlyAttachment).toMatchObject({
+        _tag: "ThreadAttached",
+        snapshotCursor: "3",
+        cursor: "1006",
+      })
+      if (appendOnlyAttachment._tag !== "ThreadAttached") throw new Error("expected ThreadAttached")
+      expect(appendOnlyAttachment.events).toHaveLength(1_003)
+      expect(appendOnlyAttachment.events.at(-1)).toMatchObject({ cursor: "1006" })
     }),
   ),
 )
@@ -789,10 +860,13 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         events: [],
         snapshot: {
           ...snapshot,
-          thread: {
-            ...snapshot.thread,
-            id: ProductThreadId.make(organizationThreadId),
-            workspace: organizationWorkspaceId,
+          view: {
+            ...snapshot.view,
+            thread: {
+              ...snapshot.view.thread,
+              id: ProductThreadId.make(organizationThreadId),
+              workspace: organizationWorkspaceId,
+            },
           },
         },
         completedAt: later,

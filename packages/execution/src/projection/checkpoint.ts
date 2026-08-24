@@ -17,7 +17,9 @@ const authorizationTargetImpl = (
 ): AuthorizationTarget | undefined => {
   if (checkpoint.version !== Projection.projectionVersion) return undefined
   try {
-    const parsed = JSON.parse(checkpoint.state) as Partial<PersistedProjector>
+    const parsed = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
+      checkpoint.state,
+    ) as Partial<PersistedProjector>
     if (!Array.isArray(parsed.authorizations)) return undefined
     for (const candidate of parsed.authorizations) {
       if (!Array.isArray(candidate) || candidate.length !== 2) continue
@@ -102,7 +104,9 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
   }
 
   const restore = (resumeCheckpoint: Projection.Checkpoint): void => {
-    const parsed = JSON.parse(resumeCheckpoint.state) as Partial<PersistedProjector>
+    const parsed = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
+      resumeCheckpoint.state,
+    ) as Partial<PersistedProjector>
     if (
       parsed.turnId !== turnId ||
       typeof parsed.hasOlder !== "boolean" ||

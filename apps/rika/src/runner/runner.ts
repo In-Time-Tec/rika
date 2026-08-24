@@ -1,5 +1,6 @@
 import { ForegroundRunnerError, runForegroundRunner, foregroundRunnerLayer } from "@rika/remote-execution/foreground"
-import { Config, Console, Deferred, Effect, Fiber, Layer, Option, Schema } from "effect"
+import { Config, Console, Context, Deferred, Effect, Fiber, Function, Layer, Option, Schema } from "effect"
+import type { Success } from "effect/Effect"
 import { ProjectId } from "@rika/product/hosted-model"
 import { inspectRunnerCheckout } from "./runner-checkout"
 import { RunnerAdmission, RunnerError, type RunnerStatus, type RemoteThreadCreation } from "./runner-contract"
@@ -97,7 +98,16 @@ export const liveAdmissionLayer = Layer.effect(
   }),
 )
 
-export const prepareRunnerCheckout = Effect.fn("Runner.prepareCheckout")(function* (input: {
+export type PreparedRunnerCheckout = {
+  readonly profile: Profile
+  readonly checkout: Success<ReturnType<typeof inspectRunnerCheckout>>
+}
+
+const InheritedPreparation = Context.Reference<PreparedRunnerCheckout | undefined>("@rika/cli/RunnerPreparation", {
+  defaultValue: () => undefined,
+})
+
+const prepareRunnerCheckoutOnce = Effect.fn("Runner.prepareCheckoutOnce")(function* (input: {
   readonly workspace: string
   readonly preferencePath: string
   readonly requestedPreference?: RemoteThreadCreation | undefined
@@ -129,12 +139,37 @@ export const prepareRunnerCheckout = Effect.fn("Runner.prepareCheckout")(functio
   return { profile: profile.value, checkout }
 })
 
+export const prepareRunnerCheckout = Effect.fn("Runner.prepareCheckout")(function* (
+  input: Parameters<typeof prepareRunnerCheckoutOnce>[0],
+) {
+  const prepared = yield* InheritedPreparation
+  return prepared ?? (yield* prepareRunnerCheckoutOnce(input))
+})
+
+const withPreparedRunnerCheckoutImpl = <A, E, R>(
+  input: Parameters<typeof prepareRunnerCheckoutOnce>[0],
+  operation: Effect.Effect<A, E, R>,
+) =>
+  Effect.flatMap(prepareRunnerCheckoutOnce(input), (prepared) =>
+    Effect.provideService(operation, InheritedPreparation, prepared),
+  )
+
+export const withPreparedRunnerCheckout: {
+  <A, E, R>(
+    input: Parameters<typeof prepareRunnerCheckoutOnce>[0],
+    operation: Effect.Effect<A, E, R>,
+  ): ReturnType<typeof withPreparedRunnerCheckoutImpl<A, E, R>>
+  (input: Parameters<typeof prepareRunnerCheckoutOnce>[0]): <A, E, R>(
+    operation: Effect.Effect<A, E, R>,
+  ) => ReturnType<typeof withPreparedRunnerCheckoutImpl<A, E, R>>
+} = Function.dual(2, withPreparedRunnerCheckoutImpl)
+
 export const runRunner = Effect.fn("Runner.run")(function* (input: {
   readonly workspace: string
   readonly preferencePath: string
   readonly requestedPreference?: RemoteThreadCreation | undefined
-}) {
-  const { profile, checkout } = yield* prepareRunnerCheckout(input)
+}, prepared?: PreparedRunnerCheckout) {
+  const { profile, checkout } = prepared ?? (yield* prepareRunnerCheckout(input))
   const admission = yield* RunnerAdmission
   const report = (status: RunnerStatus) => Console.log(statusLine(status))
   yield* report({ _tag: "Registering", registration: checkout.registration })

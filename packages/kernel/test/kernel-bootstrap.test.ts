@@ -3,7 +3,8 @@ import { Effect } from "effect"
 import { moduleNames } from "@rika/kernel/binding-modules"
 import { globals, source } from "@rika/kernel/kernel-bootstrap"
 
-type Call = (input: unknown) => Promise<unknown>
+type HostResult<A> = ReturnType<typeof Effect.runPromise<A, never>>
+type Call = (input: unknown) => HostResult<unknown>
 
 interface Sandbox {
   readonly rika: Record<string, Record<string, Call>> & { readonly mcp: Record<string, Record<string, Call>> }
@@ -12,6 +13,8 @@ interface Sandbox {
 
 const server = (sandbox: Sandbox, name: string): Record<string, Call> => sandbox.rika.mcp[name]!
 const flat = (sandbox: Sandbox, name: string): Call => (sandbox.rika.mcp as unknown as Record<string, Call>)[name]!
+const invoke = (call: Call, input: unknown): Effect.Effect<unknown> =>
+  Effect.tryPromise(() => call(input))
 
 const discovered = [
   { name: "read", rawName: "raw_read" },
@@ -23,32 +26,28 @@ interface Recorder {
   readonly toolCalls: Array<unknown>
 }
 
-/**
- * Evaluate the bootstrap the way the worker does: the mounted modules are already flat globals and
- * this source assembles `rika` from them. The host stubs answer with Promises because that is what a
- * mounted binding looks like inside the kernel, which is ordinary TypeScript rather than Effect.
- */
 const evaluate = (
   recorder: Recorder,
   stale = false,
   availableTools: Array<(typeof discovered)[number]> = discovered,
 ): Effect.Effect<Sandbox> =>
-  Effect.promise(() => {
+  Effect.tryPromise(() => {
     const scope: Record<string, unknown> = {}
     for (const name of moduleNames) scope[name] = {}
     scope.mcp = {
-      servers: () => Promise.resolve([{ name: "files", kind: "local", enabled: true }]),
+      servers: () => Effect.runPromise(Effect.succeed([{ name: "files", kind: "local", enabled: true }])),
       tools: (input: unknown) => {
         recorder.toolCalls.push(input)
-        return Promise.resolve(availableTools)
+        return Effect.runPromise(Effect.succeed(availableTools))
       },
       call: (input: unknown) => {
         recorder.calls.push(input)
-        return Promise.resolve({ content: { ok: true }, isError: false })
+        return Effect.runPromise(Effect.succeed({ content: { ok: true }, isError: false }))
       },
     }
     scope.context = {
-      current: () => Promise.resolve({ threadId: "thread", workspace: "/repo", trustMode: "trusted-local" }),
+      current: () =>
+        Effect.runPromise(Effect.succeed({ threadId: "thread", workspace: "/repo", trustMode: "trusted-local" })),
     }
     scope.kernel = { ...scope }
     if (stale) {
@@ -56,7 +55,7 @@ const evaluate = (
       scope.workspace = { stale: true }
     }
     const body = `return (async () => { ${source().replaceAll("globalThis", "host")} ; return { rika: host.rika, context: host.context } })()`
-    const run = new Function("host", body) as (host: Record<string, unknown>) => Promise<Sandbox>
+    const run = new Function("host", body) as (host: Record<string, unknown>) => HostResult<Sandbox>
     return run({ ...scope })
   })
 
@@ -93,7 +92,7 @@ describe("kernel bootstrap", () => {
   it.effect("keeps the flat mcp contract reachable beside the proxy", () =>
     Effect.gen(function* () {
       const sandbox = yield* evaluate(recorder())
-      const servers = yield* Effect.promise(() => flat(sandbox, "servers")({}))
+      const servers = yield* invoke(flat(sandbox, "servers"), {})
       expect(servers).toEqual([{ name: "files", kind: "local", enabled: true }])
     }),
   )
@@ -102,7 +101,7 @@ describe("kernel bootstrap", () => {
     Effect.gen(function* () {
       const recording = recorder()
       const sandbox = yield* evaluate(recording)
-      const response = yield* Effect.promise(() => server(sandbox, "files").read!({ path: "a" }))
+      const response = yield* invoke(server(sandbox, "files").read!, { path: "a" })
       expect(recording.calls).toEqual([{ server: "files", tool: "read", input: { path: "a" } }])
       expect(response).toEqual({ content: { ok: true }, isError: false })
     }),
@@ -112,8 +111,8 @@ describe("kernel bootstrap", () => {
     Effect.gen(function* () {
       const recording = recorder()
       const sandbox = yield* evaluate(recording)
-      yield* Effect.promise(() => server(sandbox, "files").read!({}))
-      yield* Effect.promise(() => server(sandbox, "files").write!({}))
+      yield* invoke(server(sandbox, "files").read!, {})
+      yield* invoke(server(sandbox, "files").write!, {})
       expect(recording.toolCalls).toEqual([{ server: "files" }])
     }),
   )
@@ -121,7 +120,7 @@ describe("kernel bootstrap", () => {
   it.effect("returns typed data for an unknown tool rather than throwing undefined is not a function", () =>
     Effect.gen(function* () {
       const sandbox = yield* evaluate(recorder())
-      const response = yield* Effect.promise(() => server(sandbox, "files").ghost!({}))
+      const response = yield* invoke(server(sandbox, "files").ghost!, {})
       expect(response).toMatchObject({ _tag: "McpBindingNotFound", module: "files", operation: "ghost" })
     }),
   )
@@ -131,10 +130,10 @@ describe("kernel bootstrap", () => {
       const recording = recorder()
       const availableTools = [discovered[0]!]
       const sandbox = yield* evaluate(recording, false, availableTools)
-      yield* Effect.promise(() => server(sandbox, "files").read!({}))
+      yield* invoke(server(sandbox, "files").read!, {})
       availableTools.push(discovered[1]!)
 
-      const response = yield* Effect.promise(() => server(sandbox, "files").write!({}))
+      const response = yield* invoke(server(sandbox, "files").write!, {})
 
       expect(recording.toolCalls).toEqual([{ server: "files" }])
       expect(recording.calls).toEqual([{ server: "files", tool: "read", input: {} }])
@@ -152,7 +151,7 @@ describe("kernel bootstrap", () => {
     Effect.gen(function* () {
       const recording = recorder()
       const sandbox = yield* evaluate(recording)
-      yield* Effect.promise(() => server(sandbox, "files").raw_write!({ x: 1 }))
+      yield* invoke(server(sandbox, "files").raw_write!, { x: 1 })
       expect(recording.calls).toEqual([{ server: "files", tool: "raw_write", input: { x: 1 } }])
     }),
   )

@@ -10,9 +10,7 @@ const put = (action: "set" | "rotate") =>
     Effect.flatMap(readSecret(`Paste your ${selectedProvider} API key: `), (apiKey) =>
       Option.match(apiKey, {
         onNone: () =>
-          Effect.fail(
-            CliError.UserError.make({ cause: "Missing API key", userMessage: "An API key is required" }),
-          ),
+          Effect.fail(CliError.UserError.make({ cause: "Missing API key", userMessage: "An API key is required" })),
         onSome: (value) => dispatch({ _tag: "Credential", action: "put", provider: selectedProvider, apiKey: value }),
       }),
     ),

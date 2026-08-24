@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
+import * as ExecutionProjection from "../../src/execution/contract/execution-projection"
 import {
   ActorAttribution,
   BetterAuthMemberId,
@@ -23,8 +24,9 @@ import { ClientMessage, ServerFrame, protocolVersion } from "../../src/hosted/pr
 const codec = <S extends Schema.Constraint>(schema: S) =>
   schema as unknown as Schema.Codec<unknown, unknown, never, never>
 const roundTrip = (schema: Schema.Constraint, value: unknown) => {
-  const encoded = Schema.encodeUnknownSync(codec(schema))(value)
-  return Schema.decodeUnknownSync(codec(schema))(JSON.parse(JSON.stringify(encoded)))
+  const jsonCodec = Schema.fromJsonString(codec(schema))
+  const encoded = Schema.encodeUnknownSync(jsonCodec)(value)
+  return Schema.decodeUnknownSync(jsonCodec)(encoded)
 }
 
 const userId = BetterAuthUserId.make("user")
@@ -53,7 +55,8 @@ const organizationActor = {
   deviceId,
 }
 const envelope = (command: unknown) => ({ protocolVersion, requestId, command })
-const mutation = { commandId, idempotencyKey, expectedThreadVersion }
+const admitted = { commandId, idempotencyKey, expectedThreadVersion }
+const mutation = { threadId, ...admitted }
 
 describe("hosted owner and actor attribution", () => {
   it("round trips personal and organization attribution", () => {
@@ -74,14 +77,14 @@ describe("hosted Thread client protocol", () => {
     const messages = [
       envelope({
         _tag: "CreateThread",
-        ...mutation,
+        ...admitted,
         owner: { kind: "personal" },
         executorKind: "runner",
         runnerTarget: { deviceId: "device-1", checkoutFingerprint: "checkout-1" },
       }),
       envelope({
         _tag: "CreateThread",
-        ...mutation,
+        ...admitted,
         owner: { kind: "organization", organizationId },
         projectId,
         executorKind: "orb",
@@ -100,10 +103,31 @@ describe("hosted Thread client protocol", () => {
       envelope({ _tag: "Cancel", ...mutation }),
       envelope({ _tag: "Approve", ...mutation, turnId: "turn", authorizationId: "authorization", checkpoint }),
       envelope({ _tag: "Deny", ...mutation, turnId: "turn", authorizationId: "authorization", checkpoint }),
-      envelope({ _tag: "AcknowledgeCursor", cursor }),
+      envelope({
+        _tag: "EnsureRepositoryService",
+        ...mutation,
+        service: { serviceId: "docs", command: "bun", args: ["run", "dev"], cwd: "." },
+      }),
+      envelope({ _tag: "StopRepositoryService", ...mutation, serviceId: "docs" }),
+      envelope({ _tag: "PauseOrb", ...mutation }),
+      envelope({ _tag: "ResumeOrb", ...mutation }),
+      envelope({ _tag: "InspectWorkspaceFile", threadId, path: "src/main.ts", maximumBytes: 1024 }),
+      envelope({ _tag: "AcknowledgeCursor", threadId, cursor }),
+      envelope({ _tag: "UpdatePresence", threadId, status: "viewing" }),
+      envelope({ _tag: "OpenPortal", threadId, port: 3000 }),
       envelope({ _tag: "Detach" }),
     ]
     expect(messages.map((message) => roundTrip(ClientMessage, message))).toEqual(messages)
+    for (const message of messages) {
+      if (
+        message.command._tag === "CreateThread" ||
+        message.command._tag === "AttachThread" ||
+        message.command._tag === "Detach"
+      )
+        continue
+      const { threadId: _, ...withoutThread } = message.command
+      expect(() => Schema.decodeUnknownSync(ClientMessage)({ ...message, command: withoutThread })).toThrow()
+    }
   })
 
   it("rejects malformed variants and every client-supplied trusted identity field", () => {
@@ -124,12 +148,12 @@ describe("hosted Thread client protocol", () => {
     ).toThrow()
     expect(() =>
       Schema.decodeUnknownSync(ClientMessage)(
-        envelope({ _tag: "CreateThread", ...mutation, owner: { kind: "personal" }, placement: "local" }),
+        envelope({ _tag: "CreateThread", ...admitted, owner: { kind: "personal" }, placement: "local" }),
       ),
     ).toThrow()
     expect(() =>
       Schema.decodeUnknownSync(ClientMessage)(
-        envelope({ _tag: "CreateThread", ...mutation, owner: { kind: "personal" }, executorKind: "runner" }),
+        envelope({ _tag: "CreateThread", ...admitted, owner: { kind: "personal" }, executorKind: "runner" }),
       ),
     ).toThrow()
     expect(() =>
@@ -146,6 +170,30 @@ describe("hosted Thread client protocol", () => {
   })
 
   it("round trips accepted, rejected, event, and heartbeat server frames", () => {
+    const snapshot = {
+      executorKind: "orb" as const,
+      view: {
+        thread: {
+          id: threadId as never,
+          workspace: "workspace",
+          title: "Thread",
+          labels: [],
+          pinned: false,
+          archived: false,
+          lineage: { _tag: "Original" as const },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        revision: 0,
+        source: { projectionVersion: ExecutionProjection.projectionVersion },
+        turns: [],
+        pending: [],
+        hasOlder: false,
+        hasNewer: false,
+        usage: { state: ExecutionProjection.emptyUsageState() },
+      },
+      pendingAuthorizations: [],
+    }
     const frames = [
       {
         protocolVersion,
@@ -157,6 +205,18 @@ describe("hosted Thread client protocol", () => {
           threadVersion: ThreadVersion.make("4"),
           cursor,
           result: { _tag: "Applied" },
+        },
+      },
+      {
+        protocolVersion,
+        payload: {
+          _tag: "CommandAccepted",
+          requestId,
+          commandId,
+          threadId,
+          threadVersion: ThreadVersion.make("4"),
+          cursor,
+          result: { _tag: "PromptAdmitted", status: "queued" },
         },
       },
       {
@@ -185,6 +245,31 @@ describe("hosted Thread client protocol", () => {
             event: { _tag: "ExecutionControlled", action: "cancelled" },
             createdAt: now,
           },
+        },
+      },
+      {
+        protocolVersion,
+        payload: {
+          _tag: "ThreadAttached",
+          requestId,
+          threadId,
+          snapshotThreadVersion: ThreadVersion.make("4"),
+          snapshotCursor: cursor,
+          threadVersion: ThreadVersion.make("4"),
+          cursor,
+          snapshot,
+          events: [],
+          participants: [{ actor: personalActor, status: "viewing" }],
+        },
+      },
+      {
+        protocolVersion,
+        payload: {
+          _tag: "ThreadSnapshot",
+          threadId,
+          threadVersion: ThreadVersion.make("4"),
+          cursor,
+          snapshot,
         },
       },
       { protocolVersion, payload: { _tag: "Heartbeat", at: now } },

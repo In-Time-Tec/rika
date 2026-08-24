@@ -1,5 +1,7 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, Layer, Random, Redacted } from "effect"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import { Effect, FileSystem, Inspectable, Layer, Logger, Random, Redacted } from "effect"
+import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
 import { runMigration } from "../../../identity/src/postgres"
 import { identityMigrations } from "../../../identity/src/migrations"
@@ -22,25 +24,38 @@ import {
   Timestamp,
   WorkspaceId,
 } from "@rika/product/hosted-model"
+import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
+import { TurnId } from "@rika/product/turn-record"
 import { AssignmentRevision, type WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
 import { ExecutorAssignments, type Access, type Version } from "@rika/product/executor-assignments"
 import { HostedStore } from "@rika/product/hosted-store"
 import { EnvironmentStore } from "@rika/product/environment-store"
 import { EnvironmentReferenceId, SourceCommitSha, resolveEnvironmentReferences } from "@rika/product/environment-policy"
 
-const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
+const databaseUrl = "postgresql://rika:rika@127.0.0.1:5432/rika_test"
 const live = databaseUrl !== undefined
+const readFileString = (url: URL) =>
+  Effect.scoped(
+    Layer.build(BunServices.layer).pipe(
+      Effect.flatMap((context) =>
+        Effect.provide(
+          Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.readFileString(fileURLToPath(url))),
+          context,
+        ),
+      ),
+    ),
+  )
 const at = (second: number) => Timestamp.make(`2099-01-01T00:00:${String(second).padStart(2, "0")}.000Z`)
 
 const applyMigrations = (url: string) =>
   Effect.gen(function* () {
     const pool = yield* Effect.sync(() => new Pool({ connectionString: url }))
     for (const migration of [...identityMigrations, ...migrations]) {
-      const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
+      const sql = yield* readFileString(migration.url)
       yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
     }
     for (const migration of [...identityMigrations, ...migrations].reverse()) {
-      const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
+      const sql = yield* readFileString(migration.url)
       expect(yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })).toBe(false)
     }
     return pool
@@ -86,26 +101,28 @@ const capabilities = (digestCharacter: string): WorkspaceCapabilitySnapshot => (
   workspaceLifecycle: { _tag: "Ready", detail: "workspace lifecycle" },
 })
 
-it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurrency, and migration idempotence", () =>
-  Effect.gen(function* () {
+it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurrency, and migration idempotence", () => {
+  const observations: Array<ReturnType<typeof Logger.formatStructured.log>> = []
+  const logger = Logger.map(Logger.formatStructured, (record) => observations.push(record))
+  return Effect.gen(function* () {
     const database = `rika_live_${yield* Random.nextInt}`
     const admin = new Pool({ connectionString: databaseUrl })
-    yield* Effect.promise(() => admin.query(`CREATE DATABASE "${database}"`))
+    yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
     const parsed = new URL(databaseUrl!)
     parsed.pathname = `/${database}`
     const url = parsed.toString()
     let migrated: Pool | undefined
     try {
       migrated = yield* applyMigrations(url)
-      yield* Effect.promise(() =>
+      yield* Effect.tryPromise(() =>
         migrated!.query(`INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
       VALUES ('user-live', 'Live', 'live@example.com', true, now(), now())`),
       )
-      yield* Effect.promise(() =>
+      yield* Effect.tryPromise(() =>
         migrated!.query(`INSERT INTO "organization" (id, name, slug, created_at)
       VALUES ('organization-live', 'Live', 'live', now())`),
       )
-      yield* Effect.promise(() =>
+      yield* Effect.tryPromise(() =>
         migrated!.query(`INSERT INTO member (id, organization_id, user_id, role, created_at)
       VALUES ('member-live', 'organization-live', 'user-live', 'owner', now())`),
       )
@@ -331,7 +348,7 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
                 source: untrusted,
               })).candidates,
             ).toEqual([])
-            const revokedMaterial = yield* Effect.promise(() =>
+            const revokedMaterial = yield* Effect.tryPromise(() =>
               migrated!.query(
                 `SELECT key_version, nonce, ciphertext, authentication_tag
                  FROM rika_hosted_environment_values WHERE id = 'environment-live'`,
@@ -423,6 +440,8 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
             })
             expect(personalWorkspace.projectId).toBeUndefined()
             expect(personalThread.projectId).toBeUndefined()
+            expect(yield* store.readThread({ ownerId: ids.organizationOwner, threadId: ids.thread })).toEqual(thread)
+            expect(yield* store.readThread({ ownerId: ids.personalOwner, threadId: ids.thread })).toBeUndefined()
             const rolledBack = yield* Effect.result(
               store.createProject({
                 id: ProjectId.make("rollback-project"),
@@ -491,7 +510,36 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
                 }),
               ))._tag,
             ).toBe("Failure")
-            yield* Effect.promise(() =>
+            yield* Effect.tryPromise(() =>
+              migrated!.query(`INSERT INTO rika_workspaces (owner_id, path, created_at)
+                VALUES ('organization-owner-live', 'workspace-live', 1);
+                INSERT INTO rika_threads (id, owner_id, workspace, title, created_at, updated_at)
+                VALUES ('thread-live', 'organization-owner-live', 'workspace-live', 'Live', 1, 1)`),
+            )
+            const promptInput = {
+              ...command(4, "observability-admission-key"),
+              turnId: TurnId.make("observability-turn-live"),
+              prompt: "private-observability-prompt",
+              executionRoute: ExecutionRoute.testExecutionRoute(),
+              queueCapacity: 8,
+              readinessProof: true,
+            }
+            const promptAdmission = yield* store.admitPrompt(promptInput)
+            expect(yield* store.admitPrompt({ ...promptInput, readinessProof: false })).toEqual(promptAdmission)
+            const durableAdmission = yield* Effect.tryPromise(() =>
+              migrated!.query(`SELECT thread_id, id FROM rika_turns WHERE id = 'observability-turn-live'`),
+            )
+            expect(durableAdmission.rows).toEqual([{ thread_id: "thread-live", id: "observability-turn-live" }])
+            const admissionLogs = observations.filter((record) =>
+              Inspectable.toStringUnknown(record).includes("hosted.admission.success"),
+            )
+            expect(admissionLogs).toHaveLength(1)
+            const renderedAdmission = Inspectable.toStringUnknown(admissionLogs)
+            expect(renderedAdmission).toContain("thread-live")
+            expect(renderedAdmission).toContain("observability-turn-live")
+            for (const secret of ["organization-owner-live", "command-4", "private-observability-prompt"])
+              expect(renderedAdmission).not.toContain(secret)
+            yield* Effect.tryPromise(() =>
               migrated!.query(`INSERT INTO rika_hosted_git_identities (owner_id, name, email)
                 VALUES ('organization-owner-live', 'Rika Live', 'rika-live@example.test');
                 INSERT INTO rika_hosted_project_repositories
@@ -607,9 +655,12 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
         }),
       )
     } finally {
-      yield* Effect.promise(() => migrated?.end() ?? Promise.resolve())
-      yield* Effect.promise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-      yield* Effect.promise(() => admin.end())
+      if (migrated !== undefined) {
+        const migratedPool = migrated
+        yield* Effect.tryPromise(() => migratedPool.end())
+      }
+      yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+      yield* Effect.tryPromise(() => admin.end())
     }
-  }),
-)
+  }).pipe(Effect.provideService(Logger.CurrentLoggers, new Set([logger])))
+})

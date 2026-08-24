@@ -7,6 +7,7 @@ import type { ChangedFile } from "./terminal-changed-file"
 import type { ContextUsage } from "./terminal-context-usage"
 import type { GoalIndicator } from "./terminal-goal"
 import type { ThreadItem } from "./terminal-thread-state"
+import type { ConnectionState } from "./terminal-state"
 
 export const Entry = Schema.Struct({
   role: Schema.Literals(["user", "assistant", "notice"]),
@@ -30,7 +31,7 @@ type Message =
   | { readonly _tag: "ModeCommitted"; readonly selected?: number }
   | { readonly _tag: "ModeHovered"; readonly selected: number }
   | { readonly _tag: "ContextUsageReplaced"; readonly contextUsage: ContextUsage }
-  | { readonly _tag: "ConnectionStatusChanged"; readonly status?: string }
+  | { readonly _tag: "ConnectionStateChanged"; readonly state: ConnectionState }
   | { readonly _tag: "GoalChanged"; readonly goal?: GoalIndicator }
   | { readonly _tag: "CompactionChanged"; readonly status: "running" | "complete" | "failed" | "cancelled" }
   | { readonly _tag: "AnimationTicked" }

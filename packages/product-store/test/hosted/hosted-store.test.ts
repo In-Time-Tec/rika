@@ -4,7 +4,10 @@ import {
   BetterAuthMemberId,
   BetterAuthUserId,
   ClientId,
+  CommandId,
+  CommitCursor,
   DeviceId,
+  IdempotencyKey,
   OrganizationId,
   OwnerId,
   ProjectId,
@@ -13,6 +16,8 @@ import {
   WorkspaceId,
 } from "@rika/product/hosted-model"
 import { HostedStore } from "@rika/product/hosted-store"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+import { TurnId } from "@rika/product/turn-record"
 import { layer } from "../../src/hosted/memory-store"
 
 const now = Timestamp.make("2026-01-01T00:00:00.000Z")
@@ -83,6 +88,8 @@ it.layer(layer)("hosted memory store owner identity", (test) => {
       expect(workspace.projectId).toBeUndefined()
       expect(thread.projectId).toBeUndefined()
       expect(thread.ownerId).toBe(personalOwnerId)
+      expect(yield* store.readThread({ ownerId: personalOwnerId, threadId: thread.id })).toEqual(thread)
+      expect(yield* store.readThread({ ownerId: organizationOwnerId, threadId: thread.id })).toBeUndefined()
       yield* store.authorizeThread({
         ownerId: personalOwnerId,
         threadId: thread.id,
@@ -90,6 +97,58 @@ it.layer(layer)("hosted memory store owner identity", (test) => {
         action: "thread:control",
         at: now,
       })
+      const prompt = {
+        ownerId: personalOwnerId,
+        threadId: thread.id,
+        commandId: CommandId.make("prompt-command"),
+        idempotencyKey: IdempotencyKey.make("prompt-key"),
+        turnId: TurnId.make("prompt-turn"),
+        actor: personalActor,
+        prompt: "hello",
+        executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
+        admittedAt: now,
+        queueCapacity: 2,
+      }
+      expect(yield* Effect.result(store.admitPrompt({ ...prompt, readinessProof: false }))).toMatchObject({
+        _tag: "Failure",
+        failure: { reason: "database" },
+      })
+      expect(
+        yield* store.readCommands({
+          ownerId: personalOwnerId,
+          threadId: thread.id,
+          actor: personalActor,
+          afterCommitCursor: CommitCursor.make("0"),
+          limit: 10,
+        }),
+      ).toEqual([])
+      const admitted = yield* store.admitPrompt({ ...prompt, readinessProof: true })
+      expect(yield* store.admitPrompt({ ...prompt, readinessProof: false })).toEqual(admitted)
+      const duplicates = yield* Effect.all(
+        Array.from({ length: 8 }, () => store.admitPrompt({ ...prompt, readinessProof: true })),
+        { concurrency: "unbounded" },
+      )
+      expect(duplicates.every((duplicate) => duplicate.command.commandId === admitted.command.commandId)).toBe(true)
+      expect(
+        (yield* store.readCommands({
+          ownerId: personalOwnerId,
+          threadId: thread.id,
+          actor: personalActor,
+          afterCommitCursor: CommitCursor.make("0"),
+          limit: 10,
+        })).filter((command) => command.command._tag === "SubmitPrompt"),
+      ).toHaveLength(1)
+      expect(
+        (yield* store.admitCommand({
+          ownerId: personalOwnerId,
+          threadId: thread.id,
+          commandId: CommandId.make("cancel-command"),
+          idempotencyKey: IdempotencyKey.make("cancel-key"),
+          actor: personalActor,
+          command: { _tag: "Cancel" },
+          admittedAt: now,
+        })).command,
+      ).toEqual({ _tag: "Cancel" })
       expect(
         yield* store
           .authorizeThread({

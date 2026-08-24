@@ -1,38 +1,60 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Inspectable, Logger, Metric, Schema, Tracer } from "effect"
+import { Cause, Effect, Exit, Inspectable, Logger, Metric, Tracer } from "effect"
 import * as Observability from "@rika/product/hosted-observability"
 
-class SensitiveFailure extends Schema.TaggedError<SensitiveFailure>()("SensitiveFailure", { message: Schema.String }) {}
-
 describe("HostedObservability", () => {
-  it.effect("keeps one failed Turn joinable across API, store, executor, and lifecycle hops without payloads", () => {
-    const prompt = "prompt-never-record-7214"
-    const cellSource = "cell-source-never-record-6391"
-    const credential = "credential-never-record-4827"
-    const admission = {
-      ownerId: "owner-1",
-      threadId: "thread-1",
-      turnId: "turn-1",
-      commandId: "command-1",
-    }
-    const run = { ownerId: "owner-1", threadId: "thread-1", turnId: "turn-1", runId: "run-1" }
-    const executor = {
-      ...run,
-      operationId: "operation-1",
-      assignmentId: "assignment-1",
-    }
-    const cell = { ...executor, sandboxId: "sandbox-1" }
-    const lifecycle = {
-      ownerId: "owner-1",
-      threadId: "thread-1",
-      assignmentId: "assignment-1",
-      sandboxId: "sandbox-1",
-      buildId: "build-1",
-    }
-    const logs: Array<ReturnType<typeof Logger.formatStructured.log>> = []
-    const logger = Logger.map(Logger.formatStructured, (record) => {
-      logs.push(record)
+  it.effect("preserves model terminal projection when telemetry defects", () => {
+    const terminalProjection: Array<string> = []
+    const defectingLogger = Logger.make(() => {
+      throw new Error("logger defect")
     })
+    const defectingTracer = Tracer.make({
+      span() {
+        throw new Error("tracer defect")
+      },
+    })
+    const projectTerminal = Effect.sync(() => terminalProjection.push("model_terminal"))
+
+    return Effect.gen(function* () {
+      yield* Observability.modelObserved({}, "success", 12, { inputTokens: 3, outputTokens: 2 }).pipe(
+        Effect.andThen(projectTerminal),
+        Effect.provideService(Logger.CurrentLoggers, new Set([defectingLogger])),
+      )
+      yield* Observability.modelObserved({}, "failure", 8).pipe(
+        Effect.andThen(projectTerminal),
+        Effect.provideService(Tracer.Tracer, defectingTracer),
+      )
+
+      assert.deepStrictEqual(terminalProjection, ["model_terminal", "model_terminal"])
+    })
+  })
+
+  it.effect("isolates defecting telemetry from product exits", () => {
+    const defectingLogger = Logger.make(() => {
+      throw new Error("logger defect")
+    })
+    const productFailure = new Error("product failure")
+    return Effect.gen(function* () {
+      const eventExit = yield* Effect.exit(Observability.event("process_start", "success", {}))
+      const successExit = yield* Effect.exit(Observability.observe("attach", {}, Effect.succeed("attached")))
+      const failureExit = yield* Effect.exit(Observability.observe("attach", {}, Effect.fail(productFailure)))
+      const interruptionExit = yield* Effect.exit(Observability.observe("attach", {}, Effect.interrupt))
+
+      assert.isTrue(Exit.isSuccess(eventExit))
+      assert.isTrue(Exit.isSuccess(successExit))
+      if (Exit.isSuccess(successExit)) assert.strictEqual(successExit.value, "attached")
+      assert.isTrue(Exit.isFailure(failureExit))
+      if (Exit.isFailure(failureExit)) {
+        const failure = failureExit.cause.reasons.find(Cause.isFailReason)
+        assert.strictEqual(failure?.error, productFailure)
+      }
+      assert.isTrue(Exit.isFailure(interruptionExit) && Cause.hasInterruptsOnly(interruptionExit.cause))
+    }).pipe(Effect.provideService(Logger.CurrentLoggers, new Set([defectingLogger])))
+  })
+
+  it.effect("separates immediate milestones from measured completion and redacts annotations", () => {
+    const logs: Array<ReturnType<typeof Logger.formatStructured.log>> = []
+    const logger = Logger.map(Logger.formatStructured, (record) => logs.push(record))
     const spans: Array<Tracer.NativeSpan> = []
     const tracer = Tracer.make({
       span(options) {
@@ -41,137 +63,104 @@ describe("HostedObservability", () => {
         return span
       },
     })
-    const span = (name: string) => spans.find((candidate) => candidate.name === name)!
-    const join = (left: Tracer.NativeSpan, right: Tracer.NativeSpan, keys: ReadonlyArray<string>) => {
-      for (const key of keys) assert.strictEqual(left.attributes.get(key), right.attributes.get(key))
+    const correlation = {
+      threadId: "Thread:01",
+      turnId: "turn_01",
+      runId: "run-01",
+      operationId: "operation.01",
+      cellId: "cell-01",
+      bindingId: "binding-01",
+      modelAttemptId: "attempt-01",
     }
-    const failedCell = { _tag: "DomainFailure" as const, failure: { prompt, cellSource, credential } }
+    const unsafe = {
+      ...correlation,
+      turnId: "user supplied prose must not survive",
+      operationId: "x".repeat(129),
+      ownerId: "owner-secret",
+      commandId: "command-secret",
+      assignmentId: "assignment-secret",
+      sandboxId: "sandbox-secret",
+      buildId: "build-secret",
+      checkpointId: "checkpoint-secret",
+      arbitrary: "prompt-never-record",
+    }
     return Effect.gen(function* () {
-      yield* Observability.observe(
-        "command_admission",
-        admission,
-        Observability.observe("queue_admission", admission, Effect.void),
-      )
-      yield* Observability.observe("queue_claim", admission, Observability.queueWaitObserved(admission, 17))
-      yield* Observability.observe("run_start", admission, Effect.void)
-      yield* Observability.modelObserved(run, "success", 25, { inputTokens: 5, outputTokens: 3 })
-      yield* Observability.observe(
-        "executor_wait",
-        executor,
-        Observability.observe("workspace_prepare", lifecycle, Effect.void),
-      )
-      yield* Observability.observe("executor_setup", lifecycle, Effect.void)
-      yield* Observability.observe("cell", cell, Effect.succeed(failedCell), (result) =>
-        result._tag === "DomainFailure" ? "failure" : "success",
-      )
-      yield* Observability.unknownOutcome(cell)
-      yield* Observability.observe("checkpoint", { ...lifecycle, checkpointId: "checkpoint-1" }, Effect.void)
-      yield* Observability.observe("sandbox_resume", lifecycle, Effect.void)
-      yield* Observability.observe(
-        "client_replay",
-        admission,
-        Observability.replayLagObserved(admission, Observability.replayLagAlertEvents).pipe(
-          Effect.andThen(
-            Observability.health("replay_lag", admission, {
-              value: Observability.replayLagAlertEvents,
-              threshold: Observability.replayLagAlertEvents,
-            }),
-          ),
-        ),
-      )
-      yield* Effect.exit(
-        Observability.observe(
-          "projection_checkpoint",
-          admission,
-          Effect.fail(SensitiveFailure.make({ message: `${prompt}:${cellSource}:${credential}` })),
-        ),
-      )
-      yield* Effect.forEach(Observability.healthSignalNames, (signal) => Observability.health(signal, admission), {
-        discard: true,
+      yield* Observability.event("process_start", "success", correlation)
+      yield* Observability.event("first_draw", "success", correlation)
+      yield* Observability.observe("target_resolution", correlation, Effect.void)
+      yield* Observability.observe("attach", correlation, Effect.void)
+      yield* Observability.event("admission", "success", correlation)
+      yield* Observability.event("turn_claim", "success", correlation)
+      yield* Observability.event("run_created", "success", correlation)
+      yield* Observability.event("run_claim", "success", correlation)
+      yield* Observability.event("model_start", "success", correlation)
+      yield* Observability.modelObserved(correlation, "failure", 25, { inputTokens: 5, outputTokens: 3 })
+      yield* Observability.modelObserved(correlation, "interrupted", 0)
+      yield* Observability.event("cell_admission", "success", correlation)
+      yield* Observability.observe("cell_execution", correlation, Effect.void)
+      yield* Observability.event("binding_send", "success", correlation)
+      yield* Observability.observe("binding_terminal", correlation, Effect.fail("private failure")).pipe(Effect.exit)
+      yield* Observability.event("terminal", "failure", unsafe)
+
+      assert.deepStrictEqual(Observability.annotations(correlation), {
+        "rika.thread.id": "Thread:01",
+        "rika.turn.id": "turn_01",
+        "rika.run.id": "run-01",
+        "rika.operation.id": "operation.01",
+        "rika.cell.id": "cell-01",
+        "rika.binding.id": "binding-01",
+        "rika.model_attempt.id": "attempt-01",
       })
-      const snapshots = yield* Metric.snapshot
-      const hostedSpans = spans.filter((candidate) => candidate.name.startsWith("rika.hosted."))
-      assert.isAbove(new Set(hostedSpans.map((candidate) => candidate.traceId)).size, 5)
-      assert.notStrictEqual(span("rika.hosted.command_admission").traceId, span("rika.hosted.queue_claim").traceId)
-      assert.notStrictEqual(span("rika.hosted.run_start").traceId, span("rika.hosted.model").traceId)
-      assert.notStrictEqual(span("rika.hosted.executor_wait").traceId, span("rika.hosted.executor_setup").traceId)
-      assert.notStrictEqual(span("rika.hosted.executor_wait").traceId, span("rika.hosted.cell").traceId)
-      join(span("rika.hosted.queue_admission"), span("rika.hosted.queue_claim"), [
-        "rika.owner.id",
-        "rika.thread.id",
-        "rika.turn.id",
-      ])
-      join(span("rika.hosted.queue_claim"), span("rika.hosted.run_start"), [
-        "rika.owner.id",
-        "rika.thread.id",
-        "rika.turn.id",
-      ])
-      join(span("rika.hosted.run_start"), span("rika.hosted.model"), ["rika.thread.id", "rika.turn.id"])
-      join(span("rika.hosted.model"), span("rika.hosted.executor_wait"), [
-        "rika.thread.id",
-        "rika.turn.id",
-        "rika.run.id",
-      ])
-      join(span("rika.hosted.executor_wait"), span("rika.hosted.cell"), [
-        "rika.thread.id",
-        "rika.turn.id",
-        "rika.run.id",
-        "rika.operation.id",
-        "rika.assignment.id",
-      ])
-      join(span("rika.hosted.cell"), span("rika.hosted.executor_setup"), ["rika.assignment.id", "rika.sandbox.id"])
-      join(span("rika.hosted.executor_setup"), span("rika.hosted.sandbox_resume"), [
-        "rika.assignment.id",
-        "rika.sandbox.id",
-        "rika.build.id",
-      ])
-      assert.strictEqual(span("rika.hosted.model").attributes.get("rika.duration.millis"), 25)
-      assert.strictEqual(span("rika.hosted.model").attributes.get("rika.model.input_tokens"), 5)
-      assert.strictEqual(span("rika.hosted.model").attributes.get("rika.model.output_tokens"), 3)
-      assert.strictEqual(span("rika.hosted.queue_claim").attributes.get("rika.queue.wait.millis"), 17)
-      assert.strictEqual(
-        span("rika.hosted.client_replay").attributes.get("rika.replay.lag.events"),
-        Observability.replayLagAlertEvents,
-      )
-      assert.strictEqual(span("rika.hosted.client_replay").attributes.get("rika.health.signal"), "replay_lag")
-      assert.strictEqual(span("rika.hosted.cell").attributes.get("rika.hosted.outcome"), "failure")
-      const bounded = Observability.annotations({ ...executor, ownerId: "o".repeat(1_024) })
-      assert.strictEqual(bounded["rika.owner.id"]?.length, 512)
-      assert.deepStrictEqual(Object.keys(bounded).sort(), [
-        "rika.assignment.id",
-        "rika.operation.id",
-        "rika.owner.id",
-        "rika.run.id",
-        "rika.thread.id",
-        "rika.turn.id",
-      ])
-      for (const snapshot of snapshots) {
-        const expectedDimensions: Record<string, ReadonlyArray<string>> = {
-          rika_hosted_operations_total: ["outcome", "stage"],
-          rika_hosted_operation_duration_millis: ["outcome", "stage"],
-          rika_hosted_model_tokens_total: ["kind"],
-          rika_hosted_health_signals_total: ["signal"],
-        }
-        assert.deepStrictEqual(Object.keys(snapshot.attributes ?? {}).sort(), expectedDimensions[snapshot.id] ?? [])
-        const attributes = snapshot.attributes ?? {}
-        if (typeof attributes.stage === "string") assert.include(Observability.stages, attributes.stage)
-        if (typeof attributes.outcome === "string") assert.include(Observability.outcomes, attributes.outcome)
-        if (typeof attributes.kind === "string") assert.include(Observability.tokenKinds, attributes.kind)
-        if (typeof attributes.signal === "string") assert.include(Observability.healthSignalNames, attributes.signal)
-      }
-      const rendered = Inspectable.toStringUnknown({
-        logs,
-        spans: spans.map((candidate) => ({
-          attributes: Object.fromEntries(candidate.attributes),
-          status: candidate.status,
-        })),
-        snapshots,
+      assert.deepStrictEqual(Observability.annotations(unsafe), {
+        "rika.thread.id": "Thread:01",
+        "rika.run.id": "run-01",
+        "rika.cell.id": "cell-01",
+        "rika.binding.id": "binding-01",
+        "rika.model_attempt.id": "attempt-01",
       })
-      for (const privateValue of [prompt, cellSource, credential]) assert.notInclude(rendered, privateValue)
-      assert.deepStrictEqual(Observability.metricRetention, { maxAge: "15 minutes", maxSize: 1_024 })
-      assert.strictEqual(Observability.stages.length, 20)
-      assert.strictEqual(Observability.outcomes.length, 4)
-      assert.strictEqual(Observability.healthSignalNames.length, 7)
+
+      const rendered = Inspectable.toStringUnknown({ logs, spans: spans.map((span) => Object.fromEntries(span.attributes)) })
+      const immediateNames = [
+        "hosted.process_start.success",
+        "hosted.first_draw.success",
+        "hosted.admission.success",
+        "hosted.turn_claim.success",
+        "hosted.run_created.success",
+        "hosted.run_claim.success",
+        "hosted.model_start.success",
+        "hosted.cell_admission.success",
+        "hosted.binding_send.success",
+        "hosted.terminal.failure",
+      ]
+      const completionNames = [
+        "hosted.target_resolution.success",
+        "hosted.attach.success",
+        "hosted.model_terminal.failure",
+        "hosted.model_terminal.interrupted",
+        "hosted.cell_execution.success",
+        "hosted.binding_terminal.failure",
+      ]
+      for (const name of [...immediateNames, ...completionNames]) assert.include(rendered, name)
+      for (const stage of ["target_resolution", "attach", "model_terminal", "cell_execution", "binding_terminal"])
+        assert.isNumber(spans.find((span) => span.name === `rika.hosted.${stage}`)?.attributes.get("rika.duration.millis"))
+      for (const stage of ["process_start", "first_draw", "admission", "turn_claim", "run_created", "run_claim", "model_start"])
+        assert.notInclude(rendered, `rika.hosted.${stage}","rika.duration.millis`)
+      for (const sensitive of [
+        "user supplied prose must not survive",
+        "owner-secret",
+        "command-secret",
+        "assignment-secret",
+        "sandbox-secret",
+        "build-secret",
+        "checkpoint-secret",
+        "prompt-never-record",
+        "private failure",
+      ])
+        assert.notInclude(rendered, sensitive)
+      assert.deepStrictEqual(Observability.stages, [
+        "process_start", "first_draw", "target_resolution", "attach", "admission", "turn_claim", "run_created", "run_claim",
+        "model_start", "model_terminal", "cell_admission", "cell_execution", "binding_send", "binding_terminal", "terminal",
+      ])
     }).pipe(
       Effect.provideService(Logger.CurrentLoggers, new Set([logger])),
       Effect.provideService(Tracer.Tracer, tracer),

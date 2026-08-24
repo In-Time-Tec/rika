@@ -1,12 +1,9 @@
 import { ProviderCredentialStore, ProviderCredentialStoreError } from "@rika/product/provider-credential-store"
-import { Effect, Function, Layer, Option, Redacted, Schema } from "effect"
+import { Effect, FileSystem, Function, Layer, Option, Path, Redacted, Schema } from "effect"
 import { randomBytes } from "node:crypto"
 
-const nativeDescriptorFs = process.getBuiltinModule("fs")
-const { constants } = nativeDescriptorFs
-const { lstat, mkdir, open, rename, unlink } = nativeDescriptorFs.promises
-const { dirname, relative, resolve, sep } = process.getBuiltinModule("path")
-type FileHandle = Awaited<ReturnType<typeof open>>
+type FileHandle = FileSystem.File
+type FileInfo = FileSystem.File.Info
 
 export interface Options {
   readonly currentUid?: number
@@ -19,24 +16,28 @@ const credentialIdentity = "openrouter"
 
 const failure = (kind: ProviderCredentialStoreError["kind"], message: string) =>
   ProviderCredentialStoreError.make({ kind, message })
-const code = (cause: unknown) =>
-  typeof cause === "object" && cause !== null && "code" in cause ? String(cause.code) : undefined
-const io = <A>(run: () => Promise<A>, message = "Credential storage operation failed") =>
-  Effect.tryPromise({ try: run, catch: () => failure("io", message) })
+const isNotFound = (cause: unknown) =>
+  typeof cause === "object" && cause !== null && "reason" in cause && typeof cause.reason === "object" &&
+  cause.reason !== null && "_tag" in cause.reason && cause.reason._tag === "NotFound"
+const pathError = (cause: unknown): ProviderCredentialStoreError => {
+  if (Schema.is(ProviderCredentialStoreError)(cause)) return cause
+  if (isNotFound(cause)) return failure("missing", "Credential storage directory is missing")
+  return failure("io", "Credential storage operation failed")
+}
 const syncIo = <A>(run: () => A, message = "Credential storage operation failed") =>
   Effect.try({ try: run, catch: () => failure("io", message) })
 const unsafe = (message: string) => failure("unsafe", message)
 
 const validateStat = (
-  stat: Awaited<ReturnType<FileHandle["stat"]>>,
+  stat: FileInfo,
   kind: "file" | "directory",
   uid: number | undefined,
 ) =>
   Effect.gen(function* () {
-    if (kind === "file" ? !stat.isFile() : !stat.isDirectory())
+    if (kind === "file" ? stat.type !== "File" : stat.type !== "Directory")
       return yield* unsafe("Credential storage type is unsafe")
-    if (uid !== undefined && stat.uid !== uid) return yield* unsafe("Credential storage owner is unsafe")
-    if (kind === "file" && (Number(stat.mode) & 0o777) !== 0o600)
+    if (uid !== undefined && Option.getOrUndefined(stat.uid) !== uid) return yield* unsafe("Credential storage owner is unsafe")
+    if (kind === "file" && ((Number(stat.mode) & 0o777) !== 0o600 || Option.getOrElse(stat.nlink, () => 0) !== 1))
       return yield* unsafe("Credential storage file permissions are unsafe")
     if (kind === "directory" && (Number(stat.mode) & 0o077) !== 0)
       return yield* unsafe("Credential storage directory permissions are unsafe")
@@ -49,20 +50,22 @@ export const layer: {
 } = Function.dual(2, (filename: string, options: Options = {}) =>
   Layer.effect(
     ProviderCredentialStore,
-    Effect.sync(() => {
-      const parent = dirname(filename)
+    Effect.gen(function* () {
+      const path = yield* Path.Path
+      const fileSystem = yield* FileSystem.FileSystem
+      const parent = path.dirname(filename)
       const uid = options.currentUid
       const maxSize = options.maxSize ?? 16_384
-      const trustedRoot = options.trustedRoot === undefined ? undefined : resolve(options.trustedRoot)
+      const trustedRoot = options.trustedRoot === undefined ? undefined : path.resolve(options.trustedRoot)
+      const rejectLink = (name: string) => fileSystem.readLink(name).pipe(
+        Effect.flatMap(() => Effect.fail(unsafe("Credential storage cannot use symbolic links"))),
+        Effect.catch((cause) => isNotFound(cause) || !("kind" in cause) ? Effect.void : Effect.fail(cause)),
+      )
 
       const lstatOptional = (name: string) =>
-        Effect.tryPromise({
-          try: () => lstat(name),
-          catch: (cause) =>
-            code(cause) === "ENOENT"
-              ? failure("missing", "Credential storage directory is missing")
-              : failure("io", "Credential storage operation failed"),
-        }).pipe(
+        rejectLink(name).pipe(
+          Effect.andThen(fileSystem.stat(name)),
+          Effect.mapError(pathError),
           Effect.map(Option.some),
           Effect.catchTag("ProviderCredentialStoreError", (error) =>
             error.kind === "missing" ? Effect.succeed(Option.none()) : Effect.fail(error),
@@ -70,60 +73,60 @@ export const layer: {
         )
 
       const ensureParent = Effect.gen(function* () {
-        const resolvedParent = resolve(parent)
+        const resolvedParent = path.resolve(parent)
         if (
           trustedRoot !== undefined &&
           resolvedParent !== trustedRoot &&
-          !resolvedParent.startsWith(`${trustedRoot}${sep}`)
+          !resolvedParent.startsWith(`${trustedRoot}${path.sep}`)
         ) {
           return yield* unsafe("Credential storage path is outside the profile data root")
         }
         if (trustedRoot === undefined) {
-          yield* io(() => mkdir(parent, { recursive: true, mode: 0o700 }))
-          yield* validateStat(yield* io(() => lstat(parent)), "directory", uid)
+          yield* fileSystem.makeDirectory(parent, { recursive: true, mode: 0o700 }).pipe(Effect.mapError(() => failure("io", "Credential storage operation failed")))
+          yield* rejectLink(parent)
+          yield* validateStat(yield* fileSystem.stat(parent).pipe(Effect.mapError(() => failure("io", "Credential storage operation failed"))), "directory", uid)
           return
         }
-        const rootStat = yield* io(() => lstat(trustedRoot))
+        const rootStat = yield* fileSystem.stat(trustedRoot).pipe(Effect.mapError(() => failure("io", "Credential storage operation failed")))
         if (
-          !rootStat.isDirectory() ||
-          (uid !== undefined && rootStat.uid !== uid) ||
+          rootStat.type !== "Directory" ||
+          (uid !== undefined && Option.getOrUndefined(rootStat.uid) !== uid) ||
           (Number(rootStat.mode) & 0o022) !== 0
         ) {
           return yield* unsafe("Credential profile data root is unsafe")
         }
         let current = trustedRoot
-        for (const component of relative(trustedRoot, resolvedParent)
-          .split(sep)
+        for (const component of path
+          .relative(trustedRoot, resolvedParent)
+          .split(path.sep)
           .filter((value) => value.length > 0)) {
-          current = `${current}${sep}${component}`
+          current = `${current}${path.sep}${component}`
           const existing = yield* lstatOptional(current)
           if (Option.isNone(existing)) {
-            yield* Effect.tryPromise({
-              try: () => mkdir(current, { mode: 0o700 }),
-              catch: () => failure("io", "Credential storage directory could not be created"),
-            }).pipe(Effect.catchTag("ProviderCredentialStoreError", () => Effect.void))
+            yield* fileSystem.makeDirectory(current, { mode: 0o700 }).pipe(
+              Effect.mapError(() => failure("io", "Credential storage directory could not be created")),
+              Effect.catchTag("ProviderCredentialStoreError", () => Effect.void),
+            )
           }
-          yield* validateStat(yield* io(() => lstat(current)), "directory", uid)
+          yield* validateStat(yield* fileSystem.stat(current).pipe(Effect.mapError(() => failure("io", "Credential storage operation failed"))), "directory", uid)
         }
       })
+      const sameStat = (left: FileInfo, right: FileInfo) => left.dev === right.dev &&
+        Option.getOrUndefined(left.ino) === Option.getOrUndefined(right.ino) && left.type === right.type &&
+        Option.getOrUndefined(left.nlink) === Option.getOrUndefined(right.nlink) && left.mode === right.mode &&
+        Option.getOrUndefined(left.uid) === Option.getOrUndefined(right.uid)
 
       const openValidated = (name: string, missing: boolean) =>
         Effect.gen(function* () {
-          const handle = yield* Effect.tryPromise({
-            try: () => open(name, constants.O_RDONLY | constants.O_NOFOLLOW),
-            catch: (cause) => {
-              if (code(cause) === "ENOENT" && missing) return failure("missing", "Credential file is missing")
-              if (code(cause) === "ELOOP") return unsafe("Credential storage cannot use symbolic links")
-              return failure("io", "Credential storage operation failed")
-            },
-          })
-          const stat = yield* io(() => handle.stat()).pipe(
-            Effect.tapError(() => io(() => handle.close()).pipe(Effect.ignore)),
-          )
-          yield* validateStat(stat, "file", uid).pipe(
-            Effect.tapError(() => io(() => handle.close()).pipe(Effect.ignore)),
-          )
-          return handle
+          yield* rejectLink(name)
+          const pathStat = yield* fileSystem.stat(name).pipe(Effect.mapError((cause) => isNotFound(cause) && missing
+            ? failure("missing", "Credential file is missing") : failure("io", "Credential storage operation failed")))
+          yield* validateStat(pathStat, "file", uid)
+          const handle = yield* fileSystem.open(name, { flag: "r" }).pipe(Effect.mapError(() => failure("io", "Credential storage operation failed")))
+          const stat = yield* handle.stat.pipe(Effect.mapError(() => failure("io", "Credential storage operation failed")))
+          yield* validateStat(stat, "file", uid)
+          if (!sameStat(pathStat, stat)) return yield* unsafe("Credential file changed while opening")
+          return { handle, stat }
         })
 
       const readFile = (handle: FileHandle, size: number) =>
@@ -132,9 +135,9 @@ export const layer: {
           const buffer = new Uint8Array(size + 1)
           let offset = 0
           while (offset < buffer.length) {
-            const result = yield* io(() => handle.read(buffer, offset, buffer.length - offset, offset))
-            if (result.bytesRead === 0) break
-            offset += result.bytesRead
+            const bytesRead = Number(yield* handle.read(buffer.subarray(offset)).pipe(Effect.mapError(() => failure("io", "Credential storage operation failed"))))
+            if (bytesRead === 0) break
+            offset += bytesRead
           }
           if (offset > maxSize) return yield* failure("corrupt", "Credential file is too large")
           const text = yield* syncIo(
@@ -159,12 +162,11 @@ export const layer: {
         if (opened === undefined) return Option.none<Redacted.Redacted<string>>()
         return yield* Effect.acquireUseRelease(
           Effect.succeed(opened),
-          (handle) =>
-            io(() => handle.stat()).pipe(
-              Effect.flatMap((stat) => readFile(handle, Number(stat.size))),
+          ({ handle, stat }) =>
+            readFile(handle, Number(stat.size)).pipe(
               Effect.map((credential) => Option.some(Redacted.make(credential.apiKey))),
             ),
-          (handle) => io(() => handle.close()).pipe(Effect.ignore),
+          () => Effect.void,
         )
       })
 
@@ -177,34 +179,22 @@ export const layer: {
           const encoded = new TextEncoder().encode(encodedText)
           const temp = `${filename}.tmp-${yield* syncIo(() => randomBytes(12).toString("hex"))}`
           yield* Effect.acquireUseRelease(
-            Effect.tryPromise({
-              try: () =>
-                open(temp, constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_WRONLY, 0o600),
-              catch: () => failure("io", "Credential temporary file could not be created"),
-            }),
+            fileSystem.open(temp, { flag: "wx", mode: 0o600 }).pipe(Effect.mapError(() => failure("io", "Credential temporary file could not be created"))),
             (handle) =>
               Effect.gen(function* () {
-                yield* validateStat(yield* io(() => handle.stat()), "file", uid)
-                let offset = 0
-                while (offset < encoded.length) {
-                  offset += (yield* io(() => handle.write(encoded, offset))).bytesWritten
-                }
-                yield* io(() => handle.sync())
-              }).pipe(Effect.tapError(() => io(() => handle.close()).pipe(Effect.ignore))),
-            (handle) => io(() => handle.close()).pipe(Effect.ignore),
+                yield* handle.writeAll(encoded).pipe(Effect.mapError(() => failure("io", "Credential storage operation failed")))
+                yield* handle.sync.pipe(Effect.mapError(() => failure("io", "Credential storage operation failed")))
+                yield* validateStat(yield* handle.stat.pipe(Effect.mapError(() => failure("io", "Credential storage operation failed"))), "file", uid)
+              }),
+            () => Effect.void,
           )
-          yield* Effect.tryPromise({
-            try: () => rename(temp, filename),
-            catch: () => failure("io", "Credential file could not be committed"),
-          })
+          yield* fileSystem.rename(temp, filename).pipe(Effect.mapError(() => failure("io", "Credential file could not be committed")))
         })
 
       const remove = Effect.gen(function* () {
         yield* ensureParent
-        return yield* Effect.tryPromise({
-          try: () => unlink(filename),
-          catch: () => failure("missing", "Credential file is missing"),
-        }).pipe(
+        return yield* fileSystem.remove(filename).pipe(
+          Effect.mapError((cause) => isNotFound(cause) ? failure("missing", "Credential file is missing") : failure("io", "Credential storage operation failed")),
           Effect.catchTag("ProviderCredentialStoreError", (error) =>
             error.kind === "missing" ? Effect.succeed(false) : Effect.fail(error),
           ),
@@ -213,12 +203,12 @@ export const layer: {
       })
 
       return ProviderCredentialStore.of({
-        load: (identity) => (identity === credentialIdentity ? load : Effect.succeed(Option.none())),
+        load: (identity) => (identity === credentialIdentity ? Effect.scoped(load) : Effect.succeed(Option.none())),
         save: (identity, apiKey) =>
           identity === credentialIdentity
-            ? save(apiKey)
+            ? Effect.scoped(save(apiKey))
             : Effect.fail(failure("unsafe", "Unknown credential identity")),
-        remove: (identity) => (identity === credentialIdentity ? remove : Effect.succeed(false)),
+        remove: (identity) => (identity === credentialIdentity ? Effect.scoped(remove) : Effect.succeed(false)),
       })
     }),
   ),

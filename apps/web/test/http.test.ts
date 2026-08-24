@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, FileSystem } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { type Account, type AccountAccess } from "../src/account-gateway"
 import { makeApiAccountGateway } from "../src/adapters/api-account-gateway"
@@ -20,6 +20,7 @@ const account: Account = {
 const dependencies = (access: AccountAccess = { _tag: "anonymous" }): WebDependencies => ({
   production: true,
   accountGateway: { account: () => Effect.succeed(access) },
+  fileSystem: FileSystem.makeNoop({}),
 })
 
 const request = (path: string, options?: RequestInit) => new Request(`https://web.example.test${path}`, options)
@@ -34,14 +35,14 @@ describe("web HTTP", () => {
         expect(result.status).toBe(200)
         expect(result.headers.get("content-type")).toBe("text/html; charset=utf-8")
         expect(result.headers.get("x-content-type-options")).toBe("nosniff")
-        expect(yield* Effect.promise(() => result.text())).toContain('<html lang="en">')
+        expect(yield* Effect.tryPromise(() => result.text())).toContain('<html lang="en">')
       }
       const css = yield* response("/assets/web.css")
       const script = yield* response("/assets/web.js")
       expect(css.headers.get("content-type")).toBe("text/css; charset=utf-8")
       expect(script.headers.get("content-type")).toBe("text/javascript; charset=utf-8")
       const threads = yield* response("/threads")
-      const threadHtml = yield* Effect.promise(() => threads.text())
+      const threadHtml = yield* Effect.tryPromise(() => threads.text())
       expect(threadHtml).toContain('id="root"')
       expect(threadHtml).toContain("/assets/thread-client.js")
     }),
@@ -50,7 +51,7 @@ describe("web HTTP", () => {
   it.effect("keeps redirects on this origin", () =>
     Effect.gen(function* () {
       const login = yield* response("/login?redirect=%2F%5C%5Cattacker.example")
-      expect(yield* Effect.promise(() => login.text())).toContain('data-redirect="/"')
+      expect(yield* Effect.tryPromise(() => login.text())).toContain('data-redirect="/"')
       const protectedPage = yield* response("/invitations/invitation-1?redirect=https%3A%2F%2Fattacker.example")
       expect(protectedPage.status).toBe(303)
       expect(protectedPage.headers.get("location")).toBe(
@@ -85,7 +86,7 @@ describe("web HTTP", () => {
       expect(onboarding.headers.get("location")).toBe("/organizations/new?redirect=%2Fdevice")
       const authenticated = yield* response("/", { _tag: "account", account })
       expect(authenticated.status).toBe(200)
-      expect(yield* Effect.promise(() => authenticated.text())).toContain("Your account")
+      expect(yield* Effect.tryPromise(() => authenticated.text())).toContain("Your account")
     }),
   )
 
@@ -93,7 +94,7 @@ describe("web HTTP", () => {
     Effect.gen(function* () {
       const result = yield* response("/device/approve?user_code=ABCD1234", { _tag: "account", account })
       expect(result.status).toBe(200)
-      expect(yield* Effect.promise(() => result.text())).toContain('data-user-code="ABCD1234"')
+      expect(yield* Effect.tryPromise(() => result.text())).toContain('data-user-code="ABCD1234"')
     }),
   )
 
@@ -105,6 +106,7 @@ describe("web HTTP", () => {
         request: input,
         dependencies: {
           production: true,
+          fileSystem: FileSystem.makeNoop({}),
           accountGateway: {
             account: (gatewayRequest) =>
               Effect.sync(() => {

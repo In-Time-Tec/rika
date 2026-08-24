@@ -7,12 +7,13 @@ import { identityMigrations, runMigration } from "@rika/identity"
 import { BetterAuthUserId, ClientId, DeviceId } from "@rika/product/hosted-model"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { layer as assignmentLayer } from "@rika/product-store/memory-assignments"
-import { Clock, Context, Effect, Layer, Random, Redacted } from "effect"
+import { FileSystem, Config, Clock, Context, Effect, Layer, Random, Redacted } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { Pool } from "pg"
+import { live as livePlatform } from "./live-platform"
 import { HostedRepositories, layer as repositoryLayer } from "../src/hosted-repositories"
 
-const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
+const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const account = { id: 7, login: "octo-org", type: "Organization" as const }
 const installation = {
   id: 42,
@@ -32,24 +33,26 @@ const repository = {
   owner: account,
 }
 
-it.effect.skipIf(databaseUrl === undefined)(
+it.effect.skipIf(databaseUrl === "")(
   "authorizes one owner installation and resolves an immutable selected checkout",
   () =>
     Effect.gen(function* () {
       const suffix = String(yield* Random.nextInt).replaceAll("-", "n")
       const database = `rika_hosted_repositories_${suffix}`
       const admin = new Pool({ connectionString: databaseUrl })
-      yield* Effect.promise(() => admin.query(`CREATE DATABASE "${database}"`))
-      const parsed = new URL(databaseUrl!)
+      yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
+      const parsed = new URL(databaseUrl)
       parsed.pathname = `/${database}`
       const url = parsed.toString()
       const pool = new Pool({ connectionString: url })
       try {
         for (const migration of [...identityMigrations, ...productMigrations]) {
-          const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
+          const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.readFileString(migration.url.pathname),
+          )
           yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
         }
-        yield* Effect.promise(() =>
+        yield* Effect.tryPromise(() =>
           pool.query(`INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
           VALUES ('user-1', 'User', 'user@example.test', true, now(), now());
           INSERT INTO "organization" (id, name, slug, created_at)
@@ -161,7 +164,7 @@ it.effect.skipIf(databaseUrl === undefined)(
           { installationId: 42, repositoryIds: [99], permissions: { contents: "read" }, fresh: false },
         ])
         expect(revoked).toEqual(["repository-secret-1"])
-        yield* Effect.promise(() =>
+        yield* Effect.tryPromise(() =>
           pool.query(`INSERT INTO rika_hosted_owners (id, kind, user_id)
             VALUES ('owner-personal', 'personal', 'user-1');
           INSERT INTO rika_hosted_projects (id, owner_id, name, created_by_user_id, created_at, updated_at)
@@ -192,7 +195,7 @@ it.effect.skipIf(databaseUrl === undefined)(
           private: true,
           gitIdentity: { name: "Personal Committer", email: "personal@example.test" },
         }
-        yield* Effect.promise(() =>
+        yield* Effect.tryPromise(() =>
           pool.query(`INSERT INTO rika_hosted_workspaces
               (id, owner_id, project_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
               VALUES ('workspace-personal', 'owner-personal', 'project-personal', 'user-1', 'orb', true, now());
@@ -202,7 +205,7 @@ it.effect.skipIf(databaseUrl === undefined)(
               VALUES ('thread-personal', 'owner-personal', 'project-personal', 'workspace-personal',
                 'user-1', 'orb', true, now())`),
         )
-        yield* Effect.promise(() =>
+        yield* Effect.tryPromise(() =>
           pool.query(
             `INSERT INTO rika_hosted_executor_assignments
               (id, owner_id, thread_id, workspace_id, executor_kind, placement, checkout, generation, revision,
@@ -215,7 +218,7 @@ it.effect.skipIf(databaseUrl === undefined)(
             [personalCheckout],
           ),
         )
-        yield* Effect.promise(() =>
+        yield* Effect.tryPromise(() =>
           pool.query(`INSERT INTO rika_hosted_workspace_preparations
               (assignment_id, owner_id, workspace_id, generation, lease_epoch, attempt, state, phase,
                 evidence, started_at, updated_at)
@@ -246,7 +249,7 @@ it.effect.skipIf(databaseUrl === undefined)(
           authorizationCheckpointId: publication.id,
         })
         expect(publication.authorizationDigest).toMatch(/^sha256:[a-f0-9]{64}$/)
-        const evidence = yield* Effect.promise(() =>
+        const evidence = yield* Effect.tryPromise(() =>
           pool.query(
             `SELECT assignment.latest_checkpoint_id, audit.authority, audit.fence, audit.result
             FROM rika_hosted_repository_publications publication
@@ -266,16 +269,16 @@ it.effect.skipIf(databaseUrl === undefined)(
           },
           result: { outcome: "approved", purpose: "branch-push" },
         })
-        yield* Effect.promise(() =>
-          pool
-            .query(`UPDATE rika_hosted_repository_publications SET source_commit_sha = $1 WHERE id = $2`, [
-              "d".repeat(40),
-              publication.id,
-            ])
-            .then(
-              () => Promise.reject(new Error("publication authority mutation unexpectedly succeeded")),
-              () => undefined,
-            ),
+        yield* Effect.tryPromise(() =>
+          pool.query(`UPDATE rika_hosted_repository_publications SET source_commit_sha = $1 WHERE id = $2`, [
+            "d".repeat(40),
+            publication.id,
+          ]),
+        ).pipe(
+          Effect.matchEffect({
+            onFailure: () => Effect.void,
+            onSuccess: () => Effect.die("publication authority mutation unexpectedly succeeded"),
+          }),
         )
         repositories = []
         expect((yield* Effect.flip(service.resolve({ ownerId: "owner-1", projectId: "project-1" }))).reason).toBe(
@@ -287,9 +290,9 @@ it.effect.skipIf(databaseUrl === undefined)(
           "authorization",
         )
       } finally {
-        yield* Effect.promise(() => pool.end())
-        yield* Effect.promise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-        yield* Effect.promise(() => admin.end())
+        yield* Effect.tryPromise(() => pool.end())
+        yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+        yield* Effect.tryPromise(() => admin.end())
       }
-    }).pipe(Effect.scoped),
+    }).pipe(Effect.scoped, livePlatform),
 )

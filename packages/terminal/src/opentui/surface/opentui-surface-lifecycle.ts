@@ -6,6 +6,10 @@ import { welcomeAnimationActive, welcomeAnimationSettled } from "./opentui-welco
 import { SurfaceLayout } from "./opentui-surface-layout"
 
 export abstract class SurfaceLifecycle extends SurfaceLayout {
+  onNextFrameCompleted(listener: () => void): void {
+    this.renderer.once(CliRenderEvents.FRAME, listener)
+  }
+
   update(model: Model, preserveTranscriptAnchor = false): void {
     const previousModel = this.model
     if (model.busy && previousModel?.busy !== true) this.publishWorkingFrame(idleSpinnerFrame)
@@ -61,8 +65,6 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
     this.pointerController.sidebarDrag = undefined
     this.setPointerShape("default")
     this.model = undefined
-    this.transcriptPane.destroy()
-    this.threadBrowser.destroy()
     this.renderer.root.onMouseDrag = undefined
     this.renderer.root.onMouseUp = undefined
     this.renderer.root.onMouseDragEnd = undefined
@@ -70,5 +72,24 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
     this.renderer.keyInput.off("paste", this.onPaste)
     this.renderer.off(CliRenderEvents.RESIZE, this.onResize)
     this.renderer.off(CliRenderEvents.SELECTION, this.onSelection)
+    this.transcriptPane.destroy()
+    this.threadBrowser.destroy()
+    for (const renderable of [
+      this.main,
+      this.modeLabel,
+      this.statusLabel,
+      this.goalLabel,
+      this.workspaceLabel,
+      this.paletteBox,
+      this.overlayHintOne,
+      this.overlayHintTwo,
+      this.toastBox,
+      this.ctrlCMenuBox,
+      this.ctrlCMenuTitle,
+    ]) {
+      const target = renderable as typeof renderable & { destroyRecursively?: () => void; destroy?: () => void }
+      if (target.destroyRecursively !== undefined) target.destroyRecursively()
+      else target.destroy?.()
+    }
   }
 }

@@ -1,7 +1,32 @@
 import { expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import { Effect, FileSystem, Layer } from "effect"
 import { createHash } from "node:crypto"
+import { fileURLToPath } from "node:url"
 import { migrations } from "../../src/hosted/migrations"
+
+const readFile = (url: URL) =>
+  Effect.scoped(
+    Layer.build(BunServices.layer).pipe(
+      Effect.flatMap((context) =>
+        Effect.provide(
+          Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.readFile(fileURLToPath(url))),
+          context,
+        ),
+      ),
+    ),
+  )
+const readFileString = (url: URL) =>
+  Effect.scoped(
+    Layer.build(BunServices.layer).pipe(
+      Effect.flatMap((context) =>
+        Effect.provide(
+          Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.readFileString(fileURLToPath(url))),
+          context,
+        ),
+      ),
+    ),
+  )
 
 it.effect("keeps hosted PostgreSQL migration identities and checksums exact", () =>
   Effect.gen(function* () {
@@ -29,8 +54,8 @@ it.effect("keeps hosted PostgreSQL migration identities and checksums exact", ()
       "product/0021_independent_assignment_identity",
     ])
     for (const migration of migrations) {
-      const sql = yield* Effect.promise(() => Bun.file(migration.url).arrayBuffer())
-      expect(migration.checksum).toBe(createHash("sha256").update(Buffer.from(sql)).digest("hex"))
+      const sql = yield* readFile(migration.url)
+      expect(migration.checksum).toBe(createHash("sha256").update(sql).digest("hex"))
     }
   }),
 )
@@ -39,7 +64,7 @@ it.effect("removes obsolete assignment and Thread identity constraints", () =>
   Effect.gen(function* () {
     const migration = migrations.find(({ id }) => id === "product/0021_independent_assignment_identity")
     expect(migration).toBeDefined()
-    const sql = yield* Effect.promise(() => Bun.file(migration!.url).text())
+    const sql = yield* readFileString(migration!.url)
     expect(sql).toContain("DROP CONSTRAINT rika_hosted_executor_assignments_id_thread_id")
     expect(sql).toContain("DROP CONSTRAINT rika_hosted_thread_events_assignment_thread_id")
     expect(sql).toContain("DROP CONSTRAINT rika_hosted_checkpoints_assignment_thread_id")

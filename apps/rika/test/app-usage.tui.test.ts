@@ -21,7 +21,7 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Price this turn."))
+        yield* Effect.tryPromise(() => app.type("Price this turn."))
         app.pressEnter()
         yield* app.waitFrame("PRICED_TURN_COMPLETE")
         // Live preview shows the answer text before the attempt commits usage; usage is only
@@ -35,7 +35,7 @@ test(
         app.pressEscape()
         yield* app.waitGone("Used       ")
 
-        yield* Effect.promise(() => app.type("Fail this turn."))
+        yield* Effect.tryPromise(() => app.type("Fail this turn."))
         app.pressEnter()
         yield* app.waitFrame("Execution failed")
         yield* app.settled

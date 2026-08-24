@@ -1,12 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Deferred, Effect, Fiber, Layer, Schema } from "effect"
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import { Clock, DateTime, Deferred, Effect, Fiber, FileSystem, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { foregroundRunnerLayer, runForegroundRunner } from "../src/foreground"
 import type { AccessWire } from "../src/protocol"
+import { provideLayer } from "./support/layer"
 
 class FakeWebSocket {
   static current: FakeWebSocket | undefined
   static readonly instances: Array<FakeWebSocket> = []
+  static onSend: ((socket: FakeWebSocket, message: unknown) => void) | undefined
   readonly readyState = 1
   readonly sent: Array<unknown> = []
   closed = false
@@ -28,7 +31,9 @@ class FakeWebSocket {
   }
 
   send(value: string) {
-    this.sent.push(Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(value))
+    const message = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(value)
+    this.sent.push(message)
+    FakeWebSocket.onSend?.(this, message)
   }
 
   close() {
@@ -101,10 +106,11 @@ describe.sequential("foreground Runner", () => {
         Effect.scoped(
           Effect.gen(function* () {
             const foregroundContext = yield* Layer.build(foregroundRunnerLayer)
-            const workspacePath = yield* Effect.promise(() =>
-              import("node:fs/promises").then((fs) => fs.mkdtemp("/tmp/rika-runner-")),
-            )
+            const fileSystem = yield* FileSystem.FileSystem
+            const workspacePath = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-runner-" })
             const ready = yield* Deferred.make<void, import("../src/foreground").ForegroundRunnerError>()
+            const terminalPersistenceStarted = yield* Deferred.make<void>()
+            const releaseTerminalPersistence = yield* Deferred.make<void>()
             const runner = yield* Effect.forkScoped(
               runForegroundRunner({
                 admission: {
@@ -115,6 +121,17 @@ describe.sequential("foreground Runner", () => {
                   expiresAt: 9_999_999_999_999,
                 },
                 workspacePath,
+                receiptScope: "cancellation-race",
+                receiptStore: {
+                  save: (_scope, snapshot) => {
+                    const deadline = snapshot.receipts.find((receipt) => receipt.operationKey === "operation-deadline")
+                    return deadline?.frames.some((frame) => frame._tag === "Terminal") === true
+                      ? Deferred.succeed(terminalPersistenceStarted, undefined).pipe(
+                          Effect.andThen(Deferred.await(releaseTerminalPersistence)),
+                        )
+                      : Effect.void
+                  },
+                },
                 ready,
               }).pipe(Effect.provide(foregroundContext)),
             )
@@ -177,7 +194,7 @@ describe.sequential("foreground Runner", () => {
                 attempt: 0,
                 replayPolicy: "never",
                 admittedAt: null,
-                deadline: null,
+                deadlineAt: "2999-01-01T00:00:00.000Z",
                 bindings,
               },
             })
@@ -207,7 +224,7 @@ describe.sequential("foreground Runner", () => {
               attempt: 0,
               replayPolicy: "pure" as const,
               admittedAt: null,
-              deadline: null,
+              deadlineAt: "2999-01-01T00:00:00.000Z",
               bindings,
             }
             socket.message({ _tag: "CellExecute", request })
@@ -282,48 +299,109 @@ describe.sequential("foreground Runner", () => {
               toolCallId: "call-cancel",
               code: "await new Promise<void>(() => {})",
             }
+            FakeWebSocket.onSend = (origin, message: any) => {
+              if (
+                message._tag !== "CellLifecycle" ||
+                message.frame._tag !== "Accepted" ||
+                message.frame.attribution.operationKey !== "operation-cancel"
+              )
+                return
+              FakeWebSocket.onSend = undefined
+              origin.message({
+                _tag: "CellCancel",
+                access,
+                operationKey: "operation-cancel",
+                attempt: 0,
+              })
+            }
             socket.message({ _tag: "CellExecute", request: cancelRequest })
+            const cancelled = yield* acknowledgeTerminal(socket, access, "operation-cancel")
+            expect(cancelled.frame.response).toEqual({
+              _tag: "DomainFailure",
+              failure: { kind: "cancelled", message: "Cell operation cancelled" },
+            })
+            expect(cancelled.frame.outcome).toBe("cancelled")
+            expect(
+              socket.sent
+                .filter(
+                  (message: any) =>
+                    message._tag === "CellLifecycle" && message.frame.attribution.operationKey === "operation-cancel",
+                )
+                .map((message: any) => message.frame._tag),
+            ).toEqual(["Accepted", "Started", "Terminal"])
+            const deadlineRequest = {
+              ...request,
+              operationKey: "operation-deadline",
+              toolCallId: "call-deadline",
+              sessionId: "session-deadline",
+              code: "await new Promise<void>(() => {})",
+              deadlineAt: DateTime.formatIso(DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 100)),
+            }
+            socket.message({ _tag: "CellExecute", request: deadlineRequest })
             yield* eventually(
               () =>
                 socket.sent.find(
                   (message: any) =>
                     message._tag === "CellLifecycle" &&
                     message.frame._tag === "Started" &&
-                    message.frame.attribution.operationKey === "operation-cancel",
+                    message.frame.attribution.operationKey === "operation-deadline",
                 ) as any,
             )
+            yield* TestClock.adjust("100 millis")
+            yield* Deferred.await(terminalPersistenceStarted)
             socket.message({
               _tag: "CellCancel",
               access,
-              operationKey: "operation-cancel",
+              operationKey: "operation-deadline",
               attempt: 0,
             })
-            const cancelled = yield* acknowledgeTerminal(socket, access, "operation-cancel")
-            expect(cancelled.frame.outcome).toBe("cancelled")
-            expect(cancelled.frame.response).toEqual({
-              _tag: "DomainFailure",
-              failure: { kind: "cancelled", message: "Cell operation cancelled" },
-            })
+            yield* Effect.yieldNow
             expect(
               socket.sent.filter(
                 (message: any) =>
                   message._tag === "CellLifecycle" &&
                   message.frame._tag === "Terminal" &&
-                  message.frame.attribution.operationKey === "operation-cancel",
+                  message.frame.attribution.operationKey === "operation-deadline",
+              ),
+            ).toEqual([])
+            yield* Deferred.succeed(releaseTerminalPersistence, undefined)
+            const timedOut = yield* acknowledgeTerminal(socket, access, "operation-deadline")
+            expect(timedOut.frame.response).toEqual({
+              _tag: "DomainFailure",
+              failure: { kind: "timeout", message: "Cell operation deadline exceeded" },
+            })
+            expect(timedOut.frame.outcome).toBe("failed")
+            expect(
+              socket.sent.filter(
+                (message: any) =>
+                  message._tag === "CellLifecycle" &&
+                  message.frame._tag === "Terminal" &&
+                  message.frame.attribution.operationKey === "operation-deadline",
               ),
             ).toHaveLength(1)
+            socket.message({ _tag: "CellExecute", request: deadlineRequest })
+            const replayedTimeout = yield* acknowledgeTerminal(socket, access, "operation-deadline", 1)
+            expect(replayedTimeout.frame.response).toEqual(timedOut.frame.response)
             expect(
-              yield* Effect.promise(() => import("node:fs/promises").then((fs) => fs.readdir(workspacePath))),
+              socket.sent.filter(
+                (message: any) =>
+                  message._tag === "CellLifecycle" &&
+                  message.frame._tag === "Terminal" &&
+                  message.frame.attribution.operationKey === "operation-deadline" &&
+                  message.frame.response.failure?.kind === "cancelled",
+              ),
             ).toEqual([])
+            expect(yield* fileSystem.readDirectory(workspacePath)).toEqual([])
             yield* Fiber.interrupt(runner)
             expect(yield* eventually(() => (socket.closed ? true : undefined))).toBe(true)
           }),
-        ),
+        ).pipe(provideLayer(BunFileSystem.layer)),
       (original) =>
         Effect.sync(() => {
           ;(globalThis as { WebSocket: unknown }).WebSocket = original
           FakeWebSocket.current = undefined
           FakeWebSocket.instances.length = 0
+          FakeWebSocket.onSend = undefined
         }),
     ),
   )
@@ -397,7 +475,7 @@ describe.sequential("foreground Runner", () => {
               attempt: 0,
               replayPolicy: "pure",
               admittedAt: null,
-              deadline: null,
+              deadlineAt: "2999-01-01T00:00:00.000Z",
               bindings,
             }
             socket.message({ _tag: "CellExecute", request: reconnectRequest })
@@ -481,7 +559,7 @@ describe.sequential("foreground Runner", () => {
     ),
   )
 
-  it.effect("resumes a persisted running receipt as unknown without replaying local code", () =>
+  it.effect("cancels persisted Running authority after restart without replaying local code", () =>
     Effect.acquireUseRelease(
       Effect.sync(() => {
         const original = globalThis.WebSocket
@@ -517,6 +595,12 @@ describe.sequential("foreground Runner", () => {
                   leaseExpiresAt: 10_000,
                   heartbeatIntervalMillis: 60_000,
                   cursor: { sequence: 0, value: "" },
+                  cells: [
+                    {
+                      executionKey: "operation-resume\u00000",
+                      state: { _tag: "Running", attempt: 0 },
+                    },
+                  ],
                   machines: [],
                   receipts: [
                     {
@@ -568,26 +652,17 @@ describe.sequential("foreground Runner", () => {
             })
             yield* Deferred.await(ready)
             socket.message({
-              _tag: "CellExecute",
-              request: {
-                access: renewed,
-                operationKey: "operation-resume",
-                workspaceId: "workspace-binding-1",
-                sessionId: "cell-session-resume",
-                threadId: "thread-resume",
-                turnId: "turn-resume",
-                runId: "run-resume",
-                rootRunId: "run-resume",
-                toolCallId: "tool-call-resume",
-                code: "mustNotRun()",
-                attempt: 0,
-                replayPolicy: "never",
-                admittedAt: null,
-                deadline: null,
-                bindings,
-              },
+              _tag: "CellCancel",
+              access: renewed,
+              operationKey: "operation-resume",
+              attempt: 0,
             })
-            yield* acknowledgeTerminal(socket, renewed, "operation-resume")
+            const cancelled = yield* acknowledgeTerminal(socket, renewed, "operation-resume")
+            expect(cancelled.frame.response).toEqual({
+              _tag: "DomainFailure",
+              failure: { kind: "cancelled", message: "Cell operation cancelled" },
+            })
+            expect(cancelled.frame.outcome).toBe("cancelled")
             const result = yield* eventually(
               () =>
                 socket.sent.find(
@@ -596,8 +671,20 @@ describe.sequential("foreground Runner", () => {
             )
             expect(result.response).toEqual({
               _tag: "DomainFailure",
-              failure: { kind: "unknown", message: "Local operation outcome is unknown after foreground restart" },
+              failure: { kind: "cancelled", message: "Cell operation cancelled" },
             })
+            const completed = yield* eventually(() =>
+              latestSnapshot?.cells.find((cell) => cell.executionKey === "operation-resume\u00000")?.state._tag ===
+              "Completed"
+                ? latestSnapshot
+                : undefined,
+            )
+            expect(completed.cells).toEqual([
+              {
+                executionKey: "operation-resume\u00000",
+                state: { _tag: "Completed", attempt: 0, response: result.response },
+              },
+            ])
             socket.message({
               _tag: "LocalCellReceipt",
               access: renewed,
@@ -614,6 +701,7 @@ describe.sequential("foreground Runner", () => {
           ;(globalThis as { WebSocket: unknown }).WebSocket = original
           FakeWebSocket.current = undefined
           FakeWebSocket.instances.length = 0
+          FakeWebSocket.onSend = undefined
         }),
     ),
   )
@@ -697,7 +785,7 @@ describe.sequential("foreground Runner", () => {
                 attempt: 0,
                 replayPolicy: "pure",
                 admittedAt: null,
-                deadline: null,
+                deadlineAt: "2999-01-01T00:00:00.000Z",
                 bindings,
               },
             })

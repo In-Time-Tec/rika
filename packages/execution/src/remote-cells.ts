@@ -18,7 +18,7 @@ export const Request = Schema.Struct({
   attempt: NonNegativeInt,
   replayPolicy: ReplayPolicy,
   admittedAt: Schema.NullOr(NonEmptyString),
-  deadline: Schema.NullOr(NonEmptyString),
+  deadlineAt: NonEmptyString,
 })
 
 export type Request = typeof Request.Type

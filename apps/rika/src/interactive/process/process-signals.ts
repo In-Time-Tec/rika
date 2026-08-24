@@ -1,4 +1,10 @@
 import { Effect, Queue, Stream } from "effect"
+import process, { stdin } from "node:process"
+import {
+  clientSigintOwnership,
+  type ProcessListenerTarget,
+  type SigintOwnership,
+} from "../../client/client-signal-ownership"
 
 export { forceQuitWindow, interruptDecision, type InterruptDecision } from "./process-interrupt"
 export { writeGoodbye } from "./process-goodbye"
@@ -8,11 +14,13 @@ export type LifecycleSignal = "SIGINT" | "SIGTERM" | "SIGHUP" | "SIGTSTP" | "SIG
 export type LifecycleEvent = { readonly _tag: "Signal"; readonly signal: LifecycleSignal } | { readonly _tag: "Hangup" }
 
 const watchedSignals: ReadonlyArray<LifecycleSignal> = ["SIGINT", "SIGTERM", "SIGHUP", "SIGTSTP", "SIGCONT"]
+const processEmitter: NodeJS.EventEmitter = process
 
 export const lifecycleEvents = (input: {
   readonly signals: ReadonlyArray<LifecycleSignal>
-  readonly stdin: NodeJS.ReadStream
-  readonly process: NodeJS.EventEmitter
+  readonly stdin: ProcessListenerTarget<"end" | "error" | "close">
+  readonly process: ProcessListenerTarget<LifecycleSignal>
+  readonly ownership?: SigintOwnership
 }): Stream.Stream<LifecycleEvent> =>
   Stream.callback<LifecycleEvent>((queue) =>
     Effect.acquireRelease(
@@ -28,12 +36,14 @@ export const lifecycleEvents = (input: {
           Queue.offerUnsafe(queue, { _tag: "Hangup" })
         }
         for (const event of ["end", "error", "close"] as const) input.stdin.on(event, hangup)
-        return { signalHandlers, hangup }
+        const releaseOwnership = input.signals.includes("SIGINT") ? input.ownership?.acquireTui() : undefined
+        return { signalHandlers, hangup, releaseOwnership }
       }),
       (registered) =>
         Effect.sync(() => {
           for (const { signal, handler } of registered.signalHandlers) input.process.off(signal, handler)
           for (const event of ["end", "error", "close"] as const) input.stdin.off(event, registered.hangup)
+          registered.releaseOwnership?.()
         }),
     ),
   )
@@ -54,7 +64,7 @@ export const watchLifecycleSignals = (handlers: {
     return Effect.sync(handlers.continueFromSuspend)
   }
   return Effect.scoped(
-    lifecycleEvents({ signals: watchedSignals, stdin: process.stdin, process }).pipe(
+    lifecycleEvents({ signals: watchedSignals, stdin, process: processEmitter, ownership: clientSigintOwnership }).pipe(
       Stream.runForEach(dispatch),
       Effect.onExit(() => Effect.logInfo("tui.signals.released")),
     ),

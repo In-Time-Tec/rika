@@ -29,12 +29,12 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Delegate one child and use its result."))
+        yield* Effect.tryPromise(() => app.type("Delegate one child and use its result."))
         app.pressEnter()
         yield* app.waitFrame("PARENT_RESUMED_AFTER_SETTLEMENT", 20_000)
         yield* app.settled
 
-        yield* Effect.promise(() => app.type("Now run an unrelated follow-up."))
+        yield* Effect.tryPromise(() => app.type("Now run an unrelated follow-up."))
         app.pressEnter()
         yield* app.waitFrame("SECOND_TURN_DONE", 20_000)
         yield* app.settled
@@ -77,12 +77,12 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Run two independent investigations."))
+        yield* Effect.tryPromise(() => app.type("Run two independent investigations."))
         app.pressEnter()
         yield* app.waitFrame("FANOUT_PARENT_RESUMED", 30_000)
         yield* app.settled
 
-        yield* Effect.promise(() => app.type("Now run an unrelated follow-up."))
+        yield* Effect.tryPromise(() => app.type("Now run an unrelated follow-up."))
         app.pressEnter()
         yield* app.waitFrame("FANOUT_SECOND_TURN_DONE", 20_000)
         yield* app.settled

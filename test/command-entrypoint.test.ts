@@ -1,8 +1,11 @@
+import { Effect, Schema } from "effect"
 import { expect, test } from "vitest"
+import { live, readText } from "./support/platform"
 
-const manifest = (await Bun.file("package.json").json()) as {
-  readonly scripts: Readonly<Record<string, string>>
-}
+const Manifest = Schema.Struct({ scripts: Schema.Record(Schema.String, Schema.String) })
+const manifest = await Effect.runPromise(
+  live(Effect.flatMap(readText("package.json"), Schema.decodeUnknownEffect(Schema.fromJsonString(Manifest)))),
+)
 
 test("root operational commands point directly at their owners", () => {
   expect(manifest.scripts.package).toBe("bun run scripts/packaging/package-target.ts")

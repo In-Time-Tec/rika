@@ -4,14 +4,15 @@ import { identityMigrations, runMigration } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as ExecutionPostgres from "@rika/execution/postgres"
-import { Context, Effect, Layer, Random, Redacted } from "effect"
+import { FileSystem, Config, Context, Effect, Layer, Random, Redacted } from "effect"
 import { Prompt } from "effect/unstable/ai"
 import { Pool } from "pg"
 import { Address, ExecutableManifest, ExecutableResolver, Message } from "tenetkit/runtime"
 import { encodeExecutableManifest, encodeExecutableRef, encodeMessage } from "tenetkit/runtime/driver/sql/codecs"
 import { HostedRecovery, layer as hostedRecoveryLayer } from "../src/hosted-recovery"
+import { live as livePlatform } from "./live-platform"
 
-const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
+const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const principal = { userId: "recovery-user", deviceId: "recovery-device", clientId: "recovery-client" }
 const executable = ExecutableManifest.makeTest("recovery", "test")
 const sqlText = (value: string) => `'${value.replaceAll("'", "''")}'`
@@ -32,12 +33,14 @@ const storedMessage = (suffix: string) =>
   )
 
 const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.promise(() => pool.query(text, [...values]))
+  Effect.tryPromise(() => pool.query(text, [...values]))
 
 const migrate = (url: string, pool: Pool) =>
   Effect.gen(function* () {
     for (const migration of [...identityMigrations, ...productMigrations]) {
-      const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
+      const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readFileString(migration.url.pathname),
+      )
       yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
     }
     yield* ExecutionPostgres.applySchema({ url, source: "hosted-recovery-live" })
@@ -93,35 +96,36 @@ const seed = (pool: Pool) =>
       (assignment_id, owner_id, operation_key, request_digest, code, attempt, state,
         dispatched_generation, dispatched_lease_epoch, dispatched_executor_instance_id,
         dispatched_process_incarnation, response, workspace_id, session_id, thread_id, turn_id,
-        run_id, root_run_id, tool_call_id, replay_policy, started_at, resolution_state)
+        run_id, root_run_id, tool_call_id, replay_policy, started_at, resolution_state, deadline_at,
+        terminal_outcome)
       VALUES
         ('recovery-assignment', 'recovery-owner', 'operation-retry', 'retry-digest', 'retry()', 0, 'unknown',
           1, 1, 'executor-recovery', 'process-recovery',
           '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"unknown"}}'::jsonb,
           'recovery-workspace', 'session-recovery', 'recovery-thread', 'turn-retry', 'run-retry',
-          'run-retry', 'call-retry', 'pure', now(), 'pending'),
+          'run-retry', 'call-retry', 'pure', now(), 'pending', '2999-01-01T00:00:00.000Z', 'unknown'),
         ('recovery-assignment', 'recovery-owner', 'operation-accept', 'accept-digest', 'accept()', 0, 'unknown',
           1, 1, 'executor-recovery', 'process-recovery',
           '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"unknown"}}'::jsonb,
           'recovery-workspace', 'session-recovery', 'recovery-thread', 'turn-accept', 'run-accept',
-          'run-accept', 'call-accept', 'never', now(), 'pending'),
+          'run-accept', 'call-accept', 'never', now(), 'pending', '2999-01-01T00:00:00.000Z', 'unknown'),
         ('recovery-assignment', 'recovery-owner', 'operation-abort', 'abort-digest', 'abort()', 0, 'unknown',
           1, 1, 'executor-recovery', 'process-recovery',
           '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"unknown"}}'::jsonb,
           'recovery-workspace', 'session-recovery', 'recovery-thread', 'turn-abort', 'run-abort',
-          'run-abort', 'call-abort', 'never', now(), 'pending')`,
+          'run-abort', 'call-abort', 'never', now(), 'pending', '2999-01-01T00:00:00.000Z', 'unknown')`,
   )
 
-it.effect.skipIf(databaseUrl === undefined)(
+it.effect.skipIf(databaseUrl === "")(
   "persists deterministic inspect, retry, accept, and abort resolutions through the TenetKit contract",
   () =>
-    Effect.scoped(
+    livePlatform(
       Effect.gen(function* () {
         const suffix = String(yield* Random.nextInt).replaceAll("-", "n")
         const database = `rika_hosted_recovery_${suffix}`
         const admin = new Pool({ connectionString: databaseUrl })
         yield* query(admin, `CREATE DATABASE "${database}"`)
-        const parsed = new URL(databaseUrl!)
+        const parsed = new URL(databaseUrl)
         parsed.pathname = `/${database}`
         const url = parsed.toString()
         const pool = new Pool({ connectionString: url })
@@ -259,9 +263,9 @@ it.effect.skipIf(databaseUrl === undefined)(
             ))._tag,
           ).toBe("Failure")
         } finally {
-          yield* Effect.promise(() => pool.end())
-          yield* Effect.promise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-          yield* Effect.promise(() => admin.end())
+          yield* Effect.tryPromise(() => pool.end())
+          yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+          yield* Effect.tryPromise(() => admin.end())
         }
       }),
     ),

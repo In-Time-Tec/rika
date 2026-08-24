@@ -244,11 +244,7 @@ it.effect("identifies a stale CLI registration from device authorization", () =>
     Effect.gen(function* () {
       const client = HttpClient.make((request) =>
         Effect.succeed(
-          response(
-            request,
-            { error: "invalid_client", error_description: "The OAuth client does not exist" },
-            400,
-          ),
+          response(request, { error: "invalid_client", error_description: "The OAuth client does not exist" }, 400),
         ),
       )
       const context = yield* Layer.build(

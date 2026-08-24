@@ -19,11 +19,6 @@ const required = (name: string) => {
 }
 
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
-const attempt = <A>(operation: string, run: () => Promise<A>) =>
-  Effect.tryPromise({
-    try: run,
-    catch: () => LiveValidationError.make({ message: `${operation} failed` }),
-  })
 const sameBytes = (left: Uint8Array, right: Uint8Array) =>
   left.length === right.length && left.every((value, index) => value === right[index])
 
@@ -81,24 +76,34 @@ const program = Effect.gen(function* () {
         const connection = { apiKey: apiKeyValue, requestTimeoutMs: 30_000, timeoutMs: 900_000 }
         const modified = Uint8Array.from([0, 255, 109, 111, 100, 105, 102, 105, 101, 100])
         const untracked = Uint8Array.from([117, 110, 116, 114, 97, 99, 107, 101, 100, 0, 255])
-        let remote = yield* attempt("connect validation sandbox", () => Sandbox.connect(sandbox.sandboxId, connection))
-        yield* attempt("write validation files", () =>
-          remote.files.write([
-            { path: "/home/user/tracked-modified.bin", data: modified.buffer as ArrayBuffer },
-            { path: "/home/user/untracked.bin", data: untracked.buffer as ArrayBuffer },
-          ]),
-        )
+        let remote = yield* Effect.tryPromise({
+          try: () => Sandbox.connect(sandbox.sandboxId, connection),
+          catch: () => LiveValidationError.make({ message: "connect validation sandbox failed" }),
+        })
+        yield* Effect.tryPromise({
+          try: () =>
+            remote.files.write([
+              { path: "/home/user/tracked-modified.bin", data: modified.buffer },
+              { path: "/home/user/untracked.bin", data: untracked.buffer },
+            ]),
+          catch: () => LiveValidationError.make({ message: "write validation files failed" }),
+        })
         for (let cycle = 1; cycle <= 2; cycle += 1) {
           yield* provider.pauseFilesystem(sandbox.sandboxId)
           yield* provider.connect(sandbox.sandboxId, 900_000)
-          remote = yield* attempt("reconnect validation sandbox", () => Sandbox.connect(sandbox.sandboxId, connection))
+          remote = yield* Effect.tryPromise({
+            try: () => Sandbox.connect(sandbox.sandboxId, connection),
+            catch: () => LiveValidationError.make({ message: "reconnect validation sandbox failed" }),
+          })
           const [restoredModified, restoredUntracked] = yield* Effect.all([
-            attempt("read modified validation file", () =>
-              remote.files.read("/home/user/tracked-modified.bin", { format: "bytes" }),
-            ),
-            attempt("read untracked validation file", () =>
-              remote.files.read("/home/user/untracked.bin", { format: "bytes" }),
-            ),
+            Effect.tryPromise({
+              try: () => remote.files.read("/home/user/tracked-modified.bin", { format: "bytes" }),
+              catch: () => LiveValidationError.make({ message: "read modified validation file failed" }),
+            }),
+            Effect.tryPromise({
+              try: () => remote.files.read("/home/user/untracked.bin", { format: "bytes" }),
+              catch: () => LiveValidationError.make({ message: "read untracked validation file failed" }),
+            }),
           ])
           if (!sameBytes(restoredModified, modified) || !sameBytes(restoredUntracked, untracked))
             return yield* LiveValidationError.make({ message: `filesystem validation failed after wake ${cycle}` })

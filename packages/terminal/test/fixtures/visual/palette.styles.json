@@ -571,7 +571,7 @@
           "width": 16
         },
         {
-          "text": "  new thread",
+          "text": "  new on Runner",
           "fg": {
             "buffer": {
               "0": 0,
@@ -589,10 +589,10 @@
             }
           },
           "attributes": 1,
-          "width": 12
+          "width": 15
         },
         {
-          "text": "                                            ",
+          "text": "                                         ",
           "fg": {
             "buffer": {
               "0": 0,
@@ -610,7 +610,7 @@
             }
           },
           "attributes": 0,
-          "width": 44
+          "width": 41
         },
         {
           "text": " ",
@@ -767,9 +767,9 @@
           "text": "  new in Orb",
           "fg": {
             "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
+              "0": 174,
+              "1": 119,
+              "2": 255,
               "3": 255
             }
           },

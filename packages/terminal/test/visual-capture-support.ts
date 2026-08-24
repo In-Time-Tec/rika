@@ -455,6 +455,48 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
       24,
     ],
     [
+      "runner-placement",
+      {
+        ...base(),
+        connection: { connectivity: "connected", target: "runner", activity: "executor-waiting", participants: 1 },
+      },
+      80,
+      24,
+    ],
+    [
+      "orb-placement",
+      {
+        ...base(),
+        connection: {
+          connectivity: "connected",
+          target: "orb",
+          activity: "workspace-setup",
+          ownership: "organization",
+          participants: 2,
+        },
+      },
+      80,
+      24,
+    ],
+    [
+      "narrow-orb-placement",
+      {
+        ...base(),
+        connection: { connectivity: "reconnecting", target: "orb", participants: 1 },
+      },
+      32,
+      12,
+    ],
+    [
+      "narrow-runner-placement",
+      {
+        ...base(),
+        connection: { connectivity: "connected", target: "runner", activity: "executor-waiting", participants: 1 },
+      },
+      32,
+      12,
+    ],
+    [
       "image",
       block({
         _tag: "ImageAttachment",
@@ -532,6 +574,7 @@ export const captureVisuals = Effect.fn("Visual.captureVisuals")(function* (dire
         )
         for (const [name, source, width, height] of all.filter((_, index) => index % lanes === lane)) {
           const rootBefore = new Set(setup.renderer.root.getChildren())
+          const selectionListenersBefore = setup.renderer.listenerCount("selection")
           /** A frozen clock pins animation phase so frames stay deterministic under concurrency. */
           const surface = new Surface(
             setup.renderer,
@@ -547,6 +590,7 @@ export const captureVisuals = Effect.fn("Visual.captureVisuals")(function* (dire
               },
             },
           )
+          let cleanupError: Error | undefined
           try {
             setup.resize(width, height)
             surface.update({ ...source, width, height })
@@ -567,10 +611,14 @@ export const captureVisuals = Effect.fn("Visual.captureVisuals")(function* (dire
             )
           } finally {
             surface.destroy()
-            /** Surface.destroy releases controllers but leaves its renderables attached. */
-            for (const child of setup.renderer.root.getChildren())
-              if (!rootBefore.has(child)) setup.renderer.root.remove(child)
+            const retainedRoots = setup.renderer.root.getChildren().filter((child) => !rootBefore.has(child))
+            if (retainedRoots.length > 0)
+              cleanupError = new Error(`${name} retained ${retainedRoots.length} root renderables`)
+            const retainedSelectionListeners = setup.renderer.listenerCount("selection") - selectionListenersBefore
+            if (retainedSelectionListeners !== 0)
+              cleanupError = new Error(`${name} retained ${retainedSelectionListeners} selection listeners`)
           }
+          if (cleanupError !== undefined) throw cleanupError
         }
       }),
     { concurrency: lanes },

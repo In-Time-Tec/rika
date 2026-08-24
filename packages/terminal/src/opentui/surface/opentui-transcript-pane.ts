@@ -43,6 +43,8 @@ import {
 } from "./opentui-transcript-renderables"
 import { TranscriptVirtualDocument } from "./opentui-transcript-virtual-document"
 
+const runFork = Effect.runFork
+
 export interface TranscriptPaneHandlers {
   readonly scroll?: (offset: number) => void
   readonly scrollGeometry?: (offset: number) => void
@@ -793,6 +795,6 @@ export class TranscriptPane {
   }
 
   private defer(action: () => void): void {
-    Effect.runFork(Effect.yieldNow.pipe(Effect.andThen(Effect.sync(action))))
+    runFork(Effect.yieldNow.pipe(Effect.andThen(Effect.sync(action))))
   }
 }

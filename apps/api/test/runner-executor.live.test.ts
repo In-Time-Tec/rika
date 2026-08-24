@@ -8,8 +8,9 @@ import { BetterAuthUserId, OrganizationId, ThreadId } from "@rika/product/hosted
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { layer as productPostgres } from "@rika/product-store/postgres-layer"
 import type { Access, RunnerHelloWire } from "@rika/remote-execution/protocol"
-import { Effect, Layer, Random, Redacted } from "effect"
+import { FileSystem, Config, Effect, Layer, Random, Redacted } from "effect"
 import { Pool } from "pg"
+import { live as livePlatform } from "./live-platform"
 import { Executor, service as executorLayer } from "../src/executor"
 import { HostedEnvironment, type HostedEnvironmentService } from "../src/hosted-environment"
 import { testLayer as hostedModelRegistryTestLayer } from "../src/hosted-model-registry"
@@ -19,8 +20,8 @@ import { HostedToolPolicy } from "../src/hosted-tool-policy"
 import { RunnerExecutor, layer as runnerExecutorLayer } from "../src/runner-executor"
 import { testToolPolicy } from "./hosted-tool-policy-fixture"
 
-const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
-const live = databaseUrl !== undefined
+const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
+const live = databaseUrl !== ""
 const helloReadiness = {
   capabilities: { cells: true, checkpoints: false, pty: true },
   workspaceCapabilities: {
@@ -48,7 +49,7 @@ const unusedHostedEnvironment: HostedEnvironmentService = {
 }
 
 const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.promise(() => pool.query(text, [...values]))
+  Effect.tryPromise(() => pool.query(text, [...values]))
 
 const personal = (userId: string) => ({ _tag: "PersonalOwner" as const, userId: BetterAuthUserId.make(userId) })
 const organization = (organizationId: string) => ({
@@ -140,15 +141,18 @@ const isolated = <A, E, R>(
       const database = `rika_local_authority_${label}_${Math.abs(yield* Random.nextInt)}`
       const admin = new Pool({ connectionString: databaseUrl })
       yield* query(admin, `CREATE DATABASE "${database}"`)
-      const parsed = new URL(databaseUrl!)
+      const parsed = new URL(databaseUrl)
       parsed.pathname = `/${database}`
       const url = parsed.toString()
       let pool: Pool | undefined
       try {
-        pool = new Pool({ connectionString: url })
+        const activePool = new Pool({ connectionString: url })
+        pool = activePool
         for (const migration of [...identityMigrations, ...productMigrations]) {
-          const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
-          yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
+          const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.readFileString(migration.url.pathname),
+          )
+          yield* runMigration({ pool: activePool, id: migration.id, checksum: migration.checksum, sql })
         }
         const base = Layer.mergeAll(
           productPostgres({ url: Redacted.make(url), maxConnections: 8 }),
@@ -167,19 +171,21 @@ const isolated = <A, E, R>(
               templateBuildId: "local-authority-live",
               providerScope: "local-authority-live",
               provision: () => Effect.void,
+              promptAdmissionReadiness: Effect.succeed(true),
             }).pipe(Layer.provide(base)),
             runnerExecutor,
             executorLayer.pipe(Layer.provide(runnerExecutor), Layer.provide(base)),
           ),
         )
-        return yield* use(pool).pipe(Effect.provide(context))
+        return yield* use(activePool).pipe(Effect.provide(context))
       } finally {
-        yield* Effect.promise(() => pool?.end() ?? Promise.resolve())
-        yield* Effect.promise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-        yield* Effect.promise(() => admin.end())
+        const cleanupPool = pool
+        yield* cleanupPool === undefined ? Effect.void : Effect.tryPromise(() => cleanupPool.end())
+        yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+        yield* Effect.tryPromise(() => admin.end())
       }
     }),
-  )
+  ).pipe(livePlatform)
 
 it.effect.skipIf(!live)("keeps real personal local authority active without organization membership", () =>
   isolated("personal", (pool) =>

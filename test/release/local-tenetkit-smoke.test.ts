@@ -1,6 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Path } from "effect"
+import { Effect, FileSystem, Path, Schema } from "effect"
 import {
   tenetkitPackages,
   verifyInstalledTenetKitPackages,
@@ -11,6 +11,7 @@ import {
   tenetkitReleasePackages,
   tenetkitTarballName,
   catalogTenetKitVersion,
+  localTenetKitLockError,
   manifestWithLocalTenetKitTarballs,
   provisionProvenHostArchive,
   type TenetKitReleaseEvidence,
@@ -28,18 +29,21 @@ const evidence: TenetKitReleaseEvidence = {
   })),
 }
 const checksumNames = [...evidence.packages.map(({ filename }) => filename), "release-evidence.json"]
-const rootManifest = (await Bun.file(new URL("../../package.json", import.meta.url)).json()) as {
-  readonly scripts: Readonly<Record<string, string>>
-}
+const RootManifest = Schema.Struct({ scripts: Schema.Record(Schema.String, Schema.String) })
+const rootManifest = await Effect.runPromise(
+  Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+    fileSystem.readFileString(new URL("../../package.json", import.meta.url).pathname),
+  ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(RootManifest))), Effect.provide(BunServices.layer)),
+)
 
 it.layer(BunServices.layer)("local TenetKit release smoke", (test) => {
   test("exposes one canonical root command", () => {
     expect(rootManifest.scripts["local-tenetkit-smoke"]).toBe("bun run scripts/release/local-tenetkit-smoke.ts")
   })
 
-  test("rewrites every consumed package and only TenetKit catalog entries", () => {
-    expect(tenetkitPackages).toEqual(["tenetkit"])
-    const catalog = Object.fromEntries(tenetkitPackages.map((packageName) => [packageName, version]))
+  test("overrides every consumed package while preserving the catalog", () => {
+    expect(tenetkitPackages).toEqual(["tenetkit", "@tenetkit/pg"])
+    const catalog = { tenetkit: version }
     const manifest = {
       name: "consumer",
       workspaces: { packages: ["packages/*"], catalog: { ...catalog, effect: "4.0.0" } },
@@ -55,19 +59,23 @@ it.layer(BunServices.layer)("local TenetKit release smoke", (test) => {
     expect(manifestWithLocalTenetKitTarballs(manifest, "/release", version)).toEqual({
       ...manifest,
       overrides: tarballs,
-      workspaces: {
-        ...manifest.workspaces,
-        catalog: {
-          effect: "4.0.0",
-          ...tarballs,
-        },
-      },
     })
   })
 
-  test("accepts only TenetKit's exact three-package evidence and four-entry checksum inventory", () => {
-    expect(tenetkitReleasePackages).toHaveLength(3)
-    expect(checksumNames).toHaveLength(4)
+  test("rejects nested and top-level registry TenetKit lock resolutions", () => {
+    const local = tenetkitPackages.map((name) => tenetkitTarballName(name, version)).join("\n")
+    expect(localTenetKitLockError(local, version)).toBeUndefined()
+    expect(localTenetKitLockError(`${local}\n    "@tenetkit/pg/tenetkit": ["tenetkit@${version}"]`, version)).toContain(
+      "nested @tenetkit/pg/tenetkit registry",
+    )
+    expect(localTenetKitLockError(`${local}\n    "@tenetkit/pg": ["@tenetkit/pg@${version}"]`, version)).toContain(
+      "registry",
+    )
+  })
+
+  test("accepts only TenetKit's exact four-package evidence and five-entry checksum inventory", () => {
+    expect(tenetkitReleasePackages).toEqual(["tenetkit", "@tenetkit/pg", "@tenetkit/mysql", "@tenetkit/cloudflare"])
+    expect(checksumNames).toHaveLength(5)
     expect(tenetkitReleaseInventoryError(evidence, version, checksumNames)).toBeUndefined()
     expect(
       tenetkitReleaseInventoryError({ ...evidence, packages: evidence.packages.slice(1) }, version, checksumNames),
@@ -89,10 +97,9 @@ it.layer(BunServices.layer)("local TenetKit release smoke", (test) => {
 
   test("rejects a mixed or non-exact consumed TenetKit catalog", () => {
     const catalog = Object.fromEntries(tenetkitPackages.map((packageName) => [packageName, version]))
-    expect(() => catalogTenetKitVersion({ ...catalog, tenetkit: "^0.20.2" })).toThrow("not exact semver")
-    expect(() => catalogTenetKitVersion(Object.fromEntries(Object.entries(catalog).slice(1)))).toThrow(
-      "one exact version",
-    )
+    expect(() => catalogTenetKitVersion({ tenetkit: "^0.20.2" })).toThrow("not exact semver")
+    expect(() => catalogTenetKitVersion({})).toThrow("one exact version")
+    expect(() => catalogTenetKitVersion({ ...catalog, "@tenetkit/pg": "0.20.1" })).toThrow("one exact version")
   })
 
   test.effect("locates every exact package when it is only in the isolated store", () =>

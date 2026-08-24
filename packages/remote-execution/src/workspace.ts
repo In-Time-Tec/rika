@@ -1,4 +1,19 @@
-import { Clock, Crypto, Effect, Encoding, Exit, Fiber, FileSystem, Option, Redacted, Schema } from "effect"
+import {
+  Clock,
+  Config,
+  Crypto,
+  Effect,
+  Encoding,
+  Exit,
+  Fiber,
+  FileSystem,
+  Option,
+  Redacted,
+  Schema,
+  Stream,
+} from "effect"
+import * as PlatformError from "effect/PlatformError"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import type {
   AccessWire,
   EncodedArchive,
@@ -121,17 +136,18 @@ const readOnlyGhWrapper = (executable = ghExecutable, credentialClient?: string)
 
 const credentialClientSource = (socketPath: string) =>
   `#!/usr/bin/env bun
+const { exit, stdout } = process
 const operation = process.argv[2] ?? ""
-if (operation !== "git-read" && operation !== "github-read" && operation !== "branch-push") process.exit(2)
+if (operation !== "git-read" && operation !== "github-read" && operation !== "branch-push") exit(2)
 let response = ""
-const timeout = setTimeout(() => process.exit(1), 5000)
+const timeout = setTimeout(() => exit(1), 5000)
 await Bun.connect({
   unix: ${JSON.stringify(socketPath)},
   socket: {
     open(socket) { socket.write(operation) },
     data(_socket, data) { response += new TextDecoder().decode(data) },
-    close() { clearTimeout(timeout); process.stdout.write(response) },
-    error() { clearTimeout(timeout); process.exit(1) },
+    close() { clearTimeout(timeout); stdout.write(response) },
+    error() { clearTimeout(timeout); exit(1) },
   },
 })
 `
@@ -164,50 +180,65 @@ const commandAdapter = (
   command: ReadonlyArray<string>,
   cwd: string,
   environment: Record<string, string>,
-  output: (stream: "stdout" | "stderr", text: string) => void,
+  output: (stream: "stdout" | "stderr", text: string) => Effect.Effect<void, WorkspaceError>,
 ) =>
   Effect.acquireRelease(
-    Effect.sync(() => {
-      const process = Bun.spawn([...command], {
-        cwd,
-        env: { ...Bun.env, ...environment },
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "pipe",
-      })
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const path = yield* Config.string("PATH").pipe(Config.withDefault("/usr/local/bin:/usr/bin:/bin"))
+      const process = yield* spawner
+        .spawn(
+          ChildProcess.make(command[0]!, [...command.slice(1)], {
+            cwd,
+            env: { PATH: path, ...environment },
+            stdin: "ignore",
+            stdout: "pipe",
+            stderr: "pipe",
+          }),
+        )
+        .pipe(
+          Effect.mapError(() =>
+            WorkspaceError.make({ phase: "capabilities", message: "Workspace command failed", retryable: true }),
+          ),
+        )
       let retained = ""
       let truncated = false
-      const consume = (stream: ReadableStream<Uint8Array>, name: "stdout" | "stderr") => {
-        const reader = stream.getReader()
+      const consumeStreamAdapter = (
+        stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>,
+        name: "stdout" | "stderr",
+      ) => {
         const decoder = new TextDecoder()
-        const read = (): Promise<void> =>
-          reader.read().then((next) => {
-            if (next.done) return
-            const text = decoder.decode(next.value, { stream: true })
-            output(name, text)
+        return Stream.runForEach(stream, (chunk) =>
+          Effect.gen(function* () {
+            const text = decoder.decode(chunk, { stream: true })
+            yield* output(name, text)
             if (retained.length < maximumOutputBytes) retained += text.slice(0, maximumOutputBytes - retained.length)
             if (retained.length >= maximumOutputBytes) truncated = true
-            return read()
-          })
-        return read()
+          }),
+        ).pipe(
+          Effect.mapError(() =>
+            WorkspaceError.make({ phase: "capabilities", message: "Workspace command output failed", retryable: true }),
+          ),
+        )
       }
-      const completed = Promise.all([
-        consume(process.stdout, "stdout"),
-        consume(process.stderr, "stderr"),
-        process.exited,
-      ]).then(([, , code]) => ({ code, output: retained, truncated }))
+      const { stdout, stderr } = process
+      const completed = Effect.all(
+        [
+          consumeStreamAdapter(stdout, "stdout"),
+          consumeStreamAdapter(stderr, "stderr"),
+          process.exitCode.pipe(
+            Effect.map(Number),
+            Effect.mapError(() =>
+              WorkspaceError.make({ phase: "capabilities", message: "Workspace command failed", retryable: true }),
+            ),
+          ),
+        ],
+        { concurrency: "unbounded" },
+      ).pipe(Effect.map(([, , code]) => ({ code, output: retained, truncated })))
       return { process, completed }
     }),
-    ({ process }) => Effect.sync(() => process.kill()).pipe(Effect.ignore),
-  ).pipe(
-    Effect.flatMap(({ completed }) =>
-      Effect.tryPromise({
-        try: () => completed,
-        catch: () =>
-          WorkspaceError.make({ phase: "capabilities", message: "Workspace command failed", retryable: true }),
-      }),
-    ),
-  )
+    ({ process }) => process.kill().pipe(Effect.ignore),
+  ).pipe(Effect.flatMap(({ completed }) => completed))
 
 export interface BranchPushOptions {
   readonly request: BranchPushRequest
@@ -219,6 +250,7 @@ export interface BranchPushOptions {
 }
 
 export const pushApprovedBranch = Effect.fn("Workspace.pushApprovedBranch")(function* (options: BranchPushOptions) {
+  const path = yield* Config.string("PATH").pipe(Config.withDefault("/usr/local/bin:/usr/bin:/bin"))
   const fileSystem = yield* FileSystem.FileSystem
   const crypto = yield* Crypto.Crypto
   const root = options.root ?? RemoteRepositoryRoot
@@ -251,7 +283,7 @@ export const pushApprovedBranch = Effect.fn("Workspace.pushApprovedBranch")(func
       [...prefix, ...command],
       root,
       {
-        PATH: Bun.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+        PATH: path,
         GIT_TERMINAL_PROMPT: "0",
         GCM_INTERACTIVE: "Never",
         GIT_ASKPASS: "/bin/false",
@@ -259,7 +291,7 @@ export const pushApprovedBranch = Effect.fn("Workspace.pushApprovedBranch")(func
         GIT_CONFIG_NOSYSTEM: "1",
         GIT_CONFIG_GLOBAL: "/dev/null",
       },
-      () => {},
+      () => Effect.void,
     )
   const head = yield* run(["git", "-C", root, "rev-parse", "HEAD"]).pipe(Effect.option)
   const remote = yield* run(["git", "-C", root, "remote", "get-url", "origin"]).pipe(Effect.option)
@@ -388,6 +420,7 @@ export const pushApprovedBranch = Effect.fn("Workspace.pushApprovedBranch")(func
 
 const make = (options: Options) =>
   Effect.gen(function* () {
+    const executablePath = yield* Config.string("PATH").pipe(Config.withDefault("/usr/local/bin:/usr/bin:/bin"))
     const fileSystem = yield* FileSystem.FileSystem
     const crypto = yield* Crypto.Crypto
     const root = options.root ?? RemoteRepositoryRoot
@@ -397,7 +430,7 @@ const make = (options: Options) =>
     const workspaceParent = root.slice(0, root.lastIndexOf("/"))
     const workspaceEnvironment = {
       ...options.environment,
-      PATH: `${credentialRoot}/bin:${Bun.env.PATH ?? "/usr/local/bin:/usr/bin:/bin"}`,
+      PATH: `${credentialRoot}/bin:${executablePath}`,
       GH_CONFIG_DIR: `${credentialRoot}/gh`,
     }
     const workspaceEnvironmentArguments = Object.entries(workspaceEnvironment).map(([key, value]) => `${key}=${value}`)
@@ -416,14 +449,14 @@ const make = (options: Options) =>
     const activeCredentials = new Map<"git-read" | "github-read", Credential>()
     let credentialBroker: ReturnType<typeof credentialBrokerAdapter> | undefined
     let outputCount = 0
-    const runFork = Effect.runForkWith(yield* Effect.context<never>())
-
     const digest = Effect.fn("Workspace.digest")(function* (value: string | Uint8Array) {
       const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value
       return `sha256:${Encoding.encodeHex(yield* crypto.digest("SHA-256", bytes).pipe(Effect.orDie))}`
     })
     const buildDigest = yield* digest(assignment.templateBuildId)
-    const manifest = Bun.env.RIKA_IMAGE_MANIFEST ?? "/opt/rika/tool-manifest.json"
+    const manifest = yield* Config.string("RIKA_IMAGE_MANIFEST").pipe(
+      Config.withDefault("/opt/rika/tool-manifest.json"),
+    )
     const environmentDigest = yield* fileSystem.exists(manifest).pipe(
       Effect.flatMap((exists) =>
         exists ? fileSystem.readFile(manifest).pipe(Effect.flatMap(digest)) : digest("missing"),
@@ -444,13 +477,14 @@ const make = (options: Options) =>
       for (const secret of secrets) if (secret.length > 0) text = text.replaceAll(secret, "REDACTED")
       return text
     }
-    const report = (phase: WorkspacePreparationPhase) => (stream: "stdout" | "stderr", value: string) => {
-      if (outputCount >= 64) return
-      outputCount += 1
-      const redacted = redact(value)
-      const text = redacted.slice(0, 16_384)
-      runFork(options.reporter.output(phase, stream, text, redacted.length > text.length))
-    }
+    const report = (phase: WorkspacePreparationPhase) => (stream: "stdout" | "stderr", value: string) =>
+      Effect.gen(function* () {
+        if (outputCount >= 64) return
+        outputCount += 1
+        const redacted = redact(value)
+        const text = redacted.slice(0, 16_384)
+        yield* options.reporter.output(phase, stream, text, redacted.length > text.length)
+      })
     const run = (phase: WorkspacePreparationPhase, command: ReadonlyArray<string>, timeout: number, cwd = root) =>
       commandAdapter(command, cwd, workspaceEnvironment, report(phase)).pipe(
         Effect.timeoutOption(timeout),
@@ -875,7 +909,10 @@ const make = (options: Options) =>
         marker = known
       } else if (
         known !== undefined ||
-        (yield* fileSystem.stat(root).pipe(Effect.as(true), Effect.orElseSucceed(() => false)))
+        (yield* fileSystem.stat(root).pipe(
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
+        ))
       )
         return yield* WorkspaceError.make({
           phase: "checkout",

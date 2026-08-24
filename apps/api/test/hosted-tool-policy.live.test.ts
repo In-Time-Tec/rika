@@ -4,8 +4,9 @@ import { identityMigrations, runMigration } from "@rika/identity"
 import { ActorAttribution } from "@rika/product/hosted-model"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as HostedPostgres from "@rika/product-store/postgres-layer"
-import { Context, Crypto, Effect, Layer, Random, Redacted, Schema } from "effect"
+import { FileSystem, Config, Context, Crypto, Effect, Layer, Random, Redacted, Schema } from "effect"
 import { Pool } from "pg"
+import { live as livePlatform } from "./live-platform"
 import {
   HostedToolPolicy,
   argumentsDigest,
@@ -16,9 +17,9 @@ import {
   toolAuthorizationRequest,
 } from "../src/hosted-tool-policy"
 
-const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
+const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.promise(() => pool.query(text, [...values]))
+  Effect.tryPromise(() => pool.query(text, [...values]))
 
 const personalActor = Schema.decodeSync(ActorAttribution)({
   _tag: "PersonalActor",
@@ -122,7 +123,7 @@ const seed = (pool: Pool) =>
        '${JSON.stringify(organizationActor)}', '{"_tag":"SubmitPrompt"}', 'admitted', now())`,
   )
 
-it.effect.skipIf(databaseUrl === undefined)(
+it.effect.skipIf(databaseUrl === "")(
   "persists secret-free exact tool decisions and enforces personal and organization audit ownership",
   () =>
     Effect.scoped(
@@ -130,7 +131,7 @@ it.effect.skipIf(databaseUrl === undefined)(
         const database = `rika_tool_policy_${Math.abs(yield* Random.nextInt)}`
         const admin = new Pool({ connectionString: databaseUrl })
         yield* query(admin, `CREATE DATABASE "${database}"`)
-        const parsed = new URL(databaseUrl!)
+        const parsed = new URL(databaseUrl)
         parsed.pathname = `/${database}`
         const url = parsed.toString()
         const pool = new Pool({ connectionString: url })
@@ -140,7 +141,9 @@ it.effect.skipIf(databaseUrl === undefined)(
               pool,
               id: migration.id,
               checksum: migration.checksum,
-              sql: yield* Effect.promise(() => Bun.file(migration.url).text()),
+              sql: yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+                fileSystem.readFileString(migration.url.pathname),
+              ),
             })
           yield* seed(pool)
           const dependencies = Layer.merge(
@@ -336,10 +339,10 @@ it.effect.skipIf(databaseUrl === undefined)(
             ),
           ).toMatchObject({ _tag: "Failure", failure: { kind: "forbidden" } })
         } finally {
-          yield* Effect.promise(() => pool.end())
+          yield* Effect.tryPromise(() => pool.end())
           yield* query(admin, `DROP DATABASE "${database}" WITH (FORCE)`)
-          yield* Effect.promise(() => admin.end())
+          yield* Effect.tryPromise(() => admin.end())
         }
       }),
-    ),
+    ).pipe(livePlatform),
 )

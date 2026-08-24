@@ -320,7 +320,7 @@ export const CellRequest = Schema.Struct({
   attempt: Sequence,
   replayPolicy: OperationReplayPolicy,
   admittedAt: Schema.NullOr(Identifier),
-  deadline: Schema.NullOr(Identifier),
+  deadlineAt: Identifier,
   bindings: BindingManifest,
 })
 export type CellRequest = typeof CellRequest.Type
@@ -807,6 +807,14 @@ export const ApiMessage = Schema.Union([
     operationKey: Identifier,
     attempt: Sequence,
     cursor: Sequence,
+  }),
+  Schema.TaggedStruct("CellTerminalSuperseded", {
+    access: AccessWire,
+    operationKey: Identifier,
+    attempt: Sequence,
+    cursor: Sequence,
+    outcome: CellTerminalOutcome,
+    response: CellResponse,
   }),
   Schema.TaggedStruct("BindingResult", {
     access: AccessWire,

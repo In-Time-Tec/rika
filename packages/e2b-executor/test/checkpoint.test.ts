@@ -1,6 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Option, Redacted, Schema } from "effect"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import { createArchive, encodeArchive, MaximumArchiveBytes } from "@rika/remote-execution/workspace-archive"
 import {
   CheckpointError,
@@ -32,7 +33,10 @@ const cacheKey = {
   environmentDigest: `sha256:${"c".repeat(64)}`,
 }
 
-const withVault = <A, E>(effect: Effect.Effect<A, E, Vault | FileSystem.FileSystem>, objects: ObjectStoreInterface) =>
+const withVault = <A, E>(
+  effect: Effect.Effect<A, E, Vault | FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner>,
+  objects: ObjectStoreInterface,
+) =>
   Effect.scoped(
     Layer.build(
       Layer.merge(

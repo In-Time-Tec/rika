@@ -13,7 +13,7 @@ import { update } from "../../src/state/reducer/terminal-state-reducer"
 
 class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
 
-const openTui = <A>(operation: () => Promise<A>) =>
+const openTui = <A>(operation: () => ReturnType<typeof Promise.resolve<A>>) =>
   Effect.tryPromise({ try: operation, catch: (cause) => new OpenTuiError({ cause }) })
 
 const _streamingShell = (id: string, output?: string) => ({
@@ -257,7 +257,8 @@ for (const width of [80, 50] as const) {
         const surface = new Surface(setup.renderer, {
           key: (key) => {
             model = update(model, { _tag: "KeyPressed", key })
-            if (key.name === "return" && !key.shift) model = update(model, { _tag: "Submitted" })
+            if (key.name === "return" && !key.shift)
+              model = update(model, { _tag: "Submitted", submissionId: "retry-submission" })
             surface.update(model)
           },
           resize: () => undefined,
@@ -275,7 +276,15 @@ for (const width of [80, 50] as const) {
           ).toBe(true)
           yield* openTui(() => setup.mockInput.typeText("retry"))
           setup.mockInput.pressEnter()
-          expect(model.busy).toBe(true)
+          expect(model).toMatchObject({ input: "retry", busy: false, activity: undefined })
+          expect(model.entries).toEqual([])
+          model = update(model, {
+            _tag: "SubmissionAdmitted",
+            turnId: "turn-retry",
+            status: "active",
+            submissionId: "retry-submission",
+          })
+          expect(model).toMatchObject({ input: "", busy: true, activity: { _tag: "Sending" } })
           model = update(model, { _tag: "TurnStarted", turnId: "turn-retry", prompt: "retry" })
           surface.update(model)
           yield* openTui(() => setup.renderOnce())

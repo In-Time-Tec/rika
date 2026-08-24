@@ -1,4 +1,4 @@
-import { Function } from "effect"
+import { Exit, Function, Schema } from "effect"
 import type { Model } from "../../state/model/terminal-state"
 import type { TranscriptBlock, TranscriptItem } from "../../state/model/terminal-transcript-state"
 import type { AgentResponseState } from "./transcript-tool-kinds"
@@ -20,12 +20,9 @@ const decodedOutput = (output: string | undefined): object | undefined => {
   if (output === undefined) return undefined
   const value = output.trim()
   if (!(value.startsWith("{") || value.startsWith("["))) return undefined
-  try {
-    const decoded: unknown = JSON.parse(value)
-    return typeof decoded === "object" && decoded !== null ? decoded : undefined
-  } catch {
-    return undefined
-  }
+  const decoded = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown))(value)
+  if (Exit.isFailure(decoded)) return undefined
+  return typeof decoded.value === "object" && decoded.value !== null ? decoded.value : undefined
 }
 
 const failedDelegationTags = new Set(["NoReport", "Failed"])

@@ -2,7 +2,7 @@
   │ >                                                                        │
   │                                                                          │
   │                                                                          │
-  │           thread  new thread                                             │
+  │           thread  new on Runner                                          │
   │           thread  new in Orb                                             │
   │              orb  pause                                                  │
   │              orb  resume                                                 │

@@ -123,7 +123,7 @@ export type RunRequest = typeof RunRequest.Type
 
 export const RunResult = Schema.Struct({
   commandId: Schema.String,
-  status: Schema.Literal("queued"),
+  status: Schema.Literals(["accepted", "queued"]),
 })
 export type RunResult = typeof RunResult.Type
 

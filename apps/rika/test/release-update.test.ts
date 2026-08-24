@@ -1,10 +1,13 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
-import { ConfigProvider, Effect, FileSystem, Layer, Path } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
+import { ConfigProvider, Crypto, Effect, Encoding, FileSystem, Layer, Path } from "effect"
+import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http"
 import * as ReleaseUpdate from "../src/release/release-update"
 
-const digestOf = (bytes: Uint8Array) => new Bun.CryptoHasher("sha256").update(bytes).digest("hex")
+const digestOf = Effect.fn("ReleaseUpdateTest.digestOf")(function* (bytes: Uint8Array) {
+  const crypto = yield* Crypto.Crypto
+  return Encoding.encodeHex(yield* crypto.digest("SHA-256", bytes))
+})
 
 const releaseApiUrl = "https://releases.test/api/latest"
 const releaseBaseUrl = "https://releases.test/download"
@@ -15,27 +18,29 @@ interface StubRoute {
   readonly body?: string | Uint8Array
 }
 
-const stubFetch = (routes: Readonly<Record<string, StubRoute>>, seen: Array<string>): typeof globalThis.fetch => {
-  const handler = (input: string | URL | Request) => {
-    let url: string
-    if (typeof input === "string") url = input
-    else if (input instanceof URL) url = input.toString()
-    else url = input.url
-    seen.push(url)
-    const route = routes[url]
-    if (route === undefined) return Promise.reject(new TypeError(`fetch failed: ${url}`))
-    return Promise.resolve(
-      new Response(route.body ?? "", { status: route.status ?? 200, headers: { ...route.headers } }),
-    )
-  }
-  return Object.assign(handler, { preconnect: globalThis.fetch.preconnect })
-}
+const stubHttpClient = (routes: Readonly<Record<string, StubRoute>>, seen: Array<string>) =>
+  HttpClient.make((request) => {
+    seen.push(request.url)
+    const route = routes[request.url]
+    return route === undefined
+      ? Effect.fail(
+          new HttpClientError.HttpClientError({
+            reason: new HttpClientError.TransportError({ request, description: `No route for ${request.url}` }),
+          }),
+        )
+      : Effect.succeed(
+          HttpClientResponse.fromWeb(
+            request,
+            new Response(route.body ?? "", { status: route.status ?? 200, headers: { ...route.headers } }),
+          ),
+        )
+  })
 
 const withPlatform = <A, E, R>(body: Effect.Effect<A, E, R>) =>
   Effect.scoped(
     Effect.gen(function* () {
       const scope = yield* Effect.scope
-      const context = yield* Layer.buildWithScope(Layer.merge(BunServices.layer, FetchHttpClient.layer), scope)
+      const context = yield* Layer.buildWithScope(BunServices.layer, scope)
       return yield* Effect.provide(body, context)
     }),
   )
@@ -55,7 +60,7 @@ const runUpdate = (options: {
       host: options.host ?? { platform: "linux", architecture: "x64" },
     }),
   ).pipe(
-    Effect.provideService(FetchHttpClient.Fetch, stubFetch(options.routes, options.seen)),
+    Effect.provideService(HttpClient.HttpClient, stubHttpClient(options.routes, options.seen)),
     Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: options.environment })),
   )
 
@@ -183,7 +188,7 @@ it.effect("downloads, verifies, and reports an available upgrade without extract
         },
         routes: {
           [releaseApiUrl]: { body: '{"tag_name":"v0.0.4"}' },
-          [`${releaseBaseUrl}/SHA256SUMS`]: { body: `${digestOf(honest)}  ${archiveFile}\n` },
+          [`${releaseBaseUrl}/SHA256SUMS`]: { body: `${yield* digestOf(honest)}  ${archiveFile}\n` },
           [`${releaseBaseUrl}/${archiveFile}`]: { body: tampered },
         },
         seen,
@@ -191,8 +196,8 @@ it.effect("downloads, verifies, and reports an available upgrade without extract
       expect(result._tag).toBe("Failure")
       if (result._tag === "Failure") {
         expect(result.failure.failure).toBe("checksum-mismatch")
-        expect(result.failure.message).toContain(digestOf(honest))
-        expect(result.failure.message).toContain(digestOf(tampered))
+        expect(result.failure.message).toContain(yield* digestOf(honest))
+        expect(result.failure.message).toContain(yield* digestOf(tampered))
         expect(result.failure.message).toContain("left unchanged")
       }
       expect(seen).toEqual([releaseApiUrl, `${releaseBaseUrl}/SHA256SUMS`, `${releaseBaseUrl}/${archiveFile}`])

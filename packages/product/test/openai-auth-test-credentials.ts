@@ -5,7 +5,7 @@ import * as Flow from "../src/authentication/openai-auth-service"
 import * as Contract from "../src/authentication/openai-auth-contract"
 
 const digestImpl = (_algorithm: string, data: Uint8Array) =>
-  Effect.promise(() => globalThis.crypto.subtle.digest("SHA-256", data).then((value) => new Uint8Array(value)))
+  Effect.sync(() => new Uint8Array(createHash("sha256").update(data).digest()))
 
 export const digest: {
   (arg1: Uint8Array): (arg0: string) => ReturnType<typeof digestImpl>

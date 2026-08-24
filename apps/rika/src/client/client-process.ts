@@ -1,19 +1,23 @@
 #!/usr/bin/env bun
+import * as BunCrypto from "@effect/platform-bun/BunCrypto"
+import * as BunSocket from "@effect/platform-bun/BunSocket"
+import * as HostedObservability from "@rika/product/hosted-observability"
 import * as ProductOperation from "@rika/product/product-operation"
 import * as Operation from "@rika/product/product-operation-service"
-import { Config, Context, Crypto, Effect, FileSystem, Layer, Path, Schema, Stdio } from "effect"
+import { Config, Context, Crypto, Deferred, Effect, FileSystem, Layer, Option, Path, Schema, Stdio } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { Command } from "effect/unstable/cli"
 import { command, version } from "../command/root/rika-command"
-import { privateRuntime } from "./private-runtime-launch"
 import * as HostedCommand from "../command/root/hosted-command-dispatch"
 import * as RunnerCommand from "../command/root/runner-command"
 import * as Runner from "../runner/runner"
 import * as HostedCli from "../hosted/hosted-cli"
+import { runHostedInteractive } from "../hosted/hosted-interactive-controller"
 import * as OpenAiProviderAuth from "../provider/openai/openai-provider-auth"
 import * as OpenRouterProviderAuth from "../provider/openrouter/openrouter-provider-auth"
-import { processRoleLaunch, superviseLocalRoles } from "./local-role-supervisor"
+import * as Logging from "../diagnostics/diagnostic-file-logging"
+import { clientSigintOwnership, type SigintOwnership } from "./client-signal-ownership"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -33,40 +37,59 @@ const operationFailure = (input: ProductOperation.Input, error: unknown) =>
     ? error
     : ProductOperation.OperationUnavailable.make({ operation: input._tag, message: String(error) })
 
-let interactiveClientLaunch = false
-
-export const cleanInteractiveRuntimeExit = (exitCode: number): boolean =>
-  exitCode === 0 || exitCode === 130 || exitCode === 129
-
-export const clientSigintMode = (input: Pick<ProductOperation.Input, "_tag"> | undefined): "root" | "child" =>
-  input?._tag === "Interactive" ? "child" : "root"
-
 type InterruptibleRoot = { readonly interruptUnsafe: () => void }
-
-export const installClientSigintHandler = (input: {
-  readonly inputMode: () => "root" | "child"
-  readonly rootFiber: () => InterruptibleRoot | undefined
-  readonly onSignal: () => void
-}) => {
-  const handler = () => {
-    input.onSignal()
-    if (input.inputMode() === "root") input.rootFiber()?.interruptUnsafe()
-  }
-  process.on("SIGINT", handler)
-  return () => (process as NodeJS.EventEmitter).off("SIGINT", handler)
+type SignalEmitter = {
+  readonly on: (event: "SIGINT", handler: () => void) => unknown
+  readonly off: (event: "SIGINT", handler: () => void) => unknown
 }
 
-const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
+export const installClientSigintHandler = (input: {
+  readonly rootFiber: () => InterruptibleRoot | undefined
+  readonly onSignal: () => void
+  readonly ownership?: SigintOwnership
+  readonly process?: SignalEmitter
+}) => {
+  const ownership = input.ownership ?? clientSigintOwnership
+  const processEmitter = input.process ?? (process as unknown as SignalEmitter)
+  const handler = () => {
+    if (!ownership.rootOwns()) return
+    input.onSignal()
+    input.rootFiber()?.interruptUnsafe()
+  }
+  processEmitter.on("SIGINT", handler)
+  return () => processEmitter.off("SIGINT", handler)
+}
+
+export const runInProcessInteractive = Effect.fn("ClientMain.runInProcessInteractive")(function* <A, E, R, E2, R2>(
+  runner: Effect.Effect<never, E, R>,
+  interactive: Effect.Effect<A, E2, R2>,
+) {
+    yield* runner.pipe(Effect.forkScoped)
+    yield* Effect.yieldNow
+    return yield* interactive
+})
+
+const dispatcherLayer = () =>
   Layer.effect(
     Operation.Service,
     Effect.gen(function* () {
-      const stdio = yield* Stdio.Stdio
+      const persistence = yield* Effect.serviceOption(Logging.DiagnosticPersistence)
+      const startLogging = Option.match(persistence, {
+        onNone: () => Effect.void,
+        onSome: (service) => Logging.start.pipe(Effect.provideService(Logging.DiagnosticPersistence, service)),
+      })
       const platform = yield* Effect.context<
-        Crypto.Crypto | FileSystem.FileSystem | Path.Path | Stdio.Stdio | ChildProcessSpawner.ChildProcessSpawner
+        | Crypto.Crypto
+        | FileSystem.FileSystem
+        | Path.Path
+        | Stdio.Stdio
+        | ChildProcessSpawner.ChildProcessSpawner
+        | HttpClient.HttpClient
       >()
       return Operation.Service.of({
         run: Effect.fn("ClientMain.dispatch")(function* (input) {
-          interactiveClientLaunch = clientSigintMode(input) === "child"
+          yield* HostedObservability.event("process_start", "success", {})
+          if (input._tag !== "Interactive") yield* startLogging.pipe(Effect.orDie)
           return yield* Effect.gen(function* () {
             if (input._tag === "Auth") {
               const home = yield* Config.string("HOME").pipe(Config.withDefault(process.cwd()))
@@ -88,39 +111,36 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                 operation: input._tag,
                 message: `${input._tag} has no hosted command implementation`,
               })
-            const forwardedArguments = argv ?? (yield* stdio.args)
             return yield* Effect.scoped(
               Effect.gen(function* () {
-                if (input._tag === "Interactive") {
-                  const controller = yield* privateRuntime("interactive")
-                  const executor = yield* privateRuntime("client")
-                  const workspace = input.workspace ?? process.cwd()
-                  const launch = yield* processRoleLaunch({
-                    "tui-controller": {
-                      executable: controller.executable,
-                      arguments: [...controller.prefixArguments, ...forwardedArguments],
-                      environment: { RIKA_INTERNAL_CLIENT_RUNTIME: "1" },
-                    },
-                    "runner-executor": {
-                      executable: executor.executable,
-                      arguments: [...executor.prefixArguments, "--no-tui", "--workspace", workspace],
-                      environment: { RIKA_INTERNAL_RUNNER_EXECUTOR: "1" },
-                    },
-                  })
-                  const result = yield* superviseLocalRoles({
-                    headless: false,
-                    launch,
-                  })
-                  if (cleanInteractiveRuntimeExit(result.exitCode)) return
-                  if (result.errorOutput.trim().length === 0) {
-                    process.exitCode = result.exitCode
-                    return
-                  }
-                  return yield* ProductOperation.OperationUnavailable.make({
-                    operation: "Interactive",
-                    message: result.errorOutput.trim(),
-                  })
+                const environment = yield* Config.all({
+                  home: Config.option(Config.string("HOME")),
+                  visual: Config.option(Config.string("VISUAL")),
+                  editor: Config.option(Config.string("EDITOR")),
+                })
+                const home = Option.getOrElse(environment.home, () => process.cwd())
+                const editor = Option.getOrUndefined(environment.visual) ?? Option.getOrUndefined(environment.editor)
+                const runtimePlatform = Layer.mergeAll(BunCrypto.layer, BunSocket.layerWebSocketConstructor)
+                const hosted = HostedCli.liveLayer(home).pipe(Layer.provide(runtimePlatform))
+                const admission = Runner.liveAdmissionLayer.pipe(Layer.provide(hosted))
+                const runnerInput = {
+                  workspace: input.workspace ?? process.cwd(),
+                  preferencePath: yield* Runner.preferencePath,
                 }
+                const firstDraw = yield* Deferred.make<void>()
+                const firstDrawContext = yield* Effect.context<never>()
+                const runFirstDraw = Effect.runSyncWith(firstDrawContext)
+                yield* Deferred.await(firstDraw).pipe(Effect.andThen(startLogging), Effect.orDie, Effect.forkScoped)
+                return yield* runHostedInteractive(input, {
+                  editor,
+                  onFirstDraw: () =>
+                    runFirstDraw(
+                      HostedObservability.event("first_draw", "success", {}).pipe(
+                        Effect.ensuring(Deferred.succeed(firstDraw, undefined)),
+                      ),
+                    ),
+                  startRunner: (prepared) => Runner.runRunner(runnerInput, prepared),
+                }).pipe(provideLayerScoped(Layer.mergeAll(runtimePlatform, hosted, admission)))
               }),
             )
           }).pipe(
@@ -205,8 +225,6 @@ export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<s
     }),
   )
   return yield* program.pipe(
-    provideLayerScoped(Layer.mergeAll(dispatcherLayer(argv), hostedCommandLayer, runnerCommandLayer)),
+    provideLayerScoped(Layer.mergeAll(dispatcherLayer(), hostedCommandLayer, runnerCommandLayer)),
   )
 })
-
-export const isInteractiveClientLaunch = (): boolean => interactiveClientLaunch

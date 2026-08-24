@@ -1,15 +1,15 @@
+import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
-import { Context, Effect, Layer, Ref } from "effect"
+import { Context, Effect, FileSystem, Layer, Ref } from "effect"
 import { Machine, workspaceLayer, type State } from "../src/machine"
+import { provideLayer } from "./support/layer"
 
 describe("checkout machine operations", () => {
   it.effect("executes filesystem and process work once beside the checkout and fences conflicting ids", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const root = yield* Effect.acquireRelease(
-          Effect.promise(() => import("node:fs/promises").then((fs) => fs.mkdtemp("/tmp/rika-machine-"))),
-          (path) => Effect.promise(() => import("node:fs/promises").then((fs) => fs.rm(path, { recursive: true }))),
-        )
+        const fileSystem = yield* FileSystem.FileSystem
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-machine-" })
         const receipts = yield* Ref.make(new Map<string, State>())
         const build = () =>
           Layer.build(
@@ -50,26 +50,25 @@ describe("checkout machine operations", () => {
           requestDigest: "process-digest",
           request: command,
         })
-        const files = yield* Effect.promise(() =>
-          Promise.all([Bun.file(`${root}/checkout.txt`).text(), Bun.file(`${root}/process.txt`).text()]),
-        )
+        const files = yield* Effect.all([
+          fileSystem.readFileString(`${root}/checkout.txt`),
+          fileSystem.readFileString(`${root}/process.txt`),
+        ])
 
         expect(written._tag).toBe("Success")
         expect(first).toEqual(duplicate)
         expect(replayed).toEqual(first)
         expect(fenced).toEqual({ _tag: "Fenced", message: "machine call id conflicts with a different request" })
         expect(files).toEqual(["local", "once"])
-      }),
+      }).pipe(provideLayer(BunServices.layer)),
     ),
   )
 
   it.effect("returns typed machine failures and marks a restarted running receipt unknown", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const root = yield* Effect.acquireRelease(
-          Effect.promise(() => import("node:fs/promises").then((fs) => fs.mkdtemp("/tmp/rika-machine-failure-"))),
-          (path) => Effect.promise(() => import("node:fs/promises").then((fs) => fs.rm(path, { recursive: true }))),
-        )
+        const fileSystem = yield* FileSystem.FileSystem
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-machine-failure-" })
         const receipts = yield* Ref.make(
           new Map<string, State>([["crossed-1", { _tag: "Running", requestDigest: "crossed-digest" }]]),
         )
@@ -95,7 +94,7 @@ describe("checkout machine operations", () => {
         expect(failure._tag).toBe("Failure")
         if (failure._tag === "Failure") expect(failure.failure._tag).toBe("ToolError")
         expect(unknown).toEqual({ _tag: "Unknown", message: "machine call outcome is unknown after executor restart" })
-      }),
+      }).pipe(provideLayer(BunServices.layer)),
     ),
   )
 })

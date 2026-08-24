@@ -1,5 +1,6 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
-import { Console, Context, Effect, Layer } from "effect"
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import { Config, Console, Context, Effect, FileSystem, Layer } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { makeApiAccountGateway } from "./adapters/api-account-gateway"
 import { serveWeb } from "./adapters/bun-server"
@@ -17,21 +18,17 @@ const provideLayerScoped =
       ),
     )
 
-const required = (name: "API_DOMAIN" | "API_PORT" | "PORT") => {
-  const value = Bun.env[name]
-  if (value === undefined || value.length === 0) throw new Error(`${name} is required`)
-  return value
-}
-
 const program = Effect.scoped(
   Effect.gen(function* () {
-    const port = Number.parseInt(required("PORT"), 10)
+    const port = Number.parseInt(yield* Config.string("PORT"), 10)
     if (!Number.isSafeInteger(port) || port <= 0) return yield* Effect.die("PORT must be a positive integer")
+    const nodeEnvironment = yield* Config.string("NODE_ENV").pipe(Config.withDefault("development"))
     const dependencies = {
-      production: Bun.env.NODE_ENV === "production",
+      production: nodeEnvironment === "production",
+      fileSystem: yield* FileSystem.FileSystem,
       accountGateway: makeApiAccountGateway({
-        domain: required("API_DOMAIN"),
-        port: required("API_PORT"),
+        domain: yield* Config.string("API_DOMAIN"),
+        port: yield* Config.string("API_PORT"),
         client: yield* HttpClient.HttpClient,
       }),
     }
@@ -41,4 +38,4 @@ const program = Effect.scoped(
   }),
 )
 
-BunRuntime.runMain(program.pipe(provideLayerScoped(FetchHttpClient.layer)))
+BunRuntime.runMain(program.pipe(provideLayerScoped(Layer.merge(FetchHttpClient.layer, BunFileSystem.layer))))

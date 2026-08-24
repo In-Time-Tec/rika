@@ -37,7 +37,7 @@ test(
           ],
           height: 48,
         })
-        yield* Effect.promise(() => app.type("Delegate twice under one id."))
+        yield* Effect.tryPromise(() => app.type("Delegate twice under one id."))
         app.pressEnter()
         yield* app.waitFrame("ROOT_SAME_DONE", 30_000)
         const completed = yield* app.waitFrameMatch(

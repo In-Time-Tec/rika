@@ -33,7 +33,14 @@ import {
 } from "@rika/remote-execution/protocol"
 import { HostBindingRegistry } from "tenetkit/repl"
 import { Clock, Context, Crypto, Effect, Encoding, Layer, Redacted, Schedule, Schema } from "effect"
-import { GatewayError, makeGateway, type Gateway, type LifecycleStore } from "./executor-gateway"
+import {
+  GatewayError,
+  makeGateway,
+  type ExecutionOutcome,
+  type ExecutionResult,
+  type Gateway,
+  type LifecycleStore,
+} from "./executor-gateway"
 import { HostedEnvironment } from "./hosted-environment"
 import type { AuthenticatedPrincipal } from "./hosted-product"
 import { RunnerExecutor, type RunnerAdmission } from "./runner-executor"
@@ -64,7 +71,7 @@ const OperationIdentity = Schema.Struct({
   attempt: Schema.Int,
   replayPolicy: Schema.Literals(["pure", "provider-idempotent", "never"]),
   admittedAt: Schema.NullOr(Schema.String),
-  deadline: Schema.NullOr(Schema.String),
+  deadlineAt: Schema.String,
 })
 const encodeOperationIdentity = Schema.encodeSync(Schema.fromJsonString(OperationIdentity))
 const requiredWorkspaceCapabilities = [
@@ -77,19 +84,6 @@ const requiredWorkspaceCapabilities = [
 const encodeRequiredWorkspaceCapabilities = Schema.encodeSync(
   Schema.fromJsonString(Schema.Array(Schema.NonEmptyString)),
 )
-
-const cellOutcome = (outcome: "completed" | "failed" | "cancelled" | "unknown"): HostedObservability.Outcome => {
-  switch (outcome) {
-    case "completed":
-      return "success"
-    case "cancelled":
-      return "interrupted"
-    case "failed":
-      return "failure"
-    case "unknown":
-      return "unknown"
-  }
-}
 
 export const loadConfig = Effect.fn("ExecutorConfig.load")(function* (environment: Record<string, string | undefined>) {
   const apiUrl = yield* required(environment, "RIKA_EXECUTOR_API_URL")
@@ -196,7 +190,7 @@ export interface Runtime {
     readonly attempt: number
     readonly replayPolicy: "pure" | "provider-idempotent" | "never"
     readonly admittedAt: string | null
-    readonly deadline: string | null
+    readonly deadlineAt: string
     readonly authority: Context.Context<ExecutorRuntime.CellServices>
   }) => Effect.Effect<
     {
@@ -233,6 +227,23 @@ export const service = Layer.effect(
       _tag: "DomainFailure",
       failure: { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" },
     }
+    const timeoutResponse: CellResponseValue = {
+      _tag: "DomainFailure",
+      failure: { kind: "timeout", message: "Cell operation deadline exceeded" },
+    }
+    const terminalResult = Effect.fn("Executor.terminalResult")(function* (row: {
+      readonly response: unknown | null
+      readonly terminalOutcome: ExecutionOutcome | null
+    }): Effect.fn.Return<ExecutionResult, GatewayError> {
+      if (row.response === null || row.terminalOutcome === null)
+        return yield* GatewayError.make({ kind: "transport", message: "Persisted executor terminal is incomplete" })
+      const response = yield* decodeResponse(row.response).pipe(
+        Effect.mapError(() =>
+          GatewayError.make({ kind: "transport", message: "Persisted executor response is invalid" }),
+        ),
+      )
+      return { response, outcome: row.terminalOutcome }
+    })
     const reapOrphans = controller.cleanupOrphans.pipe(
       Effect.catch((error) =>
         Effect.logError("executor.orphan-reaper.failed").pipe(
@@ -287,57 +298,108 @@ export const service = Layer.effect(
         Effect.map((manifest) => manifest.digest),
       )
     const lifecycle: LifecycleStore = {
-      append: (assignmentId, frame) =>
+      append: (access, frame) =>
         sql
           .withTransaction(
             Effect.gen(function* () {
-              yield* sql`INSERT INTO rika_hosted_executor_operation_frames
-              (assignment_id, operation_key, attempt, cursor, kind, frame)
-              VALUES (${assignmentId}, ${frame.attribution.operationKey}, ${frame.attribution.attempt},
-                ${frame.cursor}, ${frame._tag}, ${sql.json(frame)})
-              ON CONFLICT DO NOTHING`
+              const operations = yield* sql<{
+                readonly state: "accepted" | "dispatched" | "completed" | "unknown"
+                readonly response: unknown | null
+                readonly terminalOutcome: ExecutionOutcome | null
+                readonly workspaceId: string
+                readonly sessionId: string
+                readonly threadId: string
+                readonly turnId: string
+                readonly runId: string
+                readonly rootRunId: string
+                readonly toolCallId: string
+                readonly dispatchedGeneration: string | null
+                readonly dispatchedExecutorInstanceId: string | null
+                readonly dispatchedProcessIncarnation: string | null
+              }>`SELECT state, response, terminal_outcome AS "terminalOutcome", workspace_id AS "workspaceId",
+                session_id AS "sessionId", thread_id AS "threadId", turn_id AS "turnId", run_id AS "runId",
+                root_run_id AS "rootRunId", tool_call_id AS "toolCallId",
+                dispatched_generation::text AS "dispatchedGeneration",
+                dispatched_executor_instance_id AS "dispatchedExecutorInstanceId",
+                dispatched_process_incarnation AS "dispatchedProcessIncarnation"
+              FROM rika_hosted_executor_operations
+              WHERE assignment_id = ${access.fence.assignmentId} AND operation_key = ${frame.attribution.operationKey}
+                AND attempt = ${frame.attribution.attempt}::bigint
+              FOR UPDATE`
+              const operation = operations[0]
+              if (operation === undefined)
+                return yield* GatewayError.make({
+                  kind: "fenced",
+                  message: "Executor lifecycle operation is unavailable",
+                })
+              const attribution = frame.attribution
+              if (
+                operation.workspaceId !== attribution.workspaceId ||
+                operation.sessionId !== attribution.sessionId ||
+                operation.threadId !== attribution.threadId ||
+                operation.turnId !== attribution.turnId ||
+                operation.runId !== attribution.runId ||
+                operation.rootRunId !== attribution.rootRunId ||
+                operation.toolCallId !== attribution.toolCallId ||
+                operation.dispatchedGeneration !== String(access.fence.assignmentGeneration) ||
+                operation.dispatchedExecutorInstanceId !== access.fence.executorId ||
+                operation.dispatchedProcessIncarnation !== access.fence.processIncarnation
+              )
+                return yield* GatewayError.make({
+                  kind: "fenced",
+                  message: "Executor lifecycle does not match its durable operation",
+                })
               const rows = yield* sql<{ readonly frame: unknown }>`SELECT frame
               FROM rika_hosted_executor_operation_frames
-              WHERE assignment_id = ${assignmentId}
+              WHERE assignment_id = ${access.fence.assignmentId}
                 AND operation_key = ${frame.attribution.operationKey}
                 AND attempt = ${frame.attribution.attempt}::bigint
                 AND cursor = ${frame.cursor}`
-              if (rows[0] === undefined)
-                return yield* GatewayError.make({
-                  kind: "fenced",
-                  message: "Executor lifecycle cursor conflicts with a terminal receipt",
-                })
-              yield* decodeLifecycle(rows[0].frame).pipe(
-                Effect.filterOrFail(
-                  (persisted) => equivalentLifecycle(persisted, frame),
-                  () =>
-                    GatewayError.make({ kind: "fenced", message: "Executor lifecycle cursor has different content" }),
-                ),
-                Effect.asVoid,
-                Effect.mapError((error) =>
-                  Schema.is(GatewayError)(error)
-                    ? error
-                    : GatewayError.make({
-                        kind: "transport",
-                        message: "Persisted executor lifecycle frame is invalid",
-                      }),
-                ),
-              )
+              if (rows[0] !== undefined) {
+                yield* decodeLifecycle(rows[0].frame).pipe(
+                  Effect.filterOrFail(
+                    (persisted) => equivalentLifecycle(persisted, frame),
+                    () =>
+                      GatewayError.make({ kind: "fenced", message: "Executor lifecycle cursor has different content" }),
+                  ),
+                  Effect.asVoid,
+                  Effect.mapError((error) =>
+                    Schema.is(GatewayError)(error)
+                      ? error
+                      : GatewayError.make({
+                          kind: "transport",
+                          message: "Persisted executor lifecycle frame is invalid",
+                        }),
+                  ),
+                )
+                return operation.state === "completed" || operation.state === "unknown"
+                  ? ({ _tag: "AlreadyTerminal", result: yield* terminalResult(operation) } as const)
+                  : ({ _tag: "AlreadyAppended" } as const)
+              }
+              if (operation.state === "completed" || operation.state === "unknown")
+                return { _tag: "AlreadyTerminal", result: yield* terminalResult(operation) } as const
+              if (operation.state !== "dispatched")
+                return yield* GatewayError.make({ kind: "fenced", message: "Executor operation was not dispatched" })
+              yield* sql`INSERT INTO rika_hosted_executor_operation_frames
+              (assignment_id, operation_key, attempt, cursor, kind, frame)
+              VALUES (${access.fence.assignmentId}, ${frame.attribution.operationKey}, ${frame.attribution.attempt},
+                ${frame.cursor}, ${frame._tag}, ${sql.json(frame)})`
               if (frame._tag === "Started")
                 yield* sql`UPDATE rika_hosted_executor_operations
                 SET started_at = COALESCE(started_at, clock_timestamp()), updated_at = clock_timestamp()
-                WHERE assignment_id = ${assignmentId} AND operation_key = ${frame.attribution.operationKey}
+                WHERE assignment_id = ${access.fence.assignmentId} AND operation_key = ${frame.attribution.operationKey}
                   AND attempt = ${frame.attribution.attempt}::bigint AND state = 'dispatched'`
               if (frame._tag === "Terminal")
                 yield* sql`UPDATE rika_hosted_executor_operations SET
                   state = ${frame.outcome === "unknown" ? "unknown" : "completed"},
                   response = ${sql.json(frame.response)},
+                  terminal_outcome = ${frame.outcome},
                   resolution_state = ${frame.outcome === "unknown" ? "pending" : null},
-                  dispatch_deadline_at = NULL,
                   updated_at = clock_timestamp()
-                WHERE assignment_id = ${assignmentId} AND operation_key = ${frame.attribution.operationKey}
+                WHERE assignment_id = ${access.fence.assignmentId} AND operation_key = ${frame.attribution.operationKey}
                   AND attempt = ${frame.attribution.attempt}::bigint
                   AND state = 'dispatched'`
+              return { _tag: "Appended" } as const
             }),
           )
           .pipe(
@@ -378,7 +440,7 @@ export const service = Layer.effect(
             attempt: input.attempt,
             replayPolicy: input.replayPolicy,
             admittedAt: input.admittedAt,
-            deadline: input.deadline,
+            deadlineAt: input.deadlineAt,
           })
           const requestDigest = Encoding.encodeHex(
             yield* crypto
@@ -391,11 +453,11 @@ export const service = Layer.effect(
           )
           yield* sql`INSERT INTO rika_hosted_executor_operations
             (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
-             turn_id, run_id, root_run_id, tool_call_id, code, attempt, replay_policy, admitted_at, deadline, state)
+             turn_id, run_id, root_run_id, tool_call_id, code, attempt, replay_policy, admitted_at, deadline_at, state)
             SELECT assignment.id, assignment.owner_id, ${input.operationKey}, ${requestDigest},
               ${input.workspaceId}, ${input.sessionId}, ${input.threadId}, ${input.turnId}, ${input.runId},
               ${input.rootRunId}, ${input.toolCallId}, ${input.code}, ${input.attempt}, ${input.replayPolicy}, ${input.admittedAt},
-              ${input.deadline}, 'accepted'
+              ${input.deadlineAt}, 'accepted'
             FROM rika_hosted_executor_assignments assignment
             WHERE assignment.id = ${input.assignmentId}
             ON CONFLICT (assignment_id, operation_key, attempt) DO NOTHING`
@@ -412,11 +474,12 @@ export const service = Layer.effect(
             readonly attempt: string
             readonly replayPolicy: "pure" | "provider-idempotent" | "never"
             readonly admittedAt: string | null
-            readonly deadline: string | null
+            readonly deadlineAt: string
           }>`SELECT request_digest AS "requestDigest", workspace_id AS "workspaceId", session_id AS "sessionId",
               thread_id AS "threadId", turn_id AS "turnId", run_id AS "runId", root_run_id AS "rootRunId",
               tool_call_id AS "toolCallId", code, attempt::text AS attempt, replay_policy AS "replayPolicy",
-              admitted_at AS "admittedAt", deadline
+              admitted_at AS "admittedAt",
+              to_char(deadline_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "deadlineAt"
             FROM rika_hosted_executor_operations
             WHERE assignment_id = ${input.assignmentId} AND operation_key = ${input.operationKey}
               AND attempt = ${input.attempt}::bigint`
@@ -435,7 +498,7 @@ export const service = Layer.effect(
             Number(row.attempt) !== input.attempt ||
             row.replayPolicy !== input.replayPolicy ||
             row.admittedAt !== input.admittedAt ||
-            row.deadline !== input.deadline
+            row.deadlineAt !== input.deadlineAt
           )
             return yield* GatewayError.make({
               kind: "fenced",
@@ -451,10 +514,11 @@ export const service = Layer.effect(
           readonly state: "accepted" | "dispatched" | "completed" | "unknown"
           readonly started: boolean
           readonly response: unknown
+          readonly terminalOutcome: ExecutionOutcome | null
           readonly dispatchedGeneration: string | null
           readonly dispatchedExecutorInstanceId: string | null
           readonly dispatchedProcessIncarnation: string | null
-        }>`SELECT state, started_at IS NOT NULL AS started, response,
+        }>`SELECT state, started_at IS NOT NULL AS started, response, terminal_outcome AS "terminalOutcome",
             dispatched_generation::text AS "dispatchedGeneration",
             dispatched_executor_instance_id AS "dispatchedExecutorInstanceId",
             dispatched_process_incarnation AS "dispatchedProcessIncarnation"
@@ -478,6 +542,7 @@ export const service = Layer.effect(
                 state: row.state,
                 started: row.started,
                 ...(decoded === undefined ? {} : { response: decoded }),
+                ...(row.terminalOutcome === null ? {} : { outcome: row.terminalOutcome }),
                 ...(row.dispatchedGeneration === null
                   ? {}
                   : { dispatchedGeneration: Number(row.dispatchedGeneration) }),
@@ -556,7 +621,7 @@ export const service = Layer.effect(
                 dispatched_lease_epoch = ${access.leaseEpoch}::bigint,
                 dispatched_executor_instance_id = ${access.fence.executorId},
                 dispatched_process_incarnation = ${access.fence.processIncarnation},
-                dispatch_deadline_at = clock_timestamp() + interval '5 minutes', updated_at = clock_timestamp()
+                updated_at = clock_timestamp()
               WHERE assignment_id = ${input.assignmentId} AND operation_key = ${input.operationKey}
                 AND attempt = ${input.attempt}::bigint AND state = 'accepted'
               RETURNING operation_key`
@@ -572,14 +637,15 @@ export const service = Layer.effect(
               GatewayError.make({ kind: "transport", message: "Could not persist executor dispatch" }),
             ),
           ),
-      reassign: (input) =>
+      resolveDeadline: (input) =>
         sql
           .withTransaction(
             Effect.gen(function* () {
               const rows = yield* sql<{
                 readonly state: "accepted" | "dispatched" | "completed" | "unknown"
-                readonly started: boolean
-              }>`SELECT state, started_at IS NOT NULL AS started
+                readonly response: unknown | null
+                readonly terminalOutcome: ExecutionOutcome | null
+              }>`SELECT state, response, terminal_outcome AS "terminalOutcome"
               FROM rika_hosted_executor_operations
               WHERE assignment_id = ${input.assignmentId} AND operation_key = ${input.operationKey}
                 AND attempt = ${input.attempt}::bigint
@@ -587,53 +653,25 @@ export const service = Layer.effect(
               const row = rows[0]
               if (row === undefined)
                 return yield* GatewayError.make({ kind: "transport", message: "Executor operation is unavailable" })
-              if (row.state === "accepted") return
-              if (row.state !== "dispatched" || row.started)
-                return yield* GatewayError.make({
-                  kind: "fenced",
-                  message: "Executor operation cannot be reassigned after it started",
-                })
-              yield* sql`UPDATE rika_hosted_executor_operations SET state = 'accepted',
-                dispatched_generation = NULL, dispatched_lease_epoch = NULL,
-                dispatched_executor_instance_id = NULL, dispatched_process_incarnation = NULL,
-                dispatch_deadline_at = NULL, updated_at = clock_timestamp()
+              if (row.state === "completed" || row.state === "unknown")
+                return { _tag: "AlreadyTerminal", result: yield* terminalResult(row) } as const
+              const ambiguous = row.state === "dispatched"
+              const response = ambiguous ? unknownResponse : timeoutResponse
+              yield* sql`UPDATE rika_hosted_executor_operations SET
+                state = ${ambiguous ? "unknown" : "completed"}, response = ${sql.json(response)},
+                terminal_outcome = ${ambiguous ? "unknown" : "failed"},
+                resolution_state = ${ambiguous ? "pending" : null}, updated_at = clock_timestamp()
               WHERE assignment_id = ${input.assignmentId} AND operation_key = ${input.operationKey}
-                AND attempt = ${input.attempt}::bigint AND state = 'dispatched' AND started_at IS NULL`
+                AND attempt = ${input.attempt}::bigint AND state = ${row.state}`
+              return {
+                _tag: "Resolved",
+                result: { response, outcome: ambiguous ? ("unknown" as const) : ("failed" as const) },
+              } as const
             }),
           )
           .pipe(
             Effect.catchTag("SqlError", () =>
-              GatewayError.make({ kind: "transport", message: "Could not safely reassign executor operation" }),
-            ),
-          ),
-      markUnknown: (input) =>
-        sql
-          .withTransaction(
-            Effect.gen(function* () {
-              const rows = yield* sql<{
-                readonly state: "accepted" | "dispatched" | "completed" | "unknown"
-                readonly started: boolean
-              }>`SELECT state, started_at IS NOT NULL AS started
-              FROM rika_hosted_executor_operations
-              WHERE assignment_id = ${input.assignmentId} AND operation_key = ${input.operationKey}
-                AND attempt = ${input.attempt}::bigint
-              FOR UPDATE`
-              const row = rows[0]
-              if (row === undefined)
-                return yield* GatewayError.make({ kind: "transport", message: "Executor operation is unavailable" })
-              if (row.state === "unknown" || row.state === "completed") return
-              if (row.state !== "dispatched" || !row.started)
-                return yield* GatewayError.make({ kind: "fenced", message: "Executor operation has not started" })
-              yield* sql`UPDATE rika_hosted_executor_operations SET state = 'unknown',
-                response = ${sql.json(unknownResponse)}, resolution_state = 'pending',
-                dispatch_deadline_at = NULL, updated_at = clock_timestamp()
-              WHERE assignment_id = ${input.assignmentId} AND operation_key = ${input.operationKey}
-                AND attempt = ${input.attempt}::bigint AND state = 'dispatched' AND started_at IS NOT NULL`
-            }),
-          )
-          .pipe(
-            Effect.catchTag("SqlError", () =>
-              GatewayError.make({ kind: "transport", message: "Could not mark executor operation unknown" }),
+              GatewayError.make({ kind: "transport", message: "Could not resolve executor operation deadline" }),
             ),
           ),
     }
@@ -817,7 +855,7 @@ export const service = Layer.effect(
             message: "Executor workspace identity does not match the Run workspace",
           })
         yield* HostedObservability.observe(
-          "workspace_prepare",
+          "attach",
           { ownerId: initial.ownerId, threadId: input.threadId, turnId: input.turnId, assignmentId: initial.id },
           Effect.gen(function* () {
             if (initial.placement._tag === "OrbPlacement") {
@@ -957,32 +995,15 @@ export const service = Layer.effect(
         }
         if (assignment.placement._tag === "RunnerPlacement") {
           return yield* HostedObservability.observe(
-            "executor_wait",
+            "cell_execution",
             correlation,
             Effect.gen(function* () {
               const authority = yield* bindings(input, runnerGateway.machine)
-              const execute = runnerGateway
-                .execute({
-                  assignmentId: assignment.id,
-                  ...input,
-                  bindings: authority,
-                })
-                .pipe(
-                  Effect.map((result) => {
-                    const failure = result.response._tag === "DomainFailure" ? result.response.failure : undefined
-                    const kind =
-                      typeof failure === "object" && failure !== null && "kind" in failure ? failure.kind : undefined
-                    let outcome: "completed" | "failed" | "cancelled" | "unknown"
-                    if (kind === "unknown") outcome = "unknown"
-                    else if (kind === "cancelled") outcome = "cancelled"
-                    else if (result.response._tag === "Success") outcome = "completed"
-                    else outcome = "failed"
-                    return { ...result, outcome }
-                  }),
-                )
-              return yield* HostedObservability.observe("cell", correlation, execute, (result) =>
-                cellOutcome(result.outcome),
-              )
+              return yield* runnerGateway.execute({
+                assignmentId: assignment.id,
+                ...input,
+                bindings: authority,
+              })
             }),
           )
         }
@@ -1011,20 +1032,15 @@ export const service = Layer.effect(
             ),
           )
         return yield* HostedObservability.observe(
-          "executor_wait",
+          "cell_execution",
           correlation,
           Effect.gen(function* () {
             const authority = yield* bindings(input, gateway.machine)
-            const result = yield* HostedObservability.observe(
-              "cell",
-              correlation,
-              gateway.execute({
-                assignmentId: assignment.id,
-                ...input,
-                bindings: authority,
-              }),
-              (completed) => cellOutcome(completed.outcome),
-            )
+            const result = yield* gateway.execute({
+              assignmentId: assignment.id,
+              ...input,
+              bindings: authority,
+            })
             return { ...result, eventPersisted: false as const }
           }),
         )

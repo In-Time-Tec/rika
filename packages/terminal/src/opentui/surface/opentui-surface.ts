@@ -69,6 +69,7 @@ class SidebarScrollBoxRenderable extends ScrollBoxRenderable {
 }
 
 const typingCursorStyle = { style: "block", blinking: true } as const
+const runSync = Effect.runSync
 
 export class Surface extends SurfaceLifecycle {
   declare public transcriptScroll: TranscriptScrollBoxRenderable
@@ -84,7 +85,7 @@ export class Surface extends SurfaceLifecycle {
     this.goalController = new GoalController({ clock: this.clock })
     this.hoverController = new HoverController({ renderer, destroyed: () => this.destroyed })
     const monotonicStartedAt = this.clock.now()
-    const epochStartedAt = options.epochMillis ?? Effect.runSync(Clock.currentTimeMillis)
+    const epochStartedAt = options.epochMillis ?? runSync(Clock.currentTimeMillis)
     this.currentTimeMillis = options.currentTimeMillis ?? (() => epochStartedAt + this.clock.now() - monotonicStartedAt)
     this.main = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "row" })
     this.contentColumn = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "column" })
@@ -500,19 +501,19 @@ export { renderTranscriptStyled } from "../rendering/opentui-renderer"
 export { probeNativeAsset } from "../rendering/opentui-spinner"
 
 export const create = (handlers: Handlers) =>
-  Effect.tryPromise({
-    try: () =>
-      handlers.makeRenderer === undefined
-        ? createCliRenderer({
+  (handlers.makeRenderer === undefined
+    ? Effect.tryPromise({
+        try: () =>
+          createCliRenderer({
             screenMode: "alternate-screen",
             exitOnCtrlC: false,
             exitSignals: [],
             useMouse: true,
             enableMouseMovement: true,
-          })
-        : handlers.makeRenderer(),
-    catch: adapterError,
-  }).pipe(
+          }),
+        catch: adapterError,
+      })
+    : handlers.makeRenderer()).pipe(
     Effect.flatMap((renderer) =>
       Effect.gen(function* () {
         const epochMillis = yield* EffectClock.currentTimeMillis

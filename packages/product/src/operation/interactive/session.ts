@@ -275,7 +275,13 @@ export const makeInteractiveImplementation = (input: InteractiveImplementationIn
   const events = makeInteractiveSessionEvents(input)
   const controls = makeInteractiveSessionControls({ ...input, ...events })
   const selection = makeInteractiveSessionSelection({ ...input, ...events, ...controls })
-  return { ...events, ...controls, ...selection }
+  return {
+    ...events,
+    ...controls,
+    ...selection,
+    currentView: input.operationFeed.currentView,
+    projectionCheckpoint: input.operationFeed.projectionCheckpoint,
+  }
 }
 type TurnId = import("@rika/product/turn-record").TurnId
 type OperationError = import("../operation-error").OperationError
@@ -337,6 +343,8 @@ export const makeInteractiveSession = (
     })
     const session: InteractiveSession = {
       events: (dispatch) => state.composition.attachFeed(implementation.events(dispatch)),
+      currentView: typedOperationFeed.currentView,
+      projectionCheckpoint: typedOperationFeed.projectionCheckpoint,
       submit: (prompt, mode, parts, tuning, submissionId) =>
         state.composition.admit(implementation.submit(prompt, mode, parts, tuning, submissionId)),
       newThread: state.composition.admitLocal(implementation.newThread),

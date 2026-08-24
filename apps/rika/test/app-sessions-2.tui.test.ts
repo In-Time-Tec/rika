@@ -38,7 +38,7 @@ test(
           height: 64,
         })
 
-        yield* Effect.promise(() => app.type("ROOT_USER_PROMPT"))
+        yield* Effect.tryPromise(() => app.type("ROOT_USER_PROMPT"))
         app.pressEnter()
         yield* app.waitFrame("ROOT_AGENT_FINAL")
         const durable = yield* app.waitTranscript(

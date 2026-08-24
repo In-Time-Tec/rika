@@ -8,7 +8,6 @@ const invalid = (message: string) => {
   return CliError.UserError.make({ cause, userMessage: message })
 }
 
-
 const continueCommand = Command.make(
   "continue",
   {
@@ -17,12 +16,9 @@ const continueCommand = Command.make(
   },
   ({ last, threadIds }) =>
     Effect.gen(function* () {
-      if (last && threadIds.length > 0)
-        return yield* invalid("thread continue accepts --last or a thread id, not both")
-      if (!last && threadIds.length === 0)
-        return yield* invalid("thread continue requires --last or a thread id")
-      if (threadIds.length > 1)
-        return yield* invalid("thread continue accepts exactly one thread id")
+      if (last && threadIds.length > 0) return yield* invalid("thread continue accepts --last or a thread id, not both")
+      if (!last && threadIds.length === 0) return yield* invalid("thread continue requires --last or a thread id")
+      if (threadIds.length > 1) return yield* invalid("thread continue accepts exactly one thread id")
       if (last) {
         yield* dispatch({ _tag: "Interactive", prompt: [], last: true, ephemeral: false })
         return

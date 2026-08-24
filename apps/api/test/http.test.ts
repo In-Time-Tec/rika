@@ -95,6 +95,22 @@ const executor: Executor = {
 
 const execution = {
   check: Effect.succeed({ backend: "postgres" as const, source: "test", workerId: "test-worker" }),
+  status: Effect.succeed({
+    poll: { _tag: "Starting" as const },
+    lastSuccessfulPollAt: undefined,
+    lastFailure: undefined,
+    active: 0,
+    capacity: 1,
+    oldestClaimAt: undefined,
+    pollAgeMillis: undefined,
+    lastSuccessfulPollAgeMillis: undefined,
+    oldestClaimAgeMillis: undefined,
+    lastFailureAgeMillis: undefined,
+    availableCapacity: 1,
+    execution: { worker: "execution" },
+    turn: { worker: "turn", active: 1, capacity: 1, oldestClaimAgeMillis: 10 },
+    projection: { worker: "projection", active: 2, capacity: 2, oldestActiveProjectionAgeMillis: 20 },
+  }),
 }
 
 const dependencies = (
@@ -129,8 +145,8 @@ const response = (path: string, deps = dependencies(), options?: RequestInit) =>
   if (!isRikaApiPath(new URL(input.url).pathname)) return handleRequest({ request: input, dependencies: deps })
   return Effect.acquireUseRelease(
     Effect.sync(() => makeRikaApiHandler(deps)),
-    (api) => Effect.promise(() => api.handler(input, undefined)),
-    (api) => Effect.promise(api.dispose),
+    (api) => Effect.tryPromise(() => api.handler(input, undefined)),
+    (api) => Effect.tryPromise(api.dispose),
   )
 }
 
@@ -174,14 +190,20 @@ describe("api HTTP", () => {
       }
       const result = yield* response("/healthz", unavailable)
       expect(result.status).toBe(200)
-      expect(yield* Effect.promise(() => result.json())).toEqual({ status: "ok" })
+      expect(yield* Effect.tryPromise(() => result.json())).toEqual({ status: "ok" })
     }),
   )
 
   it.effect("reports PostgreSQL readiness", () =>
     Effect.gen(function* () {
+      const status = yield* execution.status
       const ready = yield* response("/readyz", dependencies({ ready: true }))
       const unavailable = yield* response("/readyz", dependencies({ ready: false }))
+      expect(status).toMatchObject({
+        execution: { worker: "execution" },
+        turn: { worker: "turn", oldestClaimAgeMillis: 10 },
+        projection: { worker: "projection", oldestActiveProjectionAgeMillis: 20 },
+      })
       expect(ready.status).toBe(200)
       expect(unavailable.status).toBe(503)
     }),
@@ -236,9 +258,9 @@ describe("api HTTP", () => {
         { method: "POST", body: encodeJson(cliRegistrationBody) },
       )
       expect(result.status).toBe(201)
-      expect(yield* Effect.promise(() => result.json())).toMatchObject({ client_id: "client-1" })
+      expect(yield* Effect.tryPromise(() => result.json())).toMatchObject({ client_id: "client-1" })
       expect(delegated?.url).toBe("https://api.example.com/api/auth/oauth2/register")
-      expect(yield* Effect.promise(() => delegated!.json())).toEqual({
+      expect(yield* Effect.tryPromise(() => delegated!.json())).toEqual({
         client_name: "Rika CLI",
         application_type: "native",
         token_endpoint_auth_method: "none",
@@ -350,7 +372,7 @@ describe("api HTTP", () => {
         body: encodeJson({ commit_sha: commitSha, title: "Publish thread-1", body: "Approved publication" }),
       })
       expect(accepted.status).toBe(200)
-      expect(yield* Effect.promise(() => accepted.json())).toMatchObject({
+      expect(yield* Effect.tryPromise(() => accepted.json())).toMatchObject({
         state: "completed",
         branch: "rika/thread-1",
         ref: "refs/heads/rika/thread-1",
@@ -420,14 +442,14 @@ describe("api HTTP", () => {
         body: encodeJson({ owner: { kind: "personal" } }),
       })
       expect(models.status).toBe(200)
-      expect(yield* Effect.promise(() => models.json())).toEqual({ modes: ["low", "medium"] })
+      expect(yield* Effect.tryPromise(() => models.json())).toEqual({ modes: ["low", "medium"] })
       expect(put.status).toBe(200)
       expect(receivedSecret).toBe("provider-api-secret")
-      expect(yield* Effect.promise(() => put.text())).not.toContain("provider-api-secret")
+      expect(yield* Effect.tryPromise(() => put.text())).not.toContain("provider-api-secret")
       expect(revoke.status).toBe(200)
-      expect(yield* Effect.promise(() => revoke.json())).toMatchObject({ state: "revoked", revision: "2" })
+      expect(yield* Effect.tryPromise(() => revoke.json())).toMatchObject({ state: "revoked", revision: "2" })
       expect(listed.status).toBe(200)
-      expect(yield* Effect.promise(() => listed.json())).toEqual({ credentials: [status] })
+      expect(yield* Effect.tryPromise(() => listed.json())).toEqual({ credentials: [status] })
     }),
   )
 
@@ -481,7 +503,7 @@ describe("api HTTP", () => {
       })
       expect(put.status).toBe(200)
       expect(receivedSecret).toBe("environment-api-secret")
-      expect(yield* Effect.promise(() => put.text())).not.toContain("environment-api-secret")
+      expect(yield* Effect.tryPromise(() => put.text())).not.toContain("environment-api-secret")
     }),
   )
 
@@ -489,7 +511,7 @@ describe("api HTTP", () => {
     Effect.gen(function* () {
       const result = yield* response("/api/account", dependencies({ userId: "user-1", account }))
       expect(result.status).toBe(200)
-      expect(yield* Effect.promise(() => result.json())).toEqual(account)
+      expect(yield* Effect.tryPromise(() => result.json())).toEqual(account)
     }),
   )
 
@@ -545,7 +567,9 @@ describe("api HTTP", () => {
         },
       })
       expect(result.status).toBe(200)
-      const body = yield* Effect.promise(() => result.json() as Promise<{ readonly projects: unknown }>)
+      const body = yield* Effect.tryPromise(() => result.json()).pipe(
+        Effect.map((value) => value as { readonly projects: unknown }),
+      )
       expect(body.projects).toEqual([
         {
           id: "project-1",
@@ -595,7 +619,7 @@ describe("api HTTP", () => {
         },
       )
       expect(result.status).toBe(201)
-      expect(yield* Effect.promise(() => result.json())).toEqual({
+      expect(yield* Effect.tryPromise(() => result.json())).toEqual({
         id: "project-2",
         ownerId: "owner-1",
         owner: { kind: "organization", organizationId: "organization-1" },
@@ -630,7 +654,7 @@ describe("api HTTP", () => {
       expect(accepted.status).toBe(200)
       expect(rejected.status).toBe(404)
       expect(forwarded?.url).toBe("https://api.example.com/api/auth/organization/invite-member")
-      expect(yield* Effect.promise(() => forwarded!.json())).toEqual({
+      expect(yield* Effect.tryPromise(() => forwarded!.json())).toEqual({
         email: "new@example.test",
         organizationId: "organization-1",
         role: "member",
@@ -666,7 +690,7 @@ describe("api HTTP", () => {
         clientId: "client-1",
         dpopJkt: "thumbprint-1",
       })
-      expect(yield* Effect.promise(() => result.json())).toEqual({
+      expect(yield* Effect.tryPromise(() => result.json())).toEqual({
         ticket: "socket-ticket",
         expiresAt: "2026-08-19T00:01:00.000Z",
         websocketUrl: "wss://api.example.com/api/v1/threads/socket",
@@ -730,7 +754,7 @@ describe("api HTTP", () => {
         expect(result.status).toBe(404)
         expect(result.headers.get("content-type")).toBe("application/json; charset=utf-8")
         expect(result.headers.get("x-content-type-options")).toBe("nosniff")
-        expect(yield* Effect.promise(() => result.json())).toEqual({ message: "Not found" })
+        expect(yield* Effect.tryPromise(() => result.json())).toEqual({ message: "Not found" })
       }
     }),
   )
@@ -766,7 +790,7 @@ describe("api HTTP", () => {
     Effect.gen(function* () {
       const result = yield* response("/.well-known/oauth-protected-resource/api/v1")
       expect(result.status).toBe(200)
-      expect(yield* Effect.promise(() => result.json())).toEqual({
+      expect(yield* Effect.tryPromise(() => result.json())).toEqual({
         resource: "https://api.example.com/api/v1",
         dpop_bound_access_tokens_required: true,
       })

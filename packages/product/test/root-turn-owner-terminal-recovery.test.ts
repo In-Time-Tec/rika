@@ -600,12 +600,13 @@ it.effect("recovers typed errors and defects at every projection boundary", () =
 )
 
 it.effect(
-  "terminalizes a turn whose watch stream repeatedly dies with the same defect instead of reconnecting forever",
+  "cancels and inspects a run before settling a turn whose watch stream repeatedly dies",
   () =>
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
       let attempts = 0
       let failures = 0
+      let cancelled = false
       const replaced = new Array<ReadonlyArray<unknown>>()
       const owner = yield* make(
         { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
@@ -638,6 +639,16 @@ it.effect(
                 return yield* Effect.die(new RangeError("TenetKit projector steering text exceeds 4096"))
               }),
             ),
+          cancelTurn: () =>
+            Effect.sync(() => {
+              cancelled = true
+            }),
+          inspectTurn: () =>
+            Effect.sync(() =>
+              cancelled
+                ? ({ status: "cancelled" as const, cursor: "cancelled" })
+                : ({ status: "running" as const, cursor: "running" }),
+            ),
         } as ExecutionGateway.Interface,
       )
       const fiber = yield* Effect.forkChild(owner.watchTurn(turn.id))
@@ -656,15 +667,55 @@ it.effect(
       expect(attempts).toBe(3)
       expect(failures).toBe(3)
       expect(replaced).toHaveLength(1)
-      expect(result.status).toBe("failed")
-      expect(result.state.status).toBe("failed")
+      expect(cancelled).toBe(true)
+      expect(result.status).toBe("cancelled")
+      expect(result.state.status).toBe("cancelled")
       const failureUnit = replaced[0]?.[0] as {
+        executionOutcome: { status: string; reason: string }
         content: { block: { _tag: string; category: string; retryable: boolean } }
       }
+      expect(failureUnit.executionOutcome).toMatchObject({
+        status: "cancelled",
+        reason: expect.stringContaining("TenetKit projector steering text exceeds 4096"),
+      })
       expect(failureUnit.content.block).toMatchObject({
         _tag: "Error",
         category: "projection-defect",
         retryable: false,
       })
     }),
+)
+
+it.effect("does not settle a bounded projection defect while the cancelled run remains active", () =>
+  Effect.gen(function* () {
+    let replacements = 0
+    let cancellations = 0
+    const owner = yield* make(
+      { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
+      {
+        get: () => Effect.void,
+        replaceUnits: () =>
+          Effect.sync(() => {
+            replacements += 1
+            return undefined as never
+          }),
+      } as TranscriptRepository.Interface,
+      {
+        watchTurn: () => Stream.die("projection defect"),
+        cancelTurn: () =>
+          Effect.sync(() => {
+            cancellations += 1
+          }),
+        inspectTurn: () => Effect.succeed({ status: "running" as const, cursor: "running" }),
+      } as ExecutionGateway.Interface,
+    )
+    const fiber = yield* Effect.forkChild(owner.watchTurn(turn.id))
+    yield* Effect.yieldNow
+    yield* TestClock.adjust("300 millis")
+    const failure = yield* Effect.flip(Fiber.join(fiber))
+
+    expect(cancellations).toBe(1)
+    expect(replacements).toBe(0)
+    expect(failure._tag).toBe("WatchTurnFailure")
+  }),
 )

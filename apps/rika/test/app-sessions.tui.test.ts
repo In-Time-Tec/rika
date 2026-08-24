@@ -42,7 +42,7 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Ask Oracle to inspect the fixture."))
+        yield* Effect.tryPromise(() => app.type("Ask Oracle to inspect the fixture."))
         app.pressEnter()
         yield* app.waitFrame("ROOT_STYLE_RESULT", 25_000)
         yield* app.settled

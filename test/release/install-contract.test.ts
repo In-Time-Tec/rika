@@ -1,4 +1,6 @@
+import { Effect } from "effect"
 import { describe, expect, test } from "vitest"
+import { live, readText } from "../support/platform"
 import {
   archiveCommandName,
   devCommandName,
@@ -22,7 +24,7 @@ import * as ReleaseDownload from "../../apps/rika/src/release/release-download"
 import * as ReleaseInstall from "../../apps/rika/src/release/release-install"
 import * as ReleaseUpdate from "../../apps/rika/src/release/release-update"
 
-const installer = await Bun.file(new URL("../../install.sh", import.meta.url)).text()
+const installer = await Effect.runPromise(live(readText(new URL("../../install.sh", import.meta.url))))
 
 describe("install contract", () => {
   test("install.sh honours the same defaults as local-install.ts", () => {

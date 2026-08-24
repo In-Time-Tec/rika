@@ -15,7 +15,6 @@ import { executeRun, runCommand } from "./noninteractive-run-command"
 import * as RunnerCommand from "./runner-command"
 import * as ReleaseUpdate from "../../release/release-update"
 import { version } from "../../platform/application-version"
-import { runnerExecutorProcessRole, tuiControllerProcessRole } from "../../private-runtime-role"
 
 export { version }
 
@@ -86,14 +85,6 @@ export const command = Command.make(
     noTui: Flag.boolean("no-tui").pipe(Flag.withDefault(false)),
     allowRemoteThreadCreation: Flag.boolean("allow-remote-thread-creation").pipe(Flag.withDefault(false)),
     denyRemoteThreadCreation: Flag.boolean("deny-remote-thread-creation").pipe(Flag.withDefault(false)),
-    internalTuiController: Flag.boolean(tuiControllerProcessRole.slice(2)).pipe(
-      Flag.withDefault(false),
-      Flag.withHidden,
-    ),
-    internalRunnerExecutor: Flag.boolean(runnerExecutorProcessRole.slice(2)).pipe(
-      Flag.withDefault(false),
-      Flag.withHidden,
-    ),
     ...streamFlags,
     prompt,
   },

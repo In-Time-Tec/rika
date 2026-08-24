@@ -6,11 +6,20 @@ import { ActorAttribution } from "@rika/product/hosted-model"
 import { WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as HostedPostgres from "@rika/product-store/postgres-layer"
-import { ApiMessage, RunnerMessage, type AccessWire } from "@rika/remote-execution/protocol"
+import {
+  ApiMessage,
+  BindingRequest,
+  RunnerMessage,
+  type AccessWire,
+  type CellResponse,
+} from "@rika/remote-execution/protocol"
+import { NestedOperation, ToolContext } from "tenetkit"
 import { HostBindingRegistry } from "tenetkit/repl"
-import { Context, Effect, Layer, Random, Redacted, Schema } from "effect"
+import { FileSystem, Config, Context, Deferred, Effect, Fiber, Layer, Random, Redacted, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { createHash } from "node:crypto"
 import { Pool } from "pg"
+import { live as livePlatform } from "./live-platform"
 import { makeRunnerGateway as makeRunnerGatewayService, type RunnerGateway } from "../src/runner-gateway"
 import type { RunnerExecutorAuthority } from "../src/runner-executor"
 import type { BindingAuthority, Socket } from "../src/executor-gateway"
@@ -18,10 +27,13 @@ import { testToolPolicy } from "./hosted-tool-policy-fixture"
 
 const makeRunnerGateway = (authority: RunnerExecutorAuthority) => makeRunnerGatewayService(authority, testToolPolicy)
 
-const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
-const live = databaseUrl !== undefined
+const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
+const live = databaseUrl !== ""
 const encode = Schema.encodeSync(Schema.fromJsonString(RunnerMessage))
 const decode = Schema.decodeSync(Schema.fromJsonString(ApiMessage))
+const encodeBindingRequest = Schema.encodeSync(Schema.fromJsonString(BindingRequest))
+const bindingRequestDigest = (request: BindingRequest) =>
+  createHash("sha256").update(encodeBindingRequest(request)).digest("hex")
 const encodeActor = Schema.encodeUnknownSync(Schema.fromJsonString(ActorAttribution))
 const encodeWorkspaceCapabilities = Schema.encodeUnknownSync(Schema.fromJsonString(WorkspaceCapabilitySnapshot))
 const code = 'printf "restart"'
@@ -39,7 +51,7 @@ const sessionDigest = createHash("sha256").update(sessionToken).digest("hex")
 const deviceId = "11111111-1111-4111-8111-111111111111"
 const assignmentId = "assignment-local-gateway"
 const threadId = "thread-local-gateway"
-const cellRequest = (operationKey: string) => ({
+const cellRequest = (operationKey: string, deadlineAt = "2999-01-01T00:00:00.000Z") => ({
   assignmentId,
   operationKey,
   workspaceId: "workspace-local-gateway",
@@ -53,28 +65,28 @@ const cellRequest = (operationKey: string) => ({
   attempt: 0,
   replayPolicy: "pure" as const,
   admittedAt: null,
-  deadline: null,
+  deadlineAt,
   bindings,
 })
-const request = cellRequest("operation")
-const digest = createHash("sha256")
-  .update(
-    JSON.stringify({
-      workspaceId: request.workspaceId,
-      sessionId: request.sessionId,
-      threadId: request.threadId,
-      turnId: request.turnId,
-      runId: request.runId,
-      rootRunId: request.rootRunId,
-      toolCallId: request.toolCallId,
-      code: request.code,
-      attempt: request.attempt,
-      replayPolicy: request.replayPolicy,
-      admittedAt: request.admittedAt,
-      deadline: request.deadline,
-    }),
-  )
-  .digest("hex")
+const operationDigest = (request: ReturnType<typeof cellRequest>) =>
+  createHash("sha256")
+    .update(
+      JSON.stringify({
+        workspaceId: request.workspaceId,
+        sessionId: request.sessionId,
+        threadId: request.threadId,
+        turnId: request.turnId,
+        runId: request.runId,
+        rootRunId: request.rootRunId,
+        toolCallId: request.toolCallId,
+        code: request.code,
+        attempt: request.attempt,
+        replayPolicy: request.replayPolicy,
+        admittedAt: request.admittedAt,
+        deadlineAt: request.deadlineAt,
+      }),
+    )
+    .digest("hex")
 
 const access: AccessWire = {
   version: 1,
@@ -113,7 +125,8 @@ const persistTerminal = (
   target: Socket,
   presented: AccessWire,
   operationKey: string,
-  terminalResponse = response,
+  terminalResponse: CellResponse = response,
+  terminalOutcome: "completed" | "failed" | "cancelled" | "unknown" = "completed",
 ) =>
   Effect.gen(function* () {
     const operation = cellRequest(operationKey)
@@ -135,7 +148,7 @@ const persistTerminal = (
         _tag: "Terminal" as const,
         attribution,
         cursor: 3,
-        outcome: "completed" as const,
+        outcome: terminalOutcome,
         response: terminalResponse,
       },
     ])
@@ -187,14 +200,16 @@ const migrate = (url: string) =>
   Effect.gen(function* () {
     const pool = yield* Effect.sync(() => new Pool({ connectionString: url }))
     for (const migration of [...identityMigrations, ...productMigrations]) {
-      const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
+      const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+        fileSystem.readFileString(migration.url.pathname),
+      )
       yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
     }
     return pool
   })
 
 const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.promise(() => pool.query(text, [...values]))
+  Effect.tryPromise(() => pool.query(text, [...values]))
 
 const seed = (
   pool: Pool,
@@ -202,13 +217,15 @@ const seed = (
   options?: {
     readonly ownerKind?: "organization" | "personal"
     readonly leaseEpoch?: number
-    readonly deadline?: "past" | "future"
+    readonly deadlineAt?: string
     readonly state?: "accepted" | "dispatched"
     readonly leaseExpires?: "past" | "future"
   },
 ) =>
   Effect.gen(function* () {
     const state = options?.state ?? "dispatched"
+    const deadlineAt = options?.deadlineAt ?? "2999-01-01T00:00:00.000Z"
+    const digest = operationDigest(cellRequest(operationKey, deadlineAt))
     const ownerKind = options?.ownerKind ?? "organization"
     const ownerId = `${ownerKind}-owner-local-gateway`
     yield* query(
@@ -361,11 +378,11 @@ const seed = (
         pool,
         `INSERT INTO rika_hosted_executor_operations
         (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
-          turn_id, run_id, root_run_id, tool_call_id, code, attempt, replay_policy, state, updated_at)
+          turn_id, run_id, root_run_id, tool_call_id, code, attempt, replay_policy, deadline_at, state, updated_at)
         VALUES ('assignment-local-gateway', $4, $1, $2, 'workspace-local-gateway', 'assignment-local-gateway',
           'thread-local-gateway', 'turn-local-gateway', 'run-local-gateway', 'run-local-gateway',
-          'call-local-gateway', $3, 0, 'pure', 'accepted', now())`,
-        [operationKey, digest, code, ownerId],
+          'call-local-gateway', $3, 0, 'pure', $5, 'accepted', now())`,
+        [operationKey, digest, code, ownerId, deadlineAt],
       )
       return
     }
@@ -373,15 +390,14 @@ const seed = (
       pool,
       `INSERT INTO rika_hosted_executor_operations
       (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
-        turn_id, run_id, root_run_id, tool_call_id, code, attempt, state, dispatched_generation,
+        turn_id, run_id, root_run_id, tool_call_id, code, attempt, deadline_at, state, dispatched_generation,
         replay_policy, dispatched_lease_epoch, dispatched_executor_instance_id, dispatched_process_incarnation,
-        dispatch_deadline_at, updated_at)
+        updated_at)
       VALUES ('assignment-local-gateway', $6, $1, $2, 'workspace-local-gateway', 'assignment-local-gateway',
         'thread-local-gateway', 'turn-local-gateway', 'run-local-gateway', 'run-local-gateway',
-        'call-local-gateway', $3, 0, 'dispatched', 1, 'pure', $4,
-        'executor-local-gateway', 'process-local-gateway',
-        CASE WHEN $5 = 'past' THEN now() - interval '1 second' ELSE now() + interval '5 minutes' END, now())`,
-      [operationKey, digest, code, options?.leaseEpoch ?? 1, options?.deadline ?? "future", ownerId],
+        'call-local-gateway', $3, 0, $4, 'dispatched', 1, 'pure', $5,
+        'executor-local-gateway', 'process-local-gateway', now())`,
+      [operationKey, digest, code, deadlineAt, options?.leaseEpoch ?? 1, ownerId],
     )
   })
 
@@ -395,6 +411,12 @@ const operationState = (pool: Pool, operationKey: string) =>
       GROUP BY operation.state`,
     [operationKey],
   )
+
+const eventually = <A>(read: () => A | undefined): Effect.Effect<A> =>
+  Effect.suspend(() => {
+    const value = read()
+    return value === undefined ? Effect.yieldNow.pipe(Effect.andThen(eventually(read))) : Effect.succeed(value)
+  })
 
 const pauseAssignment = (pool: Pool) =>
   query(
@@ -411,20 +433,22 @@ const isolated = <A, E, R>(run: (input: { readonly url: string; readonly pool: P
   Effect.gen(function* () {
     const database = `rika_local_gateway_${Math.abs(yield* Random.nextInt)}`
     const admin = new Pool({ connectionString: databaseUrl })
-    yield* Effect.promise(() => admin.query(`CREATE DATABASE "${database}"`))
-    const parsed = new URL(databaseUrl!)
+    yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
+    const parsed = new URL(databaseUrl)
     parsed.pathname = `/${database}`
     const url = parsed.toString()
     let pool: Pool | undefined
     try {
-      pool = yield* migrate(url)
-      return yield* run({ url, pool })
+      const activePool = yield* migrate(url)
+      pool = activePool
+      return yield* run({ url, pool: activePool })
     } finally {
-      yield* Effect.promise(() => pool?.end() ?? Promise.resolve())
-      yield* Effect.promise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-      yield* Effect.promise(() => admin.end())
+      const cleanupPool = pool
+      yield* cleanupPool === undefined ? Effect.void : Effect.tryPromise(() => cleanupPool.end())
+      yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}"`))
+      yield* Effect.tryPromise(() => admin.end())
     }
-  })
+  }).pipe(livePlatform)
 
 it.effect.skipIf(!live)(
   "keeps a dispatched operation after a passive disconnect and accepts the retained result after restart",
@@ -468,6 +492,317 @@ it.effect.skipIf(!live)(
         }),
       ),
     ),
+)
+
+it.effect.skipIf(!live)("replays the exact durable cancelled terminal without dispatching", () =>
+  isolated(({ url, pool }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* seed(pool, "operation-cancelled")
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const target = socket()
+        const cancelled = {
+          _tag: "DomainFailure" as const,
+          failure: { kind: "cancelled", message: "Cell operation was cancelled" },
+        }
+        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* persistTerminal(gateway, target, access, "operation-cancelled", cancelled, "cancelled")
+        const first = yield* gateway.execute(cellRequest("operation-cancelled"))
+        const replay = yield* gateway.execute(cellRequest("operation-cancelled"))
+        expect(first).toMatchObject({ response: cancelled, outcome: "cancelled", eventPersisted: true })
+        expect(replay).toEqual(first)
+        expect(
+          target.sent
+            .map((value) => decode(value))
+            .filter(
+              (message) => message._tag === "CellExecute" && message.request.operationKey === "operation-cancelled",
+            ),
+        ).toEqual([])
+        expect(
+          (yield* query(
+            pool,
+            `SELECT state, terminal_outcome AS "terminalOutcome", response
+              FROM rika_hosted_executor_operations WHERE operation_key = 'operation-cancelled'`,
+          )).rows,
+        ).toEqual([{ state: "completed", terminalOutcome: "cancelled", response: cancelled }])
+      }),
+    ),
+  ),
+)
+
+it.effect.skipIf(!live)("keeps deadline authority when a late Runner terminal and result arrive", () =>
+  isolated(({ url, pool }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const deadlineAt = "1970-01-01T00:00:01.000Z"
+        yield* seed(pool, "operation-deadline-first", { deadlineAt })
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const target = socket()
+        const cancelled = {
+          _tag: "DomainFailure" as const,
+          failure: { kind: "cancelled", message: "Cell operation was cancelled" },
+        }
+        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        const deadline = yield* gateway.execute(cellRequest("operation-deadline-first", deadlineAt))
+        expect(deadline).toMatchObject({ outcome: "unknown", eventPersisted: true })
+        expect(
+          target.sent
+            .map((value) => decode(value))
+            .some((message) => message._tag === "CellCancel" && message.operationKey === "operation-deadline-first"),
+        ).toBe(true)
+        yield* persistTerminal(gateway, target, access, "operation-deadline-first", cancelled, "cancelled")
+        yield* gateway.receive(
+          target,
+          encode({
+            _tag: "LocalCellResult",
+            access,
+            operationKey: "operation-deadline-first",
+            attempt: 0,
+            response: cancelled,
+          }),
+        )
+        expect(target.closed).toEqual([])
+        expect(
+          target.sent
+            .map((value) => decode(value))
+            .some(
+              (message) =>
+                message._tag === "CellTerminalReceipt" && message.operationKey === "operation-deadline-first",
+            ),
+        ).toBe(true)
+        expect(
+          target.sent
+            .map((value) => decode(value))
+            .some(
+              (message) => message._tag === "LocalCellReceipt" && message.operationKey === "operation-deadline-first",
+            ),
+        ).toBe(true)
+        expect(
+          (yield* query(
+            pool,
+            `SELECT state, terminal_outcome AS "terminalOutcome", response
+              FROM rika_hosted_executor_operations WHERE operation_key = 'operation-deadline-first'`,
+          )).rows,
+        ).toEqual([{ state: "unknown", terminalOutcome: "unknown", response: deadline.response }])
+      }),
+    ),
+  ),
+)
+
+it.effect.skipIf(!live)("atomically persists one accepted deadline result across concurrent gateways", () =>
+  isolated(({ url, pool }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const deadlineAt = "1970-01-01T00:00:00.000Z"
+        const operationKey = "operation-accepted-deadline"
+        yield* seed(pool, operationKey, { deadlineAt, state: "accepted" })
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        yield* query(
+          pool,
+          `CREATE FUNCTION rika_test_reject_deadline_event() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION 'injected deadline event failure'; END
+          $$;
+          CREATE TRIGGER rika_test_reject_deadline_event
+            BEFORE INSERT ON rika_hosted_thread_events
+            FOR EACH ROW EXECUTE FUNCTION rika_test_reject_deadline_event()`,
+        )
+        const faulty = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        expect((yield* Effect.result(faulty.execute(cellRequest(operationKey, deadlineAt))))._tag).toBe("Failure")
+        expect((yield* operationState(pool, operationKey)).rows).toEqual([{ state: "accepted", events: 0 }])
+        yield* query(
+          pool,
+          `DROP TRIGGER rika_test_reject_deadline_event ON rika_hosted_thread_events;
+          DROP FUNCTION rika_test_reject_deadline_event()`,
+        )
+        const first = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const second = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const results = yield* Effect.all(
+          [first.execute(cellRequest(operationKey, deadlineAt)), second.execute(cellRequest(operationKey, deadlineAt))],
+          { concurrency: "unbounded" },
+        )
+        const timeout = {
+          _tag: "DomainFailure" as const,
+          failure: { kind: "timeout", message: "Cell operation deadline exceeded" },
+        }
+        expect(results).toEqual([
+          { response: timeout, outcome: "failed", eventPersisted: true },
+          { response: timeout, outcome: "failed", eventPersisted: true },
+        ])
+
+        const restarted = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        expect(yield* restarted.execute(cellRequest(operationKey, deadlineAt))).toEqual(results[0])
+        expect((yield* operationState(pool, operationKey)).rows).toEqual([{ state: "completed", events: 1 }])
+        expect(
+          (yield* query(pool, `SELECT event FROM rika_hosted_thread_events WHERE idempotency_key = $1`, [operationKey]))
+            .rows,
+        ).toEqual([{ event: { _tag: "CellResult", operationKey, response: timeout } }])
+      }),
+    ),
+  ),
+)
+
+it.effect.skipIf(!live)("bounds reconnected binding and machine work by the parent deadline", () =>
+  isolated(({ url, pool }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const deadlineAt = "1970-01-01T00:00:01.000Z"
+        const operationKey = "operation-machine-reconnect"
+        const invocationStarted = yield* Deferred.make<void>()
+        const cleanupStarted = yield* Deferred.make<void>()
+        const releaseCleanup = yield* Deferred.make<void>()
+        const cleanupCompleted = yield* Deferred.make<void>()
+        const signal = yield* Effect.abortSignal
+        const bindingContext = Context.empty().pipe(
+          Context.add(
+            ToolContext.ToolContext,
+            ToolContext.ToolContext.of({
+              signal,
+              emit: () => Effect.void,
+              sessionId: assignmentId,
+              runId: "run-local-gateway",
+              toolCallId: "call-local-gateway",
+              operationKey,
+            }),
+          ),
+          Context.add(
+            NestedOperation.NestedOperations,
+            NestedOperation.NestedOperations.of({ run: (_request, operation) => operation }),
+          ),
+        )
+        const registry = HostBindingRegistry.HostBindingRegistry.of({
+          descriptors: [{ module: "workspace", operations: ["read"] }],
+          resolve: () => Effect.die("unused"),
+          invoke: () =>
+            Deferred.succeed(invocationStarted, undefined).pipe(
+              Effect.andThen(Effect.never),
+              Effect.ensuring(
+                Deferred.succeed(cleanupStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseCleanup)),
+                  Effect.andThen(Deferred.succeed(cleanupCompleted, undefined)),
+                ),
+              ),
+            ),
+        })
+        const operationBindings = {
+          registry,
+          context: bindingContext,
+          manifest: { digest: "c".repeat(64), descriptors: registry.descriptors },
+        } as unknown as BindingAuthority
+        yield* seed(pool, operationKey, { deadlineAt, state: "accepted" })
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const first = socket()
+        yield* gateway.receive(first, encode({ _tag: "ExecutorReconnect", access }))
+        const running = yield* Effect.forkChild(
+          gateway.execute({ ...cellRequest(operationKey, deadlineAt), bindings: operationBindings }),
+        )
+        yield* eventually(() =>
+          first.sent
+            .map((value) => decode(value))
+            .find((message) => message._tag === "CellExecute" && message.request.operationKey === operationKey),
+        )
+        const machine = yield* Effect.forkChild(
+          gateway.machine(assignmentId, operationKey, 0, { _tag: "ProcessStop", processId: "process-1" }),
+        )
+        const machineRequest = yield* eventually(() =>
+          first.sent.map((value) => decode(value)).find((message) => message._tag === "MachineExecute"),
+        )
+        if (machineRequest._tag !== "MachineExecute") return yield* Effect.die("machine request was not sent")
+
+        yield* gateway.disconnected(first)
+        const second = socket()
+        yield* gateway.receive(second, encode({ _tag: "ExecutorReconnect", access }))
+        expect(
+          second.sent.map((value) => decode(value)).filter((message) => message._tag === "MachineExecute"),
+        ).toEqual([
+          expect.objectContaining({
+            _tag: "MachineExecute",
+            operationKey,
+            machineId: machineRequest.machineId,
+          }),
+        ])
+
+        const bindingRequest = {
+          module: "workspace",
+          operation: "read",
+          input: { path: "README.md" },
+          sessionId: assignmentId,
+          cellId: "call-local-gateway",
+        } as const
+        const binding = yield* Effect.forkChild(
+          gateway.receive(
+            second,
+            encode({
+              _tag: "BindingInvoke",
+              access,
+              operationKey,
+              attempt: 0,
+              callId: `${operationKey}:binding:0`,
+              requestDigest: bindingRequestDigest(bindingRequest),
+              request: bindingRequest,
+            }),
+          ),
+        )
+        yield* Deferred.await(invocationStarted)
+        const advancing = yield* Effect.forkChild(TestClock.adjust("1 second"))
+        yield* Deferred.await(cleanupStarted)
+        expect(yield* Fiber.join(machine)).toEqual({
+          _tag: "Unknown",
+          message: "Machine outcome is unknown at the operation deadline",
+        })
+        expect(yield* Fiber.join(running)).toMatchObject({ outcome: "unknown", eventPersisted: true })
+        expect(binding.pollUnsafe()).toBeUndefined()
+        expect(second.sent.map((value) => decode(value)).filter((message) => message._tag === "BindingResult")).toEqual(
+          [],
+        )
+        yield* Deferred.succeed(releaseCleanup, undefined)
+        yield* Deferred.await(cleanupCompleted)
+        yield* Fiber.join(binding)
+        yield* Fiber.join(advancing)
+        expect(second.sent.map((value) => decode(value)).filter((message) => message._tag === "BindingResult")).toEqual(
+          [
+            expect.objectContaining({
+              _tag: "BindingResult",
+              outcome: { _tag: "Unknown", message: "Cell binding outcome is unknown at the operation deadline" },
+            }),
+          ],
+        )
+
+        yield* gateway.disconnected(second)
+        const third = socket()
+        yield* gateway.receive(third, encode({ _tag: "ExecutorReconnect", access }))
+        expect(third.sent.map((value) => decode(value)).filter((message) => message._tag === "MachineExecute")).toEqual(
+          [],
+        )
+        yield* gateway.receive(
+          third,
+          encode({
+            _tag: "MachineResult",
+            access,
+            operationKey,
+            attempt: 0,
+            machineId: machineRequest.machineId,
+            requestDigest: machineRequest.requestDigest,
+            outcome: { _tag: "Success", value: { _tag: "ProcessStopped" } },
+          }),
+        )
+        expect(third.closed).toEqual([])
+        expect(third.sent.map((value) => decode(value)).filter((message) => message._tag === "BindingResult")).toEqual(
+          [],
+        )
+      }),
+    ),
+  ),
 )
 
 it.effect.skipIf(!live)("fences organization dispatch immediately after membership deletion", () =>
@@ -643,16 +978,6 @@ it.effect.skipIf(!live)(
           const renewed = { ...access, leaseEpoch: 2 }
           yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access: renewed }))
           yield* persistTerminal(gateway, target, renewed, "operation-stale")
-          yield* gateway.receive(
-            target,
-            encode({
-              _tag: "LocalCellResult",
-              access: renewed,
-              operationKey: "operation-stale",
-              attempt: 0,
-              response,
-            }),
-          )
           expect(target.closed).toEqual([[1008, "fenced"]])
           expect(
             (yield* query(
@@ -746,14 +1071,18 @@ it.effect.skipIf(!live)("recovers an overdue dispatch once across concurrent gat
   isolated(({ url, pool }) =>
     Effect.scoped(
       Effect.gen(function* () {
-        yield* seed(pool, "operation-overdue", { deadline: "past" })
+        const deadlineAt = "1970-01-01T00:00:01.000Z"
+        yield* seed(pool, "operation-overdue", { deadlineAt })
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
         const left = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const right = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const results = yield* Effect.all(
-          [left.execute(cellRequest("operation-overdue")), right.execute(cellRequest("operation-overdue"))],
+          [
+            left.execute(cellRequest("operation-overdue", deadlineAt)),
+            right.execute(cellRequest("operation-overdue", deadlineAt)),
+          ],
           { concurrency: 2 },
         )
         expect(results.map((result) => result.response)).toEqual([
@@ -802,7 +1131,11 @@ it.effect.skipIf(!live)("terminalizes unresolved work and releases the assignmen
         )
         const gateway = yield* makeRunnerGateway(
           authority({
-            release: () => pauseAssignment(pool).pipe(Effect.asVoid),
+            release: () =>
+              pauseAssignment(pool).pipe(
+                Effect.asVoid,
+                Effect.mapError((error) => ControllerError.make({ kind: "checkpoint", message: error.message })),
+              ),
           }),
         ).pipe(Effect.provide(context))
         const target = socket()

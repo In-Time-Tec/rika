@@ -33,7 +33,7 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Read the notes file."))
+        yield* Effect.tryPromise(() => app.type("Read the notes file."))
         app.pressEnter()
         const completed = yield* app.waitFrame("APPROVAL_COMPLETE")
         expect(completed).not.toContain("[pending]")
@@ -46,7 +46,7 @@ test(
         expect(app.frame()).toMatch(/◷ [0-9]+s/u)
 
         yield* app.clickComposer
-        yield* Effect.promise(() => app.type("Run the shell tool."))
+        yield* Effect.tryPromise(() => app.type("Run the shell tool."))
         expect(app.frame()).not.toContain("Context & Usage")
         app.pressEnter()
         const shellCompleted = yield* app.waitFrame("BASH_COMPLETE")
@@ -91,7 +91,7 @@ test.fails(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Write the approved file."))
+        yield* Effect.tryPromise(() => app.type("Write the approved file."))
         app.pressEnter()
         const pending = yield* app.waitFrame("Authorization pending", 3_000)
         expect(pending).toContain("write")
@@ -109,7 +109,7 @@ test.fails(
         expect(app.frame()).toContain("Authorization approved")
 
         yield* app.clickComposer
-        yield* Effect.promise(() => app.type("Write the denied file."))
+        yield* Effect.tryPromise(() => app.type("Write the denied file."))
         app.pressEnter()
         yield* app.waitFrame("Authorization pending", 3_000)
         app.pressKey("\t")

@@ -171,6 +171,116 @@ const status = (value: Run.RunStatus): Status => {
   }
 }
 
+type ModelTerminalEvent = Extract<
+  SemanticTreeEvent["event"],
+  { readonly _tag: "ModelAttemptCompleted" | "ModelAttemptFailed" }
+>
+
+export interface ModelTerminalObservation {
+  readonly modelAttemptId: string
+  readonly outcome: "success" | "failure" | "interrupted"
+  readonly durationMillis: number
+  readonly syntheticStart: boolean
+  readonly usage?: { readonly inputTokens?: number; readonly outputTokens?: number }
+}
+
+const tokenTotal = (value: number | undefined) => {
+  if (value === undefined) return undefined
+  return Number.isFinite(value) ? Math.max(0, value) : 0
+}
+
+const retainRecent = <A>(map: Map<string, A>, key: string, value: A, limit: number) => {
+  map.delete(key)
+  map.set(key, value)
+  while (map.size > limit) map.delete(map.keys().next().value!)
+}
+
+export const makeModelTerminalTelemetry = (limit = 256) => {
+  const capacity = Math.max(1, Math.floor(limit))
+  const started = new Map<string, number>()
+  const observed = new Map<string, true>()
+  return {
+    started(modelAttemptId: string, startedAt: number) {
+      if (observed.has(modelAttemptId) || started.has(modelAttemptId)) return false
+      retainRecent(started, modelAttemptId, startedAt, capacity)
+      return true
+    },
+    terminal(event: ModelTerminalEvent): ModelTerminalObservation | undefined {
+      if (observed.has(event.modelAttemptId)) {
+        retainRecent(observed, event.modelAttemptId, true, capacity)
+        return undefined
+      }
+      const terminalAt = event._tag === "ModelAttemptCompleted" ? event.completedAt : event.failedAt
+      const recordedStart = started.get(event.modelAttemptId)
+      const startedAt = recordedStart ?? terminalAt
+      started.delete(event.modelAttemptId)
+      retainRecent(observed, event.modelAttemptId, true, capacity)
+      const inputTokens = tokenTotal(
+        event._tag === "ModelAttemptCompleted" ? event.usage.inputTokens.total : event.providerUsage?.inputTokens,
+      )
+      const outputTokens = tokenTotal(
+        event._tag === "ModelAttemptCompleted" ? event.usage.outputTokens.total : event.providerUsage?.outputTokens,
+      )
+      const usage =
+        inputTokens === undefined && outputTokens === undefined
+          ? undefined
+          : {
+              ...(inputTokens === undefined ? {} : { inputTokens }),
+              ...(outputTokens === undefined ? {} : { outputTokens }),
+            }
+      let outcome: ModelTerminalObservation["outcome"] = "success"
+      if (event._tag === "ModelAttemptFailed") outcome = event.category === "cancellation" ? "interrupted" : "failure"
+      return {
+        modelAttemptId: event.modelAttemptId,
+        outcome,
+        durationMillis: Math.max(0, terminalAt - startedAt),
+        syntheticStart: recordedStart === undefined,
+        ...(usage === undefined ? {} : { usage }),
+      }
+    },
+  }
+}
+
+export const makeHostedModelObserver = (link: ExecutionGateway.ExecutionLink) => {
+  const modelTelemetry = makeModelTerminalTelemetry()
+  return (treeEvent: SemanticTreeEvent) => {
+    const event = treeEvent.event
+    if (event._tag === "ModelAttemptStarted") {
+      if (!modelTelemetry.started(event.modelAttemptId, event.startedAt)) return Effect.void
+      return HostedObservability.event("model_start", "success", {
+        threadId: link.threadId,
+        turnId: link.turnId,
+        runId: treeEvent.runId,
+        modelAttemptId: event.modelAttemptId,
+      })
+    }
+    if (event._tag === "ModelAttemptCompleted" || event._tag === "ModelAttemptFailed") {
+      const observation = modelTelemetry.terminal(event)
+      if (observation === undefined) return Effect.void
+      const terminal = HostedObservability.modelObserved(
+        {
+          threadId: link.threadId,
+          turnId: link.turnId,
+          runId: treeEvent.runId,
+          modelAttemptId: observation.modelAttemptId,
+        },
+        observation.outcome,
+        observation.durationMillis,
+        observation.usage,
+      )
+      return observation.syntheticStart
+        ? HostedObservability.event("model_start", "success", {
+            threadId: link.threadId,
+            turnId: link.turnId,
+            runId: treeEvent.runId,
+            modelAttemptId: event.modelAttemptId,
+          }).pipe(Effect.andThen(terminal))
+        : terminal
+    }
+    return Effect.void
+  }
+}
+
 const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreShape | undefined, hosted: boolean) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime.Runtime
@@ -344,42 +454,7 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
       approveTurn: (link, input) => respondToApproval("approve", link, input),
       denyTurn: (link, input) => respondToApproval("deny", link, input),
       watchTurn: (link, input) => {
-        const modelAttempts = new Map<string, number>()
-        const observeModel = (treeEvent: SemanticTreeEvent) => {
-          if (!hosted) return Effect.void
-          const event = treeEvent.event
-          if (event._tag === "ModelAttemptStarted") {
-            if (modelAttempts.size >= 256) modelAttempts.delete(modelAttempts.keys().next().value!)
-            modelAttempts.set(event.modelAttemptId, event.startedAt)
-            return Effect.void
-          }
-          if (event._tag === "ModelAttemptCompleted") {
-            const startedAt = modelAttempts.get(event.modelAttemptId) ?? event.completedAt
-            modelAttempts.delete(event.modelAttemptId)
-            return HostedObservability.modelObserved(
-              { threadId: link.threadId, turnId: link.turnId, runId: treeEvent.runId },
-              "success",
-              event.completedAt - startedAt,
-              {
-                ...(event.usage.inputTokens.total === undefined ? {} : { inputTokens: event.usage.inputTokens.total }),
-                ...(event.usage.outputTokens.total === undefined
-                  ? {}
-                  : { outputTokens: event.usage.outputTokens.total }),
-              },
-            )
-          }
-          if (event._tag === "ModelAttemptFailed") {
-            const startedAt = modelAttempts.get(event.modelAttemptId) ?? event.failedAt
-            modelAttempts.delete(event.modelAttemptId)
-            return HostedObservability.modelObserved(
-              { threadId: link.threadId, turnId: link.turnId, runId: treeEvent.runId },
-              "failure",
-              event.failedAt - startedAt,
-              event.providerUsage,
-            )
-          }
-          return Effect.void
-        }
+        const observeModel = hosted ? makeHostedModelObserver(link) : () => Effect.void
         let projector: ReturnType<typeof TreeProjector.make>
         try {
           projector = TreeProjector.make(

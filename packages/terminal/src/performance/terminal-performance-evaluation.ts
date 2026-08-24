@@ -1,7 +1,7 @@
 import { createTestRenderer } from "@opentui/core/testing"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { unitOrder } from "@rika/transcript/transcript-unit-order"
-import { Effect } from "effect"
+import { Clock, Effect } from "effect"
 import { Surface } from "../opentui/surface/opentui-surface"
 import type { Key } from "../presentation/terminal/terminal-keymap"
 import { projectUnits as applyTurnUnits } from "../presentation/transcript/terminal-transcript-projection"
@@ -145,11 +145,15 @@ const measured = (
     ? { id, unit, value, status: "measured" }
     : { id, unit, value, target, status: "measured", pass: targetPasses(target, value) }
 
+const elapsedMilliseconds = (startedAt: bigint, finishedAt: bigint): number => Number(finishedAt - startedAt) / 1_000_000
+const renderOnce = (render: Awaited<ReturnType<typeof createTestRenderer>>["renderOnce"]) =>
+  Effect.tryPromise(render).pipe(Effect.orDie)
+
 const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
   readonly observe?: (phase: PerformancePhase) => void
 }) {
   options.observe?.("started")
-  const setup = yield* Effect.promise(() => createTestRenderer({ width: 120, height: 36 }))
+  const setup = yield* Effect.tryPromise(() => createTestRenderer({ width: 120, height: 36 })).pipe(Effect.orDie)
   const base = applyTurnUnits({ ...initial("/work", "high"), width: 120, height: 36 }, parentProjection().units)
   let model: Model = {
     ...base,
@@ -172,16 +176,16 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
   }
   const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
   return yield* Effect.gen(function* () {
-    const initialStartedAt = performance.now()
+    const initialStartedAt = yield* Clock.currentTimeNanos
     surface.update(model)
-    yield* Effect.promise(() => setup.renderOnce())
-    const initialMilliseconds = performance.now() - initialStartedAt
+    yield* renderOnce(setup.renderOnce)
+    const initialMilliseconds = elapsedMilliseconds(initialStartedAt, yield* Clock.currentTimeNanos)
     for (let sample = 0; sample < warmupInteractions; sample += 1) {
       model = update(model, { _tag: "KeyPressed", key: key("t", { ctrl: true }) })
       surface.update(model)
       model = update(model, { _tag: "KeyPressed", key: key("return") })
       surface.update(model)
-      yield* Effect.promise(() => setup.renderOnce())
+      yield* renderOnce(setup.renderOnce)
     }
     options.observe?.("loaded")
     const pickerOpen: Array<number> = []
@@ -189,33 +193,33 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
     const currentSelection: Array<number> = []
     const scroll: Array<number> = []
     for (let sample = 0; sample < interactionSamples; sample += 1) {
-      let startedAt = performance.now()
+      let startedAt = yield* Clock.currentTimeNanos
       model = update(model, { _tag: "KeyPressed", key: key("t", { ctrl: true }) })
       surface.update(model)
-      yield* Effect.promise(() => setup.renderOnce())
-      pickerOpen.push(performance.now() - startedAt)
-      startedAt = performance.now()
+      yield* renderOnce(setup.renderOnce)
+      pickerOpen.push(elapsedMilliseconds(startedAt, yield* Clock.currentTimeNanos))
+      startedAt = yield* Clock.currentTimeNanos
       model = update(model, { _tag: "KeyPressed", key: key("down") })
       model = update(model, { _tag: "KeyPressed", key: key("up") })
       surface.update(model)
-      yield* Effect.promise(() => setup.renderOnce())
-      pickerNavigation.push(performance.now() - startedAt)
-      startedAt = performance.now()
+      yield* renderOnce(setup.renderOnce)
+      pickerNavigation.push(elapsedMilliseconds(startedAt, yield* Clock.currentTimeNanos))
+      startedAt = yield* Clock.currentTimeNanos
       model = update(model, { _tag: "KeyPressed", key: key("return") })
       surface.update(model)
-      yield* Effect.promise(() => setup.renderOnce())
-      currentSelection.push(performance.now() - startedAt)
-      startedAt = performance.now()
+      yield* renderOnce(setup.renderOnce)
+      currentSelection.push(elapsedMilliseconds(startedAt, yield* Clock.currentTimeNanos))
+      startedAt = yield* Clock.currentTimeNanos
       model = update(model, { _tag: "ScrollMoved", offset: sample % 2 === 0 ? -1 : 1 })
       surface.update(model)
-      yield* Effect.promise(() => setup.renderOnce())
-      scroll.push(performance.now() - startedAt)
+      yield* renderOnce(setup.renderOnce)
+      scroll.push(elapsedMilliseconds(startedAt, yield* Clock.currentTimeNanos))
     }
     options.observe?.("interactions-completed")
     const streamUpdates: Array<number> = []
     const renderLatencies: Array<number> = []
     for (let step = 0; step < streamedUpdates; step += 1) {
-      const startedAt = performance.now()
+      const startedAt = yield* Clock.currentTimeNanos
       const child = step % childRuns
       const id = childTurnId(child)
       const unitKey = `assistant:performance:${child}`
@@ -229,10 +233,11 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
         ),
       ])
       surface.update(model)
-      const renderStartedAt = performance.now()
-      yield* Effect.promise(() => setup.renderOnce())
-      renderLatencies.push(performance.now() - renderStartedAt)
-      streamUpdates.push(performance.now() - startedAt)
+      const renderStartedAt = yield* Clock.currentTimeNanos
+      yield* renderOnce(setup.renderOnce)
+      const renderedAt = yield* Clock.currentTimeNanos
+      renderLatencies.push(elapsedMilliseconds(renderStartedAt, renderedAt))
+      streamUpdates.push(elapsedMilliseconds(startedAt, renderedAt))
     }
     options.observe?.("completed")
     const mountedTranscriptRows = surface.mountedTranscriptRowCount()

@@ -25,7 +25,7 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Run something slow."))
+        yield* Effect.tryPromise(() => app.type("Run something slow."))
         app.pressEnter()
         const running = yield* app.waitFrame("Running", 20_000)
         expect(running).toContain("Running 1 tool")

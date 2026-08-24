@@ -1,4 +1,5 @@
 import type { Model, ThreadItem } from "@rika/terminal/terminal-state"
+import { stdout } from "node:process"
 import { renderGoodbye } from "../input/goodbye-message"
 
 export const writeGoodbye = (model: Model): void => {
@@ -7,7 +8,7 @@ export const writeGoodbye = (model: Model): void => {
     model.currentThreadTitle ??
     (model.threads as ReadonlyArray<ThreadItem>).find((thread) => thread.id === threadId)?.title
   try {
-    process.stdout.write(
+    stdout.write(
       renderGoodbye({
         mode: model.mode,
         workspace: model.workspace,

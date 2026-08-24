@@ -1,9 +1,25 @@
-import { EventEmitter } from "node:events"
 import { expect, it } from "@effect/vitest"
 import { Deferred, Effect, Fiber, Schedule, Stream } from "effect"
 import { test } from "vitest"
 import { interruptDecision } from "../src/interactive/process/process-interrupt"
 import { lifecycleEvents } from "../src/interactive/process/process-signals"
+
+const makeEmitter = () => {
+  const listeners = new Map<string, Set<() => void>>()
+  const on = (event: string, listener: () => void) => {
+    const eventListeners = listeners.get(event) ?? new Set()
+    eventListeners.add(listener)
+    listeners.set(event, eventListeners)
+  }
+  const off = (event: string, listener: () => void) => {
+    listeners.get(event)?.delete(listener)
+  }
+  const emit = (event: string) => {
+    for (const listener of listeners.get(event) ?? []) listener()
+  }
+  const listenerCount = (event: string) => listeners.get(event)?.size ?? 0
+  return { on, off, emit, listenerCount }
+}
 
 test("first interrupt cancels active work and leaves the session running", () => {
   expect(interruptDecision({ lifecycle: { _tag: "Running" }, hasActiveWork: true, now: 1_000 })).toEqual({
@@ -51,8 +67,8 @@ test("an interrupt after teardown is ignored", () => {
 
 it.live("lifecycle events publish signals and release every listener when the scope closes", () =>
   Effect.gen(function* () {
-    const emitter = new EventEmitter()
-    const stdin = new EventEmitter() as unknown as NodeJS.ReadStream
+    const emitter = makeEmitter()
+    const stdin = makeEmitter()
     const observed: Array<string> = []
     const allObserved = yield* Deferred.make<void>()
     const fiber = yield* Effect.forkChild(
@@ -74,13 +90,13 @@ it.live("lifecycle events publish signals and release every listener when the sc
     )
     emitter.emit("SIGINT")
     emitter.emit("SIGTERM")
-    ;(stdin as unknown as EventEmitter).emit("end")
+    stdin.emit("end")
     yield* Deferred.await(allObserved).pipe(Effect.timeout("1 second"))
     expect(emitter.listenerCount("SIGINT")).toBe(1)
     yield* Fiber.interrupt(fiber)
     expect(observed).toEqual(["SIGINT", "SIGTERM", "Hangup"])
     expect(emitter.listenerCount("SIGINT")).toBe(0)
     expect(emitter.listenerCount("SIGTERM")).toBe(0)
-    expect((stdin as unknown as EventEmitter).listenerCount("end")).toBe(0)
+    expect(stdin.listenerCount("end")).toBe(0)
   }),
 )

@@ -1,8 +1,8 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Data, Effect, FileSystem, Layer, Path, Stream } from "effect"
+import { Console, Data, Effect, FileSystem, Function, Layer, Option, Path, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { runnerExecutorProcessRole, tuiControllerProcessRole } from "../../apps/rika/src/private-runtime-role"
+import { probePtyFrameAndInterrupt } from "../benchmark/packaged-startup"
 import { validatePackageArchive } from "../packaging/archive-contract"
 
 class ReleaseSmokeError extends Data.TaggedError("ReleaseSmokeError")<{
@@ -13,6 +13,126 @@ class ReleaseSmokeError extends Data.TaggedError("ReleaseSmokeError")<{
 const failure = (step: string, message: string) => new ReleaseSmokeError({ step, message })
 const mapFailure = (step: string) =>
   Effect.mapError((error: { readonly message: string }) => failure(step, `${step}: ${error.message}`))
+
+const smokeInvocations = [
+  { purpose: "version", arguments: ["--version"] },
+  { purpose: "public help", arguments: ["--help"] },
+  { purpose: "in-process client PTY", arguments: [] },
+  { purpose: "public runner unauthenticated", arguments: ["--no-tui"] },
+] as const
+
+const probeTimeoutMilliseconds = 15_000
+
+class ProbeError extends Data.TaggedError("ProbeError")<{
+  readonly message: string
+}> {}
+
+const runBoundedProbeEffect = (
+  binary: string,
+  arguments_: ReadonlyArray<string>,
+  cwd: string,
+  timeoutMilliseconds = probeTimeoutMilliseconds,
+) =>
+  Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const child = yield* spawner.spawn(
+      ChildProcess.make(binary, arguments_, {
+        cwd,
+        env: { PATH: "/usr/bin:/bin", HOME: cwd, TERM: "dumb" },
+        killSignal: "SIGKILL",
+      }),
+    )
+    return yield* Effect.all([
+      Stream.mkString(Stream.decodeText(child.stdout)),
+      Stream.mkString(Stream.decodeText(child.stderr)),
+      child.exitCode,
+    ]).pipe(
+      Effect.timeoutOption(timeoutMilliseconds),
+      Effect.flatMap(
+        Option.match({
+          onNone: () =>
+            new ProbeError({ message: `${arguments_.join("/")} probe timed out after ${timeoutMilliseconds}ms` }),
+          onSome: Effect.succeed,
+        }),
+      ),
+      Effect.map(([stdout, stderr, exitCode]) => ({ stdout, stderr, exitCode: Number(exitCode) })),
+      Effect.mapError((error) => (error instanceof ProbeError ? error : new ProbeError({ message: String(error) }))),
+    )
+  })
+
+const runBoundedProbeImpl = (
+  binary: string,
+  arguments_: ReadonlyArray<string>,
+  cwd: string,
+  timeoutMilliseconds = probeTimeoutMilliseconds,
+) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.flatMap(Layer.build(BunServices.layer), (context) =>
+        Effect.provide(runBoundedProbeEffect(binary, arguments_, cwd, timeoutMilliseconds), context),
+      ),
+    ),
+  )
+
+export const runBoundedProbe: {
+  (
+    binary: string,
+    arguments_: ReadonlyArray<string>,
+    cwd: string,
+    timeoutMilliseconds?: number,
+  ): ReturnType<typeof runBoundedProbeImpl>
+  (
+    arguments_: ReadonlyArray<string>,
+    cwd: string,
+    timeoutMilliseconds?: number,
+  ): (binary: string) => ReturnType<typeof runBoundedProbeImpl>
+} = Function.dual((arguments_) => typeof arguments_[0] === "string", runBoundedProbeImpl)
+
+const runBehavioralProbesEffect = (binary: string, emptyHome: string) =>
+  Effect.gen(function* () {
+    const clientHome = `${emptyHome}/interactive-client`
+    const runnerHome = `${emptyHome}/unauthenticated-runner`
+    const fileSystem = yield* FileSystem.FileSystem
+    yield* fileSystem.makeDirectory(clientHome, { recursive: true })
+    yield* fileSystem.makeDirectory(runnerHome, { recursive: true })
+    const client = yield* Effect.tryPromise(() =>
+      probePtyFrameAndInterrupt(binary, {
+        timeoutMilliseconds: probeTimeoutMilliseconds,
+        environment: {
+          HOME: clientHome,
+          XDG_CONFIG_HOME: `${clientHome}/.config`,
+          XDG_DATA_HOME: `${clientHome}/.local/share`,
+          XDG_STATE_HOME: `${clientHome}/.local/state`,
+        },
+        interrupt: "foreground-process-group-sigint",
+      }),
+    )
+    if (client.exitCode !== 0 && client.exitCode !== 130)
+      return yield* new ProbeError({
+        message: `PTY client exited with undocumented code ${client.exitCode} after SIGINT`,
+      })
+    const runner = yield* runBoundedProbeEffect(binary, ["--no-tui"], runnerHome)
+    const output = `${runner.stderr}\n${runner.stdout}`
+    if (runner.exitCode !== 1 || !/Run rika auth login first/i.test(output))
+      return yield* new ProbeError({
+        message: `Expected unauthenticated Runner exit 1, received exit ${runner.exitCode}: ${output.slice(0, 2_000)}`,
+      })
+    return { client, runner }
+  })
+
+const runBehavioralProbesImpl = (binary: string, emptyHome: string) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.flatMap(Layer.build(BunServices.layer), (context) =>
+        Effect.provide(runBehavioralProbesEffect(binary, emptyHome), context),
+      ),
+    ),
+  )
+
+export const runBehavioralProbes: {
+  (binary: string, emptyHome: string): ReturnType<typeof runBehavioralProbesImpl>
+  (emptyHome: string): (binary: string) => ReturnType<typeof runBehavioralProbesImpl>
+} = Function.dual(2, runBehavioralProbesImpl)
 
 const program = Effect.scoped(
   Effect.gen(function* () {
@@ -53,54 +173,35 @@ const program = Effect.scoped(
       .pipe(mapFailure("extract archive"))
     if (Number(extracted) !== 0) return yield* failure("extract archive", `tar exited with code ${extracted}`)
     const binary = path.join(temporary, archiveRoot, "bin", "rika")
-    const runBinary = (arguments_: ReadonlyArray<string>, environment: Readonly<Record<string, string>> = {}) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const step = `run rika ${arguments_.join(" ")}`
-          const handle = yield* spawner
-            .spawn(
-              ChildProcess.make(binary, arguments_, {
-                cwd: temporary,
-                extendEnv: false,
-                env: { PATH: "/usr/bin:/bin", HOME: temporary, TERM: "dumb", ...environment },
-                stdin: "ignore",
-                stdout: "pipe",
-                stderr: "pipe",
-              }),
-            )
-            .pipe(mapFailure(step))
-          const [stdout, stderr, exitCode] = yield* Effect.all(
-            [
-              Stream.mkString(Stream.decodeText(handle.stdout)),
-              Stream.mkString(Stream.decodeText(handle.stderr)),
-              handle.exitCode,
-            ],
-            { concurrency: 3 },
-          ).pipe(mapFailure(step))
-          if (Number(exitCode) !== 0)
-            return yield* failure(step, `exit ${exitCode}\n${stderr.slice(0, 2_000)}\n${stdout.slice(0, 2_000)}`)
-          return stdout
-        }),
+    const runBinary = (arguments_: ReadonlyArray<string>) =>
+      runBoundedProbeEffect(binary, arguments_, temporary).pipe(
+        mapFailure(`run rika ${arguments_.join(" ")}`),
+        Effect.flatMap((result) =>
+          result.exitCode === 0
+            ? Effect.succeed(result.stdout)
+            : Effect.fail(
+                failure(
+                  `run rika ${arguments_.join(" ")}`,
+                  `exit ${result.exitCode}\n${result.stderr.slice(0, 2_000)}\n${result.stdout.slice(0, 2_000)}`,
+                ),
+              ),
+        ),
       )
-    const versionOutput = yield* runBinary(["--version"])
+    const versionOutput = yield* runBinary(smokeInvocations[0].arguments)
     if (!versionOutput.includes(version))
       return yield* failure("version", `Expected ${version}, received: ${versionOutput}`)
-    const helpOutput = yield* runBinary(["--help"])
+    const helpOutput = yield* runBinary(smokeInvocations[1].arguments)
     if (/relay/i.test(helpOutput) || !/rika/i.test(helpOutput))
       return yield* failure("help", `Unexpected public help output: ${helpOutput.slice(0, 2_000)}`)
-    if (helpOutput.includes(tuiControllerProcessRole) || helpOutput.includes(runnerExecutorProcessRole))
-      return yield* failure("help", "Internal process roles are exposed in public help")
-    yield* runBinary([runnerExecutorProcessRole, "--help"], { RIKA_INTERNAL_LOCAL_EXECUTOR: "1" })
-    const interactiveProbe = yield* runBinary([tuiControllerProcessRole], {
-      RIKA_INTERNAL_CLIENT_RUNTIME: "1",
-      RIKA_INTERNAL_OPENTUI_NATIVE_PROBE: "1",
-    })
-    if (!interactiveProbe.includes("RIKA_OPENTUI_NATIVE_OK"))
-      return yield* failure("interactive runtime", "The packaged executable does not contain the OpenTUI runtime")
+    yield* runBehavioralProbesEffect(binary, temporary).pipe(mapFailure("behavioral probes"))
     yield* Effect.log(`Release smoke passed for ${target}: one public executable, no hidden runtime artifacts`)
   }),
 )
 
-BunRuntime.runMain(
-  Effect.scoped(Effect.flatMap(Layer.build(BunServices.layer), (context) => Effect.provide(program, context))),
-)
+if (import.meta.main) {
+  if (Bun.argv.includes("--dry-run")) BunRuntime.runMain(Console.log(JSON.stringify(smokeInvocations)))
+  else
+    BunRuntime.runMain(
+      Effect.scoped(Effect.flatMap(Layer.build(BunServices.layer), (context) => Effect.provide(program, context))),
+    )
+}

@@ -263,7 +263,36 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
         })
         yield* query(sql`UPDATE rika_hosted_thread_protocol_state SET event_cursor = ${events.at(-1)!.cursor}
           WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}`)
+        yield* query(sql`INSERT INTO rika_hosted_thread_protocol_snapshots
+          (owner_id, thread_id, thread_version, cursor, snapshot, created_at)
+          VALUES (${input.ownerId}, ${input.threadId}, ${state.version}, ${events.at(-1)!.cursor},
+            ${sql.json(input.snapshot)}, ${input.createdAt})
+          ON CONFLICT (thread_id, thread_version) DO UPDATE
+            SET cursor = EXCLUDED.cursor, snapshot = EXCLUDED.snapshot, created_at = EXCLUDED.created_at`)
         return events
+      }),
+    )
+  })
+
+  const saveSnapshot: ThreadProtocolStoreService["saveSnapshot"] = Effect.fn(
+    "PostgresThreadProtocolStore.saveSnapshot",
+  )(function* (input) {
+    yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        const rows = yield* query(sql`SELECT 1
+          FROM rika_hosted_thread_protocol_state
+          WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
+            AND version = ${input.threadVersion} AND event_cursor = ${input.cursor}
+          FOR UPDATE`)
+        if (rows[0] === undefined)
+          return yield* failure("conflict", "Thread protocol state advanced before its snapshot was persisted")
+        yield* query(sql`INSERT INTO rika_hosted_thread_protocol_snapshots
+          (owner_id, thread_id, thread_version, cursor, snapshot, created_at)
+          VALUES (${input.ownerId}, ${input.threadId}, ${input.threadVersion}, ${input.cursor},
+            ${sql.json(input.snapshot)}, ${input.createdAt})
+          ON CONFLICT (thread_id, thread_version) DO UPDATE
+            SET cursor = EXCLUDED.cursor, snapshot = EXCLUDED.snapshot, created_at = EXCLUDED.created_at`)
       }),
     )
   })
@@ -280,6 +309,11 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
         WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}`)
           const state = stateRows[0]
           if (state === undefined) return yield* failure("not-found", "Thread protocol state is unavailable")
+          const stateCursor = BigInt(state.cursor)
+          const throughCursor = input.throughCursor === undefined ? stateCursor : BigInt(input.throughCursor)
+          const targetCursor = ThreadEventCursor.make(
+            (throughCursor < stateCursor ? throughCursor : stateCursor).toString(),
+          )
           const snapshotRows = yield* query(sql<{
             readonly threadVersion: string
             readonly cursor: string
@@ -289,9 +323,11 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
           ${sql.unsafe(timestampSql.replace("%s", "created_at"))} AS "createdAt"
         FROM rika_hosted_thread_protocol_snapshots
         WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
-          AND cursor > ${input.afterCursor} AND cursor <= ${state.cursor}
+          AND ${input.includeSnapshot === false ? sql`FALSE` : sql`TRUE`}
+          AND cursor <= ${targetCursor}
           AND thread_version <= ${state.version}
-        ORDER BY thread_version DESC LIMIT 1`)
+        ORDER BY rika_hosted_thread_protocol_snapshots.thread_version DESC,
+          rika_hosted_thread_protocol_snapshots.cursor DESC LIMIT 1`)
           const snapshotRow = snapshotRows[0]
           const replayCursor = snapshotRow?.cursor ?? input.afterCursor
           const eventRows = yield* query(sql<{
@@ -305,8 +341,9 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
           ${sql.unsafe(timestampSql.replace("%s", "created_at"))} AS "createdAt"
         FROM rika_hosted_thread_protocol_events
         WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
-          AND cursor > ${replayCursor} AND cursor <= ${state.cursor}
-        ORDER BY sequence LIMIT ${Math.min(Math.max(Math.trunc(input.limit), 1), 1_000)}`)
+          AND cursor > ${replayCursor} AND cursor <= ${targetCursor}
+        ORDER BY rika_hosted_thread_protocol_events.sequence
+        LIMIT ${Math.min(Math.max(Math.trunc(input.limit), 1), 1_000)}`)
           const events: Array<ThreadProtocolEvent> = []
           for (const row of eventRows)
             events.push({
@@ -434,6 +471,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
     admitCommand,
     completeCommand,
     appendEvents,
+    saveSnapshot,
     replay,
     acknowledgeCursor,
     issueTicket,

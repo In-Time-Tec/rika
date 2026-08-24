@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Context, Effect, Layer } from "effect"
+import { Config, Context, Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { isTuiControllerProcessLaunch } from "./private-runtime-role"
-import { start as startInteractive } from "./interactive/process/process-start"
+import * as Logging from "./diagnostics/diagnostic-file-logging"
+import { version } from "./platform/application-version"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -18,23 +18,29 @@ const provideLayerScoped =
       ),
     )
 import { clientProcessExitCode } from "./client/client-process-exit"
-import { installClientSigintHandler, isInteractiveClientLaunch, run } from "./client/client-process"
+import { installClientSigintHandler, run } from "./client/client-process"
+
+const exitProcess = process.exit
 
 const startClient = () => {
   let interruptedBySigint = false
   let rootFiber: ReturnType<typeof Effect.runFork> | undefined
   const removeSigintHandler = installClientSigintHandler({
-    inputMode: () => (isInteractiveClientLaunch() ? "child" : "root"),
     rootFiber: () => rootFiber,
     onSignal: () => {
       interruptedBySigint = true
     },
   })
-  rootFiber = Effect.runFork(run().pipe(provideLayerScoped(Layer.merge(BunServices.layer, FetchHttpClient.layer))))
-  if (interruptedBySigint && !isInteractiveClientLaunch()) rootFiber.interruptUnsafe()
+  const platform = Layer.merge(BunServices.layer, FetchHttpClient.layer)
+  const home = Effect.runSync(Config.string("HOME").pipe(Config.withDefault(process.cwd())))
+  const logging = Logging.layer({ dataRoot: `${home}/.config/rika`, role: "client", version }).pipe(
+    Layer.provide(BunServices.layer),
+  )
+  rootFiber = Effect.runFork(run().pipe(provideLayerScoped(Layer.merge(platform, logging))))
+  if (interruptedBySigint) rootFiber.interruptUnsafe()
   rootFiber.addObserver((exit) => {
     removeSigintHandler()
-    process.exit(
+    exitProcess(
       clientProcessExitCode({
         exit,
         interruptedBySigint,
@@ -44,7 +50,4 @@ const startClient = () => {
   })
 }
 
-if (import.meta.main) {
-  if (Effect.runSync(isTuiControllerProcessLaunch)) startInteractive()
-  else startClient()
-}
+if (import.meta.main) startClient()

@@ -1,17 +1,17 @@
-import { BunCrypto, BunFileSystem } from "@effect/platform-bun"
+import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
-import { Clock, Effect, FileSystem, Layer, Redacted, Schema } from "effect"
+import { Clock, Config, Effect, FileSystem, Option, Redacted, Schema } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { TestClock } from "effect/testing"
 import { prepare, pushApprovedBranch, testing, WorkspaceError } from "../src/workspace"
 import { createArchive, encodeArchive } from "../src/workspace-archive"
 import { provideLayer } from "./support/layer"
 
-const platform = Layer.merge(BunCrypto.layer, BunFileSystem.layer)
+const platform = BunServices.layer
 const kernel = { profileDigest: "1".repeat(64), bindingContractDigest: "2".repeat(64) } as const
 const JsonRecord = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
 const decodeJsonRecord = Schema.decodeUnknownEffect(JsonRecord)
 const encodeJsonRecord = Schema.encodeEffect(JsonRecord)
-
 const access = {
   version: 1 as const,
   fence: {
@@ -154,13 +154,13 @@ it.effect("forces gh API reads to GET and rejects every write-capable surface", 
       yield* fileSystem.chmod(fake, 0o700)
       yield* fileSystem.chmod(credential, 0o700)
       yield* fileSystem.chmod(wrapper, 0o700)
-      const run = (args: ReadonlyArray<string>) =>
-        Effect.sync(() => Bun.spawnSync([wrapper, ...args], { stdout: "pipe", stderr: "pipe" }))
-      expect((yield* run(["--version"])).exitCode).toBe(0)
-      expect((yield* run(["repo", "view"])).exitCode).toBe(0)
-      expect((yield* run(["issue", "view", "1"])).exitCode).toBe(0)
-      expect((yield* run(["pr", "view", "2"])).exitCode).toBe(0)
-      expect((yield* run(["api", "repos/example/repo"])).exitCode).toBe(0)
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const run = (args: ReadonlyArray<string>) => spawner.exitCode(ChildProcess.make(wrapper, args))
+      expect(Number(yield* run(["--version"]))).toBe(0)
+      expect(Number(yield* run(["repo", "view"]))).toBe(0)
+      expect(Number(yield* run(["issue", "view", "1"]))).toBe(0)
+      expect(Number(yield* run(["pr", "view", "2"]))).toBe(0)
+      expect(Number(yield* run(["api", "repos/example/repo"]))).toBe(0)
       expect(yield* fileSystem.readFileString(calls)).toBe(
         "--version\nrepo view\nissue view 1\npr view 2\napi --method GET repos/example/repo\n",
       )
@@ -175,9 +175,9 @@ it.effect("forces gh API reads to GET and rejects every write-capable surface", 
         ["api", "repos/example/repo", "-fvalue=secret"],
         ["repo", "delete"],
       ])
-        expect((yield* run(args)).exitCode).toBe(2)
+        expect(Number(yield* run(args))).toBe(2)
     }),
-  ).pipe(provideLayer(BunFileSystem.layer)),
+  ).pipe(provideLayer(platform)),
 )
 
 it.effect("atomically installs an exact private checkout without exposing its credential", () =>
@@ -303,18 +303,11 @@ fi
           expect(yield* fileSystem.readFileString(`${credentialRoot}/git-credential-rika`)).not.toContain(
             "private-checkout-secret",
           )
-          const invoke = (arguments_: ReadonlyArray<string>) =>
-            Effect.acquireRelease(
-              Effect.sync(() => Bun.spawn([...arguments_], { stdout: "pipe", stderr: "pipe" })),
-              (process) => Effect.promise(() => process.exited).pipe(Effect.ignore),
-            ).pipe(
-              Effect.flatMap((process) =>
-                Effect.all([
-                  Effect.promise(() => new Response(process.stdout).text()),
-                  Effect.promise(() => process.exited),
-                ]),
-              ),
-            )
+          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+          const invoke = (arguments_: readonly [string, ...Array<string>]) =>
+            spawner
+              .string(ChildProcess.make(arguments_[0], arguments_.slice(1)))
+              .pipe(Effect.map((text) => [text, 0] as const))
           const [gitCredential, gitExit] = yield* invoke([`${credentialRoot}/git-credential-rika`, "get"])
           expect(gitExit).toBe(0)
           expect(gitCredential).toContain("password=private-checkout-secret-3")
@@ -550,11 +543,12 @@ it.effect("blocks non-executable, failed, and timed-out setup until an explicit 
       const markerName = (yield* fileSystem.readDirectory(markerDirectory)).find((name) => name.endsWith(".json"))!
       const markerPath = `${markerDirectory}/${markerName}`
       const failMarker = fileSystem.readFileString(markerPath).pipe(
-        Effect.flatMap((value) => {
-          const marker = JSON.parse(value) as { setupState: string }
-          marker.setupState = "failed"
-          return fileSystem.writeFileString(markerPath, JSON.stringify(marker))
-        }),
+        Effect.flatMap((value) =>
+          decodeJsonRecord(value).pipe(
+            Effect.flatMap((marker) => encodeJsonRecord({ ...marker, setupState: "failed" })),
+            Effect.flatMap((marker) => fileSystem.writeFileString(markerPath, marker)),
+          ),
+        ),
       )
       yield* failMarker
       const retry = {
@@ -646,7 +640,7 @@ it.effect("blocks an early resume failure and supervises continuation after the 
       )
       yield* waitForContinuation
       expect(yield* fileSystem.readFileString(`${root}/continued`)).toBe("x")
-      expect(Bun.env.RIKA_CHILD_ONLY).toBeUndefined()
+      expect(yield* Config.option(Config.string("RIKA_CHILD_ONLY"))).toEqual(Option.none())
       yield* prepare({ ...base, assignment: cold })
       expect(yield* fileSystem.readFileString(`${root}/continued`)).toBe("x")
     }),

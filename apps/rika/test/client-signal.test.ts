@@ -1,31 +1,69 @@
-import { expect, test } from "vitest"
-import { clientSigintMode, installClientSigintHandler } from "../src/client/client-process"
+import { expect, it } from "@effect/vitest"
+import { Deferred, Effect, Fiber, Schedule, Stream } from "effect"
+import { installClientSigintHandler } from "../src/client/client-process"
+import { makeSigintOwnership } from "../src/client/client-signal-ownership"
+import { lifecycleEvents } from "../src/interactive/process/process-signals"
 
-test("startup and parsed operation select the process signal owner", () => {
-  expect(clientSigintMode(undefined)).toBe("root")
-  expect(clientSigintMode({ _tag: "Interactive" })).toBe("child")
-  expect(clientSigintMode({ _tag: "Doctor" })).toBe("root")
-  expect(clientSigintMode({ _tag: "Thread" })).toBe("root")
-})
+const makeEmitter = () => {
+  const listeners = new Map<string, Set<() => void>>()
+  const on = (event: string, listener: () => void) => {
+    const eventListeners = listeners.get(event) ?? new Set()
+    eventListeners.add(listener)
+    listeners.set(event, eventListeners)
+  }
+  const off = (event: string, listener: () => void) => {
+    listeners.get(event)?.delete(listener)
+  }
+  const emit = (event: string) => {
+    for (const listener of listeners.get(event) ?? []) listener()
+  }
+  return { on, off, emit }
+}
 
-test("noninteractive SIGINT interrupts the root and removal detaches the listener", () => {
-  let interrupted = 0
-  let observed = 0
-  let mode: "root" | "child" = "root"
-  const remove = installClientSigintHandler({
-    inputMode: () => mode,
-    rootFiber: () => ({ interruptUnsafe: () => interrupted++ }),
-    onSignal: () => observed++,
-  })
-  process.emit("SIGINT")
-  expect(interrupted).toBe(1)
-  expect(observed).toBe(1)
-  mode = "child"
-  process.emit("SIGINT")
-  expect(interrupted).toBe(1)
-  expect(observed).toBe(2)
-  remove()
-  process.emit("SIGINT")
-  expect(interrupted).toBe(1)
-  expect(observed).toBe(2)
-})
+it.live("hands SIGINT from the root to the TUI only while its watcher owns listeners", () =>
+  Effect.gen(function* () {
+    const ownership = makeSigintOwnership()
+    const emitter = makeEmitter()
+    const stdin = makeEmitter()
+    let rootInterrupts = 0
+    let tuiInterrupts = 0
+    const removeRoot = installClientSigintHandler({
+      rootFiber: () => ({ interruptUnsafe: () => rootInterrupts++ }),
+      onSignal: () => undefined,
+      ownership,
+      process: emitter,
+    })
+
+    emitter.emit("SIGINT")
+    expect(rootInterrupts).toBe(1)
+
+    const observed = yield* Deferred.make<void>()
+    const fiber = yield* Effect.forkChild(
+      Effect.scoped(
+        lifecycleEvents({ signals: ["SIGINT"], stdin, process: emitter, ownership }).pipe(
+          Stream.runForEach(() =>
+            Effect.sync(() => tuiInterrupts++).pipe(Effect.andThen(Deferred.succeed(observed, undefined))),
+          ),
+        ),
+      ),
+    )
+    yield* Effect.sync(() => ownership.rootOwns()).pipe(
+      Effect.filterOrFail((owns) => !owns),
+      Effect.retry(Schedule.spaced("1 millis")),
+      Effect.timeout("1 second"),
+    )
+    emitter.emit("SIGINT")
+    yield* Deferred.await(observed).pipe(Effect.timeout("1 second"))
+    expect(rootInterrupts).toBe(1)
+    expect(tuiInterrupts).toBe(1)
+
+    yield* Fiber.interrupt(fiber)
+    expect(ownership.rootOwns()).toBe(true)
+    emitter.emit("SIGINT")
+    expect(rootInterrupts).toBe(2)
+    expect(tuiInterrupts).toBe(1)
+    removeRoot()
+    emitter.emit("SIGINT")
+    expect(rootInterrupts).toBe(2)
+  }),
+)

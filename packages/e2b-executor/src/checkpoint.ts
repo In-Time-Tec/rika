@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import * as BunServices from "@effect/platform-bun/BunServices"
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
 import {
   MaximumArchiveBytes,
@@ -9,6 +10,7 @@ import {
 } from "@rika/remote-execution/workspace-archive"
 import type { EncodedArchive } from "@rika/remote-execution/protocol"
 import { Context, Effect, Encoding, FileSystem, Layer, Option, Redacted, Result, Schema } from "effect"
+import { ChildProcessSpawner } from "effect/unstable/process"
 
 export interface Inspection {
   readonly contentDigest: string
@@ -180,11 +182,18 @@ export const vaultLayer = (
     Effect.gen(function* () {
       const objects = yield* ObjectStore
       const fileSystem = yield* FileSystem.FileSystem
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const cryptoKey = yield* importKey(yield* decodeKey(masterKey))
       const decode = (archive: EncodedArchive) =>
-        decodeArchive(archive).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem))
+        decodeArchive(archive).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+        )
       const inspect = (archive: Archive) =>
-        inspectArchive(archive).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem))
+        inspectArchive(archive).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+        )
 
       const store = Effect.fn("CheckpointVault.store")(function* (
         objectKey: string,
@@ -269,7 +278,7 @@ export const vaultLayer = (
 
       return Vault.of({ storeCheckpoint, loadCheckpoint, storeSetupCache, loadSetupCache })
     }),
-  )
+  ).pipe(Layer.provide(BunServices.layer))
 
 export const memoryObjectStore = (): ObjectStoreInterface => {
   const objects = new Map<string, Uint8Array>()

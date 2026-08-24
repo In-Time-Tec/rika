@@ -30,7 +30,7 @@ export class TranscriptPaneFrame {
     else renderer.setFrameCallback(this.prepare)
   }
 
-  readonly prepare = (_deltaTime: number): Promise<void> => {
+  readonly prepare: Parameters<NonNullable<CliRenderer["setFrameCallback"]>>[0] = (_deltaTime) => {
     this.pending = false
     this.settle()
     return Promise.resolve()

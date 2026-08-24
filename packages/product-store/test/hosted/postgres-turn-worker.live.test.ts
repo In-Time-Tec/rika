@@ -1,4 +1,5 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
+import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
@@ -13,13 +14,25 @@ import {
 import { WorkspacePreparations } from "@rika/product/workspace-preparation"
 import { HostedTurnWorkerStore, layer as workerStoreLayer } from "../../src/hosted/postgres-turn-worker-store"
 import { layer as workspacePreparationLayer } from "../../src/hosted/postgres-workspace-preparations"
-import { Context, Effect, Layer, Random, Redacted, Schema } from "effect"
+import { Context, Effect, FileSystem, Inspectable, Layer, Logger, Random, Redacted, Schema } from "effect"
+import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
 import { identityMigrations } from "../../../identity/src/migrations"
 import { runMigration } from "../../../identity/src/postgres"
 import { migrations } from "../../src/hosted/migrations"
 
-const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
+const databaseUrl = "postgresql://rika:rika@127.0.0.1:5432/rika_test"
+const readFileString = (url: URL) =>
+  Effect.scoped(
+    Layer.build(BunServices.layer).pipe(
+      Effect.flatMap((context) =>
+        Effect.provide(
+          Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.readFileString(fileURLToPath(url))),
+          context,
+        ),
+      ),
+    ),
+  )
 
 const request = (workerId: string, claimToken: string, now: number, leaseMillis = 100) => ({
   workerId,
@@ -28,25 +41,27 @@ const request = (workerId: string, claimToken: string, now: number, leaseMillis 
   leaseMillis,
 })
 
-it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers prepared execution admission", () =>
-  Effect.scoped(
+it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers prepared execution admission", () => {
+  const observations: Array<ReturnType<typeof Logger.formatStructured.log>> = []
+  const logger = Logger.map(Logger.formatStructured, (record) => observations.push(record))
+  return Effect.scoped(
     Effect.gen(function* () {
       const database = `rika_turn_worker_${Math.abs(yield* Random.nextInt)}`
       const admin = new Pool({ connectionString: databaseUrl })
-      yield* Effect.promise(() => admin.query(`CREATE DATABASE "${database}"`))
+      yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
       const parsed = new URL(databaseUrl!)
       parsed.pathname = `/${database}`
       const url = parsed.toString()
       const pool = new Pool({ connectionString: url })
       try {
         for (const migration of [...identityMigrations, ...migrations]) {
-          const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
+          const sql = yield* readFileString(migration.url)
           yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
         }
         const route = yield* Schema.encodeEffect(Schema.fromJsonString(ExecutionRoute.ExecutionRouteSnapshot))(
           ExecutionRoute.testExecutionRoute(),
         )
-        yield* Effect.promise(() =>
+        yield* Effect.tryPromise(() =>
           pool.query(
             `INSERT INTO "user" (id,name,email,email_verified,created_at,updated_at)
                VALUES ('worker-user','Worker','worker@example.test',true,now(),now());
@@ -64,7 +79,7 @@ it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers pre
                VALUES ('thread-1','worker-owner','workspace-1','Worker',1,1)`,
           ),
         )
-        yield* Effect.promise(() =>
+        yield* Effect.tryPromise(() =>
           pool.query(
             `INSERT INTO rika_turns
                (id,thread_id,prompt,status,created_at,updated_at,execution_route_json)
@@ -73,11 +88,11 @@ it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers pre
             [route],
           ),
         )
-        yield* Effect.promise(() =>
+        yield* Effect.tryPromise(() =>
           pool.query(`INSERT INTO rika_thread_queue_state (thread_id,revision,queued_count)
             VALUES ('thread-1',2,2)`),
         )
-        yield* Effect.promise(() =>
+        yield* Effect.tryPromise(() =>
           pool.query(`INSERT INTO rika_hosted_executor_assignments
             (id, owner_id, thread_id, workspace_id, executor_kind, placement, checkout, generation, revision,
               last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
@@ -162,13 +177,25 @@ it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers pre
         const first = claims.find((claim) => claim !== undefined)
         if (first === undefined) return yield* Effect.die("Turn was not claimed")
         expect(first.input).toMatchObject({ turnId: "turn-1", threadId: "thread-1", prompt: "first" })
+        const durableClaim = yield* Effect.tryPromise(() =>
+          pool.query(`SELECT thread_id, turn_id FROM rika_hosted_turn_claims WHERE turn_id = 'turn-1'`),
+        )
+        expect(durableClaim.rows).toEqual([{ thread_id: "thread-1", turn_id: "turn-1" }])
+        const claimLogs = observations.filter((record) =>
+          Inspectable.toStringUnknown(record).includes("hosted.turn_claim.success"),
+        )
+        expect(claimLogs).toHaveLength(1)
+        const renderedClaim = Inspectable.toStringUnknown(claimLogs)
+        expect(renderedClaim).toContain("thread-1")
+        expect(renderedClaim).toContain("turn-1")
+        for (const secret of ["worker-owner", "claim-0", "first"]) expect(renderedClaim).not.toContain(secret)
         expect(yield* store.prepare(first, 101)).toBe(true)
         expect(yield* store.claimRecovery(request("early", "early-claim", 150))).toBeUndefined()
         const recovered = yield* store.claimRecovery(request("recovery", "recovery-claim", 201))
         if (recovered === undefined) return yield* Effect.die("Prepared Turn was not recovered")
         expect(recovered).toMatchObject({ prepared: true, input: first.input })
         yield* store.complete(recovered, { runId: "run-turn-1", turnId: "turn-1", threadId: "thread-1" }, 202)
-        const durable = yield* Effect.promise(() =>
+        const durable = yield* Effect.tryPromise(() =>
           pool.query(`SELECT status, execution_link_json FROM rika_turns WHERE id = 'turn-1'`),
         )
         expect(durable.rows[0]).toMatchObject({ status: "running" })
@@ -182,13 +209,13 @@ it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers pre
         })
         expect(
           Number(
-            (yield* Effect.promise(() =>
+            (yield* Effect.tryPromise(() =>
               pool.query(`SELECT count(*) FROM rika_turn_admission_outbox UNION ALL
                   SELECT count(*) FROM rika_hosted_turn_claims`),
             )).rows.reduce((total, row) => total + Number(row.count), 0),
           ),
         ).toBe(0)
-        yield* Effect.promise(() => pool.query(`UPDATE rika_turns SET status = 'completed' WHERE id = 'turn-1'`))
+        yield* Effect.tryPromise(() => pool.query(`UPDATE rika_turns SET status = 'completed' WHERE id = 'turn-1'`))
         const second = yield* store.claimNext(request("worker-a", "second-a", 300))
         if (second === undefined) return yield* Effect.die("Second Turn was not claimed")
         expect(yield* store.renew(second, 350, 100)).toBe(true)
@@ -196,15 +223,15 @@ it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers pre
         const replacement = yield* store.claimNext(request("worker-b", "second-b", 451))
         if (replacement === undefined) return yield* Effect.die("Expired Turn claim was not recovered")
         yield* store.release(second)
-        const authority = yield* Effect.promise(() =>
+        const authority = yield* Effect.tryPromise(() =>
           pool.query(`SELECT worker_id, claim_token FROM rika_hosted_turn_claims WHERE turn_id = 'turn-2'`),
         )
         expect(authority.rows[0]).toEqual({ worker_id: "worker-b", claim_token: "second-b" })
       } finally {
-        yield* Effect.promise(() => pool.end())
-        yield* Effect.promise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-        yield* Effect.promise(() => admin.end())
+        yield* Effect.tryPromise(() => pool.end())
+        yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+        yield* Effect.tryPromise(() => admin.end())
       }
     }),
-  ),
-)
+  ).pipe(Effect.provideService(Logger.CurrentLoggers, new Set([logger])))
+})

@@ -34,7 +34,14 @@ test("adds only an open active interval to accumulated time", () => {
 })
 test("tracks only the five turn activity states", () => {
   let model = { ...initial("/work", "medium"), input: "run it", cursor: 6 }
-  model = update(model, { _tag: "Submitted" })
+  model = update(model, { _tag: "Submitted", submissionId: "submission" })
+  expect(model.activity).toBeUndefined()
+  model = update(model, {
+    _tag: "SubmissionAdmitted",
+    turnId: "turn",
+    submissionId: "submission",
+    status: "active",
+  })
   expect(model.activity).toEqual({ _tag: "Sending" })
   expect(formatActivity(model.activity)).toBe("Sending")
 
@@ -107,11 +114,11 @@ test("exposes local and Orb Thread creation plus the current command controls", 
     "max-depth",
     "quit",
   ])
-  expect(filter("new thread")).toEqual([
+  expect(filter("new on runner")).toEqual([
     {
       id: "new-thread",
       category: "thread",
-      label: "new thread",
+      label: "new on Runner",
       action: { _tag: "NewThread" },
     },
   ])
@@ -186,12 +193,19 @@ test("edits, moves, and submits input", () => {
   model = update(model, { _tag: "KeyPressed", key: key({ name: "x", sequence: "x" }) })
   model = update(model, { _tag: "KeyPressed", key: key({ name: "right" }) })
   expect(model.input).toBe("xi")
-  model = update(model, { _tag: "Submitted" })
-  expect(model.entries).toEqual([{ role: "user", text: "xi" }])
+  model = update(model, { _tag: "Submitted", submissionId: "submission-xi" })
+  expect(model.entries).toEqual([])
+  model = update(model, {
+    _tag: "SubmissionAdmitted",
+    turnId: "xi",
+    submissionId: "submission-xi",
+    status: "active",
+  })
+  expect(model.entries).toEqual([{ role: "user", text: "xi", turnId: "xi" }])
   expect(model.busy).toBe(true)
   model = update(model, { _tag: "KeyPressed", key: key({ name: "q", sequence: "q" }) })
   model = update(model, { _tag: "Submitted" })
-  expect(model.entries).toEqual([{ role: "user", text: "xi" }])
+  expect(model.entries).toEqual([{ role: "user", text: "xi", turnId: "xi" }])
   model = update(model, { _tag: "TurnStarted", turnId: "q", prompt: "q" })
   expect(model.entries.at(-1)).toEqual({ role: "user", text: "q", turnId: "q" })
   expect(model.busy).toBe(true)
@@ -277,9 +291,16 @@ test("grows multiline input and supports newline shortcuts and history search", 
   let model = initial("/work")
   for (const character of "first")
     model = update(model, { _tag: "KeyPressed", key: key({ name: character, sequence: character }) })
-  model = update(model, { _tag: "Submitted" })
+  model = update(model, { _tag: "Submitted", submissionId: "first" })
+  model = update(model, { _tag: "SubmissionAdmitted", turnId: "first", submissionId: "first", status: "active" })
   model = { ...model, input: "second", cursor: 6 }
-  model = update(model, { _tag: "Submitted" })
+  model = update(model, { _tag: "Submitted", submissionId: "second" })
+  model = update(model, {
+    _tag: "SubmissionAdmitted",
+    turnId: "second",
+    submissionId: "second",
+    status: "active",
+  })
   model = update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
   expect(model.input).toBe("second")
   model = update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
@@ -390,11 +411,24 @@ test("streams, completes, and reports failures", () => {
   expect(model.items.at(-1)).toEqual({ _tag: "Block", index: 0 })
   expect(model.busy).toBe(false)
   model = { ...model, input: "try again", cursor: 9 }
-  model = update(model, { _tag: "Submitted" })
-  expect(model.entries.at(-1)).toEqual({ role: "user", text: "try again" })
+  model = update(model, { _tag: "Submitted", submissionId: "retry-submission" })
+  expect(model.entries.at(-1)).toEqual({ role: "assistant", text: "completion only" })
+  model = update(model, {
+    _tag: "SubmissionAdmitted",
+    turnId: "retry",
+    submissionId: "retry-submission",
+    status: "active",
+  })
+  expect(model.entries.at(-1)).toEqual({ role: "user", text: "try again", turnId: "retry" })
   model = update(model, { _tag: "TurnStarted", turnId: "retry", prompt: "try again" })
   expect(model.entries.at(-1)).toEqual({ role: "user", text: "try again", turnId: "retry" })
-  expect(model.items.at(-1)).toEqual({ _tag: "Entry", index: 3, id: "turn:retry:user", turnId: "retry" })
+  expect(model.items.at(-1)).toEqual({
+    _tag: "Entry",
+    index: 3,
+    id: "turn:retry:user",
+    turnId: "retry",
+    submissionId: "retry-submission",
+  })
   expect(model).toMatchObject({ input: "", busy: true })
   model = update(initial("/work"), { _tag: "AssistantCompleted", text: "standalone" })
   expect(model.entries).toEqual([{ role: "assistant", text: "standalone" }])
@@ -478,7 +512,7 @@ test("submitting while a turn is active stays an ordinary submission", () => {
     input: "queued follow-up",
   }
   const submitted = update(busy, { _tag: "Submitted", submissionId: "sub-q" })
-  expect(submitted.input).toBe("")
+  expect(submitted.input).toBe("queued follow-up")
   expect(submitted.busy).toBe(true)
   expect(submitted.pendingSteering).toEqual([])
   expect(submitted.pendingAction).toBeUndefined()
@@ -486,7 +520,7 @@ test("submitting while a turn is active stays an ordinary submission", () => {
     { input: "queued follow-up", attachments: [], cursor: 0, submissionId: "sub-q" },
   ])
 })
-test("submitting while busy echoes a provisional queue row immediately", () => {
+test("submitting while busy waits for admission before adding a provisional queue row", () => {
   const busy: Model = resetQueue(
     {
       ...initial("/work"),
@@ -500,7 +534,15 @@ test("submitting while busy echoes a provisional queue row immediately", () => {
     [],
   )
   const submitted = update(busy, { _tag: "Submitted", submissionId: "sub-1" })
-  expect(submitted.queue).toEqual([{ id: "sub-1", prompt: "queued prompt", provisional: true }])
+  expect(submitted.queue).toEqual([])
   expect(submitted.queueRevision).toBe(3)
-  expect(submitted.input).toBe("")
+  expect(submitted.input).toBe("queued prompt")
+  const admitted = update(submitted, {
+    _tag: "SubmissionAdmitted",
+    turnId: "turn-1",
+    submissionId: "sub-1",
+    status: "queued",
+  })
+  expect(admitted.queue).toEqual([{ id: "turn-1", prompt: "queued prompt", provisional: true }])
+  expect(admitted.input).toBe("")
 })

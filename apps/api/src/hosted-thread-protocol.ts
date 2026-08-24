@@ -22,7 +22,7 @@ import type { AuthorizationAction } from "@rika/product/hosted-authorization"
 import {
   type ClientMessage,
   type MutatingThreadCommand,
-  type ServerFrame,
+  ServerFrame,
   isDurableThreadEvent,
   protocolVersion,
 } from "@rika/product/client-protocol"
@@ -37,6 +37,9 @@ import { HostedWorkspace } from "./hosted-workspace"
 export const threadWebSocketAudience = "/api/v1/threads/socket"
 const ticketLifetimeMillis = 60_000
 const zeroCursor = ThreadEventCursor.make("0")
+const encodeUnknownJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+const maximumAttachmentEvents = 10_000
+const maximumAttachmentBytes = 32 * 1024 * 1024
 const checkpointEquivalent = Schema.toEquivalence(ExecutionProjection.Checkpoint)
 const replayDistance = (cursor: string, afterCursor: string) => {
   const distance = BigInt(cursor) - BigInt(afterCursor)
@@ -102,6 +105,14 @@ const commandResult = (command: ThreadProtocolCommand, requestId: RequestId): Se
       details: {},
     }
   }
+  let result: Extract<ServerFrame["payload"], { readonly _tag: "CommandAccepted" }>["result"] = { _tag: "Applied" }
+  if (command.result?._tag === "ThreadCreated")
+    result = { _tag: "ThreadCreated", threadId: ThreadId.make(String(command.result.threadId)) }
+  if (
+    command.result?._tag === "PromptAdmitted" &&
+    (command.result.status === "accepted" || command.result.status === "queued")
+  )
+    result = { _tag: "PromptAdmitted", status: command.result.status }
   return {
     _tag: "CommandAccepted",
     requestId,
@@ -109,10 +120,7 @@ const commandResult = (command: ThreadProtocolCommand, requestId: RequestId): Se
     threadId: command.threadId,
     threadVersion: command.threadVersion,
     cursor: command.cursor ?? zeroCursor,
-    result:
-      command.result?._tag === "ThreadCreated"
-        ? { _tag: "ThreadCreated", threadId: ThreadId.make(String(command.result.threadId)) }
-        : { _tag: "Applied" },
+    result,
   }
 }
 
@@ -249,27 +257,29 @@ export const layer = Layer.effect(
         ) {
           const commandId =
             "commandId" in message.command ? CommandId.make(String(message.command.commandId)) : undefined
+          const threadId = "threadId" in message.command ? message.command.threadId : undefined
           let current: { readonly threadVersion: ThreadVersion; readonly cursor: ThreadEventCursor } | undefined
-          if (attached !== undefined) {
-            current = yield* store
-              .replay({
-                ownerId: attached.authority.ownerId,
-                threadId: attached.threadId,
-                actor: attached.authority.actor,
-                afterCursor: zeroCursor,
-                limit: 1,
-              })
-              .pipe(
-                Effect.map((replay) => ({ threadVersion: replay.threadVersion, cursor: replay.cursor })),
-                Effect.orElseSucceed(() => undefined),
-              )
+          if (threadId !== undefined) {
+            current = yield* product.authorizeThread(principal, threadId, "thread:view").pipe(
+              Effect.flatMap((authority) =>
+                store.replay({
+                  ownerId: authority.ownerId,
+                  threadId,
+                  actor: authority.actor,
+                  afterCursor: zeroCursor,
+                  limit: 1,
+                }),
+              ),
+              Effect.map((replay) => ({ threadVersion: replay.threadVersion, cursor: replay.cursor })),
+              Effect.orElseSucceed(() => undefined),
+            )
           }
           return [
             frame({
               _tag: "CommandRejected",
               requestId: message.requestId,
               ...(commandId === undefined ? {} : { commandId }),
-              ...(attached === undefined ? {} : { threadId: attached.threadId }),
+              ...(threadId === undefined ? {} : { threadId }),
               reason: error.kind,
               ...(current === undefined
                 ? {}
@@ -323,11 +333,7 @@ export const layer = Layer.effect(
                 admittedAt: receivedAt,
               })
               .pipe(Effect.mapError(storeFailure), (effect) =>
-                HostedObservability.observe(
-                  "command_admission",
-                  { ownerId: authority.ownerId, threadId, commandId: command.commandId },
-                  effect,
-                ),
+                HostedObservability.observe("target_resolution", { ownerId: authority.ownerId, threadId }, effect),
               )
             let completed: ThreadProtocolCommand
             if (admission._tag === "Duplicate") {
@@ -353,7 +359,6 @@ export const layer = Layer.effect(
                 })
                 .pipe(Effect.mapError(storeFailure))
             }
-            attached = { threadId, authority }
             return [frame(commandResult(completed, message.requestId))]
           }
 
@@ -364,9 +369,12 @@ export const layer = Layer.effect(
             yield* store
               .initializeThread({ ownerId: authority.ownerId, threadId: command.threadId, actor: authority.actor })
               .pipe(Effect.mapError(storeFailure))
+            const currentSnapshot = yield* operations
+              .snapshot(authority.ownerId, ProductThreadId.make(command.threadId))
+              .pipe(Effect.mapError(operationFailure))
             const replayCorrelation = { ownerId: authority.ownerId, threadId: command.threadId }
-            const replay = yield* HostedObservability.observe(
-              "client_replay",
+            let replay = yield* HostedObservability.observe(
+              "attach",
               replayCorrelation,
               Effect.gen(function* () {
                 const result = yield* store
@@ -388,13 +396,67 @@ export const layer = Layer.effect(
                 return result
               }),
             )
-            attached = { threadId: command.threadId, authority }
+            if (replay.snapshot === undefined) {
+              const createdAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+              const saved = yield* store
+                .saveSnapshot({
+                  ownerId: authority.ownerId,
+                  threadId: command.threadId,
+                  threadVersion: replay.threadVersion,
+                  cursor: replay.cursor,
+                  snapshot: currentSnapshot,
+                  createdAt,
+                })
+                .pipe(Effect.result)
+              if (saved._tag === "Failure" && saved.failure.reason !== "conflict")
+                return yield* storeFailure(saved.failure)
+              replay = yield* store
+                .replay({
+                  ownerId: authority.ownerId,
+                  threadId: command.threadId,
+                  actor: authority.actor,
+                  afterCursor: command.afterCursor,
+                  limit: 1_000,
+                })
+                .pipe(Effect.mapError(storeFailure))
+            }
             const replaySnapshot = replay.snapshot
-            const snapshot =
-              replaySnapshot?.snapshot ??
-              (yield* operations
-                .snapshot(authority.ownerId, ProductThreadId.make(command.threadId))
-                .pipe(Effect.mapError(operationFailure)))
+            if (replaySnapshot === undefined) return yield* unavailable("Hosted Thread replay has no durable snapshot")
+            const replayEvents = [...replay.events]
+            const snapshotCursor = replaySnapshot?.cursor ?? zeroCursor
+            const snapshotThreadVersion = replaySnapshot?.threadVersion ?? replay.threadVersion
+            let representedCursor = replayEvents.at(-1)?.cursor ?? snapshotCursor
+            while (BigInt(representedCursor) < BigInt(replay.cursor)) {
+              const page = yield* store
+                .replay({
+                  ownerId: authority.ownerId,
+                  threadId: command.threadId,
+                  actor: authority.actor,
+                  afterCursor: representedCursor,
+                  throughCursor: replay.cursor,
+                  includeSnapshot: false,
+                  limit: 1_000,
+                })
+                .pipe(Effect.mapError(storeFailure))
+              if (page.events.length === 0)
+                return yield* unavailable("Hosted Thread replay does not continuously represent its cursor")
+              replayEvents.push(...page.events)
+              if (replayEvents.length > maximumAttachmentEvents)
+                return yield* unavailable("Hosted Thread replay exceeds the attachment event limit")
+              representedCursor = page.events.at(-1)!.cursor
+            }
+            let expectedCursor = BigInt(snapshotCursor) + 1n
+            for (const event of replayEvents) {
+              if (BigInt(event.cursor) !== expectedCursor)
+                return yield* unavailable(
+                  `Hosted Thread replay contains cursor ${event.cursor}; expected ${expectedCursor.toString()}`,
+                )
+              expectedCursor += 1n
+            }
+            if (representedCursor !== replay.cursor)
+              return yield* unavailable("Hosted Thread replay terminal cursor is not represented")
+            const representedThreadVersion = replayEvents.at(-1)?.threadVersion ?? snapshotThreadVersion
+            const snapshot = replaySnapshot.snapshot
             const presenceNow = Timestamp.make(receivedAt)
             const presenceExpiresAt = Timestamp.make(
               DateTime.formatIso(DateTime.add(DateTime.makeUnsafe(receivedAt), { minutes: 1 })),
@@ -419,36 +481,30 @@ export const layer = Layer.effect(
                 ),
                 Effect.orElseSucceed(() => []),
               )
-            return [
-              frame({
-                _tag: "ThreadSnapshot",
-                requestId: message.requestId,
-                threadId: command.threadId,
-                threadVersion: replaySnapshot?.threadVersion ?? replay.threadVersion,
-                cursor: replaySnapshot?.cursor ?? replay.cursor,
-                snapshot,
-              }),
-              ...(replaySnapshot === undefined
-                ? []
-                : replay.events.map((event) =>
-                    frame({
-                      _tag: "ThreadEvent",
-                      event: {
-                        threadId: event.threadId,
-                        sequence: Sequence.make(event.sequence),
-                        cursor: event.cursor,
-                        threadVersion: event.threadVersion,
-                        event: event.event,
-                        createdAt: event.createdAt,
-                      },
-                    }),
-                  )),
-              frame({
-                _tag: "PresenceSnapshot",
-                threadId: command.threadId,
-                participants: participants.map(({ actor, status }) => ({ actor, status })),
-              }),
-            ]
+            const attachment = frame({
+              _tag: "ThreadAttached",
+              requestId: message.requestId,
+              threadId: command.threadId,
+              snapshotThreadVersion,
+              snapshotCursor,
+              threadVersion: representedThreadVersion,
+              cursor: representedCursor,
+              snapshot,
+              events: replayEvents.map((event) => ({
+                threadId: event.threadId,
+                sequence: Sequence.make(event.sequence),
+                cursor: event.cursor,
+                threadVersion: event.threadVersion,
+                event: event.event,
+                createdAt: event.createdAt,
+              })),
+              participants: participants.map(({ actor, status }) => ({ actor, status })),
+            })
+            const encodedAttachment = encodeUnknownJson(attachment)
+            if (new TextEncoder().encode(encodedAttachment).byteLength > maximumAttachmentBytes)
+              return yield* unavailable("Hosted Thread replay exceeds the attachment byte limit")
+            attached = { threadId: command.threadId, authority }
+            return [attachment]
           }
 
           if (command._tag === "Detach") {
@@ -468,8 +524,7 @@ export const layer = Layer.effect(
             attached = undefined
             return []
           }
-          if (attached === undefined)
-            return yield* HostedThreadProtocolError.make({ kind: "invalid", message: "Attach a Thread first" })
+          const threadId = command.threadId
           let requiredAction: AuthorizationAction = "thread:control"
           if (command._tag === "InspectWorkspaceFile") requiredAction = "workspace:file:view"
           if (
@@ -483,16 +538,15 @@ export const layer = Layer.effect(
           if (command._tag === "AcknowledgeCursor") requiredAction = "thread:view"
           if (command._tag === "UpdatePresence") requiredAction = "presence:update"
           const authority = yield* product
-            .authorizeThread(principal, attached.threadId, requiredAction)
+            .authorizeThread(principal, threadId, requiredAction)
             .pipe(Effect.mapError(productFailure))
-          attached = { threadId: attached.threadId, authority }
 
           if (command._tag === "UpdatePresence") {
             const now = Timestamp.make(receivedAt)
             yield* hosted
               .upsertPresence({
                 ownerId: authority.ownerId,
-                threadId: attached.threadId,
+                threadId,
                 actor: authority.actor,
                 status: command.status,
                 now,
@@ -502,19 +556,19 @@ export const layer = Layer.effect(
               })
               .pipe(Effect.mapError(storeFailure))
             const participants = yield* hosted
-              .listPresence({ ownerId: authority.ownerId, threadId: attached.threadId, actor: authority.actor, now })
+              .listPresence({ ownerId: authority.ownerId, threadId, actor: authority.actor, now })
               .pipe(Effect.mapError(storeFailure))
             return [
               frame({
                 _tag: "PresenceSnapshot",
-                threadId: attached.threadId,
+                threadId,
                 participants: participants.map(({ actor, status }) => ({ actor, status })),
               }),
             ]
           }
 
           if (command._tag === "OpenPortal") {
-            const url = yield* workspace.portal(attached.threadId, command.port).pipe(
+            const url = yield* workspace.portal(threadId, command.port).pipe(
               Effect.mapError((error) =>
                 HostedThreadProtocolError.make({
                   kind: error.kind === "unsupported" ? "invalid" : "unavailable",
@@ -526,7 +580,7 @@ export const layer = Layer.effect(
               frame({
                 _tag: "PortalOpened",
                 requestId: message.requestId,
-                threadId: attached.threadId,
+                threadId,
                 port: command.port,
                 url,
               }),
@@ -535,7 +589,7 @@ export const layer = Layer.effect(
 
           if (command._tag === "InspectWorkspaceFile") {
             const inspection = yield* workspace
-              .execute(attached.threadId, {
+              .execute(threadId, {
                 _tag: "WorkspaceFileInspect",
                 requestId: String(message.requestId),
                 path: command.path,
@@ -558,14 +612,13 @@ export const layer = Layer.effect(
               frame({
                 _tag: "WorkspaceFileInspected",
                 requestId: message.requestId,
-                threadId: attached.threadId,
+                threadId,
                 inspection,
               }),
             ]
           }
 
           if (command._tag === "AcknowledgeCursor") {
-            const threadId = attached.threadId
             const cursor = yield* store
               .acknowledgeCursor({
                 ownerId: authority.ownerId,
@@ -577,7 +630,7 @@ export const layer = Layer.effect(
               .pipe(Effect.mapError(storeFailure))
             const replayCorrelation = { ownerId: authority.ownerId, threadId }
             const replay = yield* HostedObservability.observe(
-              "client_replay",
+              "attach",
               replayCorrelation,
               Effect.gen(function* () {
                 const result = yield* store
@@ -615,7 +668,7 @@ export const layer = Layer.effect(
           const admission = yield* store
             .admitCommand({
               ownerId: authority.ownerId,
-              threadId: attached.threadId,
+              threadId,
               commandId: command.commandId,
               idempotencyKey: command.idempotencyKey,
               expectedThreadVersion: command.expectedThreadVersion,
@@ -625,11 +678,10 @@ export const layer = Layer.effect(
             })
             .pipe(Effect.mapError(storeFailure), (effect) =>
               HostedObservability.observe(
-                "command_admission",
+                "target_resolution",
                 {
                   ownerId: authority.ownerId,
-                  threadId: attached!.threadId,
-                  commandId: command.commandId,
+                  threadId,
                 },
                 effect,
               ),
@@ -649,7 +701,7 @@ export const layer = Layer.effect(
               const admitted = yield* product
                 .admitRun({
                   principal,
-                  threadId: attached!.threadId,
+                  threadId,
                   operationKey: command.commandId,
                   prompt: command.text,
                   ...(command.attachments === undefined
@@ -666,13 +718,13 @@ export const layer = Layer.effect(
                 })
                 .pipe(Effect.mapError(productFailure))
               return {
-                result: { _tag: "Applied" as const },
+                result: { _tag: "PromptAdmitted" as const, status: admitted.status },
                 events: [
                   {
                     _tag: "SubmissionAdmitted" as const,
-                    threadId: ProductThreadId.make(attached!.threadId),
+                    threadId: ProductThreadId.make(threadId),
                     turnId: ProductTurnId.make(admitted.turnId),
-                    status: admitted.status,
+                    status: admitted.status === "accepted" ? ("active" as const) : ("queued" as const),
                     submissionId: command.commandId,
                   },
                 ],
@@ -694,9 +746,7 @@ export const layer = Layer.effect(
                 }
               | undefined
             if (command._tag === "PauseOrb" || command._tag === "ResumeOrb") {
-              yield* (
-                command._tag === "PauseOrb" ? workspace.pause(attached!.threadId) : workspace.resume(attached!.threadId)
-              ).pipe(
+              yield* (command._tag === "PauseOrb" ? workspace.pause(threadId) : workspace.resume(threadId)).pipe(
                 Effect.mapError((error) =>
                   HostedThreadProtocolError.make({
                     kind: error.kind === "unsupported" ? "invalid" : "unavailable",
@@ -709,7 +759,7 @@ export const layer = Layer.effect(
             if (command._tag === "EnsureRepositoryService" || command._tag === "StopRepositoryService") {
               const result = yield* workspace
                 .execute(
-                  attached!.threadId,
+                  threadId,
                   command._tag === "EnsureRepositoryService"
                     ? { _tag: "RepositoryServiceEnsure", requestId: command.commandId, service: command.service }
                     : { _tag: "RepositoryServiceStop", requestId: command.commandId, serviceId: command.serviceId },
@@ -731,11 +781,11 @@ export const layer = Layer.effect(
             }
             if (command._tag === "Approve" || command._tag === "Deny") {
               const snapshot = yield* operations
-                .snapshot(authority.ownerId, ProductThreadId.make(attached!.threadId))
+                .snapshot(authority.ownerId, ProductThreadId.make(threadId))
                 .pipe(Effect.mapError(operationFailure))
               const pending = snapshot.pendingAuthorizations.find(
                 (candidate) =>
-                  candidate.threadId === attached!.threadId &&
+                  candidate.threadId === threadId &&
                   candidate.turnId === command.turnId &&
                   candidate.authorizationId === command.authorizationId &&
                   checkpointEquivalent(candidate.checkpoint, command.checkpoint),
@@ -754,7 +804,7 @@ export const layer = Layer.effect(
                 yield* toolPolicy
                   .recordDecision({
                     ownerId: authority.ownerId,
-                    threadId: attached!.threadId,
+                    threadId,
                     turnId: command.turnId,
                     actor: authority.actor,
                     authorizationId: command.authorizationId,
@@ -778,7 +828,7 @@ export const layer = Layer.effect(
                   )
               }
               const execution = yield* product
-                .threadExecutionContext(authority.ownerId, attached!.threadId)
+                .threadExecutionContext(authority.ownerId, threadId)
                 .pipe(Effect.mapError(productFailure))
               authorization = {
                 actor: authority.actor,
@@ -794,64 +844,97 @@ export const layer = Layer.effect(
                 decision: command._tag === "Approve" ? "approve" : "deny",
               }
             }
-            const events = yield* operations
-              .interactive({
+            return yield* operations.interactive(
+              {
                 ownerId: authority.ownerId,
-                threadId: ProductThreadId.make(attached!.threadId),
+                threadId: ProductThreadId.make(threadId),
                 commandId: command.commandId,
                 command: yield* productCommand(command),
-              })
-              .pipe(Effect.mapError(operationFailure))
-            let controlFailure: Extract<InteractiveEvent, { readonly _tag: "ExecutionControlFailed" }> | undefined
-            if (command._tag === "Approve" || command._tag === "Deny") {
-              const action = command._tag === "Approve" ? "approve" : "deny"
-              for (const event of events)
-                if (event._tag === "ExecutionControlFailed" && event.action === action) {
-                  controlFailure = event
-                  break
-                }
-            }
-            const result =
-              controlFailure === undefined
-                ? {
-                    _tag: "Applied" as const,
-                    ...(authorization === undefined
-                      ? {}
-                      : { authorization: { ...authorization, result: { _tag: "Delivered" as const } } }),
+              },
+              (batch) =>
+                Effect.gen(function* () {
+                  const events = batch.events
+                  let controlFailure: Extract<InteractiveEvent, { readonly _tag: "ExecutionControlFailed" }> | undefined
+                  if (command._tag === "Approve" || command._tag === "Deny") {
+                    const action = command._tag === "Approve" ? "approve" : "deny"
+                    for (const event of events)
+                      if (event._tag === "ExecutionControlFailed" && event.action === action) {
+                        controlFailure = event
+                        break
+                      }
                   }
-                : {
-                    _tag: "Rejected" as const,
-                    reason: "conflict",
-                    message: controlFailure.failure.message,
-                    authorization: {
-                      ...authorization!,
-                      result: { _tag: "Rejected" as const, failure: controlFailure.failure },
-                    },
-                  }
-            return { result, events: events.filter(isDurableThreadEvent) }
+                  let result
+                  if (batch.failure !== undefined)
+                    result = { _tag: "Rejected" as const, reason: "unavailable", message: batch.failure.message }
+                  else if (controlFailure === undefined)
+                    result = {
+                      _tag: "Applied" as const,
+                      ...(authorization === undefined
+                        ? {}
+                        : { authorization: { ...authorization, result: { _tag: "Delivered" as const } } }),
+                    }
+                  else
+                    result = {
+                      _tag: "Rejected" as const,
+                      reason: "conflict",
+                      message: controlFailure.failure.message,
+                      authorization: {
+                        ...authorization!,
+                        result: { _tag: "Rejected" as const, failure: controlFailure.failure },
+                      },
+                    }
+                  const durableEvents = events.filter(isDurableThreadEvent)
+                  const completedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+                  const completed = yield* store.completeCommand({
+                    ownerId: authority.ownerId,
+                    threadId,
+                    commandId: command.commandId,
+                    result,
+                    events: durableEvents,
+                    snapshot: batch.snapshot,
+                    completedAt,
+                  })
+                  return { result, events: durableEvents, completed, completedAt }
+                }),
+            )
           }).pipe(
             Effect.catch((error) =>
-              Effect.succeed({
-                result: { _tag: "Rejected" as const, reason: error.kind, message: error.message },
-                events: [] as ReadonlyArray<InteractiveEvent>,
-              }),
+              Schema.is(StoreError)(error)
+                ? Effect.fail(storeFailure(error))
+                : Effect.succeed({
+                    result: {
+                      _tag: "Rejected" as const,
+                      reason: Schema.is(HostedThreadApplicationError)(error) ? "unavailable" : error.kind,
+                      message: error.message,
+                    },
+                    events: [] as ReadonlyArray<InteractiveEvent>,
+                  }),
             ),
           )
-          const latestSnapshot = yield* operations
-            .snapshot(authority.ownerId, ProductThreadId.make(attached.threadId))
-            .pipe(Effect.result)
-          const completedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
-          const completed = yield* store
-            .completeCommand({
-              ownerId: authority.ownerId,
-              threadId: attached.threadId,
-              commandId: command.commandId,
-              result: applied.result,
-              events: applied.events,
-              ...(latestSnapshot._tag === "Success" ? { snapshot: latestSnapshot.success } : {}),
-              completedAt,
-            })
-            .pipe(Effect.mapError(storeFailure))
+          const completedAt =
+            "completedAt" in applied
+              ? applied.completedAt
+              : DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+          const completionSnapshot =
+            "completed" in applied
+              ? undefined
+              : yield* operations
+                  .snapshot(authority.ownerId, ProductThreadId.make(threadId))
+                  .pipe(Effect.mapError(operationFailure))
+          const completed =
+            "completed" in applied
+              ? applied.completed
+              : yield* store
+                  .completeCommand({
+                    ownerId: authority.ownerId,
+                    threadId,
+                    commandId: command.commandId,
+                    result: applied.result,
+                    events: applied.events,
+                    snapshot: completionSnapshot!,
+                    completedAt,
+                  })
+                  .pipe(Effect.mapError(storeFailure))
           return [
             frame(commandResult(completed, message.requestId)),
             ...applied.events.map((event, index) => {
@@ -859,7 +942,7 @@ export const layer = Layer.effect(
               return frame({
                 _tag: "ThreadEvent",
                 event: {
-                  threadId: attached!.threadId,
+                  threadId,
                   sequence: Sequence.make(cursor),
                   cursor: ThreadEventCursor.make(cursor),
                   threadVersion: completed.threadVersion,

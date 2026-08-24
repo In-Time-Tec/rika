@@ -27,7 +27,7 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Delegate one probe child."))
+        yield* Effect.tryPromise(() => app.type("Delegate one probe child."))
         app.pressEnter()
         yield* app.waitFrame("PROBE_ROOT_RESUMED", 20_000)
         yield* app.settled
@@ -77,7 +77,7 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Run four independent investigations."))
+        yield* Effect.tryPromise(() => app.type("Run four independent investigations."))
         app.pressEnter()
         yield* app.waitFrame("FOUR_CHILD_PARENT_RESUMED", 30_000)
         yield* app.settled

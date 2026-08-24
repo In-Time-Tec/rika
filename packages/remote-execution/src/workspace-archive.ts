@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
-import { Effect, Encoding, FileSystem, Result, Schema } from "effect"
+import { Effect, Encoding, FileSystem, Result, Schema, Stream } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
 export const MaximumArchiveBytes = 64 * 1024 * 1024
 
@@ -59,51 +60,51 @@ interface CommandResult {
  * Deterministic archives need GNU flags (--sort=name, --mtime=@0, --numeric-owner) that bsdtar rejects.
  * Homebrew installs GNU tar as gtar; Linux distributions ship GNU tar as tar.
  */
-const gnuTar = (() => {
-  const candidate = Bun.which("gtar") ?? Bun.which("tar")
-  if (candidate == null) return undefined
-  return Bun.spawnSync([candidate, "--version"]).stdout.toString().includes("GNU tar") ? candidate : undefined
-})()
-
-const tarArguments = (
-  arguments_: ReadonlyArray<string>,
-): Effect.Effect<ReadonlyArray<string>, WorkspaceArchiveError> => {
-  if (gnuTar === undefined)
-    return Effect.fail(failure("archive", "Workspace archiving requires GNU tar (install gnu-tar on macOS)"))
-  return Effect.succeed([gnuTar, ...arguments_])
-}
+const tarArguments = (arguments_: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const candidate = Bun.which("gtar") ?? Bun.which("tar")
+    if (candidate === null)
+      return yield* failure("archive", "Workspace archiving requires GNU tar (install gnu-tar on macOS)")
+    const version = yield* run({ command: [candidate, "--version"] })
+    if (version.exitCode !== 0 || !new TextDecoder().decode(version.stdout).includes("GNU tar"))
+      return yield* failure("archive", "Workspace archiving requires GNU tar (install gnu-tar on macOS)")
+    return [candidate, ...arguments_]
+  })
 
 const run = (input: { readonly command: ReadonlyArray<string>; readonly cwd?: string; readonly stdin?: Uint8Array }) =>
-  Effect.gen(function* () {
-    const child = yield* Effect.try({
-      try: () =>
-        Bun.spawn([...input.command], {
-          ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
-          ...(input.stdin === undefined ? {} : { stdin: input.stdin }),
-          stdout: "pipe",
-          stderr: "pipe",
-        }),
-      catch: () => failure("archive", "Workspace archive command could not start"),
-    })
-    const [stdout, exitCode] = yield* Effect.all(
-      [
-        Effect.tryPromise({
-          try: () => new Response(child.stdout).bytes(),
-          catch: () => failure("archive", "Workspace archive command output could not be read"),
-        }),
-        Effect.tryPromise({
-          try: () => child.exited,
-          catch: () => failure("archive", "Workspace archive command did not complete"),
-        }),
-        Effect.tryPromise({
-          try: () => new Response(child.stderr).arrayBuffer(),
-          catch: () => failure("archive", "Workspace archive command output could not be read"),
-        }),
-      ],
-      { concurrency: "unbounded" },
-    )
-    return { stdout, exitCode } satisfies CommandResult
-  })
+  Effect.scoped(
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const child = yield* spawner
+        .spawn(
+          ChildProcess.make(input.command[0]!, [...input.command.slice(1)], {
+            ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+            stdin: input.stdin === undefined ? "ignore" : Stream.fromIterable([input.stdin]),
+            stdout: "pipe",
+            stderr: "pipe",
+          }),
+        )
+        .pipe(Effect.mapError(() => failure("archive", "Workspace archive command could not start")))
+      const [stdout, , exitCode] = yield* Effect.all(
+        [
+          Stream.runFold(
+            child.stdout,
+            () => new Uint8Array(),
+            (accumulator, chunk) => {
+              const output = new Uint8Array(accumulator.byteLength + chunk.byteLength)
+              output.set(accumulator)
+              output.set(chunk, accumulator.byteLength)
+              return output
+            },
+          ),
+          Stream.runDrain(child.stderr),
+          child.exitCode,
+        ],
+        { concurrency: 3 },
+      ).pipe(Effect.mapError(() => failure("archive", "Workspace archive command did not complete")))
+      return { stdout, exitCode: Number(exitCode) } satisfies CommandResult
+    }),
+  )
 
 const command = Effect.fn("WorkspaceArchive.command")(function* (
   input: Parameters<typeof run>[0],

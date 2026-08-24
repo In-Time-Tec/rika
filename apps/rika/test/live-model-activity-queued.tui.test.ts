@@ -21,10 +21,10 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Hold the queue head."))
+        yield* Effect.tryPromise(() => app.type("Hold the queue head."))
         app.pressEnter()
         yield* app.waitFrame("Hold the queue head.")
-        yield* Effect.promise(() => app.type("Promote me after the head."))
+        yield* Effect.tryPromise(() => app.type("Promote me after the head."))
         app.pressEnter()
         yield* app.waitFrame("Promote me after the head.")
         yield* app.waitModelRequests(1)

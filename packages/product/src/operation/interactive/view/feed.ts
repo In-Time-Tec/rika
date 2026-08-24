@@ -232,6 +232,8 @@ export interface InteractiveOperationFeed {
     currentEpoch: () => number,
     selectedThread: () => string | undefined,
   ) => Effect.Effect<void, OperationUnavailable>
+  readonly currentView: () => import("@rika/product/thread-view").ThreadViewSnapshot | undefined
+  readonly projectionCheckpoint: (turnId: string) => import("@rika/product/execution-projection").Checkpoint | undefined
   readonly emit: (dispatch: (event: RuntimeEvent) => void, event: RuntimeEvent) => void
   readonly close: Effect.Effect<void>
   readonly eventThreadId: (event: RuntimeEvent) => string | undefined
@@ -406,6 +408,8 @@ export const makeInteractiveOperationFeed = (input: {
       finishSelection,
       releaseSelectionEvents,
       events: feedEvents,
+      currentView: threadViews.current,
+      projectionCheckpoint: threadViews.checkpoint,
       emit,
       close: Queue.shutdown(queue),
       eventThreadId: runtimeEventThreadId,

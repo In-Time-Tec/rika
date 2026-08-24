@@ -8,7 +8,6 @@ import {
 } from "@opentui/core"
 import type { Model } from "../../state/model/terminal-state"
 import { SidebarController } from "./opentui-sidebar-controller"
-import { Clock, Effect } from "effect"
 import { classifyMouseJunk, fromOpenTui, type Key } from "../../presentation/terminal/terminal-keymap"
 import { pastedTextTokenAt } from "../../state/model/terminal-composer-paste"
 import { SurfaceState } from "./opentui-surface-state"
@@ -107,7 +106,7 @@ export abstract class SurfacePointer extends SurfaceState {
     }
     const text = stripAnsiSequences(decodePasteBytes(event.bytes))
     if (text.length === 0) return
-    const now = Effect.runSync(Clock.currentTimeMillis)
+    const now = this.currentTimeMillis()
     const attachment = this.model?.pastedText.findLast(
       (candidate) => candidate.type === "text" && candidate.value === text,
     )

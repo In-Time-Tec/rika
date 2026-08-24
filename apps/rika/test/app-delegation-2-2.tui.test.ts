@@ -48,7 +48,7 @@ test(
           subagents: { maxDepth: 2, maxSubagents: 4 },
           height: 48,
         })
-        yield* Effect.promise(() => app.type("Delegate deep work."))
+        yield* Effect.tryPromise(() => app.type("Delegate deep work."))
         app.pressEnter()
         const direct = yield* app.waitFrame("Parent survey working", 30_000)
         expect(direct).toContain("Running 1 subagent")

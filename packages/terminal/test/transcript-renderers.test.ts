@@ -1,6 +1,8 @@
 import { TextAttributes, type TerminalTextChunk as TextChunk } from "../src/presentation/markdown/styled-text"
 import stringWidth from "string-width"
 import { describe, expect, test } from "vitest"
+import { it } from "@effect/vitest"
+import { Clock, Effect } from "effect"
 import { renderMarkdown, renderMarkdownStyled } from "../src/presentation/markdown/markdown-renderer"
 import { renderDiff } from "../src/presentation/tool/diff-renderer"
 import { colors } from "../src/presentation/terminal/terminal-theme"
@@ -163,16 +165,18 @@ describe("transcript renderers", () => {
     ])
   })
 
-  test("renders a 4000-chunk unbroken stream without quadratic wrapping", () => {
-    const source = Array.from({ length: 4_000 }, (_, index) => `LONG_CHUNK_${String(index).padStart(4, "0")};`).join("")
-    const startedAt = performance.now()
-    const rendered = renderMarkdownStyled(source, 116)
-    const elapsed = performance.now() - startedAt
-    const text = rendered.chunks.map((chunk) => chunk.text).join("")
+  it.effect("renders a 4000-chunk unbroken stream without quadratic wrapping", () =>
+    Effect.gen(function* () {
+      const source = Array.from({ length: 4_000 }, (_, index) => `LONG_CHUNK_${String(index).padStart(4, "0")};`).join("")
+      const startedAt = yield* Clock.currentTimeMillis
+      const rendered = renderMarkdownStyled(source, 116)
+      const elapsed = (yield* Clock.currentTimeMillis) - startedAt
+      const text = rendered.chunks.map((chunk) => chunk.text).join("")
 
-    expect(text).toContain("LONG_CHUNK_3999")
-    expect(elapsed).toBeLessThan(1_000)
-  })
+      expect(text).toContain("LONG_CHUNK_3999")
+      expect(elapsed).toBeLessThan(1_000)
+    }),
+  )
 
   test("parses hunk line numbers and clips source lines", () => {
     const rendered = renderDiff(

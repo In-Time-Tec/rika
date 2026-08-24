@@ -8,18 +8,17 @@ import * as ProductRepositories from "@rika/product-store/postgres-product-repos
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { Context, Effect, Exit, Layer, Random, Redacted, Schema, Scope, Stream } from "effect"
+import { FileSystem, Config, Context, Effect, Exit, Layer, Random, Redacted, Schema, Scope, Stream } from "effect"
 import { Pool } from "pg"
+import { live as livePlatform } from "./live-platform"
 import { layer as hostedProjectionWorkerLayer } from "../src/hosted-projection-worker"
 
-const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
+const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const JsonRoute = Schema.fromJsonString(ExecutionRoute.ExecutionRouteSnapshot)
 const JsonLink = Schema.fromJsonString(ExecutionGateway.ExecutionLink)
 const JsonUnit = Schema.fromJsonString(TranscriptUnit.Unit)
 
-const eventLoop = Effect.callback<void>((resume) => {
-  setImmediate(() => resume(Effect.void))
-})
+const eventLoop = Effect.yieldNow
 
 const eventually = <A>(effect: Effect.Effect<A>, predicate: (value: A) => boolean) =>
   Effect.gen(function* () {
@@ -37,19 +36,21 @@ const state = (status: "running" | "completed") => ({
   steering: { steeringMessages: 0, followUpMessages: 0 },
 })
 
-it.effect.skipIf(databaseUrl === undefined)("resumes hosted projection from its PostgreSQL checkpoint", () =>
+it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its PostgreSQL checkpoint", () =>
   Effect.gen(function* () {
     const suffix = String(yield* Random.nextInt).replaceAll("-", "n")
     const database = `rika_hosted_projection_${suffix}`
     const admin = new Pool({ connectionString: databaseUrl })
-    yield* Effect.promise(() => admin.query(`CREATE DATABASE "${database}"`))
-    const parsed = new URL(databaseUrl!)
+    yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
+    const parsed = new URL(databaseUrl)
     parsed.pathname = `/${database}`
     const url = parsed.toString()
     const pool = new Pool({ connectionString: url })
     try {
       for (const migration of [...identityMigrations, ...productMigrations]) {
-        const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
+        const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          fileSystem.readFileString(migration.url.pathname),
+        )
         yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
       }
       const route = yield* Schema.encodeEffect(JsonRoute)(ExecutionRoute.testExecutionRoute())
@@ -58,7 +59,7 @@ it.effect.skipIf(databaseUrl === undefined)("resumes hosted projection from its 
         threadId: "projection-thread",
         turnId: "projection-turn",
       })
-      yield* Effect.promise(() =>
+      yield* Effect.tryPromise(() =>
         pool.query(
           `INSERT INTO "user" (id,name,email,email_verified,created_at,updated_at)
              VALUES ('projection-user','Projection','projection@example.test',true,now(),now());
@@ -70,7 +71,7 @@ it.effect.skipIf(databaseUrl === undefined)("resumes hosted projection from its 
              VALUES ('projection-thread','projection-owner','projection-workspace','Projection',1,1)`,
         ),
       )
-      yield* Effect.promise(() =>
+      yield* Effect.tryPromise(() =>
         pool.query(
           `INSERT INTO rika_turns
              (id,thread_id,prompt,status,created_at,updated_at,execution_route_json,execution_link_json)
@@ -136,7 +137,7 @@ it.effect.skipIf(databaseUrl === undefined)("resumes hosted projection from its 
         firstScope,
       )
       yield* eventually(
-        Effect.promise(() =>
+        Effect.tryPromise(() =>
           pool.query(`SELECT projector_cursor FROM rika_transcript_checkpoints WHERE turn_id = 'projection-turn'`),
         ),
         (result) => result.rows[0]?.projector_cursor === "cursor-running",
@@ -157,7 +158,7 @@ it.effect.skipIf(databaseUrl === undefined)("resumes hosted projection from its 
         secondScope,
       )
       const persisted = yield* eventually(
-        Effect.promise(() =>
+        Effect.tryPromise(() =>
           pool.query(`SELECT turn_record.status, checkpoint.revision, checkpoint.projector_cursor,
               unit_record.unit_json
             FROM rika_turns turn_record
@@ -178,9 +179,9 @@ it.effect.skipIf(databaseUrl === undefined)("resumes hosted projection from its 
         content: { text: "complete" },
       })
     } finally {
-      yield* Effect.promise(() => pool.end())
-      yield* Effect.promise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-      yield* Effect.promise(() => admin.end())
+      yield* Effect.tryPromise(() => pool.end())
+      yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+      yield* Effect.tryPromise(() => admin.end())
     }
-  }),
+  }).pipe(livePlatform),
 )

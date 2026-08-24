@@ -1,28 +1,41 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, Random } from "effect"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import { Effect, FileSystem, Layer, Random } from "effect"
+import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
 import { identityMigrations } from "../../../identity/src/migrations"
 import { runMigration } from "../../../identity/src/postgres"
 import { migrations } from "../../src/hosted/migrations"
 
-const databaseUrl = Bun.env.RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL
+const databaseUrl = "postgresql://rika:rika@127.0.0.1:5432/rika_test"
+const readFileString = (url: URL) =>
+  Effect.scoped(
+    Layer.build(BunServices.layer).pipe(
+      Effect.flatMap((context) =>
+        Effect.provide(
+          Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.readFileString(fileURLToPath(url))),
+          context,
+        ),
+      ),
+    ),
+  )
 
 it.effect.skipIf(databaseUrl === undefined)("creates fresh personal and organization owner authority", () =>
   Effect.gen(function* () {
     const database = `rika_owner_schema_${Math.abs(yield* Random.nextInt)}`
     const admin = new Pool({ connectionString: databaseUrl })
-    yield* Effect.promise(() => admin.query(`CREATE DATABASE "${database}"`))
+    yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
     const parsed = new URL(databaseUrl!)
     parsed.pathname = `/${database}`
     const pool = new Pool({ connectionString: parsed.toString() })
     const rejects = (sql: string, code: string) =>
-      Effect.promise(() => expect(pool.query(sql)).rejects.toMatchObject({ code }))
+      Effect.tryPromise(() => expect(pool.query(sql)).rejects.toMatchObject({ code }))
     try {
       for (const migration of [...identityMigrations, ...migrations]) {
-        const sql = yield* Effect.promise(() => Bun.file(migration.url).text())
+        const sql = yield* readFileString(migration.url)
         yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
       }
-      yield* Effect.promise(() =>
+      yield* Effect.tryPromise(() =>
         pool.query(`
           INSERT INTO "user" (id,name,email,email_verified,created_at,updated_at) VALUES
             ('personal-user','Personal','personal@example.test',true,now(),now()),
@@ -87,13 +100,13 @@ it.effect.skipIf(databaseUrl === undefined)("creates fresh personal and organiza
          VALUES ('personal-owner','personal-project','org-membership','owner','personal-user',now(),now())`,
         "23503",
       )
-      yield* Effect.promise(() => pool.query(`DELETE FROM rika_hosted_owners WHERE id='personal-owner'`))
-      const result = yield* Effect.promise(() => pool.query(`SELECT id FROM rika_hosted_threads ORDER BY id`))
+      yield* Effect.tryPromise(() => pool.query(`DELETE FROM rika_hosted_owners WHERE id='personal-owner'`))
+      const result = yield* Effect.tryPromise(() => pool.query(`SELECT id FROM rika_hosted_threads ORDER BY id`))
       expect(result.rows).toEqual([{ id: "org-thread" }])
     } finally {
-      yield* Effect.promise(() => pool.end())
-      yield* Effect.promise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-      yield* Effect.promise(() => admin.end())
+      yield* Effect.tryPromise(() => pool.end())
+      yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+      yield* Effect.tryPromise(() => admin.end())
     }
   }),
 )

@@ -5,6 +5,7 @@ import type { WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignm
 import {
   Cause,
   Clock,
+  Config,
   Context,
   Crypto,
   Deferred,
@@ -20,7 +21,7 @@ import {
 } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 import { BindingProxyError, type Transport as BindingTransport } from "./binding-proxy"
-import type { State as CellState } from "./cells"
+import { CellError, State as CellStateSchema, terminalOutcome, type State as CellState } from "./cells"
 import * as HostedKernel from "./hosted-kernel"
 import { Machine, MachineError, State as MachineState, workspaceLayer as machineLayer } from "./machine"
 import {
@@ -79,6 +80,7 @@ export const ForegroundRunnerSnapshot = Schema.Struct({
   heartbeatIntervalMillis: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   cursor: Schema.Struct({ sequence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), value: Schema.String }),
   receipts: Schema.Array(ForegroundReceipt),
+  cells: Schema.Array(Schema.Struct({ executionKey: Schema.String, state: CellStateSchema })),
   machines: Schema.Array(Schema.Struct({ machineId: Schema.String, state: MachineState })),
 })
 export type ForegroundRunnerSnapshot = typeof ForegroundRunnerSnapshot.Type
@@ -91,10 +93,6 @@ const decodeApiMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(ApiMes
 const encodeRunnerMessage = Schema.encodeSync(Schema.fromJsonString(RunnerMessage))
 const localCapabilities = { cells: true, checkpoints: false, pty: false } as const
 const initialCursors: ResumeCursors = { command: 0, event: 0, pty: 0 }
-const unknownResponse: CellResponse = {
-  _tag: "DomainFailure",
-  failure: { kind: "unknown", message: "Local operation outcome is unknown after foreground restart" },
-}
 
 const failure = (message: string) => ForegroundRunnerError.make({ message })
 
@@ -248,20 +246,28 @@ const waitForReconnect = (
     return yield* waitForReconnect(incoming, previous, processIncarnation)
   })
 
-const inMemoryCells = (workspaceIdentity: string, workspacePath: string, sendBinding: BindingTransport["send"]) =>
+const inMemoryCells = (
+  workspaceIdentity: string,
+  workspacePath: string,
+  states: Ref.Ref<Map<string, CellState>>,
+  persist: () => Effect.Effect<void, ForegroundRunnerError>,
+  sendBinding: BindingTransport["send"],
+) =>
   Effect.gen(function* () {
-    const states = yield* Ref.make(new Map<string, CellState>())
+    const temporaryDirectory = yield* Config.string("TMPDIR").pipe(
+      Config.withDefault("/tmp"),
+      Effect.mapError(() => failure("Temporary directory configuration is invalid")),
+    )
     return yield* HostedKernel.make({
       workspaceIdentity,
       workspacePath,
-      dataRoot: `${Bun.env.TMPDIR ?? "/tmp"}/rika-kernel/${encodeURIComponent(workspaceIdentity)}`,
+      dataRoot: `${temporaryDirectory}/rika-kernel/${encodeURIComponent(workspaceIdentity)}`,
       read: (operationKey) => Effect.map(Ref.get(states), (values) => values.get(operationKey)),
       write: (operationKey, state) =>
-        Ref.update(states, (values) => {
-          const next = new Map(values)
-          next.set(operationKey, state)
-          return next
-        }),
+        Ref.update(states, (values) => new Map(values).set(operationKey, state)).pipe(
+          Effect.andThen(persist()),
+          Effect.mapError((error) => CellError.make({ kind: "execution", message: error.message })),
+        ),
       sendBinding,
     })
   })
@@ -389,6 +395,11 @@ const consumeApi = (
         ).pipe(Effect.mapError(() => failure("Could not write local cell result")))
       }
     }
+    if (message._tag === "CellTerminalSuperseded") {
+      const current = yield* Ref.get(session)
+      if (current === undefined || !sameAccess(access(current), message.access))
+        return yield* failure("Runner terminal supersession is stale")
+    }
     if (message._tag === "CellReplay") {
       const receipt = (yield* Ref.get(receipts)).get(executionKey(message.operationKey, message.attempt))
       const current = yield* Ref.get(session)
@@ -409,21 +420,18 @@ const consumeApi = (
       const receipt = (yield* Ref.get(receipts)).get(key)
       if (receipt === undefined || receipt.attempt !== message.attempt)
         return yield* failure("Runner cancellation has a stale attempt")
-      const operation = (yield* Ref.get(liveOperations)).get(key)
-      if (operation !== undefined) yield* Fiber.interrupt(operation)
+      const response = yield* cells
+        .cancel(message.operationKey, message.attempt)
+        .pipe(Effect.mapError((error) => failure(error.message)))
       const interrupted = (yield* Ref.get(receipts)).get(key)
       if (interrupted !== undefined && !interrupted.frames.some((frame) => frame._tag === "Terminal")) {
-        const response: CellResponse = {
-          _tag: "DomainFailure",
-          failure: { kind: "cancelled", message: "Cell operation cancelled" },
-        }
         yield* append(
           key,
           {
             _tag: "Terminal",
             attribution: interrupted.attribution,
             cursor: interrupted.frames.length + 1,
-            outcome: "cancelled",
+            outcome: terminalOutcome(response),
             response,
           },
           { response },
@@ -480,74 +488,101 @@ const consumeApi = (
       const key = executionKey(operationKey, attempt)
       const known = (yield* Ref.get(receipts)).get(key)
       if (known !== undefined && attempt < known.attempt) return
-      if (known !== undefined) {
-        if (known.state === "running" && !(yield* Ref.get(liveOperations)).has(key)) {
-          const response = unknownResponse
+      if (known !== undefined && (known.state !== "running" || (yield* Ref.get(liveOperations)).has(key))) {
+        yield* Effect.forEach(known.frames, writeLifecycle, { discard: true })
+        return
+      }
+      const identity = known?.attribution ?? attribution(message.request)
+      if (known === undefined) {
+        const accepted: CellLifecycleFrame = { _tag: "Accepted", attribution: identity, cursor: 1 }
+        yield* Ref.update(receipts, (values) =>
+          new Map(values).set(key, {
+            operationKey,
+            attempt,
+            attribution: identity,
+            frames: [accepted],
+            state: "running",
+          }),
+        )
+        yield* persist()
+        yield* writeLifecycle(accepted)
+      }
+      const admission = yield* cells.admit(message.request).pipe(
+        Effect.match({
+          onFailure: (error) =>
+            ({
+              _tag: "Failure" as const,
+              response: {
+                _tag: "DomainFailure" as const,
+                failure: { kind: error._tag === "CellError" ? error.kind : "execution", message: error.message },
+              },
+            }) satisfies { readonly _tag: "Failure"; readonly response: CellResponse },
+          onSuccess: () => ({ _tag: "Success" as const }),
+        }),
+      )
+      if (admission._tag === "Failure") {
+        const receipt = (yield* Ref.get(receipts)).get(key)
+        if (receipt !== undefined)
           yield* append(
             key,
             {
               _tag: "Terminal",
-              attribution: known.attribution,
-              cursor: known.frames.length + 1,
-              outcome: "unknown",
+              attribution: identity,
+              cursor: receipt.frames.length + 1,
+              outcome: terminalOutcome(admission.response),
+              response: admission.response,
+            },
+            { response: admission.response },
+          )
+        return
+      }
+      const admittedReceipt = (yield* Ref.get(receipts)).get(key)
+      if (admittedReceipt !== undefined && !admittedReceipt.frames.some((frame) => frame._tag === "Started"))
+        yield* append(key, {
+          _tag: "Started",
+          attribution: identity,
+          cursor: admittedReceipt.frames.length + 1,
+        })
+      const operation = Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const response = yield* restore(
+            resolveCellResponse({
+              current,
+              request: message.request,
+              cells,
+              output: (chunk) =>
+                Effect.gen(function* () {
+                  const receipt = (yield* Ref.get(receipts)).get(key)
+                  if (receipt === undefined || receipt.frames.filter((frame) => frame._tag === "Output").length >= 16)
+                    return
+                  const output = redactOutput(chunk.text)
+                  yield* append(key, {
+                    _tag: "Output",
+                    attribution: identity,
+                    cursor: receipt.frames.length + 1,
+                    stream: chunk.stream,
+                    text: output.text,
+                    redacted: true,
+                    truncated: output.truncated,
+                  }).pipe(Effect.ignore)
+                }),
+            }),
+          )
+          const receipt = (yield* Ref.get(receipts)).get(key)
+          if (receipt === undefined) return
+          yield* append(
+            key,
+            {
+              _tag: "Terminal",
+              attribution: identity,
+              cursor: receipt.frames.length + 1,
+              outcome: terminalOutcome(response),
               response,
             },
             { response },
           )
-        } else yield* Effect.forEach(known.frames, writeLifecycle, { discard: true })
-        return
-      }
-      const identity = attribution(message.request)
-      const accepted: CellLifecycleFrame = { _tag: "Accepted", attribution: identity, cursor: 1 }
-      yield* Ref.update(receipts, (values) =>
-        new Map(values).set(key, {
-          operationKey,
-          attempt,
-          attribution: identity,
-          frames: [accepted],
-          state: "running",
         }),
-      )
-      yield* persist()
-      yield* writeLifecycle(accepted)
-      const operation = Effect.gen(function* () {
-        const started: CellLifecycleFrame = { _tag: "Started", attribution: identity, cursor: 2 }
-        yield* append(key, started)
-        const response = yield* resolveCellResponse({
-          current,
-          request: message.request,
-          cells,
-          output: (chunk) =>
-            Effect.gen(function* () {
-              const receipt = (yield* Ref.get(receipts)).get(key)
-              if (receipt === undefined || receipt.frames.filter((frame) => frame._tag === "Output").length >= 16)
-                return
-              const output = redactOutput(chunk.text)
-              yield* append(key, {
-                _tag: "Output",
-                attribution: identity,
-                cursor: receipt.frames.length + 1,
-                stream: chunk.stream,
-                text: output.text,
-                redacted: true,
-                truncated: output.truncated,
-              }).pipe(Effect.ignore)
-            }),
-        })
-        const receipt = (yield* Ref.get(receipts)).get(key)
-        if (receipt === undefined) return
-        yield* append(
-          key,
-          {
-            _tag: "Terminal",
-            attribution: identity,
-            cursor: receipt.frames.length + 1,
-            outcome: response._tag === "Success" ? "completed" : "failed",
-            response,
-          },
-          { response },
-        )
-      }).pipe(
+      ).pipe(
         Effect.ensuring(
           Ref.update(liveOperations, (values) => {
             const next = new Map(values)
@@ -726,6 +761,13 @@ export const runForegroundRunner = (
         ]),
       )
       const receipts = yield* Ref.make(initialReceipts)
+      const cellStates = yield* Ref.make(
+        new Map(
+          (options.resume === undefined ? [] : options.resume.cells).map(
+            ({ executionKey: key, state }) => [key, state] as const,
+          ),
+        ),
+      )
       const machineStates = yield* Ref.make(
         new Map((options.resume?.machines ?? []).map(({ machineId, state }) => [machineId, state] as const)),
       )
@@ -757,11 +799,12 @@ export const runForegroundRunner = (
                   heartbeatIntervalMillis: session.heartbeatIntervalMillis,
                   cursor: session.cursor,
                   receipts: storedReceipts,
+                  cells: Array.from(yield* Ref.get(cellStates), ([key, state]) => ({ executionKey: key, state })),
                   machines: Array.from(yield* Ref.get(machineStates), ([machineId, state]) => ({ machineId, state })),
                 })
               }),
         )
-      const cells = yield* inMemoryCells(workspaceIdentity, options.workspacePath, (message) =>
+      const cells = yield* inMemoryCells(workspaceIdentity, options.workspacePath, cellStates, persist, (message) =>
         Effect.gen(function* () {
           const session = yield* Ref.get(sessions)
           const writer = yield* Ref.get(activeWriter)

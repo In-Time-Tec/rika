@@ -43,7 +43,7 @@ export interface Handlers {
   readonly threadSidebarSelect?: (index: number) => void
   readonly openPath?: (target: PathTarget) => void
   readonly resize: (width: number, height: number) => void
-  readonly makeRenderer?: () => Promise<CliRenderer>
+  readonly makeRenderer?: () => Effect.Effect<CliRenderer>
 }
 
 export interface SurfaceOptions {
@@ -52,6 +52,8 @@ export interface SurfaceOptions {
   readonly epochMillis?: number
   readonly currentTimeMillis?: () => number
 }
+
+const runFork = Effect.runFork
 
 export class SurfaceState {
   protected transcriptPane!: TranscriptPane
@@ -175,9 +177,9 @@ export class SurfaceState {
     timer?.interruptUnsafe()
   }
   protected defer(action: () => void): void {
-    Effect.runFork(Effect.yieldNow.pipe(Effect.andThen(Effect.sync(action))))
+    runFork(Effect.yieldNow.pipe(Effect.andThen(Effect.sync(action))))
   }
   protected delayed(duration: number, action: () => void): Fiber.Fiber<void> {
-    return Effect.runFork(Effect.sleep(duration).pipe(Effect.andThen(Effect.sync(action))))
+    return runFork(Effect.sleep(duration).pipe(Effect.andThen(Effect.sync(action))))
   }
 }

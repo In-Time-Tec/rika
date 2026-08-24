@@ -1,13 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Crypto, Effect, FileSystem, Layer, Schema } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { testing } from "../src/host"
+import { provideLayer } from "./support/layer"
 
 const packageRoot = new URL("..", import.meta.url).pathname
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 const bootstrapProof = `
-import { Effect, Redacted } from "effect"
+import { Effect, Redacted, Schema } from "effect"
 import { createConnection } from "node:net"
 import { testing } from "./src/host.ts"
 const sandboxId = await Bun.file("/run/e2b/.E2B_SANDBOX_ID").text().then((value) => value.trim()).catch(() => "sandbox-1")
@@ -53,10 +55,10 @@ const valid = (credential) => ({
     restore: null,
   }),
 })
-const responses = await Promise.all([
-  Bun.fetch("http://127.0.0.1:7070/.rika/bootstrap", valid("bootstrap-a")),
-  Bun.fetch("http://127.0.0.1:7070/.rika/bootstrap", valid("bootstrap-b")),
-])
+const responses = await Effect.runPromise(Effect.all([
+  Effect.tryPromise(() => Bun.fetch("http://127.0.0.1:7070/.rika/bootstrap", valid("bootstrap-a"))),
+  Effect.tryPromise(() => Bun.fetch("http://127.0.0.1:7070/.rika/bootstrap", valid("bootstrap-b"))),
+], { concurrency: "unbounded" }))
 const accepted = responses.find((response) => response.status === 202)
 const body = await accepted.text()
 const bootstrap = await received
@@ -76,6 +78,7 @@ console.log(
 `
 
 const bootstrapIdentityProof = `
+import { Schema } from "effect"
 const { promise: hello, resolve: resolveHello } = Promise.withResolvers()
 const { promise: heartbeat, resolve: resolveHeartbeat } = Promise.withResolvers()
 const sandboxId = await Bun.file("/run/e2b/.E2B_SANDBOX_ID").text().then((value) => value.trim()).catch(() => "sandbox-from-bootstrap")
@@ -86,7 +89,7 @@ const server = Bun.serve({
     bunServer.upgrade(request) ? undefined : new Response("upgrade required", { status: 426 }),
   websocket: {
     message: (socket, frame) => {
-      const message = JSON.parse(String(frame))
+      const message = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(String(frame))
       if (message._tag === "ExecutorHello") {
         resolveHello(message)
         socket.send(JSON.stringify({
@@ -213,101 +216,83 @@ describe.sequential("executor host process", () => {
   )
 
   it.effect("flushes the accepted bootstrap response and closes its one-shot listener", () =>
-    Effect.acquireUseRelease(
-      Effect.sync(() =>
-        Bun.spawn(["bun", "-e", bootstrapProof], {
-          cwd: packageRoot,
-          env: { ...process.env, E2B_SANDBOX_ID: "sandbox-1" },
-          stdout: "pipe",
-          stderr: "pipe",
-        }),
-      ),
-      (child) =>
-        Effect.promise(() =>
-          Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]),
-        ).pipe(
-          Effect.tap(([exitCode, stdout, stderr]) =>
-            Effect.sync(() => {
-              expect(stderr).toBe("")
-              expect(exitCode).toBe(0)
-              expect(decodeJson(stdout)).toEqual({
-                malformedStatus: 400,
-                invalidStatus: 400,
-                statuses: [202, 404],
-                body: "accepted",
-                credential: expect.stringMatching(/^bootstrap-[ab]$/),
-                identity: {
-                  target: "orb",
-                  ownerId: "owner-1",
-                  threadId: "thread-1",
-                  assignmentId: "assignment-1",
-                  assignmentGeneration: 1,
-                  instanceId: expect.any(String),
-                  executorId: "assignment-1:g1",
-                  templateBuildId: "build-1",
-                  apiUrl: "wss://api.example.test/api/v1/executors",
-                  workspaceId: "workspace-1",
-                  repository: null,
-                  lifecycle: "fresh",
-                  environmentDigest: `sha256:${"a".repeat(64)}`,
-                  setupCache: false,
-                  stateDirectory: "/var/lib/rika-executor",
-                },
-                restore: null,
-              })
-            }),
-          ),
-          Effect.timeout("5 seconds"),
-        ),
-      (child) => Effect.sync(() => child.kill()).pipe(Effect.ignore),
+    Effect.scoped(
+      Effect.gen(function* () {
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const stdout = yield* spawner.string(
+          ChildProcess.make("bun", ["-e", bootstrapProof], {
+            cwd: packageRoot,
+            extendEnv: true,
+            env: { E2B_SANDBOX_ID: "sandbox-1" },
+          }),
+        )
+        yield* Effect.sync(() => {
+          const decoded = decodeJson(stdout)
+          expect(decoded).toEqual({
+            malformedStatus: 400,
+            invalidStatus: 400,
+            statuses: [202, 404],
+            body: "accepted",
+            credential: expect.stringMatching(/^bootstrap-[ab]$/),
+            identity: {
+              target: "orb",
+              ownerId: "owner-1",
+              threadId: "thread-1",
+              assignmentId: "assignment-1",
+              assignmentGeneration: 1,
+              instanceId: expect.any(String),
+              executorId: "assignment-1:g1",
+              templateBuildId: "build-1",
+              apiUrl: "wss://api.example.test/api/v1/executors",
+              workspaceId: "workspace-1",
+              repository: null,
+              lifecycle: "fresh",
+              environmentDigest: `sha256:${"a".repeat(64)}`,
+              setupCache: false,
+              stateDirectory: "/var/lib/rika-executor",
+            },
+            restore: null,
+          })
+        })
+      }).pipe(Effect.timeout("5 seconds"), provideLayer(BunServices.layer)),
     ),
   )
 
   it.effect(
     "uses the secured bootstrap identity and heartbeats while workspace preparation is blocked",
     () =>
-      Effect.acquireUseRelease(
-        Effect.sync(() =>
-          Bun.spawn(["bun", "-e", bootstrapIdentityProof], {
-            cwd: packageRoot,
-            stdout: "pipe",
-            stderr: "pipe",
-          }),
-        ),
-        (child) =>
-          Effect.promise(() =>
-            Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]),
-          ).pipe(
-            Effect.tap(([exitCode, stdout, stderr]) =>
-              Effect.sync(() => {
-                expect(stderr).toBe("")
-                expect(exitCode).toBe(0)
-                expect(decodeJson(stdout)).toMatchObject({
-                  status: 202,
-                  frame: {
-                    _tag: "ExecutorHello",
-                    hello: {
-                      fence: {
-                        target: "orb",
-                        assignmentId: "assignment-from-bootstrap",
-                        assignmentGeneration: 7,
-                        instanceId: expect.any(String),
-                        executorId: expect.stringMatching(/^executor-from-bootstrap:/),
-                      },
-                      templateBuildId: "build-from-bootstrap",
-                      bootstrapToken: "one-time-bootstrap",
-                    },
+      Effect.scoped(
+        Effect.gen(function* () {
+          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+          const stdout = yield* spawner.string(
+            ChildProcess.make("bun", ["-e", bootstrapIdentityProof], {
+              cwd: packageRoot,
+            }),
+          )
+          yield* Effect.sync(() => {
+            expect(decodeJson(stdout)).toMatchObject({
+              status: 202,
+              frame: {
+                _tag: "ExecutorHello",
+                hello: {
+                  fence: {
+                    target: "orb",
+                    assignmentId: "assignment-from-bootstrap",
+                    assignmentGeneration: 7,
+                    instanceId: expect.any(String),
+                    executorId: expect.stringMatching(/^executor-from-bootstrap:/),
                   },
-                  heartbeat: {
-                    _tag: "ExecutorHeartbeat",
-                    heartbeat: { cursor: { sequence: 0, value: "" } },
-                  },
-                })
-              }),
-            ),
-            Effect.timeout("15 seconds"),
-          ),
-        (child) => Effect.sync(() => child.kill()).pipe(Effect.ignore),
+                  templateBuildId: "build-from-bootstrap",
+                  bootstrapToken: "one-time-bootstrap",
+                },
+              },
+              heartbeat: {
+                _tag: "ExecutorHeartbeat",
+                heartbeat: { cursor: { sequence: 0, value: "" } },
+              },
+            })
+          })
+        }).pipe(Effect.timeout("15 seconds"), provideLayer(BunServices.layer)),
       ),
     20_000,
   )

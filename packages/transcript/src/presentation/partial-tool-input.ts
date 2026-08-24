@@ -1,3 +1,5 @@
+import { Option, Schema } from "effect"
+
 const isWhitespace = (character: string): boolean =>
   character === " " || character === "\n" || character === "\r" || character === "\t"
 
@@ -64,6 +66,8 @@ const scalar = (raw: string): unknown => {
   return /^-?\d/.test(raw) && Number.isFinite(numeric) ? numeric : undefined
 }
 
+const Json = Schema.fromJsonString(Schema.Unknown)
+
 const readNested = (reader: Reader): Fragment<unknown> | undefined => {
   const { input } = reader
   const length = input.length
@@ -80,11 +84,8 @@ const readNested = (reader: Reader): Fragment<unknown> | undefined => {
       depth -= 1
       if (depth === 0) {
         reader.cursor += 1
-        try {
-          return { value: JSON.parse(input.slice(start, reader.cursor)) as unknown, complete: true }
-        } catch {
-          return undefined
-        }
+        const decoded = Schema.decodeUnknownOption(Json)(input.slice(start, reader.cursor))
+        return Option.isSome(decoded) ? { value: decoded.value, complete: true } : undefined
       }
     }
     reader.cursor += 1

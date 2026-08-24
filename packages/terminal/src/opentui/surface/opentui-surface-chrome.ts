@@ -1,14 +1,12 @@
-import { type MouseEvent, StyledText, dim, fg, type ColorInput } from "@opentui/core"
+import { type MouseEvent, type ColorInput } from "@opentui/core"
 import type { Model } from "../../state/model/terminal-state"
 import type { ChangedFileRow } from "./opentui-surface-transcript-types"
 import { SidebarController } from "./opentui-sidebar-controller"
 import { contentColumnWidth } from "../../state/model/terminal-layout-state"
-import { spacing, colors } from "../../presentation/terminal/terminal-theme"
-import { toOpenColor } from "../rendering/terminal-text-adapter"
-import { formatActivity } from "../../state/model/terminal-activity-state"
-import { loaderFrame, spinnerFrames, spinnerInterval } from "../rendering/opentui-spinner"
+import { spacing } from "../../presentation/terminal/terminal-theme"
+import { spinnerFrames, spinnerInterval } from "../rendering/opentui-spinner"
 import { renderSidebar } from "../rendering/opentui-render-block"
-import { goalAnimationActive, goalIndicatorVisible, panelLoading, welcomeContent } from "./opentui-surface-content"
+import { goalAnimationActive, goalIndicatorVisible, statusContent, welcomeContent } from "./opentui-surface-content"
 import { goalLabelContent } from "./opentui-goal-controller"
 import { welcomeAnimationActive, welcomeAnimationSettled } from "./opentui-welcome-state"
 import { ToastController } from "./opentui-toast-controller"
@@ -108,22 +106,11 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
     this.toolSpinner.step()
     const current = this.model
     if (current !== undefined) {
-      const label =
-        current.connectionStatus ??
-        formatActivity(
-          current.activity,
-          current.activity?._tag === "Retrying"
-            ? Math.max(0, Math.ceil((current.activity.nextAt - this.currentTimeMillis()) / 1000))
-            : undefined,
-        ) ??
-        panelLoading(current)
-      if (label !== undefined) {
-        this.statusLabel.content = new StyledText([
-          fg(toOpenColor(colors.text))(" "),
-          fg(toOpenColor(colors.blue))(loaderFrame(label, current.animationTick + this.loaderController.phase)),
-          dim(fg(toOpenColor(colors.text))(` ${label} `)),
-        ])
-      }
+      this.statusLabel.content = statusContent(
+        current,
+        current.animationTick + this.loaderController.phase,
+        this.currentTimeMillis(),
+      )
       const glyph = this.toolSpinner.toBraille()
       if (current.busy) this.publishWorkingFrame(glyph)
       if (current.usageDisplay === "time" && current.usageTime?._tag === "Available") this.renderModeLabel(current)

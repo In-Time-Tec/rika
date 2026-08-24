@@ -40,9 +40,9 @@ const failure = (operation: string) => CliDeviceDirectoryError.make({ operation 
 export const makePostgresCliDeviceDirectory = (pool: Pool): CliDeviceDirectory => {
   const query = <A>(operation: string, text: string, values: ReadonlyArray<unknown> = []) =>
     Effect.tryPromise({
-      try: () => pool.query(text, [...values]).then((result) => result.rows as ReadonlyArray<A>),
+      try: () => pool.query(text, [...values]),
       catch: () => failure(operation),
-    })
+    }).pipe(Effect.map((result) => result.rows as ReadonlyArray<A>))
 
   const authenticate = Effect.fn("CliDeviceDirectory.authenticate")(function* (principal: IdentityPrincipal) {
     if (principal.clientId === undefined || principal.dpopJkt === undefined) return undefined

@@ -6,7 +6,7 @@ import { model } from "./tui-app-model"
 
 const tuiTestTimeout = 60_000
 test(
-  "drains a held submission before settling activity",
+  "keeps a held draft inert then drains admitted activity before settling",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -17,7 +17,13 @@ test(
           lanes: [
             {
               steps: [
-                model.turn([model.spawn([{ profile: "Task", prompt: "HELD_CHILD_PROMPT" }], "held-child")]),
+                model.turn(
+                  [
+                    model.reasoning("ADMITTED_ROOT_THINKING"),
+                    model.spawn([{ profile: "Task", prompt: "HELD_CHILD_PROMPT" }], "held-child"),
+                  ],
+                  { streamPartDelayMillis: 250 },
+                ),
                 model.text("ROOT_SETTLED_AFTER_HOLD"),
                 model.text("HELD_CHILD_SETTLEMENT_ACKNOWLEDGED"),
                 model.text("HELD_CHILD_SETTLEMENT_RETRY_ACKNOWLEDGED"),
@@ -27,14 +33,17 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("HELD_ROOT_PROMPT"))
+        yield* Effect.tryPromise(() => app.type("HELD_ROOT_PROMPT"))
         app.pressEnter()
         const held = yield* app.nextFrame
         expect(held).toContain("HELD_ROOT_PROMPT")
-        expect(held).toContain("Sending")
+        expect(held).not.toContain("Sending")
         expect(held).not.toContain("HELD_CHILD_PROMPT")
+        expect(yield* app.modelRequestCount).toBe(0)
 
         yield* Deferred.succeed(admission, undefined)
+        const admitted = yield* app.waitFrame("Thinking")
+        expect(admitted).toContain("HELD_ROOT_PROMPT")
         yield* app.waitFrame("ROOT_SETTLED_AFTER_HOLD")
         const final = yield* app.settled
         for (const marker of ["Waiting", "Streaming", "Thinking", "Sending", "Running 1 subagent"])

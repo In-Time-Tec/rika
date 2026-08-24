@@ -3,6 +3,7 @@ import { oauthDeviceAuthorization, oauthProvider } from "@better-auth/oauth-prov
 import { betterAuth, type BetterAuthPlugin } from "better-auth"
 import { jwt, organization } from "better-auth/plugins"
 import { Effect, Redacted, Schema } from "effect"
+import { runPromise } from "effect/Effect"
 import type { Pool } from "pg"
 import type { IdentityConfig } from "./config"
 import { invitationEmail, passwordResetEmail, verificationEmail, type MailSender } from "./mail"
@@ -63,7 +64,7 @@ export const makeBetterAuthIdentityRuntime = (input: {
 }): IdentityRuntime => {
   const { config, mail, pool } = input
   const oauthResource = identityOAuthResourceContract(config)
-  const sendMail = (message: Parameters<MailSender["send"]>[0]) => Effect.runPromise(mail.send(message))
+  const sendMail = (message: Parameters<MailSender["send"]>[0]) => runPromise(mail.send(message))
   const provider = oauthProvider({
     loginPage: "/login",
     consentPage: "/consent",
@@ -188,39 +189,37 @@ export const makeBetterAuthIdentityRuntime = (input: {
       if (authorization !== null) {
         return Effect.tryPromise({
           try: () =>
-            resource
-              .verifyAccessTokenRequest(request, {
-                verifyOptions: { audience: oauthResource.resource, issuer: oauthResource.issuer },
-                requiredScopes: ["account"],
-                jwksUrl: oauthResource.jwksUrl,
-              })
-              .then((payload) => {
-                if (typeof payload.sub !== "string" || payload.sub.length === 0) throw new TypeError("missing subject")
-                const clientId = typeof payload.client_id === "string" ? payload.client_id : undefined
-                const confirmation = payload.cnf
-                const dpopJkt =
-                  typeof confirmation === "object" &&
-                  confirmation !== null &&
-                  "jkt" in confirmation &&
-                  typeof confirmation.jkt === "string"
-                    ? confirmation.jkt
-                    : undefined
-                return {
-                  userId: payload.sub,
-                  ...(clientId === undefined ? {} : { clientId }),
-                  ...(dpopJkt === undefined ? {} : { dpopJkt }),
-                }
-              }),
+            resource.verifyAccessTokenRequest(request, {
+              verifyOptions: { audience: oauthResource.resource, issuer: oauthResource.issuer },
+              requiredScopes: ["account"],
+              jwksUrl: oauthResource.jwksUrl,
+            }),
           catch: () => IdentityRuntimeError.make({ kind: "invalid" }),
-        })
+        }).pipe(
+          Effect.map((payload) => {
+            if (typeof payload.sub !== "string" || payload.sub.length === 0) throw new TypeError("missing subject")
+            const clientId = typeof payload.client_id === "string" ? payload.client_id : undefined
+            const confirmation = payload.cnf
+            const dpopJkt =
+              typeof confirmation === "object" &&
+              confirmation !== null &&
+              "jkt" in confirmation &&
+              typeof confirmation.jkt === "string"
+                ? confirmation.jkt
+                : undefined
+            return {
+              userId: payload.sub,
+              ...(clientId === undefined ? {} : { clientId }),
+              ...(dpopJkt === undefined ? {} : { dpopJkt }),
+            }
+          }),
+          Effect.mapError(() => IdentityRuntimeError.make({ kind: "invalid" })),
+        )
       }
       return Effect.tryPromise({
-        try: () =>
-          auth.api
-            .getSession({ headers: request.headers })
-            .then((session) => (session === null ? undefined : { userId: session.user.id })),
+        try: () => auth.api.getSession({ headers: request.headers }),
         catch: () => IdentityRuntimeError.make({ kind: "unavailable" }),
-      })
+      }).pipe(Effect.map((session) => (session === null ? undefined : { userId: session.user.id })))
     }),
     protectedResourceMetadata: Effect.tryPromise({
       try: () =>

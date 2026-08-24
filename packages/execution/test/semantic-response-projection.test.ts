@@ -17,7 +17,9 @@ const semanticResponse = (fragments: ReadonlyArray<ProviderFragment>) => [
     type: "tool-call" as const,
     id: "read-call",
     name: "read",
-    params: JSON.parse(fragments.map((fragment) => fragment.params).join("")),
+    params: Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
+      fragments.map((fragment) => fragment.params).join(""),
+    ),
     providerExecuted: false,
     metadata: {},
   },

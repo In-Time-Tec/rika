@@ -35,7 +35,7 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Start the slow child and use its result."))
+        yield* Effect.tryPromise(() => app.type("Start the slow child and use its result."))
         app.pressEnter()
         const turnId = Turn.TurnId.make("tui-turn-0")
         yield* app.waitTranscript(

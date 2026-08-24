@@ -42,7 +42,7 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Run the process and wait for it."))
+        yield* Effect.tryPromise(() => app.type("Run the process and wait for it."))
         app.pressEnter()
         yield* app.waitFrame("SHELL_WAIT_COMPLETE", 20_000)
         yield* app.settled

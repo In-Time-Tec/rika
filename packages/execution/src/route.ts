@@ -21,7 +21,7 @@ import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registra
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 import type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
-import { Context, Effect, Function, Layer, Schema, Stream } from "effect"
+import { Clock, Context, DateTime, Effect, Function, Layer, Schema, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import { profileInstructions } from "./agent-instructions"
 import * as Models from "./models"
@@ -391,6 +391,7 @@ const remoteCellExecutor = (
   route: RemoteCellRoute,
   workspace: string,
   executionIdentity: ConfigureOptions["executionIdentity"],
+  deadlineMillis: number,
 ): Layer.Layer<ToolExecutor.ToolExecutor> =>
   Layer.effect(
     ToolExecutor.ToolExecutor,
@@ -401,6 +402,10 @@ const remoteCellExecutor = (
           return Effect.gen(function* () {
             const context = yield* ToolContext.ToolContext
             const authority = yield* ExecutorRuntime.capture
+            const admittedAtMillis = yield* Clock.currentTimeMillis
+            const cellDeadlineAt = DateTime.formatIso(DateTime.makeUnsafe(admittedAtMillis + deadlineMillis))
+            const deadlineAt =
+              context.deadline === undefined || cellDeadlineAt < context.deadline ? cellDeadlineAt : context.deadline
             const operationKey = context.operationKey
             if (operationKey === undefined || operationKey.length === 0)
               return yield* ToolExecutor.FrameworkFailure.make({
@@ -444,8 +449,8 @@ const remoteCellExecutor = (
                       code: parameters.code,
                       attempt: context.attempt ?? 0,
                       replayPolicy: "never",
-                      admittedAt: context.admittedAt ?? null,
-                      deadline: context.deadline ?? null,
+                      admittedAt: DateTime.formatIso(DateTime.makeUnsafe(admittedAtMillis)),
+                      deadlineAt,
                     }),
                     authority,
                   )
@@ -542,7 +547,12 @@ export const configure = (
         options.kernel.limits?.cellDeadlineMillis ?? KernelProfileRegistration.defaultLimits.cellDeadlineMillis,
       )
     if (options.cell?._tag === "Remote")
-      cellLayer = remoteCellExecutor(options.cell, options.workspace, options.executionIdentity)
+      cellLayer = remoteCellExecutor(
+        options.cell,
+        options.workspace,
+        options.executionIdentity,
+        options.kernel.limits?.cellDeadlineMillis ?? KernelProfileRegistration.defaultLimits.cellDeadlineMillis,
+      )
     const environment = (name: keyof typeof routes): AgentEnvironment => {
       const model = routed[name].layer
       if (name === "Title" || name === "Compaction") return Layer.orDie(model)

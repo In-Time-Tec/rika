@@ -47,9 +47,9 @@ const postgresError = (operation: string) => () => PostgresAdapterError.make({ o
 
 const query = <Row extends QueryResultRow>(pool: Pool, operation: string, text: string, values?: unknown[]) =>
   Effect.tryPromise({
-    try: () => pool.query<Row>(text, values).then((result) => result.rows),
+    try: () => pool.query<Row>(text, values),
     catch: () => IdentityDirectoryError.make({ operation }),
-  })
+  }).pipe(Effect.map((result) => result.rows))
 
 const membershipFromRow = (row: AccountRow): OrganizationMembership | undefined => {
   if (

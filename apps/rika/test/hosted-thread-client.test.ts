@@ -1,6 +1,7 @@
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import { expect, it } from "@effect/vitest"
 import { ClientMessage, ServerFrame } from "@rika/product/client-protocol"
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import { Context, Effect, Layer, Schema } from "effect"
 import { ThreadClient } from "../src/hosted/hosted-contract"
 import { layer } from "../src/hosted/hosted-thread-client"
@@ -8,7 +9,7 @@ import { layer } from "../src/hosted/hosted-thread-client"
 const decode = Schema.decodeUnknownSync(Schema.fromJsonString(ClientMessage))
 const encode = Schema.encodeSync(Schema.fromJsonString(ServerFrame))
 
-it.effect("creates, attaches, and submits through the authenticated Thread WebSocket protocol", () =>
+it.effect("creates, attaches, submits, and replays admission through the authenticated Thread WebSocket protocol", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const commands: Array<ClientMessage["command"]> = []
@@ -53,28 +54,39 @@ it.effect("creates, attaches, and submits through the authenticated Thread WebSo
                     encode({
                       protocolVersion: 1,
                       payload: {
-                        _tag: "ThreadSnapshot",
+                        _tag: "ThreadAttached",
                         requestId: message.requestId,
                         threadId: message.command.threadId,
+                        snapshotThreadVersion: "1" as never,
+                        snapshotCursor: "0" as never,
                         threadVersion: "1" as never,
                         cursor: "0" as never,
                         snapshot: {
-                          thread: {
-                            id: "thread-1" as never,
-                            workspace: "workspace-1",
-                            title: "Thread",
-                            labels: [],
-                            pinned: false,
-                            archived: false,
-                            lineage: { _tag: "Original" },
-                            createdAt: 1,
-                            updatedAt: 1,
+                          executorKind: "runner",
+                          view: {
+                            thread: {
+                              id: "thread-1" as never,
+                              workspace: "workspace-1",
+                              title: "Thread",
+                              labels: [],
+                              pinned: false,
+                              archived: false,
+                              lineage: { _tag: "Original" },
+                              createdAt: 1,
+                              updatedAt: 1,
+                            },
+                            revision: 0,
+                            source: { projectionVersion: ExecutionProjection.projectionVersion },
+                            turns: [],
+                            pending: [],
+                            hasOlder: false,
+                            hasNewer: false,
+                            usage: { state: ExecutionProjection.emptyUsageState() },
                           },
-                          turns: [],
-                          units: [],
-                          queue: { revision: 0, turns: [] },
                           pendingAuthorizations: [],
                         },
+                        events: [],
+                        participants: [],
                       },
                     }),
                   )
@@ -95,10 +107,39 @@ it.effect("creates, attaches, and submits through the authenticated Thread WebSo
                         threadId: "thread-1" as never,
                         threadVersion: "2" as never,
                         cursor: "0" as never,
-                        result: { _tag: "Applied" },
+                        result:
+                          message.command._tag === "SubmitPrompt"
+                            ? {
+                                _tag: "PromptAdmitted",
+                                status: message.command.commandId === "submit-replay" ? "queued" : "accepted",
+                              }
+                            : { _tag: "Applied" },
                       },
                     }),
                   )
+                  if (message.command._tag === "SubmitPrompt" && message.command.commandId !== "submit-replay")
+                    socket.send(
+                      encode({
+                        protocolVersion: 1,
+                        payload: {
+                          _tag: "ThreadEvent",
+                          event: {
+                            threadId: "thread-1" as never,
+                            sequence: "1" as never,
+                            cursor: "1" as never,
+                            threadVersion: "2" as never,
+                            createdAt: "2026-08-23T00:00:00.000Z",
+                            event: {
+                              _tag: "SubmissionAdmitted",
+                              threadId: "thread-1" as never,
+                              turnId: "turn-1" as never,
+                              status: "active",
+                              submissionId: message.command.commandId,
+                            },
+                          },
+                        },
+                      }),
+                    )
                   return
                 }
                 if (message.command._tag === "OpenPortal")
@@ -118,7 +159,7 @@ it.effect("creates, attaches, and submits through the authenticated Thread WebSo
             },
           }),
         ),
-        (runningServer) => Effect.promise(() => runningServer.stop(true)),
+        (runningServer) => Effect.tryPromise(() => runningServer.stop(true)),
       )
       const context = yield* Layer.build(layer.pipe(Layer.provide(BunSocket.layerWebSocketConstructor)))
       const threads = Context.get(context, ThreadClient)
@@ -143,7 +184,15 @@ it.effect("creates, attaches, and submits through the authenticated Thread WebSo
           request: { prompt: ["hello"], mode: "low" },
           commandId: "submit-1",
         }),
-      ).toEqual({ commandId: "submit-1", status: "queued" })
+      ).toEqual({ commandId: "submit-1", status: "accepted" })
+      expect(
+        yield* threads.submit({
+          ticket,
+          threadId: "thread-1",
+          request: { prompt: ["replayed prompt"] },
+          commandId: "submit-replay",
+        }),
+      ).toEqual({ commandId: "submit-replay", status: "queued" })
       yield* threads.ensureService({
         ticket,
         threadId: "thread-1",
@@ -169,19 +218,28 @@ it.effect("creates, attaches, and submits through the authenticated Thread WebSo
         "AttachThread",
         "SubmitPrompt",
         "AttachThread",
+        "SubmitPrompt",
+        "AttachThread",
         "EnsureRepositoryService",
         "AttachThread",
         "StopRepositoryService",
         "AttachThread",
         "OpenPortal",
       ])
-      expect(commands[2]).toMatchObject({ expectedThreadVersion: "1", text: "hello", mode: "low" })
-      expect(commands[4]).toMatchObject({
+      expect(commands[2]).toMatchObject({
+        threadId: "thread-1",
+        expectedThreadVersion: "1",
+        text: "hello",
+        mode: "low",
+      })
+      expect(commands[6]).toMatchObject({
+        threadId: "thread-1",
         expectedThreadVersion: "1",
         service: { serviceId: "web", command: "bun", args: ["run", "dev"], cwd: "." },
       })
-      expect(commands[6]).toMatchObject({ expectedThreadVersion: "1", serviceId: "web" })
-      expect(offeredProtocols).toEqual(Array.from({ length: 5 }, () => "rika.thread.v1, rika.ticket.single-use-ticket"))
+      expect(commands[8]).toMatchObject({ threadId: "thread-1", expectedThreadVersion: "1", serviceId: "web" })
+      expect(commands[10]).toMatchObject({ threadId: "thread-1", port: 3000 })
+      expect(offeredProtocols).toEqual(Array.from({ length: 6 }, () => "rika.thread.v1, rika.ticket.single-use-ticket"))
     }),
   ),
 )
@@ -223,7 +281,7 @@ it.effect("returns a hosted rejection instead of accepting a failed command", ()
             },
           }),
         ),
-        (runningServer) => Effect.promise(() => runningServer.stop(true)),
+        (runningServer) => Effect.tryPromise(() => runningServer.stop(true)),
       )
       const context = yield* Layer.build(layer.pipe(Layer.provide(BunSocket.layerWebSocketConstructor)))
       const threads = Context.get(context, ThreadClient)

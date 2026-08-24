@@ -11,6 +11,8 @@ import type { InteractiveOperationFeed } from "./view/feed"
 
 export interface InteractiveSession {
   readonly events: (dispatch: (event: ClientEvent) => void) => Effect.Effect<void, OperationUnavailable>
+  readonly currentView: () => import("@rika/product/thread-view").ThreadViewSnapshot | undefined
+  readonly projectionCheckpoint: (turnId: string) => ExecutionProjection.Checkpoint | undefined
   readonly submit: (
     prompt: string,
     mode?: ModeId,

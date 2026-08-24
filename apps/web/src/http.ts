@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Effect, FileSystem } from "effect"
 import { AccountGateway, type Account } from "./account-gateway"
 import {
   accountPage,
@@ -20,6 +20,7 @@ import {
 export interface WebDependencies {
   readonly production: boolean
   readonly accountGateway: AccountGateway["Service"]
+  readonly fileSystem: FileSystem.FileSystem
 }
 
 const securityHeaders = (production: boolean) => {
@@ -58,13 +59,15 @@ const redirect = (location: string, production: boolean) =>
 const clientAsset = Effect.fn("WebHttp.clientAsset")(function* (
   name: "thread-client.css" | "thread-client.js",
   production: boolean,
+  fileSystem: FileSystem.FileSystem,
 ) {
-  const file = Bun.file(new URL(`../client/${name}`, import.meta.url))
-  if (!(yield* Effect.promise(() => file.exists()))) return html("<h1>Not found</h1>", production, 404)
+  const path = new URL(`../client/${name}`, import.meta.url).pathname
+  if (!(yield* fileSystem.exists(path))) return html("<h1>Not found</h1>", production, 404)
+  const body = yield* fileSystem.readFileString(path)
   const headers = securityHeaders(production)
   headers.set("content-type", name.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8")
   headers.set("cache-control", "public, max-age=3600")
-  return new Response(file, { headers })
+  return new Response(body, { headers })
 })
 
 const safePath = (value: string | null, requestUrl: URL, fallback = "/") => {
@@ -110,8 +113,10 @@ const route = Effect.fn("WebHttp.route")(function* (request: Request, dependenci
       headers: new Headers({ "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }),
     })
   if (request.method !== "GET") return html("<h1>Not found</h1>", dependencies.production, 404)
-  if (pathname === "/assets/thread-client.css") return yield* clientAsset("thread-client.css", dependencies.production)
-  if (pathname === "/assets/thread-client.js") return yield* clientAsset("thread-client.js", dependencies.production)
+  if (pathname === "/assets/thread-client.css")
+    return yield* clientAsset("thread-client.css", dependencies.production, dependencies.fileSystem)
+  if (pathname === "/assets/thread-client.js")
+    return yield* clientAsset("thread-client.js", dependencies.production, dependencies.fileSystem)
   if (pathname === "/assets/web.css")
     return response(webStyles, {
       production: dependencies.production,

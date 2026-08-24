@@ -21,7 +21,7 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Persist a checkpoint."))
+        yield* Effect.tryPromise(() => app.type("Persist a checkpoint."))
         app.pressEnter()
         yield* app.waitFrame("RESTART_TURN_COMPLETE")
         yield* app.settled

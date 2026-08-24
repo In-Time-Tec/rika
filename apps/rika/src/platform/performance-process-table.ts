@@ -1,5 +1,6 @@
-import { Data, Effect, FileSystem, Function, Path } from "effect"
-import { matchesRole, type PerformanceRole, type RoleObservation, roleRuntimes } from "./performance-platform"
+import { Clock, Data, Effect, FileSystem, Function, Path, Stream } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { clientRuntime, matchesClientProcess, type ProcessMeasurement } from "./performance-platform"
 
 export interface PsRow {
   readonly pid: number
@@ -15,11 +16,8 @@ export class ProcessObservationError extends Data.TaggedError("ProcessObservatio
   readonly cause?: unknown
 }> {}
 
-const psRows = (): ReadonlyArray<PsRow> => {
-  const result = Bun.spawnSync(["ps", "-axo", "pid=,ppid=,rss=,%cpu=,time=,command="])
-  if (result.exitCode !== 0) throw new Error(new TextDecoder().decode(result.stderr))
-  return new TextDecoder()
-    .decode(result.stdout)
+const parsePsRows = (output: string): ReadonlyArray<PsRow> =>
+  output
     .trim()
     .split("\n")
     .flatMap((line) => {
@@ -42,12 +40,29 @@ const psRows = (): ReadonlyArray<PsRow> => {
             },
           ]
     })
-}
 
-export const readProcessRows = Effect.try({
-  try: psRows,
-  catch: (cause) => new ProcessObservationError({ message: "Unable to sample the process table", cause }),
-})
+export const readProcessRows = Effect.gen(function* () {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const child = yield* spawner.spawn(
+    ChildProcess.make("ps", ["-axo", "pid=,ppid=,rss=,%cpu=,time=,command="], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    }),
+  )
+  const [stdout, stderr, exitCode] = yield* Effect.all(
+    [
+      Stream.mkString(Stream.decodeText(child.stdout)),
+      Stream.mkString(Stream.decodeText(child.stderr)),
+      child.exitCode,
+    ],
+    { concurrency: 3 },
+  )
+  if (Number(exitCode) !== 0) return yield* Effect.fail(stderr)
+  return parsePsRows(stdout)
+}).pipe(
+  Effect.mapError((cause) => new ProcessObservationError({ message: "Unable to sample the process table", cause })),
+)
 
 const descendantsImpl = (rows: ReadonlyArray<PsRow>, root: number) => {
   const ids = new Set([root])
@@ -68,80 +83,67 @@ export const descendants: {
   (root: number): (rows: ReadonlyArray<PsRow>) => ReadonlyArray<PsRow>
 } = Function.dual(2, descendantsImpl)
 
-const killTree = (pid: number) => {
-  try {
-    process.kill(-pid, "SIGTERM")
-  } catch {
-    try {
-      process.kill(pid, "SIGTERM")
-    } catch {}
-  }
-}
+const observedClientRowImpl = (rows: ReadonlyArray<PsRow>, root: number, runtime: ReturnType<typeof clientRuntime>) =>
+  descendants(rows, root).find((row) => matchesClientProcess({ command: row.command, runtime }))
 
-const signal = (pid: number, value: NodeJS.Signals) => {
-  try {
-    process.kill(pid, value)
-  } catch {}
-}
+export const observedClientRow: {
+  (rows: ReadonlyArray<PsRow>, root: number, runtime: ReturnType<typeof clientRuntime>): PsRow | undefined
+  (root: number, runtime: ReturnType<typeof clientRuntime>): (rows: ReadonlyArray<PsRow>) => PsRow | undefined
+} = Function.dual(3, observedClientRowImpl)
 
-const running = (pid: number) => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
+const processSubtreeRssImpl = (rows: ReadonlyArray<PsRow>, root: number): number =>
+  descendants(rows, root).reduce((total, row) => total + row.rss, 0)
+
+export const processSubtreeRss: {
+  (rows: ReadonlyArray<PsRow>, root: number): number
+  (root: number): (rows: ReadonlyArray<PsRow>) => number
+} = Function.dual(2, processSubtreeRssImpl)
 
 export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses")(function* () {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const temporaryHome = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-performance-" })
   const moduleDirectory = import.meta.dir ?? path.dirname(decodeURIComponent(new URL(import.meta.url).pathname))
   const sourceDirectory = path.dirname(moduleDirectory)
   const packaged = import.meta.path?.startsWith("/$bunfs/") ?? false
   const directory = packaged ? path.dirname(process.execPath) : sourceDirectory
-  const runtimes = roleRuntimes({ packaged, executable: process.execPath, sourceDirectory: directory })
-  const executableBytes = yield* Effect.all(
-    Object.entries(runtimes).map(([role, runtime]) =>
-      fileSystem.stat(runtime.evidencePath).pipe(Effect.map((info) => [role, Number(info.size)] as const)),
-    ),
-  ).pipe(Effect.map(Object.fromEntries))
+  const runtime = clientRuntime({ packaged, executable: process.execPath, sourceDirectory: directory })
+  const executableBytes = yield* fileSystem.stat(runtime.evidencePath).pipe(Effect.map((info) => Number(info.size)))
   if (process.platform !== "darwin")
     return {
-      roles: [],
       executableBytes,
       unsupportedReason: "Process-tree RSS and CPU sampling currently requires Darwin ps and script PTY semantics.",
     }
-  const launcher = runtimes.launcher
-  const processMatchesRole = (row: PsRow, role: PerformanceRole) =>
-    matchesRole({ command: row.command, runtime: runtimes[role] })
+  const processMatchesClient = (row: PsRow) => matchesClientProcess({ command: row.command, runtime })
   const baselinePids = new Set((yield* readProcessRows).map((row) => row.pid))
   return yield* Effect.acquireUseRelease(
-    Effect.sync(() => {
-      const startedAt = performance.now()
+    Effect.gen(function* () {
+      const startedAt = yield* Clock.currentTimeMillis
       const ownedPids = new Set<number>()
-      const child = Bun.spawn(
-        [
+      const child = yield* spawner.spawn(
+        ChildProcess.make(
           "/bin/sh",
-          "-c",
-          `tail -f /dev/null | exec script -q /dev/null /bin/sh -c 'stty rows 36 cols 120; exec "$@"' rika-pty "$@"`,
-          "rika-performance",
-          launcher.executable,
-          ...launcher.arguments,
-        ],
-        {
-          cwd: temporaryHome,
-          env: {
-            ...process.env,
-            HOME: temporaryHome,
-            TERM: "xterm-256color",
+          [
+            "-c",
+            `tail -f /dev/null | exec script -q /dev/null /bin/sh -c 'stty rows 36 cols 120; exec "$@"' rika-pty "$@"`,
+            "rika-performance",
+            runtime.executable,
+            ...runtime.arguments,
+          ],
+          {
+            cwd: temporaryHome,
+            extendEnv: true,
+            env: {
+              HOME: temporaryHome,
+              TERM: "xterm-256color",
+            },
+            stdin: "ignore",
+            stdout: "ignore",
+            stderr: "ignore",
+            detached: true,
           },
-          stdin: "ignore",
-          stdout: "ignore",
-          stderr: "ignore",
-          detached: true,
-        },
+        ),
       )
       return { child, ownedPids, startedAt }
     }),
@@ -149,82 +151,60 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
       Effect.gen(function* () {
         for (let attempt = 0; attempt <= 40; attempt += 1) {
           const readyRows = descendants(yield* readProcessRows, child.pid).filter((row) => !baselinePids.has(row.pid))
-          for (const row of readyRows)
-            if (
-              processMatchesRole(row, "launcher") ||
-              processMatchesRole(row, "interactive") ||
-              processMatchesRole(row, "runner-executor")
-            )
-              ownedPids.add(row.pid)
-          const ready =
-            readyRows.some((row) => processMatchesRole(row, "interactive") && row.rss > 1024) &&
-            readyRows.some((row) => processMatchesRole(row, "runner-executor") && row.rss > 1024)
+          for (const row of readyRows) if (processMatchesClient(row)) ownedPids.add(row.pid)
+          const ready = readyRows.some((row) => processMatchesClient(row) && row.rss > 1024)
           if (ready || attempt === 40) break
           yield* Effect.sleep("250 millis")
         }
-        const startupToRolePresenceMilliseconds = performance.now() - startedAt
+        const startupToProcessPresenceMilliseconds = (yield* Clock.currentTimeMillis) - startedAt
         yield* Effect.sleep("8 seconds")
         let previousRows = yield* readProcessRows
-        const roleCpu = new Map<PerformanceRole, Array<number>>(
-          (["launcher", "interactive", "runner-executor"] as const).map((role) => [role, []]),
-        )
+        const clientCpu: Array<number> = []
         const totalCpu: Array<number> = []
-        let stableRoles = true
+        let stableProcess = true
         let currentRows = previousRows
         for (let sample = 0; sample < 5; sample += 1) {
-          const sampleStartedAt = performance.now()
+          const sampleStartedAt = yield* Clock.currentTimeMillis
           yield* Effect.sleep("1 second")
           currentRows = yield* readProcessRows
-          const elapsedSeconds = (performance.now() - sampleStartedAt) / 1000
+          const elapsedSeconds = ((yield* Clock.currentTimeMillis) - sampleStartedAt) / 1000
           const previousTree = descendants(previousRows, child.pid).filter((row) => !baselinePids.has(row.pid))
           const currentTree = descendants(currentRows, child.pid).filter((row) => !baselinePids.has(row.pid))
           let total = 0
-          for (const name of ["launcher", "interactive", "runner-executor"] as const) {
-            const before = previousTree.find((row) => processMatchesRole(row, name))
-            const after = currentTree.find((row) => processMatchesRole(row, name))
-            if (after !== undefined) ownedPids.add(after.pid)
-            if (before?.pid !== after?.pid) stableRoles = false
-            const value =
-              before === undefined || after === undefined || before.pid !== after.pid
-                ? 0
-                : Math.max(0, ((after.cpuSeconds - before.cpuSeconds) / elapsedSeconds) * 100)
-            roleCpu.get(name)!.push(value)
-            total += value
-          }
+          const before = previousTree.find(processMatchesClient)
+          const after = currentTree.find(processMatchesClient)
+          if (after !== undefined) ownedPids.add(after.pid)
+          if (before?.pid !== after?.pid) stableProcess = false
+          const value =
+            before === undefined || after === undefined || before.pid !== after.pid
+              ? 0
+              : Math.max(0, ((after.cpuSeconds - before.cpuSeconds) / elapsedSeconds) * 100)
+          clientCpu.push(value)
+          total += value
           totalCpu.push(total)
           previousRows = currentRows
         }
         const tree = descendants(currentRows, child.pid).filter((row) => !baselinePids.has(row.pid))
-        const launcherRow = tree.find((row) => processMatchesRole(row, "launcher"))
-        const interactiveRow = tree.find((row) => processMatchesRole(row, "interactive"))
-        const runnerExecutorRow = tree.find((row) => processMatchesRole(row, "runner-executor"))
-        for (const row of [launcherRow, interactiveRow, runnerExecutorRow])
-          if (row !== undefined) ownedPids.add(row.pid)
-        const role = (name: PerformanceRole, row: PsRow, executable: string): RoleObservation => ({
-          role: name,
+        const clientRow = tree.find(processMatchesClient)
+        if (clientRow !== undefined) ownedPids.add(clientRow.pid)
+        const client = (row: PsRow): ProcessMeasurement => ({
           pid: row.pid,
-          executable,
-          rssMebibytes: row.rss / 1024,
-          cpuPercent: roleCpu.get(name)!.reduce((total, value) => total + value, 0) / totalCpu.length,
+          executable: path.basename(runtime.evidencePath),
+          runtimeKind: runtime.kind,
+          rssMebibytes: processSubtreeRss(tree, row.pid) / 1024,
+          cpuPercent: clientCpu.reduce((total, value) => total + value, 0) / totalCpu.length,
         })
         return {
-          roles: [
-            ...(launcherRow === undefined ? [] : [role("launcher", launcherRow, runtimes.launcher.evidencePath)]),
-            ...(interactiveRow === undefined
-              ? []
-              : [role("interactive", interactiveRow, runtimes.interactive.evidencePath)]),
-            ...(runnerExecutorRow === undefined
-              ? []
-              : [role("runner-executor", runnerExecutorRow, runtimes["runner-executor"].evidencePath)]),
-          ],
-          ...(interactiveRow === undefined || runnerExecutorRow === undefined
+          ...(clientRow === undefined ? {} : { client: client(clientRow) }),
+          descendantCount: tree.length - 1,
+          ...(clientRow === undefined
             ? {}
             : {
                 sampleCount: totalCpu.length,
                 terminalColumns: 120,
                 terminalRows: 36,
-                startupToRolePresenceMilliseconds,
-                ...(stableRoles
+                startupToProcessPresenceMilliseconds,
+                ...(stableProcess
                   ? {
                       idleCpuMeanPercent: totalCpu.reduce((total, value) => total + value, 0) / totalCpu.length,
                       idleCpuPeakPercent: Math.max(...totalCpu),
@@ -232,21 +212,24 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
                   : {}),
               }),
           executableBytes,
-          ...(interactiveRow === undefined || runnerExecutorRow === undefined
-            ? { unsupportedReason: "The isolated PTY did not expose every expected process role before sampling." }
+          ...(clientRow === undefined
+            ? { unsupportedReason: "The isolated PTY did not expose the client process before sampling." }
             : {}),
         }
       }),
     ({ child, ownedPids }) =>
       Effect.gen(function* () {
-        for (const row of descendants(yield* readProcessRows, child.pid)) ownedPids.add(row.pid)
-        killTree(child.pid)
-        for (const pid of ownedPids) signal(pid, "SIGTERM")
-        for (let attempt = 0; attempt < 20 && [...ownedPids].some(running); attempt += 1)
+        const finalRows = yield* readProcessRows.pipe(Effect.orElseSucceed((): ReadonlyArray<PsRow> => []))
+        for (const row of descendants(finalRows, child.pid)) ownedPids.add(row.pid)
+        yield* child.kill({ killSignal: "SIGTERM" }).pipe(Effect.ignore)
+        for (
+          let attempt = 0;
+          attempt < 20 && (yield* child.isRunning.pipe(Effect.orElseSucceed(() => false)));
+          attempt += 1
+        )
           yield* Effect.sleep("50 millis")
-        for (const pid of ownedPids) if (running(pid)) signal(pid, "SIGKILL")
-        for (let attempt = 0; attempt < 20 && [...ownedPids].some(running); attempt += 1)
-          yield* Effect.sleep("50 millis")
+        if (yield* child.isRunning.pipe(Effect.orElseSucceed(() => false)))
+          yield* child.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore)
       }),
   )
 })

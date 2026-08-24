@@ -282,7 +282,7 @@ test("closes an expanded settled subagent's nested tree with the terminal connec
   expect(lines.some((line) => line.trimStart().startsWith("├"))).toBe(true)
   expect(lines.some((line) => line.includes("╰"))).toBe(true)
   expect(lines.some((line) => line.includes("All checks passed."))).toBe(true)
-  expect(lines.every((line) => !line.startsWith("│"))).toBe(true)
+  expect(lines.every((line) => String(line).startsWith("│") === false)).toBe(true)
 })
 test("shows a nested agent title and renders its prompt once in the expanded body", () => {
   const state = model({
@@ -462,5 +462,5 @@ test("connects and aligns the subagent response after two blank timeline rows", 
   for (const [offset, row] of lines.slice(childRow + 1, lastResponseRow).entries())
     expect([offset, row.startsWith("  │")]).toEqual([offset, true])
   expect(lines[lastResponseRow]!.startsWith("  ╰ ")).toBe(true)
-  expect(lines.every((line) => !line.startsWith("│"))).toBe(true)
+  expect(lines.every((line) => String(line).startsWith("│") === false)).toBe(true)
 })

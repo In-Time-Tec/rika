@@ -79,7 +79,6 @@ export interface UpdateCapabilitiesInput {
   readonly capabilities: WorkspaceCapabilitySnapshot
 }
 
-
 export interface Fence {
   readonly assignmentId: ExecutorAssignmentId
   readonly assignmentGeneration: FencingGeneration
@@ -136,9 +135,7 @@ export interface AssignmentsService {
     input: BindProviderInstanceInput,
   ) => Effect.Effect<ExecutorAssignment, AssignmentError>
   readonly openSession: (input: OpenSessionInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
-  readonly updateCapabilities: (
-    input: UpdateCapabilitiesInput,
-  ) => Effect.Effect<ExecutorAssignment, AssignmentError>
+  readonly updateCapabilities: (input: UpdateCapabilitiesInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
   readonly reconnect: (input: ReconnectInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
   readonly heartbeat: (input: HeartbeatInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
   readonly authenticate: (access: Access) => Effect.Effect<ExecutorAssignment, AssignmentError>

@@ -13,7 +13,7 @@ test.each([
   TuiApp.run(
     Effect.gen(function* () {
       const app = yield* TuiApp.tuiApp({ script: [model.text("ROOT_LEAF_DONE")], subagents })
-      yield* Effect.promise(() => app.type("Inspect the root tool surface."))
+      yield* Effect.tryPromise(() => app.type("Inspect the root tool surface."))
       app.pressEnter()
       yield* app.waitFrame("ROOT_LEAF_DONE")
       yield* app.settled
@@ -38,7 +38,7 @@ test("makes depth one a leaf while keeping the root child-capable", () =>
           { profile: "Task", steps: [model.text("DEPTH_ONE_CHILD_DONE")] },
         ],
       })
-      yield* Effect.promise(() => app.type("Delegate at depth one."))
+      yield* Effect.tryPromise(() => app.type("Delegate at depth one."))
       app.pressEnter()
       yield* app.waitFrame("DEPTH_ONE_ROOT_DONE", 20_000)
       yield* app.settled
@@ -70,7 +70,7 @@ test("keeps depth one child-capable and makes depth two a leaf", () =>
           { profile: "Oracle", steps: [model.text("DEPTH_TWO_DONE")] },
         ],
       })
-      yield* Effect.promise(() => app.type("Delegate through depth two."))
+      yield* Effect.tryPromise(() => app.type("Delegate through depth two."))
       app.pressEnter()
       yield* app.waitFrame("DEPTH_TWO_ROOT_DONE", 20_000)
       yield* app.settled
@@ -96,7 +96,7 @@ test("restores child tools after active capacity becomes available", () =>
           { profile: "Task", steps: [model.text("ONLY_CHILD_DONE")] },
         ],
       })
-      yield* Effect.promise(() => app.type("Use the only direct-child slot."))
+      yield* Effect.tryPromise(() => app.type("Use the only direct-child slot."))
       app.pressEnter()
       yield* app.waitFrame("QUOTA_ROOT_DONE", 20_000)
       yield* app.settled

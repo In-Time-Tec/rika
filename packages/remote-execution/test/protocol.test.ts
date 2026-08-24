@@ -142,13 +142,27 @@ describe("executor protocol v1", () => {
         attempt: 0,
         replayPolicy: "pure",
         admittedAt: null,
-        deadline: null,
+        deadlineAt: "2999-01-01T00:00:00.000Z",
         bindings: { digest: "a".repeat(64), descriptors: [] },
       })
       expect(yield* Schema.decodeUnknownEffect(ApiMessage)({ _tag: "CellExecute", request })).toEqual({
         _tag: "CellExecute",
         request,
       })
+      expect(
+        yield* Schema.decodeUnknownEffect(ApiMessage)({
+          _tag: "CellTerminalSuperseded",
+          access: request.access,
+          operationKey: request.operationKey,
+          attempt: request.attempt,
+          cursor: 3,
+          outcome: "unknown",
+          response: {
+            _tag: "DomainFailure",
+            failure: { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" },
+          },
+        }),
+      ).toMatchObject({ _tag: "CellTerminalSuperseded", cursor: 3, outcome: "unknown" })
       for (const identity of [
         "workspaceId",
         "sessionId",

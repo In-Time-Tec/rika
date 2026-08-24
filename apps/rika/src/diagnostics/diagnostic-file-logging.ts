@@ -1,10 +1,32 @@
 import * as Diagnostic from "./diagnostic-file-logging-contract"
-import { Clock, DateTime, Duration, Effect, FileSystem, Layer, Logger, Option, Path, Queue, References } from "effect"
+import fsHost, { closeSync, fsyncSync, openSync, renameSync } from "node:fs"
+import {
+  Clock,
+  Context,
+  DateTime,
+  Duration,
+  Effect,
+  FileSystem,
+  Layer,
+  Logger,
+  Option,
+  Path,
+  PlatformError,
+  Queue,
+  References,
+  Semaphore,
+  Scope,
+} from "effect"
 
 export type ProcessRole = "client" | "server"
 export type LogLevel = "debug" | "info" | "warning" | "error"
 
-const activeSettlers = new Set<() => void>()
+interface ActiveSettler {
+  readonly graceful: Effect.Effect<void>
+  readonly hardExit: () => void
+}
+
+const activeSettlers = new Set<ActiveSettler>()
 
 const settlingSignals = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"] as const
 
@@ -31,10 +53,6 @@ const matching =
     typeof value === "string" && value.length <= maximum && pattern.test(value) ? value : undefined
 
 const uuid = matching(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i, 36)
-const threadOrTurnId = matching(
-  /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|(?:thread|turn)-[a-z0-9][a-z0-9._-]{0,127})$/i,
-  128,
-)
 const executionId = matching(
   /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|(?:run|turn)-[a-z0-9][a-z0-9._-]{0,223})$/i,
   256,
@@ -44,11 +62,13 @@ const eventCursor = matching(
   256,
 )
 const toolCallId = matching(/^(?:call[-_:]|id_)[a-z0-9][a-z0-9._:%-]{0,127}$/i, 160)
+const hostedCorrelationId = matching(/^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,127})$/, 128)
 
 const knownFailureKinds = oneOf(...Diagnostic.failureKinds)
 
 const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
   "rika.duration.ms": boundedNumber,
+  "rika.duration.millis": boundedNumber,
   "rika.event.cursor": eventCursor,
   "rika.event.type": matching(/^[a-z][a-z0-9]*(?:[._][a-z0-9]+)+$/, 100),
   "rika.execution.id": executionId,
@@ -64,11 +84,30 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
   ),
   "rika.failure.interrupted": boolean,
   "rika.failure.kind": knownFailureKinds,
-  "rika.failure.message": matching(/^[\s\S]{1,4096}$/, 4096),
   "rika.failure.outcome": oneOf("known", "unknown"),
   "rika.follow.cursor": eventCursor,
   "rika.follow.reason": oneOf("thread-open", "reattach", "resume", "recovery"),
   "rika.follow.scope": oneOf("execution", "tree"),
+  "rika.hosted.outcome": oneOf("success", "failure", "interrupted", "unknown"),
+  "rika.hosted.stage": oneOf(
+    "process_start",
+    "first_draw",
+    "target_resolution",
+    "attach",
+    "admission",
+    "turn_claim",
+    "run_created",
+    "model_start",
+    "model_terminal",
+    "cell_admission",
+    "cell_execution",
+    "binding_send",
+    "binding_terminal",
+    "terminal",
+  ),
+  "rika.binding.id": hostedCorrelationId,
+  "rika.cell.id": hostedCorrelationId,
+  "rika.model_attempt.id": hostedCorrelationId,
   "rika.model.selection": oneOf(
     "main",
     "oracle",
@@ -81,6 +120,7 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
     "task",
   ),
   "rika.model.backend.kind": oneOf(...Diagnostic.modelBackendKinds),
+  "rika.operation.id": hostedCorrelationId,
   "rika.process.instance": matching(/^\d{1,16}-\d{1,10}$/, 32),
   "rika.process.pid": boundedNumber,
   "rika.process.role": oneOf("client", "server"),
@@ -99,6 +139,7 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
   "rika.reconciliation.terminal": boolean,
   "rika.reconciliation.tree.verified": boolean,
   "rika.reconnect.attempt": boundedNumber,
+  "rika.run.id": hostedCorrelationId,
   "rika.server.client.kind": oneOf("interactive", "run", "thread-continue", "product"),
   "rika.server.command.sequence": boundedNumber,
   "rika.server.connection.duration.ms": boundedNumber,
@@ -120,7 +161,7 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
   "rika.server.session.id": uuid,
   "rika.server.startup.pid": boundedNumber,
   "rika.server.startup.role": oneOf("owner", "child", "reclaimer"),
-  "rika.thread.id": threadOrTurnId,
+  "rika.thread.id": hostedCorrelationId,
   "rika.tool.call.id": toolCallId,
   "rika.tool.deadline.ms": boundedNumber,
   "rika.tool.dependency": oneOf("parallel", "sequential"),
@@ -142,7 +183,7 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
   ),
   "rika.tool.retry.attempt": boundedNumber,
   "rika.tool.retry.delay.ms": boundedNumber,
-  "rika.turn.id": threadOrTurnId,
+  "rika.turn.id": hostedCorrelationId,
   "rika.version": matching(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, 64),
 }
 
@@ -170,9 +211,9 @@ const structuredLogger = Logger.make(({ date, fiber, logLevel, message }) => {
   })
 })
 
-export const settleActiveLogs = () => {
-  for (const settle of activeSettlers) settle()
-}
+export const settleActiveLogs = Effect.suspend(() =>
+  Effect.forEach([...activeSettlers], ({ graceful }) => graceful, { concurrency: 1, discard: true }),
+)
 
 const effectLogLevel = (level: LogLevel) => {
   switch (level) {
@@ -188,6 +229,17 @@ const effectLogLevel = (level: LogLevel) => {
 }
 
 export const minimumLevel = effectLogLevel
+
+interface DiagnosticPersistenceInterface {
+  readonly logger: Logger.Logger<unknown, void>
+  readonly start: Effect.Effect<void, PlatformError.PlatformError>
+}
+
+export class DiagnosticPersistence extends Context.Service<DiagnosticPersistence, DiagnosticPersistenceInterface>()(
+  "@rika/cli/diagnostics/diagnostic-file-logging/DiagnosticPersistence",
+) {}
+
+export const start = DiagnosticPersistence.pipe(Effect.flatMap((persistence) => persistence.start))
 
 const isLogFile = (name: string) => name.endsWith(".jsonl") || name.endsWith(".bootstrap.log")
 
@@ -257,73 +309,142 @@ export const layer = (options: {
   readonly now?: Date
   readonly pid?: number
 }) => {
-  const logger = Effect.gen(function* () {
+  const runtime = Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const diagnostics = yield* prepareDirectory(options.dataRoot)
-    const timestamp = options.now === undefined ? yield* DateTime.now : DateTime.makeUnsafe(options.now)
-    const now = DateTime.formatIso(timestamp).replace(/[:.]/g, "-")
-    const closed = path.join(diagnostics, `${options.role}-${now}-${options.pid ?? process.pid}.jsonl`)
-    const open = closed.replace(/\.jsonl$/, ".open.jsonl")
-    const settle = () => {
-      try {
-        process.getBuiltinModule("fs").renameSync(open, closed)
-      } catch {}
-    }
-    activeSettlers.add(settle)
-    const signalSettlers = settlingSignals.map((signal) => {
-      const onSignal = () => {
-        settle()
-        if (process.listenerCount(signal) === 1) {
-          processEvents.removeListener(signal, onSignal)
-          process.kill(process.pid, signal)
-        }
-      }
-      process.on(signal, onSignal)
-      return [signal, onSignal] as const
-    })
-    process.once("exit", settle)
-    process.once("beforeExit", settle)
-    yield* Effect.addFinalizer(() =>
-      fs.rename(open, closed).pipe(
-        Effect.ignore,
-        Effect.andThen(
-          Effect.sync(() => {
-            processEvents.removeListener("exit", settle)
-            processEvents.removeListener("beforeExit", settle)
-            for (const [signal, onSignal] of signalSettlers) processEvents.removeListener(signal, onSignal)
-            activeSettlers.delete(settle)
-          }),
-        ),
-      ),
-    )
-    const logFile = yield* fs.open(open, { flag: "ax", mode: 0o600 })
+    const scope = yield* Scope.Scope
     const encoder = new TextEncoder()
     const wakeups = yield* Queue.sliding<void>(1)
-    let buffer: Array<string> = []
-    const flush = Effect.suspend(() => {
-      if (buffer.length === 0) return Effect.void
-      const chunk = buffer
-      buffer = []
-      return Effect.ignore(logFile.write(encoder.encode(`${chunk.join("\n")}\n`)))
-    })
-    yield* Effect.forkScoped(
-      Effect.gen(function* () {
-        while (true) {
-          yield* Queue.take(wakeups)
-          yield* Effect.sleep(Duration.seconds(1))
-          yield* flush
-        }
-      }),
-    )
-    yield* Effect.addFinalizer(() => flush)
-    return Logger.make((options_) => {
-      buffer.push(structuredLogger.log(options_))
+    const startLock = yield* Semaphore.make(1)
+    const accepted: Array<string> = []
+    let lifecycle: "buffering" | "open" | "settled" = "buffering"
+    const logger = Logger.make((options_) => {
+      if (lifecycle === "settled") return
+      accepted.push(structuredLogger.log(options_))
       Queue.offerUnsafe(wakeups, undefined)
     })
+    const startPersistence = startLock.withPermits(1)(
+      Effect.gen(function* () {
+        if (lifecycle !== "buffering") return
+        const diagnostics = yield* prepareDirectory(options.dataRoot)
+        const timestamp = options.now === undefined ? yield* DateTime.now : DateTime.makeUnsafe(options.now)
+        const now = DateTime.formatIso(timestamp).replace(/[:.]/g, "-")
+        const closed = path.join(diagnostics, `${options.role}-${now}-${options.pid ?? process.pid}.jsonl`)
+        const open = closed.replace(/\.jsonl$/, ".open.jsonl")
+        const descriptor = openSync(open, "ax", 0o600)
+        lifecycle = "open"
+        const effectContext = yield* Effect.context<never>()
+        let persisted = 0
+        let byteOffset = 0
+        const writeAccepted = (end: number) => {
+          if (persisted === end) return
+          const bytes = encoder.encode(`${accepted.slice(persisted, end).join("\n")}\n`)
+          let sourceOffset = 0
+          while (sourceOffset < bytes.byteLength) {
+            const bytesWritten = fsHost.writeSync(
+              descriptor,
+              bytes,
+              sourceOffset,
+              bytes.byteLength - sourceOffset,
+              byteOffset,
+            )
+            if (bytesWritten === 0) throw new Error("Unable to persist diagnostics")
+            sourceOffset += bytesWritten
+            byteOffset += bytesWritten
+          }
+          persisted = end
+        }
+        const writeBuffered = Effect.sync(() => {
+          if (lifecycle === "open") writeAccepted(accepted.length)
+        })
+        const writeLock = yield* Semaphore.make(1)
+        const flush = writeLock.withPermits(1)(writeBuffered)
+        const graceful = writeLock.withPermits(1)(
+          Effect.sync(() => {
+            if (lifecycle === "settled") return
+            lifecycle = "settled"
+            const end = accepted.length
+            try {
+              writeAccepted(end)
+              fsyncSync(descriptor)
+            } finally {
+              closeSync(descriptor)
+            }
+            renameSync(open, closed)
+          }),
+        )
+        const hardExit = () => {
+          if (lifecycle === "settled") return
+          lifecycle = "settled"
+          const end = accepted.length
+          try {
+            writeAccepted(end)
+            fsyncSync(descriptor)
+          } finally {
+            closeSync(descriptor)
+          }
+          renameSync(open, closed)
+        }
+        const settler = { graceful, hardExit }
+        activeSettlers.add(settler)
+        const signalSettlers = settlingSignals.map((signal) => {
+          const onSignal = () => {
+            Effect.runForkWith(effectContext)(
+              graceful.pipe(
+                Effect.andThen(
+                  Effect.sync(() => {
+                    if (process.listenerCount(signal) !== 1) return
+                    processEvents.removeListener(signal, onSignal)
+                    process.kill(process.pid, signal)
+                  }),
+                ),
+              ),
+            )
+          }
+          process.on(signal, onSignal)
+          return [signal, onSignal] as const
+        })
+        process.once("exit", hardExit)
+        process.once("beforeExit", hardExit)
+        yield* Effect.addFinalizer(() =>
+          graceful.pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                processEvents.removeListener("exit", hardExit)
+                processEvents.removeListener("beforeExit", hardExit)
+                for (const [signal, onSignal] of signalSettlers) processEvents.removeListener(signal, onSignal)
+                activeSettlers.delete(settler)
+              }),
+            ),
+          ),
+        )
+        yield* Effect.forkScoped(
+          Effect.gen(function* () {
+            while (true) {
+              yield* Queue.take(wakeups)
+              yield* Effect.sleep(Duration.seconds(1))
+              yield* flush
+            }
+          }),
+        )
+        yield* flush
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, path),
+        Effect.provideService(Scope.Scope, scope),
+      ),
+    )
+    return { logger, start: startPersistence }
   })
+  const persistence = Layer.effect(
+    DiagnosticPersistence,
+    Effect.map(runtime, ({ logger, start: startPersistence }) => ({ logger, start: startPersistence })),
+  )
   return Layer.merge(
-    Logger.layer([logger]),
+    Layer.merge(
+      persistence,
+      Logger.layer([Effect.map(DiagnosticPersistence, ({ logger }) => logger)]).pipe(Layer.provide(persistence)),
+    ),
     Layer.succeed(References.MinimumLogLevel, effectLogLevel(options.level ?? "info")),
   )
 }

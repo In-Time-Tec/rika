@@ -1,6 +1,6 @@
   ╭─ Command Palette ────────╮
   │ > thread                 │
-  │ new thread               │
+  │ new on Runner            │
   │ new in Orb               │
   │ enable remote Thread cre │
   │ disable remote Thread cr │

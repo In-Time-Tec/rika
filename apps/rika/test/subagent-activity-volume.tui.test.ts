@@ -1,12 +1,10 @@
 import * as Turn from "@rika/product/turn-record"
-import { Effect } from "effect"
-import { performance } from "node:perf_hooks"
+import { Clock, Effect } from "effect"
 import { expect, test } from "vitest"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
 const tuiTestTimeout = 90_000
-const currentWallTime = () => performance.now()
 
 test(
   "retains prior turns across an active-only resync at realistic tool and child volume",
@@ -87,7 +85,7 @@ test(
         })
 
         expect(app.frame()).not.toContain(marker)
-        yield* Effect.promise(() => app.type("Run realistic volume"))
+        yield* Effect.tryPromise(() => app.type("Run realistic volume"))
         app.pressEnter()
         yield* app.waitModelRequests(1)
         yield* app.reload
@@ -99,10 +97,10 @@ test(
         // The seeded history arrives complete in one snapshot: the fixture thread's window is
         // assembled newest-first with a single true-oldest cursor, so no page fetches are needed.
         expect(fixturePageCursors, "the fixture window has one true-oldest cursor").toHaveLength(1)
-        const pagingDeadline = currentWallTime() + 20_000
+        const pagingDeadline = (yield* Clock.currentTimeMillis) + 20_000
         let paged = app.frame()
         let previous = ""
-        while (!paged.includes(marker) && paged !== previous && currentWallTime() < pagingDeadline) {
+        while (!paged.includes(marker) && paged !== previous && (yield* Clock.currentTimeMillis) < pagingDeadline) {
           previous = paged
           yield* app.pressPageUp
           paged = app.frame()

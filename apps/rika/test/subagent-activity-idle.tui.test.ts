@@ -25,7 +25,7 @@ test(
           height: 40,
         })
 
-        yield* Effect.promise(() => app.type("Delegate once."))
+        yield* Effect.tryPromise(() => app.type("Delegate once."))
         app.pressEnter()
         const root = yield* app.waitFrameMatch(
           (frame) => frame.includes("IDLE_ROOT_DONE") || frame.includes("Execution failed"),

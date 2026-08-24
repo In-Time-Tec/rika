@@ -5,11 +5,10 @@ import { boundedThreadSidebarWidth, contentColumnWidth, isNarrow } from "../../s
 import { colors, modeColor } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { shortcutsContent } from "./opentui-composer-region"
-import { formatActivity } from "../../state/model/terminal-activity-state"
 import { truncateToWidth } from "../../presentation/terminal/terminal-format"
-import { loaderFrame, spinnerFrames } from "../rendering/opentui-spinner"
+import { spinnerFrames } from "../rendering/opentui-spinner"
 import { renderSidebar } from "../rendering/opentui-render-block"
-import { panelLoading, compactWorkspace } from "./opentui-surface-content"
+import { panelLoading, compactWorkspace, statusContent } from "./opentui-surface-content"
 import { queueContentWidth, wrappedRowCount } from "../../state/model/terminal-layout-composer"
 import { displayInput } from "../../state/model/terminal-composer-state"
 import { readyOr } from "../../state/model/terminal-loadable-state"
@@ -156,32 +155,16 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       ? ""
       : ` ${compactWorkspace(model.workspace)}${model.branch === undefined ? "" : ` (${model.branch})`} `
     const panelLoadingLabel = panelLoading(model)
-    const activityLabel = formatActivity(
-      model.activity,
-      model.activity?._tag === "Retrying"
-        ? Math.max(0, Math.ceil((model.activity.nextAt - this.currentTimeMillis()) / 1000))
-        : model.retryCountdown,
-    )
     const statusChanged =
       previousModel === undefined ||
       previousModel.activity !== model.activity ||
-      previousModel.connectionStatus !== model.connectionStatus ||
+      previousModel.connection !== model.connection ||
       previousModel.retryCountdown !== model.retryCountdown ||
       previousModel.busy !== model.busy ||
       panelLoading(previousModel) !== panelLoadingLabel
     if (statusChanged) {
-      if (model.connectionStatus !== undefined || activityLabel !== undefined || panelLoadingLabel !== undefined) {
-        const statusName = model.connectionStatus ?? activityLabel ?? panelLoadingLabel!
-        this.inputBox.bottomTitle = ""
-        this.statusLabel.content = new StyledText([
-          fg(toOpenColor(colors.text))(" "),
-          fg(toOpenColor(colors.blue))(loaderFrame(statusName, this.loaderController.phase)),
-          dim(fg(toOpenColor(colors.text))(` ${statusName} `)),
-        ])
-      } else {
-        this.inputBox.bottomTitle = ""
-        this.statusLabel.content = ""
-      }
+      this.inputBox.bottomTitle = ""
+      this.statusLabel.content = statusContent(model, this.loaderController.phase, this.currentTimeMillis())
     }
     const goalChanged =
       previousModel === undefined ||

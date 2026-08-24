@@ -1,11 +1,13 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import { describe, expect, it } from "@effect/vitest"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as ContextBinding from "@rika/kernel/context-binding"
 import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
 import { NestedOperation, Session, ToolContext } from "tenetkit"
 import { HostBindingRegistry } from "tenetkit/repl"
-import { Context, Crypto, Effect, Layer, Ref } from "effect"
+import { Context, Crypto, Deferred, Effect, Fiber, FileSystem, Layer, Ref } from "effect"
+import { TestClock } from "effect/testing"
 import * as HostedKernel from "../src/hosted-kernel"
 import {
   bindingManifest,
@@ -14,6 +16,7 @@ import {
   type CellRequest,
   type CellResponse,
 } from "../src/protocol"
+import { provideLayer } from "./support/layer"
 
 const access = {
   version: 1 as const,
@@ -48,7 +51,7 @@ const request = (
   attempt: 0,
   replayPolicy: "never",
   admittedAt: null,
-  deadline: null,
+  deadlineAt: "2999-01-01T00:00:00.000Z",
   bindings: manifest,
 })
 
@@ -68,13 +71,73 @@ const resultValue = (response: CellResponse) => {
 }
 
 describe("hosted TypeScript kernel", () => {
+  it.effect("terminalizes a dropped binding result and never accepts or replays it after the deadline", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-binding-deadline-" })
+        const manifest = yield* bindingManifest([{ module: "context", operations: ["current"] }])
+        const states = yield* Ref.make(new Map<string, import("../src/cells").State>())
+        const sent: Array<Parameters<HostedKernel.Options["sendBinding"]>[0]> = []
+        const bindingSent = yield* Deferred.make<Parameters<HostedKernel.Options["sendBinding"]>[0]>()
+        const kernel = yield* HostedKernel.make({
+          workspaceIdentity: "workspace-1",
+          workspacePath: root,
+          dataRoot: root,
+          read: (operationKey) => Effect.map(Ref.get(states), (current) => current.get(operationKey)),
+          write: (operationKey, state) => Ref.update(states, (current) => new Map(current).set(operationKey, state)),
+          sendBinding: (message) =>
+            Effect.sync(() => sent.push(message)).pipe(
+              Effect.andThen(Deferred.succeed(bindingSent, message)),
+              Effect.asVoid,
+            ),
+        })
+        const cell = {
+          ...request(manifest, "operation-binding-deadline", "call-binding-deadline", "await rika.context.current({})"),
+          deadlineAt: "1970-01-01T00:00:01.000Z",
+        }
+        const running = yield* Effect.forkChild(
+          kernel.execute(cell, () => Effect.void),
+          { startImmediately: true },
+        )
+        const call = yield* Deferred.await(bindingSent)
+        yield* TestClock.adjust("1 second")
+        expect(yield* Fiber.join(running)).toEqual({
+          _tag: "DomainFailure",
+          failure: { kind: "timeout", message: "Cell operation deadline exceeded" },
+        })
+
+        const late = () =>
+          Effect.result(
+            kernel.completeBinding({
+              operationKey: call.operationKey,
+              attempt: call.attempt,
+              callId: call.callId,
+              requestDigest: call.requestDigest,
+              outcome: { _tag: "Returned", response: { _tag: "Success", output: {} } },
+            }),
+          )
+        expect((yield* late())._tag).toBe("Failure")
+        expect((yield* late())._tag).toBe("Failure")
+        yield* kernel.replayBindings({ ...access, leaseEpoch: 2 })
+        expect(sent).toHaveLength(1)
+      }).pipe(
+        provideLayer(BunFileSystem.layer),
+        Effect.provideServiceEffect(
+          Crypto.Crypto,
+          Effect.scoped(Layer.build(Layer.merge(BunCrypto.layer, BunFileSystem.layer))).pipe(
+            Effect.map((context) => Context.get(context, Crypto.Crypto)),
+          ),
+        ),
+      ),
+    ),
+  )
+
   it.effect("keeps Session state, invokes real rika bindings, and suspends API-owned approval", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const root = yield* Effect.acquireRelease(
-          Effect.promise(() => import("node:fs/promises").then((fs) => fs.mkdtemp("/tmp/rika-hosted-kernel-"))),
-          (path) => Effect.promise(() => import("node:fs/promises").then((fs) => fs.rm(path, { recursive: true }))),
-        )
+        const fileSystem = yield* FileSystem.FileSystem
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-hosted-kernel-" })
         const session = yield* Layer.build(Session.layerMemory)
         const nestedRequests: Array<NestedOperation.Request> = []
         const nested = NestedOperation.NestedOperations.of({
@@ -181,9 +244,10 @@ describe("hosted TypeScript kernel", () => {
           },
         ])
       }).pipe(
+        provideLayer(BunFileSystem.layer),
         Effect.provideServiceEffect(
           Crypto.Crypto,
-          Effect.scoped(Layer.build(BunCrypto.layer)).pipe(
+          Effect.scoped(Layer.build(Layer.merge(BunCrypto.layer, BunFileSystem.layer))).pipe(
             Effect.map((context) => Context.get(context, Crypto.Crypto)),
           ),
         ),
@@ -193,12 +257,13 @@ describe("hosted TypeScript kernel", () => {
 
   it.effect("contains no /bin/sh -c hosted cell evaluation path", () =>
     Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
       const sources = yield* Effect.all(
         ["../src/foreground.ts", "../src/host.ts", "../src/hosted-kernel.ts", "../../kernel/src/cell-executor.ts"].map(
-          (path) => Effect.promise(() => Bun.file(new URL(path, import.meta.url)).text()),
+          (path) => fileSystem.readFileString(new URL(path, import.meta.url).pathname),
         ),
       )
       expect(sources.join("\n")).not.toContain("/bin/sh -c")
-    }),
+    }).pipe(provideLayer(BunFileSystem.layer)),
   )
 })

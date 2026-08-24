@@ -28,7 +28,7 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Delegate nested work, then fail."))
+        yield* Effect.tryPromise(() => app.type("Delegate nested work, then fail."))
         app.pressEnter()
         const turnId = Turn.TurnId.make("tui-turn-0")
         // The root fails only after the child it waited for has answered.

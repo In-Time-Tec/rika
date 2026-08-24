@@ -3,18 +3,25 @@ import * as OpenRouterAuthService from "@rika/product/openrouter-auth-service"
 import * as OpenRouterCredentialStore from "./openrouter-credential-store"
 import { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 import { FetchHttpClient } from "effect/unstable/http"
-import { Function, Layer } from "effect"
+import { Effect, Function, Layer, Path } from "effect"
 
-const { dirname, join } = process.getBuiltinModule("node:path")
+const credentialLayer = (database: string, profileIdentity: string) =>
+  Layer.effectContext(
+    Effect.gen(function* () {
+      const path = yield* Path.Path
+      const trustedRoot = path.dirname(database)
+      return yield* Layer.build(
+        OpenRouterCredentialStore.layer(path.join(trustedRoot, "auth", profileIdentity, "openrouter.json"), {
+          trustedRoot,
+          ...(typeof process.getuid === "function" ? { currentUid: process.getuid() } : {}),
+        }),
+      )
+    }),
+  )
 
 const createLayerImpl = (database: string, profileIdentity: string) =>
   OpenRouterAuthService.layer.pipe(
-    Layer.provide(
-      OpenRouterCredentialStore.layer(join(dirname(database), "auth", profileIdentity, "openrouter.json"), {
-        trustedRoot: dirname(database),
-        ...(typeof process.getuid === "function" ? { currentUid: process.getuid() } : {}),
-      }),
-    ),
+    Layer.provide(credentialLayer(database, profileIdentity)),
     Layer.provide(BunServices.layer),
     Layer.provide(FetchHttpClient.layer),
   )
@@ -30,8 +37,5 @@ export const credentialStoreLayer: {
   (profileIdentity: string): (database: string) => Layer.Layer<ProviderCredentialStore, never, never>
   (database: string, profileIdentity: string): Layer.Layer<ProviderCredentialStore, never, never>
 } = Function.dual(2, (database: string, profileIdentity: string) =>
-  OpenRouterCredentialStore.layer(join(dirname(database), "auth", profileIdentity, "openrouter.json"), {
-    trustedRoot: dirname(database),
-    ...(typeof process.getuid === "function" ? { currentUid: process.getuid() } : {}),
-  }),
+  credentialLayer(database, profileIdentity).pipe(Layer.provide(BunServices.layer)),
 )

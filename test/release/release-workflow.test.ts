@@ -1,4 +1,6 @@
+import { Effect } from "effect"
 import { expect, test } from "vitest"
+import { live, readText } from "../support/platform"
 
 type Step = {
   readonly uses?: string
@@ -18,7 +20,7 @@ type Workflow = {
   readonly jobs?: Readonly<Record<string, Job>>
 }
 
-const workflow = Bun.YAML.parse(await Bun.file(".github/workflows/publish.yml").text()) as Workflow
+const workflow = Bun.YAML.parse(await Effect.runPromise(live(readText(".github/workflows/publish.yml")))) as Workflow
 const jobs = workflow.jobs ?? {}
 const steps = (job: string) => jobs[job]?.steps ?? []
 const commands = (job: string) =>

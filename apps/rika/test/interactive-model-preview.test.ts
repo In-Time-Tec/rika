@@ -653,7 +653,7 @@ describe("tentative model preview overlay", () => {
 
   it.effect("normalizes a CRLF split across tentative frames as one newline", () =>
     Effect.gen(function* () {
-      const setup = yield* Effect.promise(() => createTestRenderer({ width: 60, height: 20 }))
+      const setup = yield* Effect.tryPromise(() => createTestRenderer({ width: 60, height: 20 }))
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
@@ -665,7 +665,7 @@ describe("tentative model preview overlay", () => {
       surface.update(state.model)
       state = InteractiveController.update(state, preview(2, "\nnext", {}, "", { text: 5, reasoning: 0 })).state
       surface.update(state.model)
-      yield* Effect.promise(() => setup.flush())
+      yield* Effect.tryPromise(() => setup.flush())
 
       const lines = setup
         .captureCharFrame()
@@ -682,7 +682,7 @@ describe("tentative model preview overlay", () => {
     "reuses a bounded set of physical OpenTUI rows across preview revisions",
     () =>
       Effect.gen(function* () {
-        const setup = yield* Effect.promise(() => createTestRenderer({ width: 100, height: 30 }))
+        const setup = yield* Effect.tryPromise(() => createTestRenderer({ width: 100, height: 30 }))
         const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
         yield* Effect.addFinalizer(() =>
           Effect.sync(() => {
@@ -715,7 +715,7 @@ describe("tentative model preview overlay", () => {
             stableRowKey = stable?.key
           }
         }
-        yield* Effect.promise(() => setup.flush())
+        yield* Effect.tryPromise(() => setup.flush())
         const diagnostics = surface.transcriptDiagnostics()
         expect(state.model.items).toHaveLength(3)
         expect(runPreview(state)?.text).toContain("answer 10000")

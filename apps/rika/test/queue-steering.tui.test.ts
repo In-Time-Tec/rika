@@ -21,11 +21,12 @@ const waitQueue = (
   budgetMillis = 20_000,
 ): Effect.Effect<QueueSnapshot, never> =>
   Effect.gen(function* () {
-    const started = performance.now()
+    const started = yield* Clock.currentTimeMillis
     for (;;) {
       const queue = yield* app.queue(threadId).pipe(Effect.orDie)
       if (predicate(queue)) return queue
-      if (performance.now() - started >= budgetMillis)
+      const now = yield* Clock.currentTimeMillis
+      if (now - started >= budgetMillis)
         return yield* Effect.die(
           `queue condition was not met: ${queue.turns.map((turn) => String(turn.id)).join(", ")}`,
         )
@@ -69,13 +70,16 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Run the deterministic agentic queue scenario."))
+        yield* Effect.tryPromise(() => app.type("Run the deterministic agentic queue scenario."))
         app.pressEnter()
         yield* app.waitModelRequests(1)
+        yield* app.waitSubmissionAdmissions(1)
 
         for (const prompt of prompts) {
-          yield* Effect.promise(() => app.type(prompt))
+          yield* Effect.tryPromise(() => app.type(prompt))
           app.pressEnter()
+          yield* waitQueue(app, threadId, (queue) => queue.queuedCount === prompts.indexOf(prompt) + 1)
+          yield* app.waitSubmissionAdmissions(prompts.indexOf(prompt) + 2)
         }
 
         const queued = yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 10)
@@ -93,7 +97,7 @@ test(
         yield* selectQueue(app, remainingPrompts, remainingPrompts.indexOf("QUEUE_7"))
         app.pressKey("e", { ctrl: true })
         yield* app.waitFrame("Editing queued")
-        yield* Effect.promise(() => app.type("_EDITED"))
+        yield* Effect.tryPromise(() => app.type("_EDITED"))
         app.pressEnter()
         const edited = yield* waitQueue(app, threadId, (queue) =>
           queue.turns.some((turn) => turn.prompt === "QUEUE_7_EDITED"),
@@ -149,17 +153,25 @@ test(
         const app = yield* TuiApp.tuiApp({
           height: 36,
           inspectTranscript: true,
-          // Steering the queued row measures ~0.5s, so the active answer stays pending with
-          // several times that margin instead of holding the turn open for ten seconds.
-          script: [model.text("HELLO_COMPLETE", 4_000), model.text("HI_COMPLETE")],
+          workspaceFiles: { "fixture.txt": "deterministic steering fixture" },
+          script: [
+            model.turn(
+              [model.binding({ module: "workspace", operation: "read", input: { path: "fixture.txt" } }, "hi-read")],
+              { delayMillis: 4_000 },
+            ),
+            model.text("HI_COMPLETE"),
+          ],
         })
 
-        yield* Effect.promise(() => app.type("Hello"))
+        yield* Effect.tryPromise(() => app.type("Hello"))
         app.pressEnter()
         yield* app.waitModelRequests(1)
-        yield* Effect.promise(() => app.type("Hi"))
+        yield* app.waitSubmissionAdmissions(1)
+        yield* Effect.tryPromise(() => app.type("Hi"))
         app.pressEnter()
         yield* waitQueue(app, threadId, (queue) => queue.turns.some((turn) => turn.prompt === "Hi"))
+        yield* app.waitSubmissionAdmissions(2)
+        yield* app.waitFrame("Hi")
         app.pressArrow("up")
         yield* app.waitFrame("Enter to steer")
         app.pressEnter()
@@ -170,7 +182,6 @@ test(
             projection.state.steering.settled?.some((entry) => entry.outcome === "consumed") === true,
           20_000,
         )
-        app.pressEnter()
         yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 0)
 
         yield* app.waitFrame("HI_COMPLETE", 20_000)
@@ -380,12 +391,15 @@ test(
             ...Array.from({ length: 9 }, (_, index) => model.text(`CANCEL_DRAINED_${index}`)),
           ],
         })
-        yield* Effect.promise(() => app.type("Hold the active turn for cancellation."))
+        yield* Effect.tryPromise(() => app.type("Hold the active turn for cancellation."))
         app.pressEnter()
         yield* app.waitModelRequests(1)
+        yield* app.waitSubmissionAdmissions(1)
         for (const prompt of prompts) {
-          yield* Effect.promise(() => app.type(prompt))
+          yield* Effect.tryPromise(() => app.type(prompt))
           app.pressEnter()
+          yield* waitQueue(app, threadId, (queue) => queue.queuedCount === prompts.indexOf(prompt) + 1)
+          yield* app.waitSubmissionAdmissions(prompts.indexOf(prompt) + 2)
         }
         yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 10)
 
@@ -453,12 +467,15 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Fail after accepting steering."))
+        yield* Effect.tryPromise(() => app.type("Fail after accepting steering."))
         app.pressEnter()
         yield* app.waitModelRequests(1)
+        yield* app.waitSubmissionAdmissions(1)
         for (const prompt of prompts) {
-          yield* Effect.promise(() => app.type(prompt))
+          yield* Effect.tryPromise(() => app.type(prompt))
           app.pressEnter()
+          yield* waitQueue(app, threadId, (queue) => queue.queuedCount === prompts.indexOf(prompt) + 1)
+          yield* app.waitSubmissionAdmissions(prompts.indexOf(prompt) + 2)
         }
         yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 3)
 
@@ -470,7 +487,7 @@ test(
         yield* selectQueue(app, remainingPrompts, 1)
         app.pressKey("e", { ctrl: true })
         yield* app.waitFrame("Editing queued")
-        yield* Effect.promise(() => app.type("_MUST_NOT_SAVE"))
+        yield* Effect.tryPromise(() => app.type("_MUST_NOT_SAVE"))
         app.pressKey("escape")
         const unchanged = yield* waitQueue(app, threadId, (queue) => queue.queuedCount === 2)
         expect(unchanged.turns.map((turn) => turn.prompt)).toEqual(remainingPrompts)

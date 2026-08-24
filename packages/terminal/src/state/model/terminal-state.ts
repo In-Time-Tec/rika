@@ -88,6 +88,29 @@ const ThreadPreviewSchema = Schema.Union([
   Schema.TaggedStruct("Ready", { value: ThreadPreviewValueSchema }),
   Schema.TaggedStruct("Failed", { threadId: Schema.String, requestId: Schema.Int, message: Schema.String }),
 ])
+export const ConnectionState = Schema.Struct({
+  connectivity: Schema.Literals(["connecting", "connected", "reconnecting"]),
+  target: Schema.Literals(["resolving", "runner", "orb"]),
+  activity: Schema.optional(
+    Schema.Literals([
+      "authenticating",
+      "executor-waiting",
+      "executor-connecting",
+      "executor-connected",
+      "workspace-preparing",
+      "workspace-setup",
+      "workspace-resuming",
+      "lease-active",
+      "retrying",
+      "approval-required",
+      "unknown-operation",
+      "terminal",
+    ]),
+  ),
+  ownership: Schema.optional(Schema.Literals(["personal", "organization"])),
+  participants: Schema.Int,
+})
+export type ConnectionState = typeof ConnectionState.Type
 export const Model = Schema.Struct({
   workspace: Schema.String,
   branch: Schema.optional(Schema.String),
@@ -144,7 +167,7 @@ export const Model = Schema.Struct({
   cancelPending: Schema.Boolean,
   busy: Schema.Boolean,
   activity: Schema.optional(Activity),
-  connectionStatus: Schema.optional(Schema.String),
+  connection: Schema.optional(ConnectionState),
   contextUsage: Schema.optional(ContextUsage),
   goal: Schema.optional(GoalIndicator),
   contextAnimation: ContextAnimationSchema,
@@ -233,7 +256,7 @@ const initialImpl = (workspace: string, mode: Mode): Model => ({
   steeringRequests: [],
   cancelPending: false,
   busy: false,
-  connectionStatus: undefined,
+  connection: undefined,
   contextUsage: { _tag: "Loading" },
   goal: undefined,
   contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },

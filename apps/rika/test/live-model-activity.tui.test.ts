@@ -26,7 +26,7 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("LIVE_ACTIVITY_PROMPT"))
+        yield* Effect.tryPromise(() => app.type("LIVE_ACTIVITY_PROMPT"))
         app.pressEnter()
         yield* app.waitFrame("LIVE_ACTIVITY_PROMPT")
 
@@ -73,7 +73,7 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Stream styled Markdown."))
+        yield* Effect.tryPromise(() => app.type("Stream styled Markdown."))
         app.pressEnter()
 
         const live = yield* app.waitFrame("LIVE_MARKDOWN_STYLED", 30_000)
@@ -103,7 +103,7 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Stream well beyond the old preview boundary."))
+        yield* Effect.tryPromise(() => app.type("Stream well beyond the old preview boundary."))
         app.pressEnter()
 
         const live = yield* app.waitFrame("LIVE_BEYOND_4096_BOUNDARY", 30_000)
@@ -141,7 +141,7 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("Use a tool, then stream the answer."))
+        yield* Effect.tryPromise(() => app.type("Use a tool, then stream the answer."))
         app.pressEnter()
 
         const live = yield* app.waitFrame("SECOND_CALL_STREAMING", 30_000)

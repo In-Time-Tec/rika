@@ -41,6 +41,7 @@ import {
   type CreateProjectInput,
   type CreateThreadInput,
   type CreateWorkspaceInput,
+  type ReadThreadInput,
   type StoreService,
   type PutCredentialReferenceInput,
   type PutOwnerInput,
@@ -65,6 +66,7 @@ const transaction = <A>(sql: SqlClient, effect: Effect.Effect<A, StoreError>) =>
   sql.withTransaction(effect).pipe(Effect.catchTag("SqlError", databaseError))
 const ExecutionRouteJson = Schema.fromJsonString(ExecutionRouteSnapshot)
 const PromptPartsJson = Schema.fromJsonString(Schema.Array(PromptPart))
+const AdmissionStatus = Schema.Literals(["accepted", "queued"])
 const commandEquivalent = Schema.toEquivalence(
   Schema.Struct({
     ownerId: ThreadCommand.fields.ownerId,
@@ -269,6 +271,19 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
     return yield* decode(HostedThread, row)
   })
 
+  const readThread = Effect.fn("PostgresStore.readThread")(function* (input: ReadThreadInput) {
+    const rows = yield* query(sql`SELECT id, owner_id AS "ownerId", project_id AS "projectId",
+      workspace_id AS "workspaceId", created_by_user_id AS "createdByUserId", executor_kind AS "executorKind",
+      inherit_project_grants AS "inheritProjectGrants",
+      to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"
+      FROM rika_hosted_threads
+      WHERE id = ${input.threadId} AND owner_id = ${input.ownerId}`)
+    if (rows[0] === undefined) return undefined
+    const row = rows[0] as Record<string, unknown>
+    if (row.projectId === null) delete row.projectId
+    return yield* decode(HostedThread, row)
+  })
+
   const putThreadGrant = Effect.fn("PostgresStore.putThreadGrant")(function* (input: PutThreadGrantInput) {
     yield* requireOrganizationGrantAuthority(sql, {
       ownerId: input.ownerId,
@@ -462,7 +477,8 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
       },
       admittedAt: input.admittedAt,
     }
-    return yield* transaction(
+    let inserted = false
+    const admitted = yield* transaction(
       sql,
       Effect.gen(function* () {
         const locked = yield* query(sql`SELECT id FROM rika_hosted_threads
@@ -471,6 +487,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
         yield* requireThreadAccess(sql, input, "thread:control", input.admittedAt)
         const existingRows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId",
           command_id AS "commandId", idempotency_key AS "idempotencyKey", turn_id AS "turnId",
+          admission_status AS "admissionStatus",
           actor, sequence::text AS sequence, commit_cursor::text AS "commitCursor", command,
           to_char(admitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "admittedAt"
           FROM rika_hosted_thread_commands
@@ -484,27 +501,38 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
             return yield* failure("conflict", "Command identity or idempotency key was reused with different content")
           const turnId = (existingRows[0] as { readonly turnId?: unknown }).turnId
           if (typeof turnId !== "string")
-            return yield* failure("conflict", "Command identity was admitted without a queued Turn")
-          return { command: existing, turnId: TurnId.make(turnId) }
+            return yield* failure("conflict", "Command identity was admitted without a Turn")
+          const status = yield* Schema.decodeUnknownEffect(AdmissionStatus)(
+            (existingRows[0] as { readonly admissionStatus?: unknown }).admissionStatus,
+          ).pipe(Effect.mapError(databaseError))
+          return { command: existing, turnId: TurnId.make(turnId), status }
         }
+        if (!input.readinessProof) return yield* failure("database", "Prompt admission workers are unavailable")
         const productThread = yield* query(sql`SELECT 1 FROM rika_threads
           WHERE id = ${input.threadId} AND owner_id = ${input.ownerId} FOR KEY SHARE`)
         if (productThread[0] === undefined)
           return yield* failure("invalid-authority", "Thread has no product state for the owner")
         const collidingTurn = yield* query(sql`SELECT 1 FROM rika_turns WHERE id = ${input.turnId}`)
         if (collidingTurn[0] !== undefined) return yield* failure("conflict", "Turn identity is already in use")
+        const occupied = yield* query(sql<{ readonly occupied: boolean }>`SELECT EXISTS (
+          SELECT 1 FROM rika_turns WHERE thread_id = ${input.threadId} AND turn_kind = 'AgentExecution'
+            AND status IN ('queued', 'accepted', 'running', 'waiting', 'cancelling')
+        ) AS occupied`)
+        const status = occupied[0]?.occupied === true ? ("queued" as const) : ("accepted" as const)
         yield* query(sql`INSERT INTO rika_turns
           (id, thread_id, turn_kind, prompt, prompt_parts_json, execution_route_json, author_json, lineage_json,
             status, created_at, updated_at)
           VALUES (${input.turnId}, ${input.threadId}, 'AgentExecution', ${input.prompt}, ${promptParts}, ${executionRoute},
-            '{"_tag":"Human"}', '{"_tag":"Original"}', 'queued', ${admittedAtMillis}, ${admittedAtMillis})`)
+            '{"_tag":"Human"}', '{"_tag":"Original"}', ${status}, ${admittedAtMillis}, ${admittedAtMillis})`)
         yield* query(sql`INSERT INTO rika_thread_queue_state (thread_id)
           VALUES (${input.threadId}) ON CONFLICT (thread_id) DO NOTHING`)
-        const queueRows = yield* query(sql`UPDATE rika_thread_queue_state
-          SET revision = revision + 1, queued_count = queued_count + 1
-          WHERE thread_id = ${input.threadId} AND queued_count < ${queueCapacity}
-          RETURNING queued_count`)
-        if (queueRows[0] === undefined) return yield* failure("conflict", "Thread prompt queue is full")
+        if (status === "queued") {
+          const queueRows = yield* query(sql`UPDATE rika_thread_queue_state
+            SET revision = revision + 1, queued_count = queued_count + 1
+            WHERE thread_id = ${input.threadId} AND queued_count < ${queueCapacity}
+            RETURNING queued_count`)
+          if (queueRows[0] === undefined) return yield* failure("conflict", "Thread prompt queue is full")
+        }
         const sequences = yield* query(sql<{ readonly sequence: string }>`UPDATE rika_hosted_threads
           SET next_command_sequence = next_command_sequence + 1
           WHERE id = ${input.threadId} AND owner_id = ${input.ownerId}
@@ -512,23 +540,25 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
         const sequence = Sequence.make(sequences[0]!.sequence)
         const commitCursor = yield* allocateCommitCursor(sql, input.ownerId)
         const rows = yield* query(sql`INSERT INTO rika_hosted_thread_commands
-          (owner_id, thread_id, command_id, idempotency_key, turn_id, actor, sequence, commit_cursor, command, admitted_at)
+          (owner_id, thread_id, command_id, idempotency_key, turn_id, admission_status, actor, sequence, commit_cursor,
+            command, admitted_at)
           VALUES (${input.ownerId}, ${input.threadId}, ${input.commandId}, ${input.idempotencyKey}, ${input.turnId},
-            ${sql.json(input.actor)}, ${sequence}::bigint, ${commitCursor}::bigint,
+            ${status}, ${sql.json(input.actor)}, ${sequence}::bigint, ${commitCursor}::bigint,
             ${sql.json(commandInput.command)}, ${input.admittedAt})
           RETURNING owner_id AS "ownerId", thread_id AS "threadId", command_id AS "commandId",
             idempotency_key AS "idempotencyKey", actor, sequence::text AS sequence,
             commit_cursor::text AS "commitCursor", command,
             to_char(admitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "admittedAt"`)
-        return { command: yield* decode(ThreadCommand, rows[0]), turnId: input.turnId }
+        inserted = true
+        return { command: yield* decode(ThreadCommand, rows[0]), turnId: input.turnId, status }
       }),
-    ).pipe((effect) =>
-      HostedObservability.observe(
-        "queue_admission",
-        { ownerId: input.ownerId, threadId: input.threadId, turnId: input.turnId, commandId: input.commandId },
-        effect,
-      ),
     )
+    if (inserted)
+      yield* HostedObservability.event("admission", "success", {
+        threadId: input.threadId,
+        turnId: admitted.turnId,
+      })
+    return admitted
   })
 
   const readCommands: StoreService["readCommands"] = Effect.fn("PostgresStore.readCommands")(function* (input) {
@@ -908,6 +938,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
     putProjectGrant,
     createWorkspace,
     createThread,
+    readThread,
     putThreadGrant,
     registerDevice,
     authenticateClient,

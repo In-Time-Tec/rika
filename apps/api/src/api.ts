@@ -345,12 +345,16 @@ const publicHandlers = (dependencies: HttpDependencies) =>
     handlers.handleAll({
       health: () => Effect.succeed({ status: "ok" }),
       ready: () =>
-        Effect.all([
-          dependencies.directory.ready,
-          dependencies.product.ready,
-          dependencies.executor.ready,
-          dependencies.execution.check,
-        ]).pipe(
+        dependencies.execution.status.pipe(
+          Effect.tap((status) => Effect.logInfo("hosted-workers.status", status)),
+          Effect.andThen(
+            Effect.all([
+              dependencies.directory.ready,
+              dependencies.product.ready,
+              dependencies.executor.ready,
+              dependencies.execution.check,
+            ]),
+          ),
           Effect.as({ status: "ready" }),
           Effect.mapError(() => ServiceUnavailable.make({ message: "API is unavailable" })),
         ),

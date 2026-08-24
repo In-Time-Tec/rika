@@ -492,7 +492,7 @@ export const layer = (
           duplicates,
           (entry) =>
             HostedObservability.observe(
-              "sandbox_reap",
+              "attach",
               { ...assignmentCorrelation(assignment), sandboxId: entry.sandboxId },
               provider.kill(entry.sandboxId).pipe(Effect.mapError(providerFailure)),
             ),
@@ -575,7 +575,7 @@ export const layer = (
         authorization: WorkspaceAuthorization,
       ) {
         return yield* HostedObservability.observe(
-          "sandbox_resume",
+          "attach",
           assignmentCorrelation(assignment),
           Effect.gen(function* () {
             yield* authorizeWorkspace(authorization, "runtime")
@@ -634,7 +634,7 @@ export const layer = (
         yield* authorizeWorkspace(authorization, "runtime")
         const previous = yield* current(key)
         return yield* HostedObservability.observe(
-          "sandbox_replace",
+          "attach",
           assignmentCorrelation(previous),
           Effect.gen(function* () {
             yield* approvedPlacement(previous)
@@ -653,7 +653,7 @@ export const layer = (
             const replacement = yield* createAndBootstrap(replacing, identity, authorization, "replacement", restore)
             if (retiringProviderId !== undefined)
               yield* HostedObservability.observe(
-                "sandbox_reap",
+                "attach",
                 { ...assignmentCorrelation(previous), sandboxId: retiringProviderId },
                 provider.kill(retiringProviderId),
               ).pipe(Effect.ignore)
@@ -677,7 +677,7 @@ export const layer = (
       const pause = Effect.fn("Controller.pause")(function* (key: AssignmentKey, quiescence?: Quiescence) {
         const assignment = yield* current(key)
         return yield* HostedObservability.observe(
-          "sandbox_pause",
+          "attach",
           assignmentCorrelation(assignment),
           Effect.gen(function* () {
             if (assignment.lifecycle._tag === "Paused") {
@@ -724,7 +724,7 @@ export const layer = (
       const kill = Effect.fn("Controller.kill")(function* (key: AssignmentKey) {
         const assignment = yield* current(key)
         return yield* HostedObservability.observe(
-          "sandbox_reap",
+          "attach",
           assignmentCorrelation(assignment),
           Effect.gen(function* () {
             const sandboxId = providerInstanceId(assignment)
@@ -1152,7 +1152,7 @@ export const layer = (
           HostedObservability.health("orphan_sandbox", { sandboxId: sandbox.sandboxId }).pipe(
             Effect.andThen(
               HostedObservability.observe(
-                "sandbox_reap",
+                "attach",
                 { sandboxId: sandbox.sandboxId },
                 provider.kill(sandbox.sandboxId).pipe(Effect.mapError(providerFailure)),
               ),
@@ -1175,7 +1175,7 @@ export const layer = (
         hello,
         reconnect: (access) =>
           HostedObservability.observe(
-            "lease_steal",
+            "attach",
             {
               assignmentId: access.fence.assignmentId,
               sandboxId: access.fence.instanceId,
@@ -1186,7 +1186,7 @@ export const layer = (
         validateAccess,
         heartbeat: (input) =>
           HostedObservability.observe(
-            "lease_renew",
+            "attach",
             { assignmentId: input.access.fence.assignmentId, sandboxId: input.access.fence.instanceId },
             heartbeat(input),
           ).pipe(
@@ -1201,7 +1201,7 @@ export const layer = (
           ),
         checkpoint: (access, staged) =>
           HostedObservability.observe(
-            "checkpoint",
+            "attach",
             {
               assignmentId: access.fence.assignmentId,
               sandboxId: access.fence.instanceId,

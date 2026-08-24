@@ -133,7 +133,8 @@ for (const width of [80, 50] as const) {
         const surface = new Surface(setup.renderer, {
           key: (key) => {
             model = update(model, { _tag: "KeyPressed", key })
-            if (key.name === "return" && !key.shift) model = update(model, { _tag: "Submitted" })
+            if (key.name === "return" && !key.shift)
+              model = update(model, { _tag: "Submitted", submissionId: "retry-submission" })
             surface.update(model)
           },
           resize: () => undefined,
@@ -151,7 +152,15 @@ for (const width of [80, 50] as const) {
           ).toBe(true)
           yield* openTui(() => setup.mockInput.typeText("retry"))
           setup.mockInput.pressEnter()
-          expect(model.busy).toBe(true)
+          expect(model).toMatchObject({ input: "retry", busy: false, activity: undefined })
+          expect(model.entries).toEqual([])
+          model = update(model, {
+            _tag: "SubmissionAdmitted",
+            turnId: "turn-retry",
+            status: "active",
+            submissionId: "retry-submission",
+          })
+          expect(model).toMatchObject({ input: "", busy: true, activity: { _tag: "Sending" } })
           model = update(model, { _tag: "TurnStarted", turnId: "turn-retry", prompt: "retry" })
           surface.update(model)
           yield* openTui(() => setup.renderOnce())
@@ -286,14 +295,14 @@ for (const [width, height] of [
             bounded("queue", surface.queueBox)
             bounded("overlay", surface.paletteBox)
             bounded("content", surface.contentColumn)
-            if (model.modePicker.open || model.filePicker.open) {
+            if (model.modePicker.open === true || model.filePicker.open === true) {
               expect(surface.paletteBox.x).toBeGreaterThanOrEqual(surface.contentColumn.x)
               expect(surface.paletteBox.x + surface.paletteBox.width).toBeLessThanOrEqual(
                 surface.contentColumn.x + surface.contentColumn.width,
               )
             }
-            if (surface.sidebar.visible) bounded("thread sidebar", surface.sidebar)
-            if (surface.changedFilesBox.visible) {
+            if (surface.sidebar.visible === true) bounded("thread sidebar", surface.sidebar)
+            if (surface.changedFilesBox.visible === true) {
               bounded("file sidebar", surface.changedFilesBox)
               const state = {
                 get changedRows() {
@@ -307,7 +316,7 @@ for (const [width, height] of [
                 ),
               ).toBe(true)
             }
-            if (surface.overlayEditor.visible) {
+            if (surface.overlayEditor.visible === true) {
               bounded("overlay editor", surface.overlayEditor)
               expect(surface.overlayEditor.x).toBeGreaterThanOrEqual(surface.paletteBox.x)
               expect(surface.overlayEditor.x + surface.overlayEditor.width).toBeLessThanOrEqual(

@@ -42,10 +42,7 @@ const policies: ReadonlyArray<PerformanceMetricPolicy> = [
   lower("process.rss-interaction-growth", 10),
   lower("process.rss-after", 500),
   lower("process.heap-interaction-growth", 10),
-  lower("process.launcher.idle-rss", 75),
-  lower("process.interactive.idle-rss", 175),
-  lower("process.server.idle-rss", 250),
-  lower("process.combined-idle-rss", 350),
+  lower("process.client.idle-rss", 350),
   lower("process.idle-cpu.mean", 1),
   lower("process.idle-cpu.peak", 3),
 ]

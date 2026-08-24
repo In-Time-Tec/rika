@@ -3,7 +3,7 @@ import type * as PgClient from "@effect/sql-pg/PgClient"
 import { appJwtJoseLayer } from "@rika/github-app/app-jwt"
 import { installationLayer } from "@rika/github-app/installation-service"
 import { installationTokenLayer } from "@rika/github-app/installation-token"
-import { Context, Effect, Layer, Redacted } from "effect"
+import { Config, Context, Effect, Layer, Redacted } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { Runtime as TenetRuntime } from "tenetkit/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
@@ -73,6 +73,7 @@ export const layer = (options: {
     HostedApplication,
     Effect.gen(function* () {
       const httpClient = yield* HttpClient.HttpClient
+      const temporaryDirectory = yield* Config.string("TMPDIR").pipe(Config.withDefault("/tmp"))
       const httpLayer = Layer.succeed(HttpClient.HttpClient, httpClient)
       const data = yield* Layer.build(
         Layer.mergeAll(postgresLayer(options.database), AuthorizationPolicy.layer, BunCrypto.layer),
@@ -129,7 +130,7 @@ export const layer = (options: {
       )
       const executionContext = yield* Layer.build(
         HostedExecution.layerHosted({
-          kernel: { runtimeVersion: Bun.version, dataRoot: `${Bun.env.TMPDIR ?? "/tmp"}/rika-hosted` },
+          kernel: { runtimeVersion: Bun.version, dataRoot: `${temporaryDirectory}/rika-hosted` },
           credentialStore: Layer.succeed(
             ProviderCredentialStore,
             Context.get(credentialContext, ProviderCredentialStore),
@@ -187,14 +188,36 @@ export const layer = (options: {
           workerId: options.workerId,
           leaseMillis: 30_000,
           pollIntervalMillis: 250,
+          concurrency: 32,
         }).pipe(Layer.provide(HostedTurnWorkerStore.layer), Layer.provide(Layer.succeedContext(hostedContext))),
       )
       const turnWorker = Context.get(turnWorkerContext, HostedTurnWorker)
+      const executionReadiness = Context.get(executionContext, ExecutionPostgres.Readiness)
+      const readiness = ExecutionPostgres.Readiness.of({
+        check: Effect.all([
+          executionReadiness.check,
+          projectionWorker.ready.pipe(
+            Effect.mapError((error) => ExecutionPostgres.WorkerUnavailable.make({ message: error.message })),
+          ),
+          turnWorker.ready.pipe(
+            Effect.mapError((error) => ExecutionPostgres.WorkerUnavailable.make({ message: error.message })),
+          ),
+        ]).pipe(Effect.map(([proof]) => proof)),
+        status: Effect.all({
+          execution: executionReadiness.status,
+          turn: turnWorker.status,
+          projection: projectionWorker.status,
+        }).pipe(Effect.map((status) => ({ ...status.execution, ...status }))),
+      })
       const environment = Context.get(environmentContext, HostedEnvironment)
       const productContext = yield* Layer.build(
         hostedProductLayer({
           templateBuildId: options.executor.templateBuildId,
           providerScope: options.executor.deploymentId,
+          promptAdmissionReadiness: readiness.check.pipe(
+            Effect.as(true),
+            Effect.orElseSucceed(() => false),
+          ),
           provision: (assignmentId) =>
             environment
               .usePhase({ assignmentId, phase: "setup" }, (resolved) =>
@@ -248,17 +271,7 @@ export const layer = (options: {
         execution: {
           gateway: Context.get(executionContext, ExecutionGateway.Service),
           lifecycle: Context.get(executionContext, ExecutionSessionLifecycle.Service),
-          readiness: ExecutionPostgres.Readiness.of({
-            check: Effect.all([
-              Context.get(executionContext, ExecutionPostgres.Readiness).check,
-              projectionWorker.ready.pipe(
-                Effect.mapError((error) => ExecutionPostgres.WorkerUnavailable.make({ message: error.message })),
-              ),
-              turnWorker.ready.pipe(
-                Effect.mapError((error) => ExecutionPostgres.WorkerUnavailable.make({ message: error.message })),
-              ),
-            ]).pipe(Effect.map(([readiness]) => readiness)),
-          }),
+          readiness,
         },
       })
     }),

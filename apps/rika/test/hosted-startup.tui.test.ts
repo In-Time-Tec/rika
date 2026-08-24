@@ -1,12 +1,13 @@
 import { Deferred, Effect } from "effect"
 import { expect, test } from "vitest"
+import * as Thread from "@rika/product/thread-record"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
 const tuiTestTimeout = 90_000
 
 test(
-  "submits during hosted startup without reopening the attached Thread",
+  "keeps the draft inert while the hosted connection is still connecting",
   () =>
     TuiApp.run(
       Effect.scoped(
@@ -20,7 +21,7 @@ test(
             },
             initialThreadId: "tui-thread-0",
             initialThreadSelected: true,
-            initialConnectionStatus: "connecting",
+            initialConnectionState: { connectivity: "connecting", target: "resolving", participants: 1 },
             idStart: 10,
             holdSubmissionAdmission: admit,
             width: 80,
@@ -28,18 +29,20 @@ test(
             script: [model.text("STARTUP_REPLY")],
           })
           yield* app.waitFrame("SEEDED_THREAD")
-          yield* Effect.promise(() => app.type("Send while connecting"))
+          yield* Effect.tryPromise(() => app.type("Send while connecting"))
           app.pressEnter()
-          yield* app.nextFrame
-          const submitted = yield* app.nextFrame
-          expect(submitted).toContain("Connecting")
-          expect(submitted).toContain("Send while connecting")
-          expect(submitted).not.toContain("Thread is still loading")
+          const connecting = yield* app.nextFrame
+          expect(connecting).toContain("Connecting")
+          expect(connecting).toContain("│ Send while connecting")
+          expect(connecting).not.toContain("Sending")
+          expect((yield* app.queue(Thread.ThreadId.make("tui-thread-0"))).turns).toHaveLength(0)
           expect(yield* app.modelRequestCount).toBe(0)
-          yield* app.setConnectionStatus("connected")
-          yield* Deferred.succeed(admit, undefined)
-          const completed = yield* app.waitFrame("STARTUP_REPLY")
-          expect(completed).not.toContain("Connecting")
+
+          yield* app.setConnectionState({ connectivity: "connected", target: "runner", participants: 1 })
+          const connected = yield* app.waitGone("Connecting")
+          expect(connected).toContain("│ Send while connecting")
+          expect(connected).not.toContain("STARTUP_REPLY")
+          expect(yield* app.modelRequestCount).toBe(0)
           yield* app.quit
         }),
       ),

@@ -4,64 +4,52 @@ import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
 const tuiTestTimeout = 60_000
+const hasColor = (app: TuiApp.TuiApp, text: string, color: string): boolean =>
+  app
+    .spans()
+    .lines.flatMap((line) => line.spans)
+    .some((span) => span.text.includes(text) && span.fg.toInts().join(",") === color)
 
 test(
-  "shows connecting and reconnecting in the bottom-left status without closing the TUI",
+  "shows connection and placement lifecycle targets in the bottom-left status",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
-          initialConnectionStatus: "connecting",
+          initialConnectionState: { connectivity: "connecting", target: "resolving", participants: 1 },
           script: [model.text("WORK_CONTINUED", 1_000)],
         })
 
-        expect(yield* app.waitFrame("Connecting")).toContain("Welcome to Rika")
-        yield* app.setConnectionStatus("connected")
-        yield* app.waitGone("Connecting")
+        const connecting = yield* app.waitFrame("Connecting")
+        expect(connecting).toContain("Welcome to Rika")
+        expect(connecting).toContain("Resolving target")
+        yield* app.setConnectionState({ connectivity: "connected", target: "runner", participants: 1 })
+        const runnerIdle = yield* app.waitGone("Connecting")
+        expect(runnerIdle).toContain("Runner")
+        expect(hasColor(app, "Runner", "210,162,92,255")).toBe(true)
 
-        yield* Effect.promise(() => app.type("Keep working during replacement"))
+        yield* Effect.tryPromise(() => app.type("Keep working during replacement"))
         app.pressEnter()
         yield* app.waitFrame("Waiting")
-        yield* app.setConnectionStatus("reconnecting")
+        yield* app.setConnectionState({ connectivity: "reconnecting", target: "runner", participants: 1 })
         const reconnecting = yield* app.waitFrame("Reconnecting")
         expect(reconnecting).toContain("Keep working during replacement")
+        expect(reconnecting).toContain("Runner")
 
-        yield* app.setConnectionStatus("connected")
+        yield* app.setConnectionState({ connectivity: "connected", target: "runner", participants: 1 })
         yield* app.waitGone("Reconnecting")
         yield* app.waitFrame("WORK_CONTINUED")
 
-        yield* app.setConnectionStatus("authenticating")
-        yield* app.waitFrame("Connecting")
-
-        const hidden = [
-          "Owner:",
-          "Placement:",
-          "selected executor",
-          "Workspace",
-          "lease",
-          "Retry",
-          "Approval",
-          "outcome unknown",
-          "Thread terminal",
-        ]
-        for (const status of [
-          "personal-owner",
-          "local-placement",
-          "executor-waiting",
-          "workspace-setup",
-          "workspace-resuming",
-          "lease-active",
-          "retrying",
-          "approval-required",
-          "unknown-operation",
-          "terminal",
-        ] as const) {
-          yield* app.setConnectionStatus(status)
-          const frame = yield* app.waitGone("Connecting")
-          for (const label of hidden) expect(frame).not.toContain(label)
-          yield* app.setConnectionStatus("connecting")
-          yield* app.waitFrame("Connecting")
-        }
+        yield* app.setConnectionState({
+          connectivity: "connected",
+          target: "orb",
+          activity: "workspace-setup",
+          ownership: "organization",
+          participants: 2,
+        })
+        const orb = yield* app.waitFrame("Setting up workspace")
+        expect(orb).toContain("Orb")
+        expect(hasColor(app, "Orb", "174,119,255,255")).toBe(true)
         yield* app.quit
       }),
     ),
