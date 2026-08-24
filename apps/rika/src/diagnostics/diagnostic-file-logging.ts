@@ -1,5 +1,4 @@
 import * as Diagnostic from "./diagnostic-file-logging-contract"
-import fsHost, { closeSync, fsyncSync, openSync, renameSync } from "node:fs"
 import {
   Clock,
   Context,
@@ -17,6 +16,7 @@ import {
   Semaphore,
   Scope,
 } from "effect"
+import { openDiagnosticFile } from "../platform/diagnostic-file-host"
 
 export type ProcessRole = "client" | "server"
 export type LogLevel = "debug" | "info" | "warning" | "error"
@@ -331,27 +331,15 @@ export const layer = (options: {
         const now = DateTime.formatIso(timestamp).replace(/[:.]/g, "-")
         const closed = path.join(diagnostics, `${options.role}-${now}-${options.pid ?? process.pid}.jsonl`)
         const open = closed.replace(/\.jsonl$/, ".open.jsonl")
-        const descriptor = openSync(open, "ax", 0o600)
+        const logFile = openDiagnosticFile(open)
+        yield* Effect.addFinalizer(() => Effect.sync(logFile.close))
         lifecycle = "open"
         const effectContext = yield* Effect.context<never>()
         let persisted = 0
-        let byteOffset = 0
         const writeAccepted = (end: number) => {
           if (persisted === end) return
           const bytes = encoder.encode(`${accepted.slice(persisted, end).join("\n")}\n`)
-          let sourceOffset = 0
-          while (sourceOffset < bytes.byteLength) {
-            const bytesWritten = fsHost.writeSync(
-              descriptor,
-              bytes,
-              sourceOffset,
-              bytes.byteLength - sourceOffset,
-              byteOffset,
-            )
-            if (bytesWritten === 0) throw new Error("Unable to persist diagnostics")
-            sourceOffset += bytesWritten
-            byteOffset += bytesWritten
-          }
+          logFile.write(bytes)
           persisted = end
         }
         const writeBuffered = Effect.sync(() => {
@@ -359,32 +347,19 @@ export const layer = (options: {
         })
         const writeLock = yield* Semaphore.make(1)
         const flush = writeLock.withPermits(1)(writeBuffered)
-        const graceful = writeLock.withPermits(1)(
-          Effect.sync(() => {
-            if (lifecycle === "settled") return
-            lifecycle = "settled"
-            const end = accepted.length
-            try {
-              writeAccepted(end)
-              fsyncSync(descriptor)
-            } finally {
-              closeSync(descriptor)
-            }
-            renameSync(open, closed)
-          }),
-        )
-        const hardExit = () => {
+        const settle = () => {
           if (lifecycle === "settled") return
           lifecycle = "settled"
-          const end = accepted.length
           try {
-            writeAccepted(end)
-            fsyncSync(descriptor)
-          } finally {
-            closeSync(descriptor)
+            writeAccepted(accepted.length)
+            logFile.settle(closed)
+          } catch (error) {
+            logFile.close()
+            throw error
           }
-          renameSync(open, closed)
         }
+        const graceful = writeLock.withPermits(1)(Effect.sync(settle))
+        const hardExit = settle
         const settler = { graceful, hardExit }
         activeSettlers.add(settler)
         const signalSettlers = settlingSignals.map((signal) => {

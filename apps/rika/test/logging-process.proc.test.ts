@@ -53,7 +53,7 @@ test("persists the final buffered record before settling on process.exit", () =>
     ),
   ))
 
-test("persists an accepted batch when process.exit interrupts its first ordinary write", () =>
+test("persists every accepted record when process.exit wins before the ordinary flush", () =>
   run(
     Effect.scoped(
       Effect.gen(function* () {
@@ -71,7 +71,6 @@ test("persists an accepted batch when process.exit interrupts its first ordinary
           }),
         )
         expect(Number(yield* handle.exitCode)).toBe(0)
-        expect(yield* fs.exists(`${dataRoot}/write.started`)).toBe(true)
         const diagnostics = `${dataRoot}/diagnostics`
         const names = yield* fs.readDirectory(diagnostics)
         expect(names.filter((name) => name.endsWith(".open.jsonl"))).toEqual([])

@@ -109,6 +109,12 @@
   },
   "overrides": [
     {
+      "files": ["apps/rika/src/platform/diagnostic-file-host.ts"],
+      "rules": {
+        "effecttsgo/node-builtin-import": "off"
+      }
+    },
+    {
       "files": ["**/test/**"],
       "rules": {
         "no-await-in-loop": "off"

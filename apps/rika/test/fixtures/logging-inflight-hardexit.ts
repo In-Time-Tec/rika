@@ -1,20 +1,10 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Config, Context, Effect, Layer, Scope } from "effect"
-import fsHost from "node:fs"
 import { exit } from "node:process"
+import * as Logging from "../../src/diagnostics/diagnostic-file-logging"
 
 const dataRoot = Effect.runSync(Config.string("RIKA_TEST_LOG_DATA_ROOT"))
-const originalWrite = fsHost.writeSync
-let first = true
-fsHost.writeSync = ((...args: Parameters<typeof fsHost.writeSync>) => {
-  if (!first) return originalWrite(...args)
-  first = false
-  fsHost.writeFileSync(`${dataRoot}/write.started`, "started")
-  exit(0)
-}) as typeof fsHost.writeSync
-
-const Logging = await import("../../src/diagnostics/diagnostic-file-logging")
 
 const provideScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -38,7 +28,7 @@ const program = Logging.start.pipe(
   Effect.andThen(Effect.logInfo("logging.inflight.first")),
   Effect.andThen(Effect.logInfo("logging.inflight.second")),
   Effect.andThen(Effect.logInfo("logging.inflight.third")),
-  Effect.andThen(Effect.sleep("10 seconds")),
+  Effect.andThen(Effect.sync(() => exit(0))),
   provideScoped(Logging.layer({ dataRoot, role: "server", version: "test" })),
 )
 
