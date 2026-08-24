@@ -65,8 +65,9 @@ const detectContainerCommand = Effect.gen(function* () {
 const containerCommand = await Effect.runPromise(live(detectContainerCommand))
 
 describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
-  it.layer(BunServices.layer)("builds the pinned image and executes its complete doctor contract", (test) =>
+  it.layer(BunServices.layer)((test) =>
     test.effect(
+      "builds the pinned image and executes its complete doctor contract",
       () =>
         Effect.scoped(
           Effect.gen(function* () {
